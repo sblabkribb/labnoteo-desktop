@@ -312,13 +312,22 @@ function normalize(changes: Change[]): Change[] {
   return out;
 }
 
+/** 끝이 홀수 개 백슬래시이면 뒤에 오는 글자(대개 닫는 파이프)를 escape 한다. */
+function endsWithOpenEscape(s: string): boolean {
+  let n = 0;
+  for (let i = s.length - 1; i >= 0 && s.charCodeAt(i) === BACKSLASH; i--) n++;
+  return n % 2 === 1;
+}
+
 /**
  * 한 셀의 내용을 바꾼다. 비어 있던 셀은 `| x |` 모양이 되도록 공백을 보탠다.
+ * 내용이 홀수 개 백슬래시로 끝나면(`dir\`) 공백 하나를 덧붙여, 바로 뒤의 파이프가 escape 되어
+ * 다음 셀과 합쳐지지 않게 한다. 그 공백도 escape 되어 셀 글자 끝에 남는다.
  * 바깥 파이프가 없는 줄에서 첫 셀이나 마지막 셀을 비우면 그 셀이 사라지므로(`a | ` 는 셀 하나),
  * 파이프를 보태 빈 셀로 남긴다.
  */
 function contentChange(row: Row, cell: Cell, text: string, appending: boolean): Change {
-  let insert = text;
+  let insert = endsWithOpenEscape(text) ? text + ' ' : text;
   if (cell.contentFrom === cell.contentTo && text !== '') {
     if (cell.contentFrom === cell.from) insert = ' ' + insert;
     if (cell.contentTo === cell.to) insert += ' ';
@@ -362,10 +371,14 @@ const colOk = (m: TableModel, c: number) => Number.isInteger(c) && c >= 0 && c <
 
 // ---------------------------------------------------------------- 연산
 
-/** 셀(r=0 머리 행, 1.. 본문)의 내용을 바꾼다. `text` 는 이미 escape 된 글자. 가상 셀이면 행 끝을 채운다. */
+/**
+ * 셀(r=0 머리 행, 1.. 본문)의 내용을 바꾼다. `text` 는 이미 escape 된 글자. 가상 셀이면 행 끝을 채운다.
+ * 열은 표 폭(본문 행은 넘치는 셀까지) 안이어야 한다. 그 너머면 아무것도 하지 않는다([]).
+ */
 export function setCell(m: TableModel, r: number, c: number, text: string): Change[] {
   const row = rows(m)[r];
   if (!row || !Number.isInteger(c) || c < 0) return [];
+  if (c >= Math.max(m.width, realCells(row).length)) return [];
   return normalize(rowEdits(row, new Map([[c, text]])));
 }
 
@@ -527,7 +540,10 @@ export function pasteRect(m: TableModel, r: number, c: number, grid: string[][],
   return normalize(out);
 }
 
-/** 문서 위치 pos 가 있는 셀 {r, c}. 구분 행이나 표 밖이면 null. */
+/**
+ * 문서 위치 pos 가 있는 셀 {r, c}. 구분 행이나 표 밖이면 null.
+ * 실제 셀만 돌려준다: 짧은 행의 끝 위치는 가상 셀이 아니라 마지막 실제 셀로 간다.
+ */
 export function cellAt(m: TableModel, pos: number): { r: number; c: number } | null {
   const all = rows(m);
   for (let r = 0; r < all.length; r++) {

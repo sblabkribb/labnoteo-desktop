@@ -160,6 +160,7 @@ const corpus: Entry[] = [
     warnings: ['ragged'],
   }),
   L('single column', '| a |\n| --- |\n| 1 |', [['a'], ['1']], { pre: '' }),
+  L('compact pipes', '|a|b|\n|---|---|\n|x|y|\nx|C:\\', [['a', 'b'], ['x', 'y'], ['x', 'C:\\']]),
 ];
 
 const docOf = (e: Entry) => e.pre + e.table + e.post;
@@ -290,6 +291,25 @@ describe('setCell', () => {
     expect(run(BASIC, (m) => setCell(m, 0, 0, ''))).toBe('|  | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |');
   });
 
+  it('never lets a trailing backslash escape the closing pipe', () => {
+    const compact = '|a|b|\n|---|---|\n|x|y|';
+    const out = run(compact, (m) => setCell(m, 1, 0, 'C:\\'));
+    expect(out).toBe('|a|b|\n|---|---|\n|C:\\ |y|');
+    expect(realTexts(parseTable(out, 0, out.length)!)).toEqual([['a', 'b'], ['C:\\ ', 'y']]);
+    // 백슬래시가 짝수 개면 파이프를 escape 하지 않으므로 그대로 쓴다
+    expect(run(compact, (m) => setCell(m, 1, 0, 'a\\\\'))).toBe('|a|b|\n|---|---|\n|a\\\\|y|');
+  });
+
+  it('ignores columns past the table width', () => {
+    const m = parseTable(BASIC, 0, BASIC.length)!;
+    expect(setCell(m, 0, m.width, 'z')).toEqual([]);
+    expect(setCell(m, 1, m.width, 'z')).toEqual([]);
+    const ragged = '| a | b |\n| --- | --- |\n| 1 | 2 | 3 |';
+    // 넘치는 셀은 바꿀 수 있지만 그 너머는 아니다
+    expect(run(ragged, (m2) => setCell(m2, 1, 2, 'z'))).toBe('| a | b |\n| --- | --- |\n| 1 | 2 | z |');
+    expect(setCell(parseTable(ragged, 0, ragged.length)!, 1, 3, 'z')).toEqual([]);
+  });
+
   it('keeps a cleared edge cell in a row without outer pipes', () => {
     const doc = 'a | b\n--- | ---\n1 | 2\nplain';
     expect(run(doc, (m) => setCell(m, 1, 0, ''))).toBe('a | b\n--- | ---\n|  | 2\nplain');
@@ -361,6 +381,12 @@ describe('column operations', () => {
     expect(moveColumn(m, 0, -1)).toEqual([]);
     expect(moveColumn(m, 1, 1)).toEqual([]);
   });
+
+  it('moves a cell ending in a backslash without escaping the next pipe', () => {
+    const out = run('|a|b|\n|---|---|\nx|y\\', (m) => moveColumn(m, 0, 1));
+    expect(out).toBe('|b|a|\n|---|---|\ny\\ |x');
+    expect(realTexts(parseTable(out, 0, out.length)!)).toEqual([['b', 'a'], ['y\\ ', 'x']]);
+  });
 });
 
 describe('cellAt', () => {
@@ -388,6 +414,10 @@ describe('pasteRect', () => {
     expect(out).toBe('| a | b |  |\n| --- | --- | --- |\n| 1 | 2 |\n| 3 | x | a\\|b |\n|  | 시료 | l1<br>l2 |');
   });
 
+  it('never lets a pasted trailing backslash escape the closing pipe', () => {
+    expect(run('|a|b|\n|---|---|\n|x|y|', (m) => pasteRect(m, 1, 0, [['p\\']], '\n'))).toBe('|a|b|\n|---|---|\n|p\\ |y|');
+  });
+
   it('pastes into the header row', () => {
     expect(run(BASIC, (m) => pasteRect(m, 0, 0, [['H1', 'H2']], '\n'))).toBe('| H1 | H2 |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |');
   });
@@ -405,6 +435,11 @@ interface Ref {
   align: Align[];
   width: number;
 }
+/**
+ * 비교용 셀 글자. 홀수 개 백슬래시 뒤의 공백 하나는 escape 된 공백이라 셀 글자에 남는데,
+ * 모델은 파이프를 지키려고 이 공백을 보탠다(`dir\` -> `dir\ `). 그 공백만 떼고 견준다.
+ */
+const loose = (rs: string[][]) => rs.map((r) => r.map((t) => (/(^|[^\\])(\\\\)*\\ $/.test(t) ? t.slice(0, -1) : t)));
 const refOf = (m: TableModel): Ref => ({ rows: realTexts(m), align: [...m.align], width: m.width });
 const clone = (r: Ref): Ref => ({ rows: r.rows.map((x) => [...x]), align: [...r.align], width: r.width });
 function setAt(row: string[], c: number, t: string) {
@@ -525,7 +560,7 @@ function step(e: Entry, doc: string, ref: Ref, op: Op): { doc: string; ref: Ref 
   const want = refOp(ref, op);
   const m2 = modelOf(next, e.pre.length);
   const ctx = `${e.name} ${JSON.stringify(op)}\n${doc}\n=>\n${next}`;
-  expect(realTexts(m2), ctx).toEqual(want.rows);
+  expect(loose(realTexts(m2)), ctx).toEqual(loose(want.rows));
   expect(m2.align, ctx).toEqual(want.align);
   expect(m2.width, ctx).toBe(want.width);
   expect(next.slice(0, e.pre.length), ctx).toBe(e.pre);
@@ -597,7 +632,7 @@ describe('property: random operation sequences never lose cell text', () => {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
-  const POOL = ['x', '시료 A', 'a|b', '', '1 mM', '`c|d`', 'l1\nl2', '007', 'a\\|b', '**굵게**'];
+  const POOL = ['x', '시료 A', 'a|b', '', '1 mM', '`c|d`', 'l1\nl2', '007', 'a\\|b', '**굵게**', 'C:\\'];
   const ALIGNS: Align[] = ['left', 'center', 'right', null];
 
   it('holds for 200 seeded sequences', () => {
