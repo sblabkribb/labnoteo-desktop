@@ -14,6 +14,7 @@ import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
+import { registerOpenNote } from '../labnote/openNotes';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -27,6 +28,16 @@ export const MAX_SAVE_ATTEMPTS = 5;
 export interface EditorHandle {
   /** 다른 노트로 넘어가기 전에 부른다. 잃을 편집이 없으면(저장됐거나 원래 깨끗하면) true. */
   flush(): Promise<boolean>;
+  view(): EditorView | undefined;
+  /**
+   * 읽는 중, 읽기 실패, 또는 바깥 변경이 풀리지 않은 동안 true — 사용자가 충돌 대화상자를 "그대로 두기"로 닫은 뒤에도.
+   * 이 동안 명령은 이 노트를 고치지 않는다(`processNote` 가 NoteBusyError 로 거부한다).
+   */
+  busy(): boolean;
+  /** 버퍼를 디스크 인코딩(BOM, 줄바꿈)으로: toRaw(doc, sliceDoc()). 읽기 전에는 undefined. */
+  rawText(): string | undefined;
+  /** 커서를 그 줄(0부터)과 글자 위치로 옮기고 보이게 한 뒤 초점을 준다. 범위를 넘으면 끝으로 붙인다. */
+  reveal(at: { line: number; ch?: number }): void;
 }
 
 interface Props {
@@ -38,6 +49,8 @@ interface Props {
   maxAutosaveMs?: number;
   /** 창 닫기 요청을 가로채 저장하기 위한 이음새. 기본은 Tauri 창. */
   windowApi?: WindowApi;
+  /** 처음 읽은 뒤 한 번 커서를 둘 곳(0부터 센 줄). */
+  initialReveal?: { line: number; ch?: number };
 }
 
 export interface WindowApi {
@@ -64,6 +77,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     autosaveMs = AUTOSAVE_MS,
     maxAutosaveMs = MAX_AUTOSAVE_MS,
     windowApi,
+    initialReveal,
   },
   ref,
 ) {
@@ -93,7 +107,16 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const latest = useRef({ invoke, autosaveMs, maxAutosaveMs });
   latest.current = { invoke, autosaveMs, maxAutosaveMs };
 
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
+  /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
+  const statusRef = useRef<'loading' | 'ready' | 'error'>('loading');
+  const setStatus = (s: 'loading' | 'ready' | 'error') => {
+    statusRef.current = s;
+    setStatusState(s);
+  };
+  /** 마운트된 동안 true. 내려간 편집기의 손잡이는 늘 바쁘다. */
+  const alive = useRef(false);
+  const firstReveal = useRef(initialReveal);
   const [dirty, setDirty] = useState(false);
   const [external, setExternalState] = useState<External | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -259,7 +282,27 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   }
   api.current = makeApi();
 
-  useImperativeHandle(ref, () => ({ flush: () => api.current.flush() }), []);
+  /** 바깥(명령, 열린 노트 목록)에 주는 손잡이. 한 번만 만들어 같은 객체를 등록하고 ref 로도 준다. */
+  const handle = useRef<EditorHandle>({
+    flush: () => api.current.flush(),
+    view: () => viewRef.current,
+    busy: () => !alive.current || !viewRef.current || statusRef.current !== 'ready' || externalRef.current !== null,
+    rawText: () => {
+      const doc = docRef.current;
+      const view = viewRef.current;
+      return doc && view ? toRaw(doc, view.state.sliceDoc()) : undefined;
+    },
+    reveal: ({ line, ch = 0 }) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const doc = view.state.doc;
+      const l = doc.line(Math.max(0, Math.min(Math.floor(line), doc.lines - 1)) + 1);
+      const at = l.from + Math.max(0, Math.min(Math.floor(ch), l.length));
+      view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+      view.focus();
+    },
+  }).current;
+  useImperativeHandle(ref, () => handle, [handle]);
 
   // 열기: 읽어서 에디터에 채운다.
   useEffect(() => {
@@ -312,16 +355,23 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       state: EditorState.create({ doc: '', extensions: extensions.current(undefined) }),
     });
     viewRef.current = view;
+    alive.current = true;
+    const unregister = registerOpenNote(path, handle);
     loadDocument(path, invoke).then(
       (doc) => {
         if (!live) return;
         api.current.adopt(doc);
         setStatus('ready');
+        const at = firstReveal.current;
+        firstReveal.current = undefined;
+        if (at) handle.reveal(at);
       },
       () => live && setStatus('error'),
     );
     return () => {
       live = false;
+      alive.current = false;
+      unregister();
       clearTimers();
       // 노트를 닫는데 저장 안 된 편집이 있으면 마지막으로 한 번 저장해 본다(충돌이면 쓰지 않는다).
       if (!externalRef.current && api.current.isDirty()) void api.current.save();
