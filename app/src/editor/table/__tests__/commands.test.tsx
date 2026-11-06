@@ -3,7 +3,7 @@ import { createRef } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
-import { history, undo, undoDepth } from '@codemirror/commands';
+import { history, isolateHistory, undo, undoDepth } from '@codemirror/commands';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { Editor, type EditorHandle } from '../../Editor';
 import { catalogs } from '../../../i18n/t';
@@ -52,7 +52,7 @@ afterEach(() => {
 
 const wrapOf = (v: EditorView, i = 0) => v.dom.querySelectorAll<HTMLElement>('.lno-table-wrap')[i];
 const cellEl = (v: EditorView, r: number, c: number) =>
-  wrapOf(v).querySelector<HTMLTableElement>(':scope > table')!.rows[r].cells[c] as HTMLElement;
+  wrapOf(v).querySelector<HTMLTableElement>(':scope > .lno-table-scroll > table')!.rows[r].cells[c] as HTMLElement;
 const tool = (v: EditorView, action: string) =>
   wrapOf(v).querySelector<HTMLButtonElement>(`.lno-table-toolbar button[data-action="${action}"]`)!;
 const menuOf = (v: EditorView) => wrapOf(v)?.querySelector<HTMLElement>('.lno-table-menu') ?? null;
@@ -114,6 +114,42 @@ describe('runTableOp: 연산마다 되돌리기 한 번', () => {
       expect(undoDepth(v.state)).toBe(0);
     });
   }
+
+  it('연산 바로 앞뒤의 타이핑과 섞이지 않는다: 되돌리기는 연산만 되돌린다', () => {
+    const doc = `앞\n\n${T3}\n\n뒤`;
+    const v = mount(doc);
+    const from = doc.indexOf('| a');
+    // 표 바로 앞에 타이핑(같은 묶음 시간 안)
+    v.dispatch({ changes: { from: from - 2, insert: 'x' }, userEvent: 'input.type' });
+    const typed = v.state.doc.toString();
+    // 표 지우기는 포커스를 칸으로 옮기지 않는다: 뒤따르는 타이핑과 묶이지 않게 막는 것은 isolateHistory 뿐이다
+    expect(runTableOp(v, from + 1, { action: 'deleteTable', r: 0, c: 0 })).toBe(true);
+    const opped = v.state.doc.toString();
+    expect(opped).toBe('앞x\n\n뒤');
+    v.dispatch({ changes: { from: from + 1, insert: 'z' }, userEvent: 'input.type' });
+    undo(v);
+    expect(v.state.doc.toString()).toBe(opped);
+    undo(v);
+    expect(v.state.doc.toString()).toBe(typed);
+    undo(v);
+    expect(v.state.doc.toString()).toBe(doc);
+  });
+
+  it('문서를 바꾸는 연산의 트랜잭션은 모두 isolateHistory("full") 를 단다', () => {
+    const seen: Array<string | undefined> = [];
+    const spy = EditorView.updateListener.of((u) => {
+      for (const tr of u.transactions) if (tr.docChanged) seen.push(tr.annotation(isolateHistory));
+    });
+    for (const k of cases) {
+      const doc = `${T3}\n`;
+      const v = mount(doc, { extra: [spy] });
+      expect(runTableOp(v, 0, { action: k.action, r: k.r, c: k.c })).toBe(true);
+    }
+    const w = mount('앞', { extra: [spy] });
+    insertTable(w);
+    expect(seen.length).toBeGreaterThanOrEqual(cases.length + 1);
+    expect(new Set(seen)).toEqual(new Set(['full']));
+  });
 
   it('할 수 없는 연산(머리 행 지우기, 첫 행 위로, 한 열뿐인 표의 열 지우기)은 아무것도 하지 않는다', () => {
     const v = mount(`${T3}\n`);
@@ -208,6 +244,9 @@ describe('도구 막대와 오른쪽 클릭 메뉴', () => {
     rightClick(cellEl(v, 2, 0));
     let menu = menuOf(v)!;
     expect(menu).not.toBeNull();
+    // 메뉴는 스크롤하는 안쪽 틀 밖(바깥 틀의 자식)에 뜬다: 작은 표에도 잘리지 않는다
+    expect(menu.parentElement).toBe(wrapOf(v));
+    expect(menu.closest('.lno-table-scroll')).toBeNull();
     expect(menu.getAttribute('role')).toBe('menu');
     expect(menu.getAttribute('aria-label')).toBe(catalogs.ko['table.menu']);
     const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'));

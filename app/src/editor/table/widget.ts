@@ -357,6 +357,22 @@ function listenForCells(wrap: HTMLElement, view: EditorView): void {
 
 const toolbarOf = (wrap: HTMLElement) => wrap.querySelector<HTMLElement>(':scope > .lno-table-toolbar');
 
+/**
+ * 표만 감싸 가로로 스크롤하는 안쪽 틀(없으면 만든다). 바깥 틀은 넘침을 자르지 않아야 오른쪽 클릭 메뉴가 표 밖으로 펼쳐진다:
+ * 메뉴는 이 틀이 아니라 바깥 틀의 자식이다.
+ */
+function scrollBox(wrap: HTMLElement): HTMLElement {
+  const found = wrap.querySelector<HTMLElement>(':scope > .lno-table-scroll');
+  if (found) return found;
+  const box = wrap.ownerDocument.createElement('div');
+  box.className = 'lno-table-scroll';
+  wrap.insertBefore(box, menuOf(wrap));
+  return box;
+}
+
+/** 틀 안의 격자 표. 셀 편집기(cellEditor.ts)도 이것으로 칸을 찾는다. */
+export const tableOf = (wrap: HTMLElement) => wrap.querySelector<HTMLTableElement>(':scope > .lno-table-scroll > table.lno-table');
+
 export class TableWidget extends WidgetType {
   constructor(
     /** 표의 원문(줄 구분은 `\n`). */
@@ -408,12 +424,12 @@ export class TableWidget extends WidgetType {
     }
 
     const m = this.model;
-    const table = wrap.querySelector<HTMLTableElement>(':scope > table.lno-table');
+    const table = tableOf(wrap);
     const active = table ? activeIn(table) : undefined;
     if (!table || !sameShape(table, m)) {
       const fresh = makeTable(doc, m);
       if (table) table.replaceWith(fresh);
-      else wrap.appendChild(fresh);
+      else scrollBox(wrap).appendChild(fresh);
       active?.relocate(fresh);
       return;
     }

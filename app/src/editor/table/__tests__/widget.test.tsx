@@ -58,7 +58,7 @@ describe('표 위젯: 렌더링', () => {
     const ws = wraps(v);
     expect(ws).toHaveLength(2);
     for (const w of ws) {
-      const table = w.querySelector(':scope > table.lno-table');
+      const table = w.querySelector(':scope > .lno-table-scroll > table.lno-table');
       expect(table).not.toBeNull();
       expect(table!.getAttribute('role')).toBe('grid');
       for (const td of w.querySelectorAll('td')) expect(td.getAttribute('role')).toBe('gridcell');
@@ -374,5 +374,17 @@ describe('테마', () => {
     const keys = Object.keys(editorThemeSpec);
     for (const k of ['.lno-table-wrap', '.lno-table', '.lno-table-toolbar', '.lno-al-center', '.lno-al-right', '.lno-cell-overflow'])
       expect(keys.some((key) => key.includes(k)), k).toBe(true);
+  });
+
+  it('가로 스크롤은 표만 감싼 안쪽 틀이 맡는다: 바깥 틀은 넘침을 자르지 않아 메뉴가 표 밖으로 펼쳐진다', () => {
+    const spec = editorThemeSpec as Record<string, Record<string, unknown>>;
+    const wrap = spec['.lno-table-wrap'];
+    // overflow-x 가 auto 이면 overflow-y 도 auto 로 계산되어 메뉴가 표 틀에 잘린다
+    for (const k of ['overflow', 'overflowX', 'overflowY']) expect(wrap[k] ?? 'visible', k).toBe('visible');
+    expect(spec['.lno-table-scroll']?.overflowX).toBe('auto');
+    const v = mount(`${T1}\n`);
+    const w = wraps(v)[0];
+    const scroll = w.querySelector(':scope > .lno-table-scroll')!;
+    expect(Array.from(scroll.children).map((c) => c.className)).toEqual(['lno-table']);
   });
 });

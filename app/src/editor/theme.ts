@@ -79,7 +79,10 @@ export const editorThemeSpec = {
     },
   },
   // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
-  '.lno-table-wrap': { position: 'relative', padding: 'var(--space-2) var(--space-3)', overflowX: 'auto' },
+  // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
+  // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
+  '.lno-table-wrap': { position: 'relative', padding: 'var(--space-2) var(--space-3)' },
+  '.lno-table-scroll': { overflowX: 'auto' },
   // 칸 사이 선이 겹치지 않게: 칸은 오른쪽·아래 선만, 표가 왼쪽·위 선을 긋는다(border-collapse 의 값이 색 이름 검사에 걸린다)
   '.lno-table': {
     borderSpacing: '0',

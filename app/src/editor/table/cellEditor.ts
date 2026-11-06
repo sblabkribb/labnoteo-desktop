@@ -19,7 +19,7 @@ import { markdownHighlighting } from '../theme';
 import { labnoteMarkdown } from '../markdownSyntax';
 import { cellAt, escapeCellText, insertRow, parseTable, rows, setCell, type Change, type TableModel } from './model';
 import { displayText } from './renderInline';
-import { activeCells, cellActivator, paintCell, type CellHandle } from './widget';
+import { activeCells, cellActivator, paintCell, tableOf, type CellHandle } from './widget';
 // field.ts 도 이 파일을 가져온다(tableExtension). 순환이므로 이 파일의 맨 위 코드는 field 의 값을 쓰지 않는다: 함수 안에서만 쓴다.
 import { findTables, tableField, tableOptions, type TableSpan } from './field';
 
@@ -549,7 +549,7 @@ function cellElement(view: EditorView, tableFrom: number, r: number, c: number):
       continue;
     }
     if (pos !== tableFrom) continue;
-    const table = wrap.querySelector<HTMLTableElement>(':scope > table.lno-table');
+    const table = tableOf(wrap);
     return (table?.rows[r]?.cells[c] as HTMLElement | undefined) ?? null;
   }
   return null;

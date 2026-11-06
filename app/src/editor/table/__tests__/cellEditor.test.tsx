@@ -58,7 +58,7 @@ afterEach(() => {
 
 const wrapOf = (v: EditorView, i = 0) => v.dom.querySelectorAll<HTMLElement>('.lno-table-wrap')[i];
 const cellEl = (v: EditorView, r: number, c: number, i = 0) =>
-  wrapOf(v, i).querySelector<HTMLTableElement>(':scope > table')!.rows[r].cells[c] as HTMLElement;
+  wrapOf(v, i).querySelector<HTMLTableElement>(':scope > .lno-table-scroll > table')!.rows[r].cells[c] as HTMLElement;
 const nestedIn = (el: Element) => {
   const dom = el.querySelector<HTMLElement>('.cm-editor');
   return dom ? EditorView.findFromDOM(dom) : null;

@@ -2,6 +2,7 @@
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { history, undo, undoDepth } from '@codemirror/commands';
+import { ensureSyntaxTree } from '@codemirror/language';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../field';
 import { activeCell, activeCellView, focusCell } from '../cellEditor';
@@ -90,6 +91,62 @@ describe('바깥 편집기에 붙여 넣기', () => {
     v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: '' } });
     paste(v.contentDOM, 'a\tb');
     expect(v.state.doc.toString()).toBe('| a | b |\n| --- | --- |');
+  });
+
+  it('한글 입력 상태의 Ctrl+Shift+V(key 가 ㅍ 이나 Process 여도 code 는 KeyV)도 원문으로 붙인다', () => {
+    for (const key of ['ㅍ', 'Process']) {
+      const v = mount('');
+      v.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key, code: 'KeyV', shiftKey: true, ctrlKey: !isMac, metaKey: isMac, bubbles: true, cancelable: true }),
+      );
+      paste(v.contentDOM, 'a\tb');
+      expect(v.state.doc.toString(), key).toBe('a\tb');
+    }
+  });
+
+  it('Ctrl+Shift+V 뒤에 붙여 넣기 없이 다른 키를 누르면 원문 붙여 넣기는 풀린다', () => {
+    const v = mount('');
+    plainPasteKey(v.contentDOM);
+    // 클립보드가 비어 붙여 넣기 사건이 오지 않았다. 다음 보통 Ctrl+V 는 다시 표가 된다(수정 키만 누른 것은 풀지 않는다)
+    v.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true, bubbles: true, cancelable: true }));
+    v.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: !isMac, metaKey: isMac, bubbles: true, cancelable: true }));
+    paste(v.contentDOM, 'a\tb');
+    expect(v.state.doc.toString()).toBe('| a | b |\n| --- | --- |');
+  });
+
+  it('붙인 표 바로 뒤의 타이핑은 붙여 넣기와 다른 되돌리기 단계다', () => {
+    const v = mount('');
+    paste(v.contentDOM, 'a\tb');
+    const pasted = v.state.doc.toString();
+    v.dispatch({ changes: { from: pasted.length, insert: 'z' }, userEvent: 'input.type' });
+    undo(v);
+    expect(v.state.doc.toString()).toBe(pasted);
+    undo(v);
+    expect(v.state.doc.toString()).toBe('');
+  });
+
+  // 코드·머리말 안의 탭은 들여쓰기다: 표로 바꾸면 코드가 망가진다
+  const rawCases: Array<{ name: string; doc: string; at: number; text: string; out: string }> = [
+    { name: '울타리 코드 블록', doc: '```python\n\n```', at: 10, text: 'def f():\n\treturn 1', out: '```python\ndef f():\n\treturn 1\n```' },
+    { name: '들여쓴 코드 블록', doc: '앞\n\n    x\n', at: 8, text: 'a\tb', out: '앞\n\n    xa\tb\n' },
+    { name: '인라인 코드', doc: '글 `x` 끝', at: 3, text: 'a\tb', out: '글 `a\tbx` 끝' },
+    { name: '머리말', doc: '---\ntitle: x\n---\n본문', at: 12, text: 'a\tb', out: '---\ntitle: xa\tb\n---\n본문' },
+  ];
+  for (const k of rawCases) {
+    it(`${k.name} 안에서는 TSV 도 원문 그대로 붙는다`, () => {
+      const v = mount(k.doc);
+      ensureSyntaxTree(v.state, v.state.doc.length, 1000);
+      v.dispatch({ selection: { anchor: k.at } });
+      paste(v.contentDOM, k.text);
+      expect(v.state.doc.toString()).toBe(k.out);
+    });
+  }
+
+  it('코드 블록 바로 뒤 줄에서는 다시 표가 된다', () => {
+    const v = mount('```\nx\n```\n');
+    v.dispatch({ selection: { anchor: v.state.doc.length } });
+    paste(v.contentDOM, 'a\tb');
+    expect(v.state.doc.toString()).toBe('```\nx\n```\n\n| a | b |\n| --- | --- |');
   });
 
   it('CRLF 문서에서는 CRLF 로 넣는다', () => {
