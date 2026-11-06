@@ -425,8 +425,11 @@ mod tests {
     #[test]
     fn to_rel_accepts_the_short_8dot3_spelling_of_the_root() {
         let s = Scratch::new();
-        let long = s.vault().join("a long folder name");
-        fs::create_dir_all(long.join("sub")).unwrap();
+        let made = s.vault().join("a long folder name");
+        fs::create_dir_all(made.join("sub")).unwrap();
+        // Fully long spelling. The scratch dir itself may already be short (RUNNER~1 on CI), and a
+        // half-short path is neither spelling, so compare the two complete forms.
+        let long = std::path::PathBuf::from(strip_verbatim(&fs::canonicalize(&made).unwrap()));
         use std::os::windows::process::CommandExt;
         // cmd.exe does not follow the quoting Command::args uses, so pass the line verbatim.
         let out = Command::new("cmd")
