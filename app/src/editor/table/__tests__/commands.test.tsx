@@ -417,6 +417,24 @@ describe('편집기의 표 넣기 단추', () => {
     e.utils.unmount();
   });
 
+  it('칸에 포커스가 있어도 Mod-Alt-t 로 표 아래에 새 표를 넣는다', async () => {
+    const T = '| a | b |\n| --- | --- |\n| 1 | 2 |';
+    const e = mountEditor({ [P]: `${T}\n` });
+    await waitFor(() => expect(e.view().state.readOnly).toBe(false));
+    const v = e.view();
+    await act(async () => void focusCell(v, 0, 1, 1));
+    const nv = activeCellView(v)!;
+    expect(nv).not.toBeNull();
+    const isMac = /Mac/.test(navigator.platform);
+    const ev = new KeyboardEvent('keydown', { key: 't', altKey: true, ctrlKey: !isMac, metaKey: isMac, bubbles: true, cancelable: true });
+    let handled = false;
+    await act(async () => void (handled = runScopeHandlers(nv, ev, 'editor')));
+    expect(handled).toBe(true);
+    expect(v.state.doc.toString()).toBe(`${T}\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\n`);
+    expect(v.state.field(activeCell)).toEqual({ tableFrom: T.length + 2, r: 0, c: 0 });
+    e.utils.unmount();
+  });
+
   it('단추의 이름은 언어를 따른다', async () => {
     const e = mountEditor({ [P]: '' });
     await act(async () => setLang('en'));

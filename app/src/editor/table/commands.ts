@@ -23,10 +23,13 @@ import { displayText } from './renderInline';
 import { tableOpRunner, toggleRawTable, type TableAction } from './widget';
 // field.ts 와 cellEditor.ts 도 이 파일을 (간접적으로) 가져온다. 순환이므로 그 값은 함수 안에서만 쓴다.
 import { findTables, type TableSpan } from './field';
-import { focusCell } from './cellEditor';
+import { cellOuterKeys, focusCell } from './cellEditor';
 import { tableAwareInsertPos } from './target';
 
 export type { TableAction };
+
+/** 표 넣기 키(편집기 머리의 "표 넣기" 단추와 같다). 바깥 편집기(Editor.tsx)와 셀 편집기 둘 다 듣는다. */
+export const INSERT_TABLE_KEY = 'Mod-Alt-t';
 
 /**
  * 표의 구조 연산(연구 문서 §4.4): 행·열 넣기와 지우기, 정렬, 옮기기, TSV 로 복사, 원문으로 편집, 표 지우기, 새 표 넣기.
@@ -284,5 +287,9 @@ export function tableFromGrid(grid: string[][], br: string): string {
 
 /** tableExtension 이 싣는 연산 부분: 위젯의 단추가 부른다. */
 export function tableCommandsExtension(): Extension {
-  return tableOpRunner.of((view, tableFrom, op) => runTableOp(view, tableFrom, op));
+  return [
+    tableOpRunner.of((view, tableFrom, op) => runTableOp(view, tableFrom, op)),
+    // 칸에 포커스가 있어도 표 넣기 키가 듣는다(셀 편집기의 키는 바깥 편집기의 keymap 에 닿지 않는다)
+    cellOuterKeys.of({ key: INSERT_TABLE_KEY, run: (outer) => insertTable(outer) }),
+  ];
 }

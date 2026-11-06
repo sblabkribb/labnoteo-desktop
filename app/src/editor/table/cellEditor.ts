@@ -157,6 +157,18 @@ export function outerOf(nested: EditorView): EditorView | null {
  */
 export const cellExtras = Facet.define<Extension>();
 
+/** 셀 편집기에서도 듣는 바깥 편집기의 명령 키. `run` 은 바깥 편집기를 받는다. */
+export interface OuterKey {
+  key: string;
+  run: (outer: EditorView) => boolean;
+}
+
+/**
+ * 셀 편집기에서 바깥 편집기로 넘기는 키(표 넣기 Mod-Alt-t 등, commands.ts). 셀 편집기의 키 사건은 바깥 편집기의 keymap 에
+ * 닿지 않으므로 여기 실은 키만 셀 안에서도 듣는다. 이 파일이 그 모듈을 가져오지 않아도 되게(순환) facet 으로 잇는다.
+ */
+export const cellOuterKeys = Facet.define<OuterKey>();
+
 /** 지금 살아 있는 셀 편집기 수(테스트가 새는지 본다). */
 export const liveCellEditors = () => live;
 
@@ -535,6 +547,7 @@ class Session implements CellHandle {
           return true;
         },
       },
+      ...outer.state.facet(cellOuterKeys).map((k): KeyBinding => ({ key: k.key, preventDefault: true, run: () => k.run(outer) })),
     ];
   }
 }

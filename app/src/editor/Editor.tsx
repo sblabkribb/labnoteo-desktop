@@ -10,7 +10,7 @@ import { useLang } from '../i18n/useLang';
 import { editorTheme } from './theme';
 import { labnoteMarkdown } from './markdownSyntax';
 import { tableExtension } from './table/field';
-import { insertTable } from './table/commands';
+import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -283,7 +283,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
             },
           },
           // 표 넣기(머리의 단추와 같다). 잠겨 있으면 insertTable 이 false 를 돌려 키가 그대로 지나간다.
-          { key: 'Mod-Alt-t', preventDefault: true, run: (v) => insertTable(v) },
+          // 칸에 포커스가 있을 때는 셀 편집기가 같은 키를 듣는다(commands.ts 의 cellOuterKeys).
+          { key: INSERT_TABLE_KEY, preventDefault: true, run: (v) => insertTable(v) },
         ]),
       ),
       keymap.of([...defaultKeymap, ...historyKeymap]),
