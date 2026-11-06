@@ -282,11 +282,12 @@ input, select, textarea {
   background: var(--bg-elevated);
   border-right: 1px solid var(--border);
 }
-.sidebar > section { padding: 0 var(--space-3) var(--space-3); }
-.sidebar > section input { width: 100%; }
-.sidebar > section > p { margin: var(--space-2) 0 0; color: var(--text-muted); }
-.sidebar > section > p[role="alert"] { color: var(--danger); }
-.sidebar > p { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
+/* 탭 패널(.sidebar-panel) 안: 파일 탭의 찾기 칸과 트리, Workflows 패널 */
+.sidebar-panel > section { padding: 0 var(--space-3) var(--space-3); }
+.sidebar-panel > section input { width: 100%; }
+.sidebar-panel > section > p { margin: var(--space-2) 0 0; color: var(--text-muted); }
+.sidebar-panel > section > p[role="alert"] { color: var(--danger); }
+.sidebar-panel > p { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
 
 /* 검색 결과: 한 건이 사이드바 폭 안에서 줄바꿈된다 */
 .sidebar section li { margin-top: var(--space-1); }
@@ -568,3 +569,83 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 }
 .context-menu-item:hover:not(:disabled), .context-menu-item:focus { background: var(--bg-selected); }
 .context-menu-item:disabled { color: var(--text-muted); }
+
+/* 사이드바 탭: 파일 / 워크플로 */
+.sidebar-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-2);
+}
+.sidebar-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-tab[aria-selected="true"] {
+  background: var(--bg-selected);
+  box-shadow: inset 0 -3px 0 var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Workflows 패널: 찾기, 묶는 기준, 새 실험, 실험 트리, 카탈로그 트리 */
+.workflows-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+.workflows-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+.workflows-search { flex: 1 1 100%; min-width: 0; }
+.workflows-group-by { flex: 1 1 auto; min-width: 0; }
+.workflows-hint { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
+
+.wf-tree { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
+.wf-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+  padding-right: var(--space-3);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-tree-row:hover { background: var(--bg-hover); }
+.wf-tree-row:focus-visible { outline-offset: -2px; }
+.wf-tree-row[aria-current="true"] { background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--accent); }
+.wf-tree-row[aria-expanded] { font-weight: 600; }
+.wf-tree-row.dimmed { color: var(--text-muted); }
+.wf-tree-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 접기 표시: 장식이라 접근 가능한 이름에는 들어가지 않는다 */
+.wf-tree-row[aria-expanded]::before {
+  content: "▾";
+  content: "▾" / "";
+  flex: none;
+  width: 1em;
+  color: var(--text-muted);
+}
+.wf-tree-row[aria-expanded="false"]::before { content: "▸"; content: "▸" / ""; }
+.wf-tree-row:not([aria-expanded])::before { content: ""; flex: none; width: 1em; }
+
+/* 트리 아이콘(treeIcons.ts): CSS 글리프만, 토큰 색 */
+.tree-icon { flex: none; width: 1.2em; text-align: center; color: var(--text-muted); }
+.ti-none::before { content: ""; }
+.ti-beaker::before { content: "⚗"; content: "⚗" / ""; color: var(--accent); }
+.ti-folder::before { content: "▣"; content: "▣" / ""; }
+.ti-file::before { content: "▤"; content: "▤" / ""; }
+.ti-warning::before { content: "⚠"; content: "⚠" / ""; color: var(--danger); }
+.ti-discuss::before { content: "✎"; content: "✎" / ""; color: var(--accent); }
+.ti-class::before { content: "◆"; content: "◆" / ""; color: var(--accent); }
+.ti-method::before { content: "◇"; content: "◇" / ""; }
+.ti-function::before { content: "•"; content: "•" / ""; }

@@ -24,6 +24,50 @@ export const SETTLE_MS = 100;
 export const MAX_SETTLE_MS = 1000;
 
 /**
+ * 이벤트 묶음을 한 번의 호출로 모은다: 마지막 이벤트 뒤 `SETTLE_MS` 조용하면, 끝없이 이어지면 첫 이벤트로부터
+ * `MAX_SETTLE_MS` 안에 `fire` 를 부른다. `useVaultEvents` 와 Workflows 패널의 `useVaultChanges` 가 같이 쓴다.
+ */
+export function createSettler(fire: () => void): { poke(): void; cancel(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let burstStart: number | undefined; // 아직 알리지 않은 첫 이벤트의 시각
+  return {
+    poke() {
+      clearTimeout(timer);
+      const now = Date.now();
+      burstStart ??= now;
+      const wait = Math.min(SETTLE_MS, Math.max(0, burstStart + MAX_SETTLE_MS - now));
+      timer = setTimeout(() => {
+        burstStart = undefined;
+        fire();
+      }, wait);
+    },
+    cancel() {
+      clearTimeout(timer);
+      burstStart = undefined;
+    },
+  };
+}
+
+/**
+ * `vault://changed` 를 구독해 각 변경을 `onEvent` 로 넘긴다. 돌려준 함수가 구독을 거둔다(구독이 늦게 끝나도).
+ * 감시가 없어도(구독 실패) 조용히 지나간다: 앱은 쓸 수 있고, 다시 열 때 다시 읽는다.
+ */
+export function subscribeVaultChanges(listen: ListenFn, onEvent: (change: VaultChange) => void): () => void {
+  let live = true;
+  let unlisten: UnlistenFn | undefined;
+  listen(VAULT_CHANGED, (e) => {
+    if (live) onEvent(e.payload);
+  }).then(
+    (fn) => (live ? (unlisten = fn) : fn()),
+    () => undefined,
+  );
+  return () => {
+    live = false;
+    unlisten?.();
+  };
+}
+
+/**
  * 보관함 밖에서 파일이 바뀌면(Rust 가 200ms 디바운스 후 보낸다) `onChange` 를 부른다.
  * 이벤트가 몰려 와도 한 번만 부르되(끝없이 이어지면 `MAX_SETTLE_MS` 마다), 마운트가 끝나면 구독과 대기 중인 호출을 모두 거둔다.
  */
@@ -32,28 +76,11 @@ export function useVaultEvents(onChange: () => void, listen: ListenFn = tauriLis
   latest.current = onChange;
 
   useEffect(() => {
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let burstStart: number | undefined; // 아직 알리지 않은 첫 이벤트의 시각
-    let unlisten: UnlistenFn | undefined;
-    listen(VAULT_CHANGED, () => {
-      if (!live) return;
-      clearTimeout(timer);
-      const now = Date.now();
-      burstStart ??= now;
-      const wait = Math.min(SETTLE_MS, Math.max(0, burstStart + MAX_SETTLE_MS - now));
-      timer = setTimeout(() => {
-        burstStart = undefined;
-        if (live) latest.current();
-      }, wait);
-    }).then(
-      (fn) => (live ? (unlisten = fn) : fn()),
-      () => undefined, // 감시가 없어도 앱은 쓸 수 있다: 다시 열 때 트리를 읽는다.
-    );
+    const settler = createSettler(() => latest.current());
+    const unsubscribe = subscribeVaultChanges(listen, () => settler.poke());
     return () => {
-      live = false;
-      clearTimeout(timer);
-      unlisten?.();
+      settler.cancel();
+      unsubscribe();
     };
   }, [listen]);
 }

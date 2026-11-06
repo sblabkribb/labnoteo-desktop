@@ -31,6 +31,29 @@ import { useCommandContext, useNoteSwitcher } from './labnote/commands/useComman
 import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
 import { closeMenu } from './labnote/ui/menuStore';
+import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
+
+type SidebarTab = 'files' | 'workflows';
+
+/** 보관함마다 기억하는 사이드바 탭(이 PC 의 브라우저 저장소). 읽거나 쓰지 못하면 기억하지 않는다. */
+const tabKey = (root: string) => `labnoteo-sidebar-tab:${root}`;
+
+function storedTab(root: string): SidebarTab | undefined {
+  try {
+    const v = localStorage.getItem(tabKey(root));
+    return v === 'files' || v === 'workflows' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function storeTab(root: string, tab: SidebarTab): void {
+  try {
+    localStorage.setItem(tabKey(root), tab);
+  } catch {
+    // 저장소가 막혀 있다: 이번 실행 동안만 기억한다
+  }
+}
 
 interface ViewProps {
   vault: VaultInfo;
@@ -50,6 +73,14 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   // 저장 안 된 편집이 있으면 먼저 저장한다. 저장하지 못하면(충돌 등) 노트를 바꾸지 않는다 — 편집이 사라지지 않게.
   const notes = useNoteSwitcher(editor);
   const { selected, openFile, closeActive } = notes;
+  // 사이드바 탭: 고른 적이 없으면 labnote/ 폴더가 있는 보관함은 Workflows, 아니면 Files.
+  const [chosenTab, setChosenTab] = useState<SidebarTab | undefined>(() => storedTab(vault.root));
+  const hasLabnote = entries.some((e) => e.isDir && e.depth === 0 && e.path.toLowerCase() === 'labnote');
+  const tab: SidebarTab = chosenTab ?? (hasLabnote ? 'workflows' : 'files');
+  const showPanel = (next: SidebarTab) => {
+    setChosenTab(next);
+    storeTab(vault.root, next);
+  };
   const openNote = (path: string) => openFile(path);
   // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
   const { settings, imported: settingsImported, update: updateSettings } = useVaultSettings(vault.root);
@@ -76,6 +107,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     reloadTree: reload,
     openFile,
     closeActive,
+    showPanel,
   });
   usePaletteHotkey(ctx);
   // 설정을 읽은 뒤 보관함마다 한 번: 번들 카탈로그가 바뀌었으면 알린다. 여는 것을 막지 않는다(기다리지 않고, 던지지 않는다).
@@ -131,9 +163,43 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           {settingsImported && <p role="status">{t('settings.imported')}</p>}
         </div>
         <aside className="sidebar" aria-label={t('app.sidebar')}>
-          <SearchPanel onOpen={openNote} />
-          {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
-          {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
+          <div className="sidebar-tabs" role="tablist" aria-label={t('sidebar.tabs')}>
+            <button
+              type="button"
+              role="tab"
+              id="sidebar-tab-files"
+              aria-controls="sidebar-panel-files"
+              aria-selected={tab === 'files'}
+              tabIndex={tab === 'files' ? 0 : -1}
+              className="sidebar-tab"
+              onClick={() => showPanel('files')}
+            >
+              {t('sidebar.tab.files')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="sidebar-tab-workflows"
+              aria-controls="sidebar-panel-workflows"
+              aria-selected={tab === 'workflows'}
+              tabIndex={tab === 'workflows' ? 0 : -1}
+              className="sidebar-tab"
+              onClick={() => showPanel('workflows')}
+            >
+              {t('sidebar.tab.workflows')}
+            </button>
+          </div>
+          {/* 파일 탭은 숨겨도 내리지 않는다: 접어 둔 폴더와 찾던 말이 남는다 */}
+          <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
+            <SearchPanel onOpen={openNote} />
+            {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
+            {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
+          </div>
+          {tab === 'workflows' && (
+            <div role="tabpanel" id="sidebar-panel-workflows" className="sidebar-panel" aria-labelledby="sidebar-tab-workflows">
+              {ctx ? <WorkflowsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
+            </div>
+          )}
         </aside>
         <main className="content">
           {selected ? (

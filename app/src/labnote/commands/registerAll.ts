@@ -11,8 +11,21 @@ import { workflowCommands } from './workflow';
  * 가져오기만으로는 아무것도 등록하지 않는다: VaultView 가 마운트할 때 registerAllCommands() 를 한 번 부른다.
  */
 function allCommands(): Command[] {
-  return [...experimentCommands, ...workflowCommands, ...syncChecklistCommands, ...catalogCommands, ...unitOpCommands, ...editorInsertCommands];
+  return [
+    ...experimentCommands,
+    ...workflowCommands,
+    ...syncChecklistCommands,
+    ...catalogCommands,
+    ...unitOpCommands,
+    ...editorInsertCommands,
+    ...panelCommands,
+  ];
 }
+
+/** 사이드바 패널 명령. 'open-workflow-view' 는 사이드바를 Workflows 탭으로 바꾼다(플러그인은 뷰를 연다). */
+const panelCommands: Command[] = [
+  { id: 'open-workflow-view', nameKey: 'Open workflow view', run: async (ctx) => ctx.showPanel('workflows') },
+];
 
 /** 모든 명령을 등록한다. 여러 번 불러도 id 마다 하나다(같은 id 는 바꿔 끼운다). */
 export function registerAllCommands(): void {
