@@ -42,6 +42,17 @@ macro_rules! register_commands {
     };
 }
 
+/// How long `setup` waits before showing a main window the front end never showed.
+pub const SHOW_FALLBACK: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Shows the window unless it is already visible. Errors are ignored: this is
+/// a last-resort fallback and there is nothing better to do with them.
+pub fn show_if_hidden<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    if !window.is_visible().unwrap_or(false) {
+        let _ = window.show();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     register_commands!(tauri::Builder::default())
@@ -67,6 +78,17 @@ pub fn run() {
             // Watches the open vault for changes made outside the app; started
             // by `vault_open` / `vault_current`, moved when the vault changes.
             app.manage(vault::watcher::WatcherState::new(vault::watcher::app_starter(app.handle().clone())));
+            // The main window starts hidden (`visible: false`) and the front end
+            // shows it once the first theme is applied. If the front end never
+            // gets that far (a bundle or CSP error, an exception before React
+            // mounts, a WebView2 load failure) the process would sit invisible,
+            // so show it anyway after SHOW_FALLBACK.
+            if let Some(window) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(SHOW_FALLBACK);
+                    show_if_hidden(&window);
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -80,5 +102,11 @@ mod tests {
     #[test]
     fn app_version_matches_cargo_package_version() {
         assert_eq!(app::app_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn show_fallback_waits_longer_than_the_front_end_fallback() {
+        // useTheme.ts SHOW_FALLBACK_MS is 1500: the Rust fallback must not race it.
+        assert_eq!(SHOW_FALLBACK, std::time::Duration::from_secs(3));
     }
 }

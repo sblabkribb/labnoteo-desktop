@@ -11,6 +11,9 @@ vi.mock('@tauri-apps/api/window', () => ({
     setTheme: async (theme: unknown) => {
       tauriWindow.calls.push(theme);
     },
+    show: async () => {
+      tauriWindow.calls.push('show');
+    },
   }),
 }));
 
@@ -38,10 +41,10 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('useTheme: 배포되는 기본 창 이음새', () => {
-  it('인자 없이 부르면 Tauri 현재 창의 setTheme 을 쓴다: 시작할 때 null, 다크를 고르면 dark', async () => {
+  it('인자 없이 부르면 Tauri 현재 창의 setTheme 을 쓴다: 시작할 때 null 다음 창을 보이고, 다크를 고르면 dark', async () => {
     const { result } = renderHook(() => useTheme());
-    await waitFor(() => expect(tauriWindow.calls).toEqual([null]));
+    await waitFor(() => expect(tauriWindow.calls).toEqual([null, 'show']));
     act(() => result.current.setTheme('dark'));
-    await waitFor(() => expect(tauriWindow.calls).toEqual([null, 'dark']));
+    await waitFor(() => expect(tauriWindow.calls).toEqual([null, 'show', 'dark']));
   });
 });

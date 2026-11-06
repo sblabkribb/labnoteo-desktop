@@ -103,16 +103,25 @@ describe('index.html', () => {
   });
 });
 
+// 창은 숨긴 채 뜬다: useTheme 이 첫 테마를 건 뒤(또는 1.5 초 뒤) show 하고, lib.rs 가 3 초 뒤에도 숨어 있으면 보인다.
+describe('창 시작', () => {
+  it('주 창은 visible:false 로 뜬다 (제목 표시줄이 OS 테마로 한 번 비치지 않게)', () => {
+    expect(conf.app.windows).toHaveLength(1);
+    expect(conf.app.windows[0].visible).toBe(false);
+  });
+});
+
 // 권한은 쓰는 것만 하나씩 연다. 목록을 통째로 고정해, 누가 편하자고 권한을 넓히면 여기서 보인다.
 describe('창 권한', () => {
   const cap = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf-8'));
 
-  it('기본 권한 묶음은 정확히 이 목록이다 (set-theme 은 제목 표시줄을 고른 테마에 맞추려고 연다)', () => {
+  it('기본 권한 묶음은 정확히 이 목록이다 (set-theme 은 제목 표시줄을 고른 테마에 맞추려고, show 는 숨겨 띄운 창을 첫 테마 뒤에 보이려고 연다)', () => {
     expect(cap.windows).toEqual(['main']);
     expect(cap.permissions).toEqual([
       'core:default',
       'core:window:allow-destroy',
       'core:window:allow-set-theme',
+      'core:window:allow-show',
       'dialog:allow-open',
       'dialog:allow-save',
       'updater:default',
