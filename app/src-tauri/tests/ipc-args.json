@@ -1,4 +1,5 @@
 {
+  "app_version": [],
   "vault_open": ["path"],
   "vault_current": [],
   "vault_tree": [],
@@ -9,5 +10,9 @@
   "vault_mkdir": ["path"],
   "vault_list": ["dir"],
   "vault_remove": ["path"],
-  "vault_rmdir": ["path"]
+  "vault_rmdir": ["path"],
+  "index_rebuild": [],
+  "index_upsert": ["path"],
+  "index_remove": ["path"],
+  "search": ["query", "limit"]
 }

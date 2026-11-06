@@ -14,6 +14,11 @@ const ko: Record<string, string> = {
   'tree.label': '노트',
   'tree.empty': '노트가 없습니다',
   'tree.error': '노트 목록을 불러올 수 없습니다.',
+  'search.label': '노트 검색',
+  'search.placeholder': '노트 내용에서 찾기',
+  'search.none': '검색 결과가 없습니다',
+  'search.error': '검색할 수 없습니다.',
+  'search.indexing': '색인을 만드는 중입니다',
   'test.greeting': '{0} 에 노트 {1} 개',
 };
 

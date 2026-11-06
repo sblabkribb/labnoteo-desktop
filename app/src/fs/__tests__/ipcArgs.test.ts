@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { TauriLabnoteFs } from '../tauriLabnoteFs';
 import { openVault, restoreVault } from '../../vault/useVault';
 import { fetchTree } from '../../tree/useTree';
+import { fetchAppVersion } from '../../appVersion';
+import { rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -15,7 +17,7 @@ function recorder() {
     sent.set(cmd, Object.keys(args ?? {}).sort());
     if (cmd === 'vault_modify') return { kind: 'ok' };
     if (cmd === 'vault_read') return 'old';
-    if (cmd === 'vault_list') return [];
+    if (cmd === 'vault_list' || cmd === 'search') return [];
     if (cmd === 'vault_exists') return true;
     if (cmd === 'vault_open' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
@@ -37,6 +39,11 @@ describe('IPC 인자 이름 계약', () => {
     await fs.rmdir('d');
     await fetchTree(r.invoke);
     await restoreVault(r.invoke);
+    await fetchAppVersion(r.invoke);
+    await rebuildIndex(r.invoke);
+    await upsertNote('a.md', r.invoke);
+    await removeNote('a.md', r.invoke);
+    await searchNotes('q', 10, r.invoke);
     await openVault(r.invoke, 'D:\\lab');
 
     const expected = Object.fromEntries(Object.entries(fixture).map(([k, v]) => [k, [...v].sort()]));

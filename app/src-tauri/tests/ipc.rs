@@ -13,6 +13,7 @@ use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
 use tauri::WebviewWindowBuilder;
+use labnoteo_app_lib::index::IndexState;
 use labnoteo_app_lib::vault::{SettingsFile, VaultState};
 
 const ARGS: &str = include_str!("ipc-args.json");
@@ -27,6 +28,7 @@ fn ipc_argument_names_match_the_typescript_side() {
     let app = labnoteo_app_lib::register_commands!(mock_builder())
         .manage(VaultState::default())
         .manage(SettingsFile(dir.join("config").join("settings.json")))
+        .manage(IndexState::new(dir.join("data").join("index")))
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -52,7 +54,9 @@ fn ipc_argument_names_match_the_typescript_side() {
 
     // Build a command's JSON arguments from the shared fixture's names.
     let fixture: Value = serde_json::from_str(ARGS).unwrap();
+    let used = std::cell::RefCell::new(std::collections::BTreeSet::<String>::new());
     let args = |cmd: &str, vals: Vec<Value>| -> Value {
+        used.borrow_mut().insert(cmd.to_string());
         let names = fixture[cmd].as_array().unwrap_or_else(|| panic!("{cmd} missing from ipc-args.json"));
         assert_eq!(names.len(), vals.len(), "{cmd}: fixture lists {names:?}");
         Value::Object(names.iter().map(|n| n.as_str().unwrap().to_string()).zip(vals).collect())
@@ -92,6 +96,24 @@ fn ipc_argument_names_match_the_typescript_side() {
         ok("vault_modify", args("vault_modify", vec![json!("notes/a.md"), json!("x"), json!("stale")])),
         json!({"kind": "conflict", "current": "two"})
     );
+    // The index: commands, argument names, and the wire shape of a hit.
+    assert_eq!(ok("app_version", args("app_version", vec![])), env!("CARGO_PKG_VERSION"));
+    ok("vault_write", args("vault_write", vec![json!("notes/k.md"), json!("---
+title: 실험
+---
+형질전환 효율")]));
+    assert_eq!(ok("index_rebuild", args("index_rebuild", vec![]))["indexed"], 2);
+    let hits = ok("search", args("search", vec![json!("형질전환"), json!(10)]));
+    assert_eq!(hits.as_array().unwrap().len(), 1);
+    assert_eq!(hits[0]["path"], "notes/k.md");
+    assert_eq!(hits[0]["title"], "실험");
+    assert!(hits[0]["snippet"].as_str().unwrap().contains("형질전환"));
+    ok("vault_write", args("vault_write", vec![json!("notes/k.md"), json!("agarose")]));
+    ok("index_upsert", args("index_upsert", vec![json!("notes/k.md")]));
+    assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)]))[0]["path"], "notes/k.md");
+    ok("index_remove", args("index_remove", vec![json!("notes/k.md")]));
+    assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)])), json!([]));
+    ok("vault_remove", args("vault_remove", vec![json!("notes/k.md")]));
     ok("vault_remove", args("vault_remove", vec![json!("notes/a.md")]));
     ok("vault_rmdir", args("vault_rmdir", vec![json!("notes")]));
     assert_eq!(std::fs::read_dir(dir.join("vault")).unwrap().count(), 0);
@@ -100,7 +122,39 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
     assert!(call("vault_open", json!({"vault": "x"})).is_err());
+    assert!(call("search", json!({"q": "x", "limit": 5})).is_err());
+    // A fixture entry nobody exercises pins nothing: every one was called above.
+    let fixture_keys: std::collections::BTreeSet<String> = fixture.as_object().unwrap().keys().cloned().collect();
+    assert_eq!(*used.borrow(), fixture_keys, "commands this test called vs ipc-args.json");
 
     drop(webview);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The command names `register_commands!` registers, read from its source: the
+/// one list the app really uses, so it cannot drift from a copy.
+fn registered_commands() -> std::collections::BTreeSet<String> {
+    let lib = include_str!("../src/lib.rs");
+    assert_eq!(lib.matches("generate_handler![").count(), 1, "expected exactly one handler list in lib.rs");
+    let start = lib.find("generate_handler![").unwrap() + "generate_handler![".len();
+    let list = &lib[start..start + lib[start..].find(']').expect("handler list is closed by ]")];
+    list.split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| p.rsplit("::").next().unwrap().to_string())
+        .collect()
+}
+
+/// Adding a command without adding it to `ipc-args.json` (and so to both
+/// round-trip tests) fails here, and so does leaving a removed command behind.
+#[test]
+fn fixture_covers_every_registered_command() {
+    let fixture: Value = serde_json::from_str(ARGS).unwrap();
+    let in_fixture: std::collections::BTreeSet<String> = fixture.as_object().unwrap().keys().cloned().collect();
+    let registered = registered_commands();
+    assert!(registered.contains("app_version") && registered.contains("search"), "parsed {registered:?}");
+    let missing: Vec<_> = registered.difference(&in_fixture).collect();
+    let stale: Vec<_> = in_fixture.difference(&registered).collect();
+    assert!(missing.is_empty(), "registered but not in ipc-args.json: {missing:?}");
+    assert!(stale.is_empty(), "in ipc-args.json but not registered: {stale:?}");
 }

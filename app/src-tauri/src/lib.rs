@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+pub mod index;
 pub mod vault;
 
 pub mod app {
@@ -27,6 +28,10 @@ macro_rules! register_commands {
             $crate::vault::fs::vault_list,
             $crate::vault::fs::vault_remove,
             $crate::vault::fs::vault_rmdir,
+            $crate::index::index_rebuild,
+            $crate::index::index_upsert,
+            $crate::index::index_remove,
+            $crate::index::search,
         ])
     };
 }
@@ -44,6 +49,13 @@ pub fn run() {
                 .app_config_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("kr.sblab.labnoteo"));
             app.manage(vault::SettingsFile(dir.join("settings.json")));
+            // The search index is a cache and lives in the app data dir, never
+            // in a vault. Same fallback as above: never abort startup over it.
+            let data = app
+                .path()
+                .app_local_data_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("kr.sblab.labnoteo"));
+            app.manage(index::IndexState::new(data.join("index")));
             Ok(())
         })
         .run(tauri::generate_context!())

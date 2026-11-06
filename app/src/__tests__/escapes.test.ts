@@ -11,8 +11,17 @@ import { join } from 'node:path';
 const BS = String.fromCharCode(92);
 const VALID_AFTER_BACKSLASH = new Set([...'nrtbfv0xu\'"`$', BS, '\n', '\r']);
 
-/** Quoted string literals on one line (comments and regex literals are not parsed). */
-const QUOTED = new RegExp(String.raw`'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"`, 'g');
+const BT = String.fromCharCode(96); // a backtick, which cannot be written inside a template literal
+
+/**
+ * String literals on one line: single-quoted, double-quoted and template (backtick). One
+ * alternation scanned left to right, so a backtick inside a quoted string is part of that string.
+ * A template that spans lines, comments and regex literals are not parsed.
+ */
+const QUOTED = new RegExp(
+  String.raw`'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|${BT}(?:[^${BT}\\\n]|\\.)*${BT}`,
+  'g',
+);
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -27,7 +36,10 @@ function sources(dir: string): string[] {
 export function badEscapes(text: string): string[] {
   const out: string[] = [];
   text.split('\n').forEach((line, i) => {
-    for (const m of line.match(QUOTED) ?? []) {
+    for (const found of line.matchAll(QUOTED)) {
+      const m = found[0];
+      // String.raw keeps every backslash as written: it is the sanctioned way to type a path.
+      if (m[0] === BT && line.slice(0, found.index).endsWith('String.raw')) continue;
       let bad = false;
       for (let k = 0; k < m.length; k++) {
         if (m[k] !== BS) continue;
@@ -50,6 +62,23 @@ describe('backslash escapes in string literals', () => {
     for (const m of mangled) expect(badEscapes(`const p = ${m};`), m).toHaveLength(1);
     const fine = ["'D:" + BS + BS + "lab'", "'line" + BS + "n'", "'it" + BS + "'s'"];
     for (const f of fine) expect(badEscapes(`const p = ${f};`), f).toEqual([]);
+  });
+
+  it('the guard reads template literals too, not only quoted strings', () => {
+    const mangled = [BT + 'D:' + BS + 'lab' + BT, BT + 'a' + BS + 'd/${x}' + BT, BT + '${root}' + BS + 'lab' + BT];
+    for (const m of mangled) expect(badEscapes(`const p = ${m};`), m).toHaveLength(1);
+    const fine = [
+      BT + 'D:' + BS + BS + 'lab' + BT,
+      BT + '${root}' + BS + BS + 'lab' + BT,
+      BT + 'line' + BS + 'n' + BT,
+      BT + 'a ' + BS + BT + ' b' + BT,
+      BT + 'price ' + BS + '${x}' + BT,
+    ];
+    for (const f of fine) expect(badEscapes(`const p = ${f};`), f).toEqual([]);
+    // A backtick inside a quoted string does not open a template that swallows the rest of the line.
+    expect(badEscapes(`const a = '${BT}'; const b = 'D:${BS}lab';`)).toHaveLength(1);
+    // String.raw is the sanctioned way to write a path with single backslashes.
+    expect(badEscapes('const p = String.raw' + BT + 'D:' + BS + 'lab' + BT + ';')).toEqual([]);
   });
 
   it('no source file under src has one', () => {
