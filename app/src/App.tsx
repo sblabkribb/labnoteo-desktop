@@ -5,6 +5,7 @@ import { useVault, type VaultInfo } from './vault/useVault';
 import { ChangeVault } from './vault/ChangeVault';
 import { useVaultEvents } from './vault/useVaultEvents';
 import { NoteTree } from './tree/NoteTree';
+import { NewNote } from './tree/NewNote';
 import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
@@ -45,6 +46,7 @@ function VaultView({ vault, version, onChangeVault }: { vault: VaultInfo; versio
       <p>{t('vault.open', vault.name)}</p>
       <ChangeVault flush={async () => !editor.current || (await editor.current.flush())} onChange={onChangeVault} />
       {vault.hasObsidianConfig && <p>{t('vault.obsidian')}</p>}
+      <NewNote flush={async () => !editor.current || (await editor.current.flush())} onCreated={openNote} />
       <SearchPanel onOpen={openNote} indexing={indexing} skipped={skipped} />
       {failed && <p role="alert">{t('tree.error')}</p>}
       {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}

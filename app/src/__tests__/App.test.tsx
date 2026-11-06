@@ -46,4 +46,27 @@ describe('앱', () => {
     await waitFor(() => expect(screen.getByText('보관함: right')).toBeTruthy());
     expect(tauri.invoke).toHaveBeenCalledWith('vault_open', { path: 'D:/right' });
   });
+  it('새 노트를 만들면 편집기가 그 노트를 연다', async () => {
+    const user = userEvent.setup();
+    tauri.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'vault_current') return vaults.first;
+      if (cmd === 'vault_tree') return [];
+      if (cmd === 'index_rebuild') return { indexed: 0, skipped: 0 };
+      if (cmd === 'app_version') return '0.0.0';
+      if (cmd === 'vault_exists') return false;
+      if (cmd === 'vault_modify') return { kind: 'ok' };
+      if (cmd === 'vault_read') return '';
+      throw new Error(`unexpected ${cmd}`);
+    });
+    render(<App />);
+    await screen.findByText('보관함: wrong');
+    expect(screen.getByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '새 노트' }));
+    await user.type(screen.getByRole('textbox', { name: '노트 이름' }), 'Day 1{Enter}');
+
+    await waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('vault_read', { path: 'Day 1.labnote.md' }));
+    expect(screen.queryByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeNull();
+    expect(screen.queryByRole('textbox', { name: '노트 이름' })).toBeNull();
+  });
 });

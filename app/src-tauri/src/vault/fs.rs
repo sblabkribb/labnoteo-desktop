@@ -474,6 +474,33 @@ mod tests {
         assert_eq!(read(&l, &t.0, "n.md").unwrap(), "v");
     }
 
+    /// The "new note" flow in the app is `exists` then `modify(content "", expected_before
+    /// Some(""))`. These pin what it relies on, against a real directory.
+    #[test]
+    fn creating_a_note_never_overwrites_and_rejects_windows_names() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        // A free name is created, empty.
+        assert_eq!(modify(&l, &t.0, "Day 1.labnote.md", "", Some("")).unwrap(), ModifyResult::Ok);
+        assert_eq!(read(&l, &t.0, "Day 1.labnote.md").unwrap(), "");
+        // NTFS ignores case: the same note under another spelling already exists.
+        assert!(exists(&l, &t.0, "DAY 1.labnote.md").unwrap());
+        // A note with content is not replaced by a second create.
+        write(&l, &t.0, "a.labnote.md", "my data").unwrap();
+        assert_eq!(
+            modify(&l, &t.0, "a.labnote.md", "", Some("")).unwrap(),
+            ModifyResult::Conflict { current: "my data".into() }
+        );
+        assert_eq!(read(&l, &t.0, "a.labnote.md").unwrap(), "my data");
+        // Names Windows forbids are refused as Escape, and nothing is created.
+        let before = list(&t.0, "").unwrap();
+        for bad in ["CON.labnote.md", "nul.labnote.md", "a:b.labnote.md", "a?.labnote.md", "a<b.labnote.md"] {
+            assert!(matches!(exists(&l, &t.0, bad), Err(FsError::Vault(VaultError::Escape))), "{bad}");
+            assert!(matches!(modify(&l, &t.0, bad, "", Some("")), Err(FsError::Vault(VaultError::Escape))), "{bad}");
+        }
+        assert_eq!(list(&t.0, "").unwrap(), before);
+    }
+
     #[test]
     fn exists_true_for_file_and_dir() {
         let t = Tmp::new();
