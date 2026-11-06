@@ -61,7 +61,7 @@ describe('인라인 스타일', () => {
 describe('index.html', () => {
   const page = readFileSync('index.html', 'utf-8');
   const scripts = [...page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)].map((m) => ({ attrs: m[1], body: m[2], at: m.index! }));
-  const head = page.slice(0, page.search(/<\/head\s*>/i));
+  const headEnd = page.search(/<\/head\s*>/i);
   // 따옴표가 든 정규식은 String.raw 로 쓴다: escapes.test.ts 는 정규식 리터럴 안의 따옴표를 문자열의 시작으로 읽는다.
   const SRC = new RegExp(String.raw`\bsrc="([^"]*)"`);
   const srcOf = (attrs: string) => SRC.exec(attrs)?.[1];
@@ -82,7 +82,8 @@ describe('index.html', () => {
     const app = scripts.find((s) => srcOf(s.attrs) === '/src/main.tsx');
     expect(boot).toBeDefined();
     expect(app).toBeDefined();
-    expect(boot!.at).toBeLessThan(head.length); // <head> 안
+    expect(headEnd).toBeGreaterThanOrEqual(0); // </head> 를 찾지 못하면(-1) 아래 비교가 헛돈다
+    expect(boot!.at).toBeLessThan(headEnd); // <head> 안
     expect(boot!.at).toBeLessThan(app!.at);
     expect(boot!.attrs).not.toMatch(/\b(type|async|defer)\b/); // 모듈·async·defer 는 첫 그림 뒤로 밀릴 수 있다
     // Vite 는 public/ 을 dist 맨 위로 그대로 복사한다: 앱과 같은 출처의 /theme-boot.js 가 된다
@@ -107,8 +108,16 @@ describe('창 권한', () => {
     ]);
   });
 
-  it('여는 창 권한은 Tauri 가 만든 스키마에 실제로 있는 이름이다', () => {
-    const schema = readFileSync('src-tauri/gen/schemas/desktop-schema.json', 'utf-8');
-    for (const p of cap.permissions as string[]) expect(schema, p).toContain(`"const": "${p}"`);
+  // gen/schemas 는 cargo 빌드가 만드는 gitignore 된 산출물이라 CI 의 npm test(cargo 보다 먼저 돈다)와 새 클론에는 없다.
+  // 대신 npm ci 가 package-lock 그대로 까는 @tauri-apps/api 의 창 API 문서를 읽는다: 메서드마다 "Requires the `…` permission" 을 적어 둔다.
+  // 플러그인·묶음 권한(dialog:, updater:, process:, core:default)은 거기에 없으므로 위의 고정 목록만이 지킨다.
+  it('여는 창 권한(core:window:allow-*)은 @tauri-apps/api 가 그 메서드에 요구한다고 적은 이름이다', () => {
+    const api = readFileSync('node_modules/@tauri-apps/api/window.d.ts', 'utf-8');
+    const REQUIRES = new RegExp(String.raw`Requires the .(core:window:allow-[\w-]+). permission`, 'g');
+    const required = new Set([...api.matchAll(REQUIRES)].map((m) => m[1]));
+    expect(required.size).toBeGreaterThan(10); // 문서를 실제로 읽었다
+    const windowPerms = (cap.permissions as string[]).filter((p) => p.startsWith('core:window:'));
+    expect(windowPerms.length).toBeGreaterThanOrEqual(2); // 위 목록이 고정한 destroy·set-theme
+    for (const p of windowPerms) expect(required.has(p), p).toBe(true);
   });
 });
