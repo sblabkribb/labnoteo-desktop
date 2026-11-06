@@ -8,7 +8,18 @@ fn app_version() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_version])
+        .manage(vault::fs::VaultState::default())
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            vault::fs::vault_read,
+            vault::fs::vault_write,
+            vault::fs::vault_modify,
+            vault::fs::vault_exists,
+            vault::fs::vault_mkdir,
+            vault::fs::vault_list,
+            vault::fs::vault_remove,
+            vault::fs::vault_rmdir,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running labnoteO");
 }
