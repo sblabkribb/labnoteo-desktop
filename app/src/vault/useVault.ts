@@ -78,5 +78,8 @@ export function useVault(invoke: InvokeFn = tauriInvoke) {
     [invoke],
   );
 
-  return { state, open, create };
+  /** 선택 화면으로 돌아간다. 새 보관함을 열기 전까지 기억된 보관함은 그대로다. */
+  const change = useCallback(() => setState({ status: 'picker' }), []);
+
+  return { state, open, create, change };
 }

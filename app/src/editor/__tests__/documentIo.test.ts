@@ -130,4 +130,22 @@ describe('문서 읽기/쓰기', () => {
     expect(doc.mixed).toBe(false);
     expect(doc.text).toBe('a\nb\n');
   });
+
+  it('CRLF 바로 앞의 단독 CR 도 저장 때 사라지지 않는다 (CR CR LF)', async () => {
+    for (const raw of ['a\r\r\nb', 'a\r\r\nb\r\n', '\r\r\n', 'x\r\r\r\ny\r\n']) {
+      const v = fakeVault({ [P]: raw });
+      const doc = await loadDocument(P, v.invoke);
+      expect(doc.mixed, JSON.stringify(raw)).toBe(true); // 정규화하면 CR 이 사라지므로 손대지 않는다
+      expect(toRaw(doc, doc.text), JSON.stringify(raw)).toBe(raw); // 고치지 않고 저장해도 그대로
+      await saveDocument(doc, doc.text + '!', { invoke: v.invoke });
+      expect(v.files[P], JSON.stringify(raw)).toBe(raw + '!');
+    }
+  });
+
+  it('순수 LF 와 순수 CRLF 노트는 그대로 정규화된다 (CR 감지가 이 둘을 바꾸지 않는다)', async () => {
+    const lf = await loadDocument(P, fakeVault({ [P]: 'a\nb\n' }).invoke);
+    const crlf = await loadDocument(P, fakeVault({ [P]: 'a\r\nb\r\n' }).invoke);
+    expect([lf.mixed, crlf.mixed]).toEqual([false, false]);
+    expect(toRaw(crlf, crlf.text)).toBe('a\r\nb\r\n');
+  });
 });

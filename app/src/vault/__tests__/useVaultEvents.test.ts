@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTLE_MS, VAULT_CHANGED, useVaultEvents, type VaultChange } from '../useVaultEvents';
+import { MAX_SETTLE_MS, SETTLE_MS, VAULT_CHANGED, useVaultEvents, type VaultChange } from '../useVaultEvents';
 import { EVENTS_FIXTURE } from '../../__tests__/fixtures';
 import { useTree, type TreeEntry } from '../../tree/useTree';
 
@@ -76,6 +76,31 @@ describe('보관함 이벤트 훅', () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('이벤트가 끝없이 이어져도 MAX_SETTLE_MS 안에 한 번은 부른다', async () => {
+    const f = fakeListen();
+    const onChange = vi.fn();
+    renderHook(() => useVaultEvents(onChange, f.listen as never));
+    await vi.waitFor(() => expect(f.handlers.size).toBe(1));
+    // SETTLE_MS 보다 촘촘하게(50ms) 3초 동안: 조용해지는 때가 없다.
+    const calls: number[] = [];
+    onChange.mockImplementation(() => calls.push(Date.now() - start));
+    const start = Date.now();
+    await act(async () => {
+      for (let t = 0; t < 3000; t += 50) {
+        f.emit({ path: 'busy.md', kind: 'modified' });
+        await vi.advanceTimersByTimeAsync(50);
+      }
+    });
+    expect(calls.length).toBeGreaterThanOrEqual(2); // 한 번도 안 불리던 때(상한이 없을 때)와 다르다
+    expect(calls[0]).toBeLessThanOrEqual(MAX_SETTLE_MS);
+    expect(calls[0]).toBeGreaterThanOrEqual(MAX_SETTLE_MS - 50);
+    // 끝난 뒤 한 번 더: 마지막 이벤트 뒤의 변경도 놓치지 않는다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    });
+    expect(calls.length).toBeGreaterThanOrEqual(3);
   });
 
   it('언마운트하면 구독을 풀고 대기 중이던 호출도 버린다', async () => {

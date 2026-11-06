@@ -44,7 +44,8 @@ export function parseRaw(path: string, raw: string): LoadedDocument {
   const body = hadBom ? raw.slice(BOM.length) : raw;
   const crlf = (body.match(/\r\n/g) ?? []).length;
   const lf = (body.match(/\n/g) ?? []).length - crlf; // CRLF 의 일부가 아닌 단독 LF
-  const mixed = crlf > 0 && lf > 0;
+  // 단독 CR(CRLF 의 일부가 아닌 CR)이 있어도 섞인 것이다: CR CR LF 를 LF 로 정규화하면 앞의 CR 이 사라진다.
+  const mixed = (crlf > 0 && lf > 0) || /\r(?!\n)/.test(body);
   const eol = crlf > 0 && crlf >= lf ? 'crlf' : 'lf';
   // 섞이지 않은 CRLF 파일만 LF 본문으로 정규화한다(저장 때 되돌린다). 섞인 파일은 손대지 않는다.
   return { path, text: mixed ? body : body.replace(/\r\n/g, '\n'), eol, mixed, hadBom, loadedText: raw };

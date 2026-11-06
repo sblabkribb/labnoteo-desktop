@@ -54,11 +54,23 @@ describe('업데이트 알림', () => {
     expect(s.restart).not.toHaveBeenCalled();
   });
 
-  it('설치가 실패하면 오류를 보이고 다시 시작하지 않는다', async () => {
+  it('내려받기가 실패하면 저장도 설치도 하지 않고 오류를 보인다', async () => {
     const s = setup();
     (s.update.download as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('bad signature'));
     await userEvent.click(await screen.findByRole('button', { name: '지금 업데이트' }));
     expect((await screen.findByRole('alert')).textContent).toContain('업데이트하지 못했습니다');
+    expect(s.order).toEqual([]); // 내려받지 못했으니 저장도 설치도 시도하지 않았다
+    expect(s.update.install).not.toHaveBeenCalled();
+    expect(s.restart).not.toHaveBeenCalled();
+  });
+
+  it('설치가 실패하면 오류를 보이고 다시 시작하지 않는다', async () => {
+    const s = setup();
+    (s.update.install as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('installer failed'));
+    await userEvent.click(await screen.findByRole('button', { name: '지금 업데이트' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('업데이트하지 못했습니다');
+    expect(s.update.install).toHaveBeenCalledTimes(1); // 설치까지 갔다가 실패했다
+    expect(s.order).toEqual(['download', 'save']); // 저장은 설치 전에 이미 끝났다
     expect(s.restart).not.toHaveBeenCalled();
   });
 });

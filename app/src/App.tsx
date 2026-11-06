@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from './i18n/t';
 import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
+import { ChangeVault } from './vault/ChangeVault';
 import { useVaultEvents } from './vault/useVaultEvents';
 import { NoteTree } from './tree/NoteTree';
 import { useTree } from './tree/useTree';
@@ -11,7 +12,7 @@ import { Editor, type EditorHandle } from './editor/Editor';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 
-function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
+function VaultView({ vault, version, onChangeVault }: { vault: VaultInfo; version: string; onChangeVault: () => void }) {
   const { entries, failed, reload } = useTree(vault.root);
   // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
   useVaultEvents(reload);
@@ -42,6 +43,7 @@ function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
     <>
       <UpdateBanner beforeInstall={async () => !editor.current || (await editor.current.flush())} />
       <p>{t('vault.open', vault.name)}</p>
+      <ChangeVault flush={async () => !editor.current || (await editor.current.flush())} onChange={onChangeVault} />
       {vault.hasObsidianConfig && <p>{t('vault.obsidian')}</p>}
       <SearchPanel onOpen={openNote} indexing={indexing} skipped={skipped} />
       {failed && <p role="alert">{t('tree.error')}</p>}
@@ -57,7 +59,7 @@ function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
 
 export function App() {
   const [version, setVersion] = useState('');
-  const { state, open, create } = useVault();
+  const { state, open, create, change } = useVault();
   useEffect(() => {
     fetchAppVersion().then(setVersion);
   }, []);
@@ -66,7 +68,7 @@ export function App() {
       <h1>{t('app.title')}</h1>
       {state.status === 'loading' && <p>{t('vault.loading')}</p>}
       {state.status === 'picker' && <FirstRun error={state.error} onOpen={open} onCreate={create} />}
-      {state.status === 'ready' && <VaultView key={state.vault.root} vault={state.vault} version={version} />}
+      {state.status === 'ready' && <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} />}
     </main>
   );
 }
