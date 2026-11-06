@@ -3,7 +3,7 @@ import { TauriLabnoteFs } from '../tauriLabnoteFs';
 import { createVault, openVault, restoreVault } from '../../vault/useVault';
 import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
-import { rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
+import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
 import { listVaultImages, readVaultImage, writeVaultImage } from '../vaultImage';
 
@@ -37,6 +37,7 @@ function recorder() {
     if (cmd === 'vault_exists') return true;
     if (cmd === 'vault_read_image') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
+    if (cmd === 'index_bodies') return { items: [], next: null };
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
   };
@@ -64,6 +65,7 @@ describe('IPC 인자 이름 계약', () => {
     await upsertNote('a.md', r.invoke);
     await removeNote('a.md', r.invoke);
     await searchNotes('q', 10, r.invoke);
+    await indexBodies(null, 1, r.invoke);
     await openVault(r.invoke, 'D:\\lab');
     await createVault(r.invoke, 'D:\\lab');
     const { settings } = await loadVaultSettings(r.invoke);

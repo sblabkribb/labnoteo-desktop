@@ -72,4 +72,10 @@ describe('fakeVault', () => {
     await v.emitChange('b.md', 'modified');
     expect(seen).toEqual([{ path: 'a.md', kind: 'modified' }]);
   });
+  it('pages bodies and lists images', async () => {
+    const v = createFakeVault({ 'b.md': 'B', 'A.md': 'a', 'img/p.png': '', 'c/d.md': '[[x]]' });
+    expect(await v.invoke('index_bodies', { after: null, limit: 2 })).toEqual({ items: [{ path: 'A.md', body: 'a' }, { path: 'b.md', body: 'B' }], next: 'b.md' });
+    expect(await v.invoke('index_bodies', { after: 'b.md', limit: 2 })).toEqual({ items: [{ path: 'c/d.md', body: '[[x]]' }], next: null });
+    expect(await v.invoke('vault_list_images', {})).toEqual(['img/p.png']);
+  });
 });

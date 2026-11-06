@@ -1,6 +1,7 @@
 import { MemFileSystem } from '@labnoteo/core';
 import { ERROR_KINDS } from '../fs/errorKinds';
 import type { VaultChange } from '../vault/useVaultEvents';
+import { IMAGE_EXTS } from '../editor/live/imagePath';
 
 /**
  * 테스트용 가짜 보관함: Tauri `invoke` 의 표면을 `MemFileSystem` 위에 Rust 와 같은 의미로 흉내 낸다.
@@ -231,6 +232,27 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
           return undefined;
         case 'search':
           return { hits: [], truncated: false };
+        case 'index_bodies': {
+          // Rust 처럼 키(소문자 경로) 순서로, `after` 키 다음부터, 꽉 찬 쪽이면 마지막 키를 next 로.
+          const after = (args.after as string | null) ?? null;
+          const limit = Math.min(Math.max(Number(args.limit) || 1, 1), 500);
+          const notes = Object.entries(files())
+            .filter(([p]) => /.\.md$/i.test(p))
+            .map(([p, body]) => ({ key: p.toLowerCase(), path: p, body }))
+            .filter((n) => after === null || n.key > after)
+            .sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0))
+            .slice(0, limit);
+          return {
+            items: notes.map(({ path: p, body }) => ({ path: p, body })),
+            next: notes.length === limit ? notes[notes.length - 1].key : null,
+          };
+        }
+        case 'vault_list_images': {
+          const ext = (p: string) => p.slice(p.lastIndexOf('.') + 1).toLowerCase();
+          return Object.keys(files())
+            .filter((p) => p.includes('.') && IMAGE_EXTS.includes(ext(p)))
+            .sort((x, y) => (x.toLowerCase() < y.toLowerCase() ? -1 : x.toLowerCase() > y.toLowerCase() ? 1 : 0));
+        }
         case 'settings_vault_read':
           return fake.settings;
         case 'settings_vault_write':

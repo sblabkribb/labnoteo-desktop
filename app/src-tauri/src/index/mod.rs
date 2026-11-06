@@ -25,6 +25,23 @@ pub struct IndexStats {
     pub skipped: usize,
 }
 
+/// One note's indexed text, for the link index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NoteBody {
+    /// Vault-relative path in on-disk spelling.
+    pub path: String,
+    pub body: String,
+}
+
+/// A page of `Index::bodies`. `next` is the key to pass as `after` for the
+/// following page, `None` when this page was the last.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BodyPage {
+    pub items: Vec<NoteBody>,
+    pub next: Option<String>,
+}
+
 pub struct Index {
     conn: Mutex<rusqlite::Connection>,
     rebuilding: Mutex<()>,
@@ -383,6 +400,25 @@ impl Index {
         search::search(&lock(&self.conn), query, limit).map_err(db_err)
     }
 
+    /// One page of note bodies in key order, starting after the key `after`
+    /// (the link index loads the vault this way). `next` is the last item's
+    /// key, given only when the page is full: the page after it may be empty.
+    pub fn bodies(&self, after: Option<&str>, limit: usize) -> Result<BodyPage, FsError> {
+        let conn = lock(&self.conn);
+        let mut stmt = conn
+            .prepare("SELECT key, path, body FROM notes WHERE ?1 IS NULL OR key > ?1 ORDER BY key LIMIT ?2")
+            .map_err(db_err)?;
+        let limit_sql = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map((after, limit_sql), |r| {
+                Ok((r.get::<_, String>(0)?, NoteBody { path: r.get(1)?, body: r.get(2)? }))
+            })
+            .map_err(db_err)?;
+        let rows = rows.collect::<Result<Vec<_>, _>>().map_err(db_err)?;
+        let next = if limit > 0 && rows.len() == limit { rows.last().map(|(k, _)| k.clone()) } else { None };
+        Ok(BodyPage { items: rows.into_iter().map(|(_, b)| b).collect(), next })
+    }
+
     /// Every indexed path, in on-disk spelling.
     pub fn paths(&self) -> Result<Vec<String>, FsError> {
         let conn = lock(&self.conn);
@@ -470,6 +506,24 @@ pub async fn search(
     blocking(move || ix.search(&query, limit as usize)).await
 }
 
+/// Most note bodies one `index_bodies` call returns.
+const MAX_BODY_PAGE: u32 = 500;
+
+/// One page of the open vault's note bodies in key order, after the key
+/// `after`. `limit` is clamped to 1..=500.
+#[tauri::command]
+pub async fn index_bodies(
+    state: tauri::State<'_, IndexState>,
+    vault: tauri::State<'_, crate::vault::VaultState>,
+    after: Option<String>,
+    limit: u32,
+) -> Result<BodyPage, FsError> {
+    let root = vault.root()?;
+    let ix = state.get(&root)?;
+    let limit = limit.clamp(1, MAX_BODY_PAGE) as usize;
+    blocking(move || ix.bodies(after.as_deref(), limit)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +584,41 @@ mod tests {
         let mut paths = ix.paths().unwrap();
         paths.sort();
         assert_eq!(paths, ["a/b/three.md", "a/two.labnote.md", "top.md"]);
+    }
+
+    #[test]
+    fn bodies_pages_in_key_order() {
+        let s = Scratch::new();
+        s.note("b.md", "B");
+        s.note("A.md", "a");
+        s.note("c/d.md", "[[x]]");
+        let ix = s.index();
+        ix.rebuild(&s.vault()).unwrap();
+        let p1 = ix.bodies(None, 2).unwrap();
+        assert_eq!(p1.items.iter().map(|i| i.path.as_str()).collect::<Vec<_>>(), vec!["A.md", "b.md"]);
+        assert_eq!(p1.items[0].body, "a");
+        assert_eq!(p1.next.as_deref(), Some("b.md"));
+        let p2 = ix.bodies(p1.next.as_deref(), 2).unwrap();
+        assert_eq!(p2.items.len(), 1);
+        assert_eq!(p2.items[0].path, "c/d.md");
+        assert_eq!(p2.items[0].body, "[[x]]");
+        assert_eq!(p2.next, None);
+        // `next` is the folded key, so an upper-case last path still pages on.
+        let q = ix.bodies(None, 1).unwrap();
+        assert_eq!(q.items[0].path, "A.md");
+        assert_eq!(q.next.as_deref(), Some("a.md"));
+        assert_eq!(ix.bodies(q.next.as_deref(), 1).unwrap().items[0].path, "b.md");
+        // A full last page still says `next`; the page after it is empty.
+        let full = ix.bodies(None, 3).unwrap();
+        assert_eq!(full.next.as_deref(), Some("c/d.md"));
+        let empty = ix.bodies(full.next.as_deref(), 3).unwrap();
+        assert!(empty.items.is_empty());
+        assert_eq!(empty.next, None);
+        // The wire shape is camelCase `{items, next}` with `{path, body}` items.
+        assert_eq!(
+            serde_json::to_value(&p2).unwrap(),
+            serde_json::json!({"items": [{"path": "c/d.md", "body": "[[x]]"}], "next": null})
+        );
     }
 
     #[test]

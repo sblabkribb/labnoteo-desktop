@@ -23,5 +23,6 @@
   "index_rebuild": [],
   "index_upsert": ["path"],
   "index_remove": ["path"],
-  "search": ["query", "limit"]
+  "search": ["query", "limit"],
+  "index_bodies": ["after", "limit"]
 }

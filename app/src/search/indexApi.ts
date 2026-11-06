@@ -39,3 +39,14 @@ export function removeNote(path: string, invoke: InvokeFn = tauriInvoke): Promis
 export function searchNotes(query: string, limit: number, invoke: InvokeFn = tauriInvoke): Promise<SearchResults> {
   return invoke<SearchResults>('search', { query, limit });
 }
+
+/** Rust 의 `BodyPage`. `next` 는 다음 쪽에 `after` 로 넘길 키(소문자 경로)이고, 마지막 쪽이면 `null` 이다. */
+export interface BodyPage {
+  items: { path: string; body: string }[];
+  next: string | null;
+}
+
+/** 색인된 노트 본문을 키 순서로 한 쪽씩 읽는다(링크 색인 적재용). `limit` 은 Rust 가 1..=500 으로 자른다. */
+export function indexBodies(after: string | null, limit: number, invoke: InvokeFn = tauriInvoke): Promise<BodyPage> {
+  return invoke<BodyPage>('index_bodies', { after, limit });
+}

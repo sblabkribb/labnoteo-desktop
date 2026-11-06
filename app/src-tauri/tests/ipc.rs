@@ -147,6 +147,12 @@ title: 실험
     ok("vault_write", args("vault_write", vec![json!("notes/k.md"), json!("agarose")]));
     ok("index_upsert", args("index_upsert", vec![json!("notes/k.md")]));
     assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)]))["hits"][0]["path"], "notes/k.md");
+    let page = ok("index_bodies", args("index_bodies", vec![Value::Null, json!(0)]));
+    assert_eq!(page["items"].as_array().unwrap().len(), 1, "a limit of 0 is clamped to 1: {page}");
+    assert!(page["next"].is_string(), "a full page names the next key: {page}");
+    let rest = ok("index_bodies", args("index_bodies", vec![page["next"].clone(), json!(500)]));
+    assert!(rest["items"].as_array().unwrap().iter().any(|i| i["path"] == "notes/k.md" && i["body"].is_string()), "{rest}");
+    assert_eq!(rest["next"], Value::Null);
     ok("index_remove", args("index_remove", vec![json!("notes/k.md")]));
     assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)])), json!({"hits": [], "truncated": false}));
     ok("vault_remove", args("vault_remove", vec![json!("notes/k.md")]));

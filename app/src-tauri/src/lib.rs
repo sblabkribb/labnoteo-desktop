@@ -41,6 +41,7 @@ macro_rules! register_commands {
             $crate::index::index_upsert,
             $crate::index::index_remove,
             $crate::index::search,
+            $crate::index::index_bodies,
         ])
     };
 }
