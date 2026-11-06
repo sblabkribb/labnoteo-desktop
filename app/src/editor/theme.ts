@@ -132,6 +132,16 @@ export const editorThemeSpec = {
   // 링크(live/links.ts): Markdown 링크는 강조색 밑줄, 위키링크(아직 이동하지 않는다, SP4)는 강조색만.
   '.lno-link': { color: 'var(--accent)', textDecorationLine: 'underline', textUnderlineOffset: '2px' },
   '.lno-wikilink': { color: 'var(--accent)' },
+  // 보관함 이미지(live/imageWidget.ts): 줄 너비를 넘지 않고 비율을 지킨다. 크기 문법(|200)은 위젯이 CSSOM 으로 건다.
+  // 찾지 못한 이미지는 흐린 기울임 글에 옅은 테두리.
+  '.lno-image': { maxWidth: '100%', height: 'auto', verticalAlign: 'bottom' },
+  '.lno-image-missing': {
+    color: 'var(--text-muted)',
+    fontStyle: 'italic',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    padding: '0 var(--space-1)',
+  },
   // 목록: 글머리 점(BulletWidget)과 번호. 깊이마다 왼쪽 여백을 늘리고 같은 만큼 첫 줄을 당겨(textIndent) 걸친 줄이
   // 항목의 글 첫 칸에 맞는다(내어쓰기). 줄 앞의 들임 공백은 글자 그대로 남아 첫 줄을 그 깊이로 민다.
   '.lno-bullet': { display: 'inline-block', minWidth: '2ch', textIndent: '0', color: 'var(--text-muted)' },

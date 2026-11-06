@@ -34,6 +34,12 @@ describe('콘텐츠 보안 정책', () => {
     const d = directives(csp as string);
     expect(d['connect-src']).toEqual(expect.arrayContaining(['ipc:', 'http://ipc.localhost']));
   });
+
+  // 보관함 이미지는 확인된 바이트(vault_read_image)를 blob: URL 로 보인다. 바깥 주소(http:)는 열지 않는다.
+  it('img-src allows self, data and blob only', () => expect(directives(csp as string)['img-src']).toEqual(["'self'", 'data:', 'blob:']));
+
+  it('devCsp img-src allows the same image sources', () =>
+    expect(directives(conf.app.security.devCsp as string)['img-src']).toEqual(["'self'", 'data:', 'blob:']));
 });
 
 // style-src 'self' 는 style="..." 속성도 막는다. React 의 style={{...}} 는 그 속성으로 나온다.

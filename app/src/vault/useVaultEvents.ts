@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { listen as tauriListen, type UnlistenFn } from '@tauri-apps/api/event';
+import { vaultImages } from '../editor/live/vaultImages';
 
 /** Rust 의 `Change`. `path` 는 vault-relative POSIX; 빈 문자열이면 "무엇이 바뀌었는지 놓쳤다 — 전부 다시 보라"는 뜻이다. */
 export interface VaultChange {
@@ -68,7 +69,8 @@ export function subscribeVaultChanges(listen: ListenFn, onEvent: (change: VaultC
 }
 
 /**
- * 보관함 밖에서 파일이 바뀌면(Rust 가 200ms 디바운스 후 보낸다) `onChange` 를 부른다.
+ * 보관함 밖에서 파일이 바뀌면(Rust 가 200ms 디바운스 후 보낸다) `onChange` 를 부른다. 그 전에 바뀐 경로들을
+ * `vaultImages.onChanged` 에 넘겨 바뀐 이미지의 blob: URL 과 이름 색인을 버린다.
  * 이벤트가 몰려 와도 한 번만 부르되(끝없이 이어지면 `MAX_SETTLE_MS` 마다), 마운트가 끝나면 구독과 대기 중인 호출을 모두 거둔다.
  */
 export function useVaultEvents(onChange: () => void, listen: ListenFn = tauriListen as ListenFn) {
@@ -76,8 +78,18 @@ export function useVaultEvents(onChange: () => void, listen: ListenFn = tauriLis
   latest.current = onChange;
 
   useEffect(() => {
-    const settler = createSettler(() => latest.current());
-    const unsubscribe = subscribeVaultChanges(listen, () => settler.poke());
+    // 한 묶음에서 바뀐 경로들: 라이브 미리보기의 이미지 캐시와 이름 색인이 그 이미지만 버린다('' 이면 모두).
+    let paths: string[] = [];
+    const settler = createSettler(() => {
+      const changed = paths;
+      paths = [];
+      vaultImages.onChanged(changed);
+      latest.current();
+    });
+    const unsubscribe = subscribeVaultChanges(listen, (change) => {
+      paths.push(change.path);
+      settler.poke();
+    });
     return () => {
       settler.cancel();
       unsubscribe();

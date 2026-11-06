@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_SETTLE_MS, SETTLE_MS, VAULT_CHANGED, useVaultEvents, type VaultChange } from '../useVaultEvents';
 import { EVENTS_FIXTURE } from '../../__tests__/fixtures';
 import { useTree, type TreeEntry } from '../../tree/useTree';
+import { vaultImages } from '../../editor/live/vaultImages';
 
 // 공유 픽스처. Rust 쪽 tests/ipc.rs 가 같은 파일을 읽어 `EVENT` 가 이 문자열인지 본다.
 // 두 언어가 각자 자기 상수만 비교하면 한쪽 오타가 모든 테스트를 통과한다.
@@ -60,6 +61,29 @@ describe('보관함 이벤트 훅', () => {
     expect(result.current.entries.map((e) => e.path)).toEqual(['a.md']);
     await act(async () => finish([row('a.md'), row('b.md')]));
     await vi.waitFor(() => expect(result.current.entries.map((e) => e.path)).toEqual(['a.md', 'b.md']));
+  });
+
+  it('한 묶음의 바뀐 경로를 이미지 캐시에 넘긴 뒤 onChange 를 부른다', async () => {
+    const f = fakeListen();
+    const order: string[] = [];
+    const onChanged = vi.spyOn(vaultImages, 'onChanged').mockImplementation(() => void order.push('images'));
+    const onChange = vi.fn(() => void order.push('change'));
+    renderHook(() => useVaultEvents(onChange, f.listen as never));
+    await vi.waitFor(() => expect(f.handlers.size).toBe(1));
+    await act(async () => {
+      f.emit({ path: 'exp/images/a.png', kind: 'modified' });
+      f.emit({ path: 'n.md', kind: 'created' });
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith(['exp/images/a.png', 'n.md']);
+    expect(order).toEqual(['images', 'change']);
+    await act(async () => {
+      f.emit({ path: 'b.png', kind: 'removed' });
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    });
+    expect(onChanged).toHaveBeenLastCalledWith(['b.png']); // 앞 묶음의 경로는 다시 넘기지 않는다
+    onChanged.mockRestore();
   });
 
   it('몰려 온 이벤트는 한 번의 호출로 합친다', async () => {

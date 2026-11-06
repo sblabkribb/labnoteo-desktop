@@ -5,6 +5,7 @@ import { render, waitFor } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { Editor } from '../Editor';
 import { setMode, type EditorMode } from '../live/mode';
+import type { VaultImages } from '../live/vaultImages';
 import { compareSpecificity, declarations, literalColours, parseRules, specificity, SYSTEM_COLOURS, type Rule } from '../../__tests__/css';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
@@ -153,7 +154,20 @@ function codemirrorImports(dir = 'src'): Set<string> {
 // 끝 공백, 탭, 섞인 줄바꿈: 공백 강조나 끝 공백 확장이 설치돼 있다면 그 요소가 그려질 본문.
 // 라이브 미리보기의 제목·굵게·인라인 코드·하이라이트·인용·콜아웃·코드 블록·가로줄·스캔 주석도 그려지게 한다(그 표시의 색도 이 검사를 받는다).
 // 머리말을 앞에 둔다: 실제 노트처럼 머리말이 있어도 본문 장식이 그려져야 한다.
-const SAMPLE = '---\ntitle: a\n---\n# 제목  \n\t- [링크](https://x) 본문 \r\n## h\n**b** `c` ==h==\n- [x] done\n\n> 인용\n\n> [!tip] 팁\n> 본문\n\n```js\nconst a = 1;\n```\n\n---\n<!-- labnoteo-scan id=1 -->\n';
+const SAMPLE = '---\ntitle: a\n---\n# 제목  \n\t- [링크](https://x) 본문 \r\n## h\n**b** `c` ==h==\n- [x] done\n\n> 인용\n\n> [!tip] 팁\n> 본문\n\n```js\nconst a = 1;\n```\n\n---\n<!-- labnoteo-scan id=1 -->\n![[a.png|100]]\n![[없음.png]]\n';
+
+/** 이미지 견본의 가짜 로더: a.png 만 있다(blob: URL 은 가짜). 다른 이름은 찾을 수 없음으로 그려진다. */
+const stubImages: VaultImages = {
+  cache: {
+    url: async (p) => (p === 'a.png' ? 'blob:stub' : Promise.reject(new Error('notFound'))),
+    release: () => {},
+    invalidate: () => {},
+    clear: () => {},
+  },
+  index: { find: async (_n, name) => (name === 'a.png' ? 'a.png' : null), isUnique: async () => true, invalidate: () => {} },
+  onChanged: () => {},
+  clear: () => {},
+};
 
 /** 앱이 싣는 확장으로 편집기를 그 모드(live/source)로 띄운다. */
 async function mountShipped(text = SAMPLE, mode: EditorMode = 'live') {
@@ -161,7 +175,7 @@ async function mountShipped(text = SAMPLE, mode: EditorMode = 'live') {
   const invoke = (async () => text) as never;
   const listen = (async () => () => {}) as never;
   const windowApi = { onCloseRequested: async () => () => {}, destroy: async () => {} };
-  const { container } = render(<Editor path="a.labnote.md" invoke={invoke} listen={listen} windowApi={windowApi} />);
+  const { container } = render(<Editor path="a.labnote.md" invoke={invoke} listen={listen} windowApi={windowApi} images={stubImages} />);
   const shadow = (container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
   // 불러오기가 끝나 편집할 수 있게 됐을 때까지 기다린다(빈 노트도 같은 상태가 된다)
   await waitFor(() => expect(shadow.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('true'));
@@ -208,6 +222,11 @@ afterEach(() => vi.unstubAllGlobals());
 describe('편집기 그림자 루트의 날것의 색', () => {
   it.each(['live', 'source'] as const)('no LEAK in %s mode: 박힌 색은 모두 토큰으로 덮였거나 다크 전용이거나 아직 그려지지 않는 요소의 것이다', async (m) => {
     const { shadow, view } = await mountShipped(SAMPLE, m);
+    if (m === 'live') {
+      // 이미지 견본이 실제로 그려졌다: 찾은 그림과 찾지 못한 글
+      await waitFor(() => expect(shadow.querySelector('img.lno-image')?.getAttribute('src')).toBe('blob:stub'));
+      await waitFor(() => expect(shadow.querySelector('.lno-image-missing')).not.toBeNull());
+    }
     const css = shadowCss(shadow);
     const rootClasses = Array.from(view.dom.classList).filter((c) => /^ͼ/.test(c));
     const dark = darkClass();

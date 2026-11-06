@@ -4,6 +4,7 @@ import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
 import { ChangeVault } from './vault/ChangeVault';
 import { useVaultEvents } from './vault/useVaultEvents';
+import { vaultImages } from './editor/live/vaultImages';
 import { NoteTree } from './tree/NoteTree';
 import { NewNote } from './tree/NewNote';
 import { useTree } from './tree/useTree';
@@ -158,6 +159,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   }, []);
   const [indexing, setIndexing] = useState(true);
   const [skipped, setSkipped] = useState(0);
+  // 이미지 캐시(blob: URL)와 이름 색인은 보관함마다 다르다: 보관함을 열 때와 닫을(바꿀) 때 비운다.
+  useEffect(() => {
+    vaultImages.clear();
+    return () => vaultImages.clear();
+  }, [vault.root]);
   // 색인은 캐시다: 보관함을 열 때마다 파일에서 다시 채운다. 실패해도 노트 사용은 막지 않는다.
   useEffect(() => {
     let live = true;

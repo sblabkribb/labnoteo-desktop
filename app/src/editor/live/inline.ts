@@ -6,6 +6,8 @@ import { isFenceMark, revealInline, revealLine, skipRanges, touchedLines } from 
 import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
 import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
+import { isImageTarget, resolveImagePath, splitAltSize } from './imagePath';
+import { ImageWidget, imageLoader } from './imageWidget';
 
 /**
  * 라이브 미리보기의 인라인 플러그인(계획 D4). 보이는 범위(visibleRanges)만 훑어 다음을 단다:
@@ -25,6 +27,8 @@ import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
  *   블록 안은 장식하지 않는다.
  * - 가로줄: 줄에 lno-hr, 드러나지 않았으면 글을 빈 인라인 바꾸기로 숨긴다.
  * - 스캔 주석(`<!-- labnoteo-scan …`): 그 줄에 lno-scan-meta(흐리고 작게).
+ * - 이미지(`![alt](경로)`, `![[x.png|200]]`): 대상이 이미지 파일(isImageTarget)이면 ImageWidget. 커서 줄이 아니면 원문을
+ *   위젯으로 바꾸고, 커서 줄이면 원문을 두고 그 뒤(side 1)에 위젯을 단다. 이미지가 아닌 `![[노트]]` 는 위키링크처럼 그린다.
  *
  * 무엇을 원문으로 보일지는 reveal.ts 가 정한다. 표 구역과 머리말은 건너뛴다(skipRanges).
  * 한글 조합 중에는 다시 만들지 않고 바뀐 위치로 옮기기만 한다: 조합 중인 줄에 장식을 더하거나 빼면 IME 가 깨진다.
@@ -177,6 +181,45 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     conceal(shown.to, node.to);
   };
 
+  /** 노트 경로(이미지 경로를 노트 기준으로 푼다). 이미지 로더가 없으면 보관함 맨 위의 노트로 친다. */
+  const notePath = state.facet(imageLoader)?.notePath ?? '';
+  /**
+   * `![alt](경로)`(md) 또는 `![[x.png|200]]`(wiki): 대상이 이미지면 위젯을 달고 true. 이미지가 아니면 false(호출한 쪽이 다룬다).
+   * 거른 경로(보관함 밖, 절대·드라이브·UNC)와 바깥 주소는 후보 없는 위젯이 되어 대체 글(없으면 대상)을 "찾을 수 없음" 으로 보인다.
+   */
+  const image = (node: SyntaxNode, kind: 'md' | 'wiki'): boolean => {
+    let target: string;
+    let rawAlt = '';
+    if (kind === 'wiki') {
+      const tn = node.getChild('WikiTarget');
+      if (!tn) return false;
+      target = state.sliceDoc(tn.from, tn.to);
+      const an = node.getChild('WikiAlias');
+      if (an) rawAlt = state.sliceDoc(an.from, an.to);
+    } else {
+      const url = node.getChild('URL');
+      const open = node.firstChild;
+      let close: SyntaxNode | null = null;
+      for (let c = open?.nextSibling ?? null; c; c = c.nextSibling)
+        if (c.name === 'LinkMark' && state.sliceDoc(c.from, c.to) === ']') {
+          close = c;
+          break;
+        }
+      if (!url || !open || !close) return false;
+      target = state.sliceDoc(url.from, url.to);
+      rawAlt = state.sliceDoc(open.to, close.from);
+    }
+    if (!isImageTarget(target)) return false;
+    // 여러 줄에 걸친 이미지는 원문 그대로 둔다(바꾸기 장식은 줄바꿈을 넘지 못한다)
+    if (!sameLine(node.from, node.to)) return true;
+    const { alt, size } = splitAltSize(rawAlt);
+    const ref = resolveImagePath(notePath, target, kind);
+    const widget = ref ? new ImageWidget(ref, alt, size) : new ImageWidget({ kind: 'paths', candidates: [] }, alt || target, size);
+    if (revealLine(state, state.doc.lineAt(node.from).number, lines)) decos.push(Decoration.widget({ widget, side: 1 }).range(node.to));
+    else conceal(node.from, node.to, Decoration.replace({ widget }));
+    return true;
+  };
+
   /** 목록 항목: 깊이 줄 클래스, 글머리 점 또는 번호 표시. */
   const listItem = (node: SyntaxNode) => {
     let depth = 0;
@@ -305,6 +348,15 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
         if (ref.name === 'WikiLink') {
           wikiLink(ref.node);
           return false;
+        }
+        if (ref.name === 'Embed') {
+          // 이미지가 아닌 임베드(`![[노트]]`)는 위키링크처럼 그린다(노트 끼워 넣기는 아직 없다)
+          if (!image(ref.node, 'wiki')) wikiLink(ref.node);
+          return false;
+        }
+        if (ref.name === 'Image') {
+          if (image(ref.node, 'md')) return false;
+          return;
         }
         const spec = INLINE[ref.name];
         if (!spec) return;

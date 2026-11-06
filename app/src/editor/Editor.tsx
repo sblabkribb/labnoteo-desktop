@@ -15,6 +15,8 @@ import { cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview } from './live';
 import { linkClickHandler } from './live/links';
+import { imageLoader } from './live/imageWidget';
+import { vaultImages, type VaultImages } from './live/vaultImages';
 import { LIST_KEYS } from './live/listKeys';
 import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
 import { notify } from '../labnote/host/toastStore';
@@ -76,6 +78,8 @@ interface Props {
    * `anchor` 는 `#` 뒤의 글(GitHub 식 제목 앵커)이다. 이 노트 안의 `#앵커` 는 편집기가 직접 옮긴다.
    */
   onOpenLink?: (target: { path: string; anchor?: string }) => void;
+  /** 라이브 미리보기의 이미지(blob: URL 캐시와 이름 색인). 기본은 앱의 보관함 이미지. 테스트는 가짜를 꽂는다. */
+  images?: VaultImages;
 }
 
 export interface WindowApi {
@@ -106,6 +110,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     onContextMenu,
     headerActions,
     onOpenLink,
+    images = vaultImages,
   },
   ref,
 ) {
@@ -430,6 +435,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
+      // 이미지 위젯이 읽는 노트 경로와 이미지 묶음(경로는 이 노트 기준으로 푼다). 소스 보기에서는 쓰는 것이 없다.
+      imageLoader.of({ notePath: path, images }),
       editorTheme,
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
       highlightSpecialChars(),
