@@ -22,6 +22,7 @@ import { vaultImages, type VaultImages } from './live/vaultImages';
 import { pasteImages } from './live/pasteImage';
 import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
 import { linkIndex } from '../links/linkIndex';
+import { wikiCompletionGuards, wikiCompletionSource, type WikiCompletionDeps } from '../links/complete';
 import { linkResolution, resolutionFlusher, scheduleResolution, type LinkResolution } from './live/linkResolution';
 import { LIST_KEYS } from './live/listKeys';
 import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
@@ -435,6 +436,27 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       toast: (message) => notify('info', message),
       reveal: (line) => handle.reveal({ line }),
     };
+    // 위키링크 완성이 읽는 링크 색인. 색인이 준비되기 전에는 null(반쪽 목록을 내지 않는다). 파일·링크 판이 같으면 다시 쓴다.
+    let snap: { files: number; links: number; value: ReturnType<WikiCompletionDeps['snapshot']> } | null = null;
+    const completionDeps: WikiCompletionDeps = {
+      notePath: () => path,
+      snapshot: () => {
+        if (!linkIndex.ready()) return null;
+        const files = linkIndex.filesVersion;
+        const links = linkIndex.linksVersion;
+        if (snap === null || snap.files !== files || snap.links !== links) {
+          const all = linkIndex.files();
+          const titles = new Map<string, string>();
+          for (const f of all) {
+            const title = linkIndex.title(f);
+            if (title !== undefined) titles.set(f, title);
+          }
+          snap = { files, links, value: { files: all, aliases: linkIndex.aliases(), titles, resolver: linkIndex.resolver() } };
+        }
+        return snap.value;
+      },
+      headings: async () => [], // Task 16
+    };
     // 상태(확장 포함)는 노트를 채울 때마다 새로 만든다: 되돌리기 기록이 읽기 이전으로 거슬러 가지 못하게.
     extensions.current = (doc) => [
       // 줄 구분자는 파일에서 온 그대로: 섞인 파일에서도 손대지 않은 줄의 바이트가 바뀌지 않는다.
@@ -485,9 +507,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       Prec.high(keymap.of(LIST_KEYS)),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
-      // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었고(markdownSyntax.ts),
-      // override 가 빈 지금은 아무것도 제안하지 않는 자리다. 위키링크 완성 원본은 다음 작업이 채운다.
-      autocompletion({ override: [], icons: false }),
+      // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었다(markdownSyntax.ts).
+      // `[[` 뒤의 노트·별칭·제목·(`![[` 뒤) 이미지 완성. 조합 중에도 목록은 열려 거르지만, 받아들이기는 조합이 끝난 뒤에만 한다
+      // (wikiCompletionGuards: 조합 중 Enter/Tab 은 IME 몫, compositionend 뒤 목록을 다시 연다).
+      autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }),
+      wikiCompletionGuards(),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
       // 링크 풀이: 모드 칸 밖에 두어 모드를 바꿔도 남는다. 조합 중에 미룬 값은 resolutionFlusher 가 조합이 끝난 뒤 넣는다.
       resolutionSlot.current.of(linkResolution.of(resolutionRef.current)),
