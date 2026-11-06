@@ -70,7 +70,7 @@ export function NewNote({ flush, onCreated, invoke = tauriInvoke }: Props) {
       <label>
         {t('newNote.label')} <input ref={input} type="text" value={name} onChange={(e) => setName(e.target.value)} />
       </label>{' '}
-      <button type="submit" disabled={busy}>
+      <button type="submit" className="primary" disabled={busy}>
         {t('newNote.create')}
       </button>{' '}
       <button type="button" onClick={close}>

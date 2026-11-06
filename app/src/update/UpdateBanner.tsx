@@ -57,7 +57,7 @@ export function UpdateBanner({ beforeInstall, checkForUpdate = check, restart = 
   return (
     <aside aria-label={t('update.install')}>
       <p>{t('update.available', update.version)}</p>
-      <button type="button" disabled={phase === 'installing'} onClick={() => install(update)}>
+      <button type="button" className="primary" disabled={phase === 'installing'} onClick={() => install(update)}>
         {t('update.install')}
       </button>
       {phase === 'installing' && <p role="status">{t('update.installing')}</p>}

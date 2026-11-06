@@ -29,12 +29,12 @@ export function FirstRun({ error, onCreate, onOpen }: Props) {
   }
 
   return (
-    <section>
+    <section className="first-run">
       <h2>{t('firstRun.title')}</h2>
       <p>{t('firstRun.hint')}</p>
       <div className="first-run-choices">
         <div>
-          <button type="button" onClick={() => ask(() => pickNewFolder({ title: t('firstRun.createDialogTitle') }), onCreate)}>
+          <button type="button" className="primary" onClick={() => ask(() => pickNewFolder({ title: t('firstRun.createDialogTitle') }), onCreate)}>
             {t('firstRun.create')}
           </button>
           <p>{t('firstRun.createHint')}</p>

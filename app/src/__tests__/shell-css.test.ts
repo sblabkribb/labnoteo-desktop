@@ -57,7 +57,12 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.sidebar nav li > button[aria-current="true"]')!.body).toMatch(/background:\s*var\(--bg-selected\)/);
     const hover = ruleFor('.sidebar nav li > button[aria-current="true"]:hover:not(:disabled)');
     expect(hover!.body).toMatch(/background:\s*var\(--bg-selection\)/);
-    expect(hover!.selectors).toContain('.sidebar nav li:has(> button[aria-current="true"]):hover');
+    // :has() 를 못 읽는 환경은 그것이 든 선택자 목록 전체를 버린다: :has() 규칙과 한 목록으로 묶지 않는다.
+    expect(hover!.selectors).toEqual(['.sidebar nav li > button[aria-current="true"]:hover:not(:disabled)']);
+    const hasHover = ruleFor('.sidebar nav li:has(> button[aria-current="true"]):hover');
+    expect(hasHover).not.toBeNull();
+    expect(hasHover!.selectors).toEqual(['.sidebar nav li:has(> button[aria-current="true"]):hover']);
+    expect(hasHover!.body).toMatch(/background:\s*var\(--bg-selection\)/);
   });
 
   it('접기 표시는 대체 텍스트 문법을 못 읽어도 남는다 (content 선언이 둘)', () => {

@@ -5,9 +5,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { t } from '../i18n/t';
+import { editorTheme } from './theme';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -279,11 +279,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       ),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown(),
-      syntaxHighlighting(defaultHighlightStyle),
+      editorTheme(),
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
       highlightSpecialChars(),
       EditorView.lineWrapping,
-      EditorView.theme({ '&': { minHeight: '50vh' } }),
       EditorView.contentAttributes.of({ 'aria-label': t('editor.label') }),
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {
@@ -418,7 +417,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           >
             {t(gone ? 'editor.gone.recreate' : 'editor.changed.overwrite')}
           </button>
-          <button type="button" autoFocus onClick={() => setDialogOpen(false)}>
+          <button type="button" className="primary" autoFocus onClick={() => setDialogOpen(false)}>
             {t('editor.keep')}
           </button>
         </div>
