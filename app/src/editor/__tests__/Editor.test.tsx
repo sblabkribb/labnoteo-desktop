@@ -11,6 +11,7 @@ import { editorTheme, editorThemeSpec, highlightSpec } from '../theme';
 import type { VaultChange } from '../../vault/useVaultEvents';
 import { ERROR_KINDS_FIXTURE, EVENTS_FIXTURE } from '../../__tests__/fixtures';
 import { SYSTEM_COLOURS } from '../../__tests__/css';
+import { getOutline } from '../outline/outlineStore';
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
 Range.prototype.getClientRects ??= emptyRects;
@@ -69,7 +70,7 @@ function mount(files: Record<string, string>, autosaveMs = 60_000, extra: { fail
   /** 사용자가 본문 끝에 친 것과 같다 (프로그램 교체가 아닌 일반 입력). */
   const type = (extra: string) =>
     act(async () => view().dispatch({ changes: { from: view().state.doc.length, insert: extra }, userEvent: 'input.type' }));
-  return { ...s, ref, view, type, ctrlS };
+  return { ...s, ref, view, type, ctrlS, unmount: utils.unmount };
 }
 
 const dirtyMark = () => screen.queryByText('저장 안 됨');
@@ -360,6 +361,41 @@ describe('편집기', () => {
     expect(m.writes()).toBe(2); // 실패 한 번 + 재시도
     await waitFor(() => expect(screen.queryByText(/저장하지 못했습니다/)).toBeNull());
     expect(dirtyMark()).toBeNull();
+  });
+
+  describe('개요', () => {
+    it('outline click puts the cursor on the heading line itself (reveal scrolls it to the top)', async () => {
+      const m = mount({ [P]: 'a\nb\nc\nd\n### [UHW010 PCR]\nbody' });
+      await waitFor(() => expect(m.view().state.doc.lines).toBe(6));
+      const view = m.view();
+      const dispatch = vi.spyOn(view, 'dispatch');
+      act(() => m.ref.current!.reveal({ line: 4 }));
+      expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(5);
+      expect(view.state.selection.main.head).toBe(view.state.doc.line(5).from);
+      // 맨 위로 붙이는 scrollIntoView 효과로 옮긴다(단순한 scrollIntoView: true 가 아니다)
+      const spec = dispatch.mock.calls[0][0] as { effects?: unknown; scrollIntoView?: boolean };
+      expect(spec.scrollIntoView).toBeUndefined();
+      expect(spec.effects).toBeTruthy();
+    });
+
+    it('publishes the outline on load, 300 ms after edits, and clears it on unmount', async () => {
+      const m = mount({ [P]: '# A\nbody\n' });
+      await waitFor(() => expect(getOutline()).toEqual({ path: P, items: [{ level: 1, text: 'A', kind: 'heading', line: 1 }], cursorLine: 1 }));
+      await m.type('## B\n');
+      expect(getOutline()!.items).toHaveLength(1); // 바로는 아니다
+      await waitFor(() => expect(getOutline()!.items.map((i) => i.text)).toEqual(['A', 'B']));
+      m.unmount();
+      expect(getOutline()).toBeUndefined();
+    });
+
+    it('publishes the cursor line when the selection moves, without an edit', async () => {
+      const m = mount({ [P]: '# A\nx\n## B\ny\n' });
+      await waitFor(() => expect(getOutline()?.items).toHaveLength(2));
+      act(() => m.view().dispatch({ selection: { anchor: m.view().state.doc.line(4).from } }));
+      await waitFor(() => expect(getOutline()!.cursorLine).toBe(4));
+      expect(dirtyMark()).toBeNull();
+      m.unmount();
+    });
   });
 
   describe('창 닫기', () => {

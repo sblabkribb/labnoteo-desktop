@@ -26,7 +26,7 @@ import { DialogLayer } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
 import { editorAwareFs } from './labnote/editorAwareFs';
-import { activeEditTarget } from './labnote/openNotes';
+import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
 import { registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
@@ -37,8 +37,11 @@ import { closeMenu, openMenu } from './labnote/ui/menuStore';
 import { EditorActions } from './labnote/ui/EditorActions';
 import { editorMenu, noteTreeMenu } from './labnote/menus';
 import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
+import { OutlinePanel } from './editor/outline/OutlinePanel';
 
-type SidebarTab = 'files' | 'workflows';
+type SidebarTab = 'files' | 'workflows' | 'outline';
+
+const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'outline'];
 
 /** 보관함마다 기억하는 사이드바 탭(이 PC 의 브라우저 저장소). 읽거나 쓰지 못하면 기억하지 않는다. */
 const tabKey = (root: string) => `labnoteo-sidebar-tab:${root}`;
@@ -46,7 +49,7 @@ const tabKey = (root: string) => `labnoteo-sidebar-tab:${root}`;
 function storedTab(root: string): SidebarTab | undefined {
   try {
     const v = localStorage.getItem(tabKey(root));
-    return v === 'files' || v === 'workflows' ? v : undefined;
+    return TAB_ORDER.find((tab) => tab === v);
   } catch {
     return undefined;
   }
@@ -88,7 +91,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   };
   // WAI-ARIA 탭 패턴: 고른 탭만 Tab 순서에 있으니 화살표·Home·End 로 탭을 옮기고 초점도 함께 옮긴다.
   const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const order: SidebarTab[] = ['files', 'workflows'];
+    const order = TAB_ORDER;
     const at = order.indexOf(tab);
     const next =
       e.key === 'ArrowRight' ? order[(at + 1) % order.length]
@@ -102,6 +105,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     document.getElementById(`sidebar-tab-${next}`)?.focus();
   };
   const openNote = (path: string) => openFile(path);
+  // 개요에서 제목을 고르면: 열린 편집기면 그 줄로 커서를 옮기고 초점을 편집기로 돌려준다(reveal 이 focus 한다).
+  // 열려 있지 않으면(개요가 낡았다) 열면서 그 줄로 간다.
+  const onOutlineReveal = (path: string, line0: number) => {
+    const handle = openEditor(path);
+    if (handle) handle.reveal({ line: line0 });
+    else void openFile(path, { line: line0 });
+  };
   // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
   const { settings, imported: settingsImported, update: updateSettings } = useVaultSettings(vault.root);
   // 명령이 쓰는 호스트: 대화상자, 알림, 열린 노트는 버퍼를 기준으로 하는 파일 시스템, 열린 편집기의 편집 대상.
@@ -239,6 +249,18 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
             >
               {t('sidebar.tab.workflows')}
             </button>
+            <button
+              type="button"
+              role="tab"
+              id="sidebar-tab-outline"
+              aria-controls="sidebar-panel-outline"
+              aria-selected={tab === 'outline'}
+              tabIndex={tab === 'outline' ? 0 : -1}
+              className="sidebar-tab"
+              onClick={() => showPanel('outline')}
+            >
+              {t('sidebar.outline')}
+            </button>
           </div>
           {/* 파일 탭은 숨겨도 내리지 않는다: 접어 둔 폴더와 찾던 말이 남는다 */}
           <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
@@ -249,6 +271,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           {tab === 'workflows' && (
             <div role="tabpanel" id="sidebar-panel-workflows" className="sidebar-panel" aria-labelledby="sidebar-tab-workflows">
               {ctx ? <WorkflowsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
+            </div>
+          )}
+          {tab === 'outline' && (
+            <div role="tabpanel" id="sidebar-panel-outline" className="sidebar-panel" aria-labelledby="sidebar-tab-outline">
+              <OutlinePanel onReveal={onOutlineReveal} />
             </div>
           )}
         </aside>

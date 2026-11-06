@@ -19,8 +19,8 @@ export interface CommandContext {
   closeActive(): Promise<boolean>;
   /** 트리를 다시 읽고 vaultRefresh 를 알린다(Workflows 패널이 구독한다, Task 12). */
   refresh(): void;
-  /** 사이드바 탭을 바꾼다. Task 12 가 탭을 더하기 전에는 아무 일도 하지 않는다. */
-  showPanel(panel: 'files' | 'workflows'): void;
+  /** 사이드바 탭을 바꾼다. */
+  showPanel(panel: 'files' | 'workflows' | 'outline'): void;
 }
 
 const listeners = new Set<() => void>();

@@ -43,6 +43,13 @@ const toggleSource: AppCommand = {
   run: () => toggleMode(),
 };
 
+/** 사이드바를 개요 탭으로 바꾼다. */
+const outlineShow: AppCommand = {
+  id: 'outline-show',
+  nameKey: 'cmd.outlineShow',
+  run: (ctx) => ctx.showPanel('outline'),
+};
+
 /** 서식 명령(formatCommands.ts 의 D10 행). 팔레트에서 돌리면 열린 노트의 뷰(표 칸이면 그 칸)에 쓴다. */
 const formatCommands: AppCommand[] = FORMAT_KEYS.map((f) => ({
   id: f.id,
@@ -52,7 +59,7 @@ const formatCommands: AppCommand[] = FORMAT_KEYS.map((f) => ({
 }));
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, ...formatCommands];
+  return [toggleSource, outlineShow, ...formatCommands];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

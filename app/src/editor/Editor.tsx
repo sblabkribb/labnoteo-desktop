@@ -23,6 +23,8 @@ import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
 import { registerOpenNote } from '../labnote/openNotes';
 import { captureFocus } from '../ui/returnFocus';
+import { extractOutline } from './outline/extract';
+import { clearOutline, publishCursor, publishOutline } from './outline/outlineStore';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -32,6 +34,8 @@ export const AUTOSAVE_MS = 2000;
 export const MAX_AUTOSAVE_MS = 10_000;
 /** 저장이 연달아 이만큼 실패하면 더 다시 시도하지 않는다(경고는 계속 보인다). 다음 입력이 한 번 더 시도한다. */
 export const MAX_SAVE_ATTEMPTS = 5;
+/** 마지막 편집 뒤 이만큼 지나 개요(제목 목록)를 다시 낸다. 읽을 때는 곧바로 낸다. */
+export const OUTLINE_MS = 300;
 
 export interface EditorHandle {
   /** 다른 노트로 넘어가기 전에 부른다. 잃을 편집이 없으면(저장됐거나 원래 깨끗하면) true. */
@@ -133,6 +137,23 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     maxTimer.current = undefined;
   };
   const extensions = useRef<(doc: LoadedDocument | undefined) => Extension[]>(() => []);
+  const outlineTimer = useRef<ReturnType<typeof setTimeout>>();
+  const cursorFrame = useRef<number>();
+  /** 개요 패널(outlineStore)에 이 노트의 제목 목록을 낸다. */
+  const publishItems = () => {
+    clearTimeout(outlineTimer.current);
+    const view = viewRef.current;
+    if (view) publishOutline(path, extractOutline(view.state.doc.toString()));
+  };
+  /** 커서 줄(1부터)을 낸다. 한 프레임에 한 번만(선택을 끌며 옮기는 동안 패널을 매번 그리지 않게). */
+  const publishCursorLine = () => {
+    if (cursorFrame.current !== undefined) return;
+    cursorFrame.current = requestAnimationFrame(() => {
+      cursorFrame.current = undefined;
+      const view = viewRef.current;
+      if (view && alive.current) publishCursor(path, view.state.doc.lineAt(view.state.selection.main.head).number);
+    });
+  };
   const locked = useRef(true);
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
@@ -196,6 +217,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         view.setState(next); // 여기서 던져도 아래의 기준 본문은 아직 바뀌지 않았다
         view.scrollDOM.scrollTop = top;
         requestAnimationFrame(() => (view.scrollDOM.scrollTop = top));
+        // 개요는 읽자마자 낸다(다시 읽기 포함). setState 는 updateListener 를 부르지 않는다.
+        publishItems();
+        publishCursor(path, next.doc.lineAt(next.selection.main.head).number);
       }
       // 뷰가 새 본문을 보여 준 뒤에만 기준을 옮긴다: 뷰와 기준이 어긋나면 낡은 버퍼가 저장될 수 있다.
       docRef.current = doc;
@@ -341,7 +365,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       const doc = view.state.doc;
       const l = doc.line(Math.max(0, Math.min(Math.floor(line), doc.lines - 1)) + 1);
       const at = l.from + Math.max(0, Math.min(Math.floor(ch), l.length));
-      view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+      // 제목 줄이 화면 맨 위(조금 띄워서)에 오게 한다: 개요에서 고른 제목이 바로 보인다.
+      view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: 'start', yMargin: 8 }) });
       view.focus();
     },
   }).current;
@@ -434,7 +459,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       }),
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {
+        if (u.selectionSet) publishCursorLine();
         if (!u.docChanged) return;
+        clearTimeout(outlineTimer.current);
+        outlineTimer.current = setTimeout(publishItems, OUTLINE_MS);
         const dirty = api.current.isDirty();
         setDirty(dirty);
         if (!dirty) setCloseAsk(false); // 되돌려서 깨끗해졌다: 저장 안 된 편집 때문에 던진 질문은 거둔다
@@ -472,6 +500,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       unregister();
       unsubscribeMode();
       clearTimers();
+      clearTimeout(outlineTimer.current);
+      if (cursorFrame.current !== undefined) cancelAnimationFrame(cursorFrame.current);
+      cursorFrame.current = undefined;
+      clearOutline(path);
       // 노트를 닫는데 저장 안 된 편집이 있으면 마지막으로 한 번 저장해 본다(충돌이면 쓰지 않는다).
       if (!externalRef.current && api.current.isDirty()) void api.current.save();
       view.destroy();
