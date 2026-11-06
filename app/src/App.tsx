@@ -14,7 +14,7 @@ import { useLinkIndex } from './links/useLinkIndex';
 import { handleOpenLink } from './links/createFromLink';
 import { openExternal, tauriExternalDeps } from './links/openExternal';
 import { Editor, type EditorHandle } from './editor/Editor';
-import type { OpenTarget } from './editor/live/links';
+import { followLink, linkAt, type OpenTarget } from './editor/live/links';
 import type { EditorView } from '@codemirror/view';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
@@ -206,7 +206,22 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   const onEditorMenu = (e: MouseEvent, view: EditorView) => {
     const path = notes.activePath();
     if (!ctx || !path) return;
-    const items = editorMenu(ctx, path);
+    // 커서 아래 링크(오른쪽 클릭은 선택 밖이면 커서를 먼저 옮긴다): 링크 열기는 클릭과 같은 길(followLink)이다.
+    const hit = linkAt(view.state, view.state.selection.main.head);
+    const link = hit
+      ? {
+          hit,
+          text: view.state.sliceDoc(hit.from, hit.to),
+          open: () =>
+            followLink(view, hit, {
+              notePath: () => path,
+              onOpen: onOpenLink,
+              reveal: (line) => editor.current?.reveal({ line }),
+              toast: (message) => host.notify('info', message),
+            }),
+        }
+      : undefined;
+    const items = editorMenu(ctx, path, link);
     if (items.length === 0) return;
     e.preventDefault();
     // 키보드로 연 메뉴(좌표 0, 0)는 커서 자리에 연다

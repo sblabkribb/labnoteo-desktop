@@ -7,6 +7,8 @@ import { diagnoseExperimentPath } from '@labnoteo/core/lib/labnoteStructure';
 import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { FORMAT_KEYS, runFormatCommand } from '../editor/commands/formatCommands';
+import type { LinkHit } from '../editor/live/links';
+import { copyText, noteLinkText } from '../links/clipboard';
 import type { TreeEntry } from '../tree/useTree';
 import type { CommandContext } from './commands/context';
 import { insertDate, insertIssueMarker } from './commands/editorInserts';
@@ -27,7 +29,7 @@ function experimentOf(dir: string): string | undefined {
 
 /**
  * 파일 트리 줄의 메뉴.
- * - 파일: 열기, 이름 바꾸기, 삭제. 실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다.
+ * - 파일: 열기, 위키링크 복사, 이름 바꾸기, 삭제. 실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다.
  * - 폴더: 여기에 새 노트, 새 폴더, 이름 바꾸기, 삭제. 실험 안의 폴더면 워크플로 생성(그 실험에)을 더한다.
  */
 export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: readonly TreeEntry[]): MenuAction[] {
@@ -48,6 +50,7 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
   const experiment = isExperimentReadme(path) ? posix.dirname(path) : undefined;
   return [
     { labelKey: 'menu.open', run: () => ctx.openFile(path) },
+    { labelKey: 'menu.copyLink', run: () => copyText(noteLinkText(path), ctx.host.notify) },
     ...(experiment
       ? [
           { label: coreT('Change experiment status'), run: () => changeExperimentStatus(ctx, experiment) },
@@ -76,14 +79,29 @@ function formatItems(ctx: CommandContext): MenuItem[] {
 }
 
 /**
- * 편집기 본문의 메뉴(`path` 는 열린 노트). 표 칸의 메뉴는 표가 따로 띄운다. 어느 노트든 끝에 서식 항목이 붙는다.
+ * 편집기 본문의 메뉴(`path` 는 열린 노트). 커서가 링크 위면 링크 열기와 링크 복사가 맨 앞에 온다. 표 칸의 메뉴는 표가 따로 띄운다. 어느 노트든 끝에 서식 항목이 붙는다.
  * - 워크플로 노트: 유닛 오퍼레이션 삽입, 그리고 넣기 명령.
  * - 실험 README: 워크플로 삽입(만들고 체크리스트에 등록, 커서에는 링크를 넣지 않는다), 체크리스트 맞추기,
  *   실험 상태 변경, 논의 표시 전환, 그리고 넣기 명령.
  * - 그 밖의 .labnote.md: 넣기 명령. 일반 .md 는 서식 항목만.
  */
-export function editorMenu(ctx: CommandContext, path: string): MenuItem[] {
-  return [...noteItems(ctx, path), ...formatItems(ctx)];
+export function editorMenu(ctx: CommandContext, path: string, link?: { hit: LinkHit; text: string; open(): void }): MenuItem[] {
+  return [...(link ? linkItems(ctx, link) : []), ...noteItems(ctx, path), ...formatItems(ctx)];
+}
+
+/** 커서 아래 링크의 항목(SP4 Task 12): 열기, 그리고 복사(위키링크는 원문 그대로, Markdown 링크는 주소). */
+function linkItems(ctx: CommandContext, link: { hit: LinkHit; text: string; open(): void }): MenuItem[] {
+  const { hit } = link;
+  const copied = hit.kind === 'wiki' ? link.text : stripAngles(hit.href);
+  return [
+    { labelKey: 'menu.link.open', run: async () => link.open() },
+    { labelKey: 'menu.link.copy', run: () => copyText(copied, ctx.host.notify) },
+  ];
+}
+
+function stripAngles(href: string): string {
+  const h = href.trim();
+  return h.startsWith('<') && h.endsWith('>') ? h.slice(1, -1).trim() : h;
 }
 
 function noteItems(ctx: CommandContext, path: string): MenuItem[] {

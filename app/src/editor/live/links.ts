@@ -263,7 +263,8 @@ export interface LinkOpenDeps {
   toast(message: string): void;
 }
 
-function follow(view: EditorView, hit: LinkHit, deps: LinkOpenDeps): void {
+/** Follows `hit` as a click would: a place in this note moves the caret, anything else goes to `deps.onOpen`. */
+export function followLink(view: EditorView, hit: LinkHit, deps: LinkOpenDeps): void {
   const target = targetOf(view.state, hit, deps.notePath());
   if (!target) return;
   if (target.kind === 'self') {
@@ -325,7 +326,7 @@ export function linkClickHandler(deps: LinkOpenDeps): Extension {
         const hit = pos === null ? null : linkAt(view.state, pos);
         if (!hit) return false;
         e.preventDefault();
-        follow(view, hit, deps);
+        followLink(view, hit, deps);
         return true;
       }
       if (!plainButton(e) || !el || view.composing) return false;
@@ -346,7 +347,7 @@ export function linkClickHandler(deps: LinkOpenDeps): Extension {
       const hit = pos === null ? null : linkAt(view.state, pos);
       if (!hit || hit.from !== p.from) return false;
       e.preventDefault();
-      follow(view, hit, deps);
+      followLink(view, hit, deps);
       return true;
     },
   });
@@ -358,7 +359,7 @@ export function followLinkAtCursor(deps: LinkOpenDeps): (view: EditorView) => bo
     if (view.composing) return false;
     const hit = linkAt(view.state, view.state.selection.main.head);
     if (!hit) return false;
-    follow(view, hit, deps);
+    followLink(view, hit, deps);
     return true;
   };
 }

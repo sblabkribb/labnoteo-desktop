@@ -10,6 +10,8 @@ import type { TreeEntry } from '../../tree/useTree';
 import { createFakeVault } from '../../__tests__/fakeVault';
 import { runCommand } from '../commands/runCommand';
 import { coreT } from '../i18n';
+import { linkIndex } from '../../links/linkIndex';
+import { copyText, markdownLinkFor } from '../../links/clipboard';
 import { editorMenu, noteTreeMenu } from '../menus';
 import { ContextMenu } from '../ui/ContextMenu';
 import { closeMenu, openMenu, type MenuAction, type MenuItem } from '../ui/menuStore';
@@ -73,7 +75,12 @@ afterEach(() => {
 describe('noteTreeMenu', () => {
   it('files get Open, Rename, Delete; folders get New note here, New folder, Rename, Delete', () => {
     h = createTestHost();
-    expect(labels(noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES))).toEqual(['menu.open', 'menu.rename', 'menu.delete']);
+    expect(labels(noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES))).toEqual([
+      'menu.open',
+      'menu.copyLink',
+      'menu.rename',
+      'menu.delete',
+    ]);
     expect(labels(noteTreeMenu(h.ctx, entry('notes', true), ENTRIES))).toEqual([
       'menu.newNoteHere',
       'menu.newFolder',
@@ -120,6 +127,84 @@ describe('noteTreeMenu', () => {
     await runCommand(h.ctx, noteTreeMenu(h.ctx, entry('notes', true), ENTRIES)[0].run);
     expect(h.notes.at(-1)?.kind).toBe('warn');
     expect(h.opened).toEqual(['notes/b.labnote.md']);
+  });
+});
+
+describe('Open link and Copy link', () => {
+  let clip: string[];
+  let failClipboard: boolean;
+  const open = vi.fn();
+  beforeEach(() => {
+    clip = [];
+    failClipboard = false;
+    open.mockReset();
+    linkIndex.clear();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          if (failClipboard) throw new Error('denied');
+          clip.push(text);
+        },
+      },
+    });
+  });
+  afterEach(() => linkIndex.clear());
+  const action = (items: MenuItem[], i: number) => items[i] as MenuAction;
+  const byKey = (items: MenuItem[], key: string) => items.find((i): i is MenuAction => !i.separator && i.labelKey === key)!;
+
+  it('editor menu offers Open link and Copy link first on a link', async () => {
+    h = createTestHost();
+    const items = editorMenu(h.ctx, 'n.md', {
+      hit: { kind: 'wiki', from: 0, to: 12, linkpath: 'Home', subpath: 'A', embed: false },
+      text: '[[Home#A|h]]',
+      open,
+    });
+    expect(labels(items.slice(0, 2))).toEqual(['menu.link.open', 'menu.link.copy']);
+    expect(t('menu.link.open')).toBe('링크 열기');
+    await action(items, 1).run();
+    expect(clip).toEqual(['[[Home#A|h]]']);
+    expect(h.notes).toEqual([{ kind: 'info', message: t('links.copied') }]);
+    await action(items, 0).run();
+    expect(open).toHaveBeenCalledTimes(1);
+    // 링크가 없으면 링크 항목도 없다
+    expect(labels(editorMenu(h.ctx, 'n.md'))).not.toContain('menu.link.open');
+  });
+
+  it('Copy link on a Markdown link copies its href without angle brackets', async () => {
+    h = createTestHost();
+    const md = (href: string) =>
+      editorMenu(h.ctx, 'n.md', { hit: { kind: 'md', from: 0, to: 10, href }, text: `[x](${href})`, open });
+    await action(md('https://doi.org/10.1/x'), 1).run();
+    await action(md('<notes/My Home.md>'), 1).run();
+    expect(clip).toEqual(['https://doi.org/10.1/x', 'notes/My Home.md']);
+  });
+
+  it('tree menu copies a wikilink for a note', async () => {
+    h = createTestHost();
+    linkIndex.setFiles(['notes/PCR 조건.md', 'notes/sub/PCR 조건.md']);
+    const item = byKey(noteTreeMenu(h.ctx, { path: 'notes/sub/PCR 조건.md', name: 'PCR 조건.md', isDir: false, depth: 2 }, []), 'menu.copyLink');
+    await item.run();
+    expect(clip).toEqual(['[[notes/sub/PCR 조건]]']);
+    // 폴더에는 없다
+    expect(labels(noteTreeMenu(h.ctx, entry('notes', true), ENTRIES))).not.toContain('menu.copyLink');
+  });
+
+  it('a name a wikilink cannot express copies a rooted, percent-encoded Markdown link', async () => {
+    h = createTestHost();
+    linkIndex.setFiles(['notes/C# (v2) 50%.md']);
+    const item = byKey(noteTreeMenu(h.ctx, entry('notes/C# (v2) 50%.md', false), ENTRIES), 'menu.copyLink');
+    await item.run();
+    expect(clip).toEqual(['[C# (v2) 50%](/notes/C%23%20%28v2%29%2050%25.md)']);
+    expect(linkIndex.resolver().resolveMd('/notes/C%23%20%28v2%29%2050%25.md', 'x.md')).toBe('notes/C# (v2) 50%.md');
+    expect(markdownLinkFor('a/[b].md')).toBe('[\\[b\\]](/a/[b].md)');
+  });
+
+  it('a clipboard failure is not reported as copied', async () => {
+    const notes: Array<[string, string]> = [];
+    failClipboard = true;
+    await expect(copyText('x', (k, m) => notes.push([k, m]))).rejects.toThrow('denied');
+    expect(notes).toEqual([]);
   });
 });
 
