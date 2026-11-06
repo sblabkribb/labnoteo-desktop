@@ -202,8 +202,8 @@ export const editorThemeSpec = {
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
   // 틀은 표 폭만큼만 차지해 도구 줄이 표 오른쪽 끝에 붙는다. 넓은 표는 100% 에서 멈추고 안쪽 틀이 스크롤한다.
   // 속성(머리말) 격자: 키와 값 두 칸. 값 칸의 글은 줄을 넘기면 감싼다.
+  '.lno-props-wrap': { padding: 'var(--space-2) var(--space-3)' },
   '.lno-props': {
-    margin: 'var(--space-2) var(--space-3)',
     padding: 'var(--space-1) var(--space-2)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',

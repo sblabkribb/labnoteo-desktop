@@ -90,6 +90,8 @@ export function toggleInline(state: EditorState, mark: InlineMark): TransactionS
       const open = node.firstChild;
       const close = node.lastChild;
       if (open && close && open !== close && MARK_NODES.has(open.name) && MARK_NODES.has(close.name)) {
+        // Obsidian 처럼: 빈 커서가 닫는 표시 바로 앞(글이 있는 노드)이면 풀지 않고 표시 뒤로 나간다(Ctrl+B, 입력, Ctrl+B).
+        if (from === to && from === close.from && open.to < from) return { range: EditorSelection.cursor(close.to) };
         const changes: ChangeSpec[] = [
           { from: open.from, to: open.to },
           { from: close.from, to: close.to },
@@ -129,7 +131,7 @@ export function toggleInline(state: EditorState, mark: InlineMark): TransactionS
       range: EditorSelection.range(from + len, to + len),
     };
   });
-  return spec.changes.empty ? null : finish(spec);
+  return spec.changes.empty && spec.selection?.eq(state.selection) !== false ? null : finish(spec);
 }
 
 /** `[선택]()` 로 감싸고 커서를 `()` 안에 둔다. */

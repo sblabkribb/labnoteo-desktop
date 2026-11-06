@@ -54,6 +54,18 @@ describe('format builders', () => {
     ['한|글', '**', '**|한글|**'],
   ])('toggleInline %s %s', (src, mark, out) => expect(apply(src, (s) => toggleInline(s, mark as InlineMark))).toBe(out));
 
+  it('toggleInline steps past the closing mark when the cursor sits right before it (Obsidian)', () => {
+    expect(apply('a **b|** c', (s) => toggleInline(s, '**'))).toBe('a **b**| c');
+    expect(apply('a ==hi|== c', (s) => toggleInline(s, '=='))).toBe('a ==hi==| c');
+    expect(apply('a `x|` c', (s) => toggleInline(s, '`'))).toBe('a `x`| c');
+  });
+  it('the step-past is a selection-only spec with no document change', () => {
+    const s = stateOf('a **b|** c');
+    const spec = toggleInline(s, '**');
+    expect(spec).not.toBeNull();
+    expect(s.update(spec!).docChanged).toBe(false);
+  });
+  it('an empty pair **|** still unwraps', () => expect(apply('a **|** c', (s) => toggleInline(s, '**'))).toBe('a | c'));
   it('toggleInline unwraps a selection that equals the node', () => expect(apply('a |**b**| c', (s) => toggleInline(s, '**'))).toBe('a |b| c'));
   it('toggleInline unwraps from inside with an empty cursor', () => expect(apply('a ==b|c== d', (s) => toggleInline(s, '=='))).toBe('a b|c d'));
   it('toggleInline unwraps from the outside text without a syntax tree', () => {

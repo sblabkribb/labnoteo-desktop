@@ -349,7 +349,19 @@ export class PropertiesWidget extends WidgetType {
     for (const e of this.block.entries) box.append(this.row(e, view));
     box.append(addRow(view));
     applyLock(box, locked(view.state));
-    return box;
+    // 블록 위젯의 뿌리는 바깥 여백(margin)이 없어야 한다: CodeMirror 는 테두리 상자로 높이를 재므로 여백만큼 아래 줄의
+    // 클릭 위치가 어긋난다. 간격은 감싼 틀의 padding 이 맡는다.
+    const wrap = document.createElement('div');
+    wrap.className = 'lno-props-wrap';
+    wrap.append(box);
+    // 격자의 단추에 초점이 있을 때 누른 글자는 버린다: 편집 가능한 본문 안이라 브라우저가 앞서 고치던 입력으로 초점을 옮겨
+    // 그 값에 글을 덧붙인다. Enter·Space·Tab·단축키는 그대로 둔다.
+    wrap.addEventListener('keydown', (e) => {
+      if (!(e.target instanceof HTMLButtonElement)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if ((e.key.length === 1 && e.key !== ' ') || e.key === 'Process' || e.keyCode === 229) e.preventDefault();
+    });
+    return wrap;
   }
 
   private row(e: FrontEntry, view: EditorView): HTMLElement {
@@ -412,7 +424,9 @@ export class PropertiesWidget extends WidgetType {
   }
 
   /** 같은 키들(같은 순서·종류)이면 값만 제자리에서 바꾼다. 초점이 있고 고치던 입력은 건드리지 않는다. */
-  updateDOM(dom: HTMLElement, view: EditorView): boolean {
+  updateDOM(root: HTMLElement, view: EditorView): boolean {
+    const dom = root.querySelector<HTMLElement>(':scope > .lno-props');
+    if (!dom) return false;
     const rowEls = [...dom.querySelectorAll<HTMLElement>(':scope > .lno-props-row')];
     const entries = this.block.entries;
     if (rowEls.length !== entries.length) return false;
@@ -479,6 +493,12 @@ function addRow(view: EditorView): HTMLElement {
   button.textContent = t('props.add');
   const add = () => {
     if (locked(view.state)) return;
+    // 이름이 비었으면 실패로 표시하지 않고 이름 칸으로 데려간다(단추에 초점이 남으면 다음 글자가 엉뚱한 입력으로 간다)
+    if (key.value.trim() === '') {
+      key.removeAttribute('aria-invalid');
+      key.focus();
+      return;
+    }
     const spec = addKey(view.state, key.value, value.value);
     if (!spec) {
       key.setAttribute('aria-invalid', 'true');

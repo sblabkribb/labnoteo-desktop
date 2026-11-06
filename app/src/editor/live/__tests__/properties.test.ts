@@ -335,6 +335,27 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
     expect(taken.value).toBe('제목'); // 받지 않은 이름은 되돌린다
   });
 
+  it('the add button with an empty key focuses the key input instead of failing', () => {
+    const v = view('---\na: 1\n---\nx', 14);
+    const key = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.add')}"]`)!;
+    const btn = v.contentDOM.querySelector<HTMLButtonElement>('.lno-props-add-btn')!;
+    btn.focus();
+    btn.click();
+    expect(document.activeElement).toBe(key);
+    expect(key.hasAttribute('aria-invalid')).toBe(false);
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\nx');
+  });
+  it('a printable key pressed on a grid button is swallowed, so it cannot land in another input', () => {
+    const v = view('---\na: 1\n---\nx', 14);
+    for (const btn of v.contentDOM.querySelectorAll<HTMLButtonElement>('.lno-props button')) {
+      const ev = new KeyboardEvent('keydown', { key: '온', bubbles: true, cancelable: true });
+      btn.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(true);
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      btn.dispatchEvent(enter);
+      expect(enter.defaultPrevented).toBe(false);
+    }
+  });
   it('removes a row and adds one from the add row', () => {
     const v = view(original, original.length);
     click(rowEl(v, 'title').querySelector(`button[aria-label="${t('props.removeKey', 'title')}"]`)!);
