@@ -21,8 +21,8 @@ impl fmt::Display for VaultError {
 impl std::error::Error for VaultError {}
 
 /// Windows device names that resolve to devices whatever the extension.
-const RESERVED: [&str; 22] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+const RESERVED: [&str; 24] = [
+    "CON", "CONIN$", "CONOUT$", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
@@ -53,8 +53,9 @@ pub fn confine(root: &Path, rel: &str) -> Result<PathBuf, VaultError> {
     let mut parts: Vec<&str> = Vec::new();
     for part in rel.split('/') {
         match part {
-            "" | "." => continue,
-            ".." => return Err(VaultError::Escape),
+            // Empty and `.` components are rejected so `rel` is canonical:
+            // one file, one string (index keys, tree nodes).
+            "" | "." | ".." => return Err(VaultError::Escape),
             p if is_safe_component(p) => parts.push(p),
             _ => return Err(VaultError::Escape),
         }
@@ -96,6 +97,47 @@ pub fn confine(root: &Path, rel: &str) -> Result<PathBuf, VaultError> {
         }
     }
     Ok(resolved)
+}
+
+/// Drop the Win32 verbatim prefix (`\\?\C:\x` -> `C:\x`, `\\?\UNC\s\x` -> `\\s\x`).
+fn strip_verbatim(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix("\\\\?\\UNC\\") {
+        format!("\\\\{rest}")
+    } else if let Some(rest) = s.strip_prefix("\\\\?\\") {
+        rest.to_string()
+    } else {
+        s.into_owned()
+    }
+}
+
+/// Inverse of `confine`: turn an absolute path under `root` into its
+/// vault-relative POSIX string. Accepts verbatim (`\\?\C:\...`) and plain
+/// (`C:\...`, as `notify` emits) forms; comparison is case-insensitive like
+/// NTFS. The root itself maps to the empty string. Anything outside the root
+/// (or containing `..`) is `Escape`.
+pub fn to_rel(root: &Path, abs: &Path) -> Result<String, VaultError> {
+    let canon_root = std::fs::canonicalize(root).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => VaultError::NotFound,
+        _ => VaultError::Io(e),
+    })?;
+    let root_s = strip_verbatim(&canon_root);
+    let abs_s = strip_verbatim(abs);
+    let root_parts: Vec<&str> = root_s.split(|c| c == '\\' || c == '/').filter(|p| !p.is_empty()).collect();
+    let abs_parts: Vec<&str> = abs_s.split(|c| c == '\\' || c == '/').filter(|p| !p.is_empty()).collect();
+    if abs_parts.len() < root_parts.len()
+        || !root_parts
+            .iter()
+            .zip(&abs_parts)
+            .all(|(r, a)| r.to_lowercase() == a.to_lowercase())
+    {
+        return Err(VaultError::Escape);
+    }
+    let rest = &abs_parts[root_parts.len()..];
+    if rest.iter().any(|p| *p == "." || *p == "..") {
+        return Err(VaultError::Escape);
+    }
+    Ok(rest.join("/"))
 }
 
 #[cfg(test)]
@@ -299,6 +341,81 @@ mod tests {
         for rel in ["a<b", "a>b", "a\"b", "a|b", "a?b", "a*b", "a\0b", "a\u{1}b"] {
             assert_escape(&root, rel);
         }
+    }
+
+    #[test]
+    fn rejects_console_buffer_device_names() {
+        let s = Scratch::new();
+        let root = s.vault();
+        for rel in ["CONIN$", "conout$", "a/CONIN$", "CONOUT$.txt"] {
+            assert_escape(&root, rel);
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_dot_components() {
+        let s = Scratch::new();
+        let root = s.vault();
+        for rel in ["a//b", "a/./b", "./a", "a/", "a/."] {
+            assert_escape(&root, rel);
+        }
+    }
+
+    #[test]
+    fn to_rel_round_trips() {
+        let s = Scratch::new();
+        let root = s.vault();
+        fs::create_dir_all(root.join("labnote/001_PCR")).unwrap();
+        for rel in ["a.md", "labnote/001_PCR/02.md", "new/deep/er/file.md", "labnote"] {
+            let abs = confine(&root, rel).unwrap();
+            assert_eq!(to_rel(&root, &abs).unwrap(), rel);
+        }
+    }
+
+    #[test]
+    fn to_rel_accepts_verbatim_and_plain_forms() {
+        let s = Scratch::new();
+        let root = s.vault();
+        let abs = confine(&root, "labnote/02.md").unwrap();
+        assert!(abs.to_string_lossy().starts_with("\\\\?\\"));
+        // Verbatim, as returned by confine.
+        assert_eq!(to_rel(&root, &abs).unwrap(), "labnote/02.md");
+        // Plain `C:\...`, as notify emits.
+        let plain = PathBuf::from(abs.to_string_lossy().trim_start_matches("\\\\?\\"));
+        assert!(!plain.to_string_lossy().starts_with("\\\\?\\"));
+        assert_eq!(to_rel(&root, &plain).unwrap(), "labnote/02.md");
+        // Different case, forward slashes: still the same NTFS file.
+        let odd = plain.to_string_lossy().to_uppercase().replace('\\', "/");
+        assert_eq!(to_rel(&root, Path::new(&odd)).unwrap(), "LABNOTE/02.MD");
+    }
+
+    #[test]
+    fn to_rel_rejects_outside_root() {
+        let s = Scratch::new();
+        let root = s.vault();
+        let sibling = s.0.join("vault-evil").join("x.md");
+        for p in [
+            sibling.as_path(),
+            s.0.as_path(),
+            Path::new("C:\\Windows\\System32"),
+            Path::new("relative\\x.md"),
+        ] {
+            match to_rel(&root, p) {
+                Err(VaultError::Escape) => {}
+                other => panic!("expected Escape for {p:?}, got {other:?}"),
+            }
+        }
+        let dotdot = fs::canonicalize(&root).unwrap().join("..").join("outside.md");
+        assert!(matches!(to_rel(&root, &dotdot), Err(VaultError::Escape)));
+    }
+
+    #[test]
+    fn to_rel_of_root_is_empty() {
+        let s = Scratch::new();
+        let root = s.vault();
+        let canon = fs::canonicalize(&root).unwrap();
+        assert_eq!(to_rel(&root, &canon).unwrap(), "");
+        assert_eq!(to_rel(&root, &root).unwrap(), "");
     }
 
     #[test]
