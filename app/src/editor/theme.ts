@@ -224,6 +224,17 @@ export const editorThemeSpec = {
   '.lno-props-key': { color: 'var(--text-muted)', overflowWrap: 'anywhere' },
   '.lno-props-value': { color: 'var(--text)', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
   '.lno-props-row[data-cell="readOnly"] .lno-props-value, .lno-props-row[data-cell="nested"] .lno-props-value': { color: 'var(--text-muted)' },
+  // 위키링크 칸(SP4 Task 13): 평소에는 링크 줄(누르면 연다), 링크 옆을 누르거나 Enter·F2 로 입력이 된다
+  '.lno-props-linkcell': { minWidth: '0' },
+  '.lno-prop-links': {
+    cursor: 'text',
+    padding: '0 var(--space-1)',
+    border: '1px solid var(--bg-elevated)', // 입력 칸과 같은 자리: 고치기로 바뀔 때 칸이 움직이지 않는다
+    borderRadius: 'var(--radius)',
+    '&:hover': { borderColor: 'var(--border)' },
+    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-1px' },
+  },
+  '.lno-prop-links .lno-wikilink': { cursor: 'pointer' },
   '.lno-props-raw': { fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' },
   // 격자의 입력 칸(Task 25): 평소에는 글처럼 보이고, 가리키거나 초점이 오면 칸의 테두리가 드러난다
   '.lno-props-input': {

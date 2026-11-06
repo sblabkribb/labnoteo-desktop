@@ -490,8 +490,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       resolutionFlusher,
       // 이미지 위젯이 읽는 노트 경로와 이미지 묶음(경로는 이 노트 기준으로 푼다). 소스 보기에서는 쓰는 것이 없다.
       imageLoader.of({ notePath: path, images }),
-      // 속성 격자가 앱에 넘기는 일(상태 칩 → 앱의 상태 명령). 늘 최신 prop 을 부른다.
-      propertiesActions.of({ onChangeStatus: () => latest.current.onChangeStatus?.() }),
+      // 속성 격자가 앱에 넘기는 일(상태 칩 → 앱의 상태 명령, 머리말 링크 → 앱의 링크 열기). 늘 최신 prop 을 부른다.
+      propertiesActions.of({
+        onChangeStatus: () => latest.current.onChangeStatus?.(),
+        onOpenLink: (target) => latest.current.onOpenLink?.(target),
+      }),
       // 이미지 붙여 넣기·끌어 놓기 → 노트 폴더의 images/ 에 새 파일 + `![[이름]]`. 두 모드 모두에서 되도록 모드 칸 밖에 둔다.
       // 쓴 뒤에는 pasteImages 가 이름 색인을 버리고(isUnique 가 새 파일을 보게) 이름만 넣을지 경로를 넣을지 정한다.
       pasteImages({

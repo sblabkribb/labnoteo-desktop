@@ -16,13 +16,18 @@ import {
   type TransactionSpec,
 } from '@codemirror/state';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import { frontMatterNames, parseFrontMatterYaml } from '@labnoteo/core';
+import { parseFrontMatterYaml } from '@labnoteo/core';
 import { frontMatterText } from '../../labnote/frontMatterText';
 import { toDocBreaks } from '../../labnote/editTarget';
 import { t } from '../../i18n/t';
 import { addKey, APP_KEYS, editValue, isWikilinkValue, keyOfLine, READ_ONLY_KEYS, removeKey, renameKey } from './frontEdit';
 import { tableOptions } from '../table/field';
 import { toggleMode } from './mode';
+import { extractLinks } from '../../links/extract';
+import { splitLinktext } from '../../links/resolve';
+import { linkResolution, linkStateOf } from './linkResolution';
+import { imageLoader } from './imageWidget';
+import { targetOf, type OpenTarget } from './links';
 
 /**
  * 라이브 미리보기의 속성(Properties) 격자(계획 D7: Task 24 보이기와 경계 지킴이, Task 25 고치기).
@@ -114,7 +119,12 @@ export function frontBlock(state: EditorState): FrontBlock | null {
     if (READ_ONLY_KEYS.has(key)) cell = 'readOnly';
     // 여러 줄 글(블록·접힌 스칼라, 줄바꿈이 든 따옴표 글)은 한 줄 입력에 담기면 납작해진다: "YAML로 편집"으로만 고친다
     else if (hasLineBreak(value) || source.some((l) => BLOCK_SCALAR.test(l))) cell = 'nested';
-    else if (isWikilinkValue(source) || (Array.isArray(value) && value.length > 0 && value.every((x) => typeof x === 'string' && /^\[\[.*\]\]$/.test(x))))
+    else if (
+      isWikilinkValue(source) ||
+      // 따옴표 친 링크 하나(`author: "[[이서연]]"`, 플러그인이 적는 꼴)도 링크 칸이다(SP4 Task 13)
+      (typeof value === 'string' && SINGLE_WIKI.test(value)) ||
+      (Array.isArray(value) && value.length > 0 && value.every((x) => typeof x === 'string' && /^\[\[.*\]\]$/.test(x)))
+    )
       cell = 'wikilink';
     else if (Array.isArray(value)) cell = value.every(isScalar) ? 'list' : 'nested';
     else cell = isScalar(value) ? 'scalar' : 'nested';
@@ -125,10 +135,36 @@ export function frontBlock(state: EditorState): FrontBlock | null {
   return { from: 0, to: node.to, text, entries };
 }
 
+/** One `[[…]]` link with no `[`, `]` or line break inside. */
+const SINGLE_WIKI = /^\[\[[^[\]\r\n]+\]\]$/;
+
+/**
+ * The links of a wikilink value as the edit input shows them: a plain link by its name, a link with an alias,
+ * a subpath or a comma whole (`[[path|alias]]`), so committing the input never drops a path or a heading.
+ */
+function wikilinkTexts(value: unknown): string[] {
+  const out: string[] = [];
+  const add = (v: unknown, depth: number): void => {
+    if (Array.isArray(v)) {
+      if (depth < 3) for (const x of v) add(x, depth + 1);
+      return;
+    }
+    if (typeof v !== 'string' && typeof v !== 'number') return;
+    const s = String(v).trim();
+    // 따옴표 친 값은 `[[…]]` 째로, 따옴표 없는 `[[a]]` 는 YAML 이 중첩 목록 [["a"]] 로 읽어 안쪽 글만 남는다
+    const inner = /^\[\[(.*)\]\]$/.exec(s)?.[1] ?? s;
+    if (!inner.trim()) return;
+    const text = /[|#,]/.test(inner) ? `[[${inner}]]` : inner.trim();
+    if (!out.includes(text)) out.push(text);
+  };
+  add(value, 0);
+  return out;
+}
+
 /** 칸에 보일 글. 목록은 쉼표로 잇고, 위키링크는 이름만 보인다(고치면 `[[…]]` 로 다시 적는다). */
 function cellText(e: FrontEntry): string {
-  // 쉼표가 든 이름은 `[[…]]` 째로 보인다(고칠 때 쉼표로 나뉘지 않게)
-  if (e.cell === 'wikilink') return frontMatterNames(e.value).map((n) => (n.includes(',') ? `[[${n}]]` : n)).join(', ');
+  // 별칭·제목(#)·쉼표가 든 링크는 `[[…]]` 째로 보인다(고칠 때 경로를 잃거나 쉼표로 나뉘지 않게)
+  if (e.cell === 'wikilink') return wikilinkTexts(e.value).join(', ');
   if (e.cell === 'list') return (e.value as unknown[]).map((x) => (x === null ? '' : String(x))).join(', ');
   if (e.cell === 'nested') return JSON.stringify(e.value);
   return e.value === null || e.value === undefined ? '' : String(e.value);
@@ -184,6 +220,8 @@ function editYamlButton(view: EditorView): HTMLButtonElement {
 /** 격자가 앱에 넘기는 일. 상태 칩은 직접 쓰지 않고 앱의 "실험 상태 바꾸기" 명령을 부른다(Editor 의 onChangeStatus). */
 export interface PropertiesActions {
   onChangeStatus?: () => void;
+  /** Opens a front-matter wikilink (a note, or a note to create). Editor.tsx hands it to the app (SP4 Task 13). */
+  onOpenLink?(t: OpenTarget): void;
 }
 
 export const propertiesActions: Facet<PropertiesActions, PropertiesActions> = Facet.define<PropertiesActions, PropertiesActions>({
@@ -326,12 +364,29 @@ const cssString = (s: string) => JSON.stringify(s);
 
 /** 머리말 대신 보이는 키·값 격자. 글이 같으면(eq) 다시 그리지 않는다. */
 export class PropertiesWidget extends WidgetType {
-  constructor(readonly block: FrontBlock) {
+  /** Each wikilink cell's links, by key (front-matter links from `extractLinks`, the index's own parser). */
+  private readonly links: Map<string, CellLink[]>;
+
+  /**
+   * `version` is the link resolution's version (`filesVersion`: typing never changes it) and `notePath` the note
+   * the links resolve from. Either one changing redraws the wikilink cells in place (`updateDOM`).
+   */
+  constructor(
+    readonly block: FrontBlock,
+    readonly version: number = -1,
+    readonly notePath: string = '',
+  ) {
     super();
+    this.links = cellLinks(block);
   }
 
   eq(o: PropertiesWidget): boolean {
-    return this.block.text === o.block.text;
+    return this.block.text === o.block.text && this.version === o.version && this.notePath === o.notePath;
+  }
+
+  /** What a wikilink cell shows now. */
+  private linkCell(e: FrontEntry): LinkCell {
+    return { entry: e, links: this.links.get(e.key) ?? [], version: this.version, notePath: this.notePath };
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -357,7 +412,10 @@ export class PropertiesWidget extends WidgetType {
     // 격자의 단추에 초점이 있을 때 누른 글자는 버린다: 편집 가능한 본문 안이라 브라우저가 앞서 고치던 입력으로 초점을 옮겨
     // 그 값에 글을 덧붙인다. Enter·Space·Tab·단축키는 그대로 둔다.
     wrap.addEventListener('keydown', (e) => {
-      if (!(e.target instanceof HTMLButtonElement)) return;
+      // 위키링크 칸의 링크 줄(.lno-prop-links)도 초점을 받는 단추처럼 다룬다
+      const buttonLike =
+        e.target instanceof HTMLButtonElement || (e.target instanceof HTMLElement && e.target.classList.contains('lno-prop-links'));
+      if (!buttonLike) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if ((e.key.length === 1 && e.key !== ' ') || e.key === 'Process' || e.keyCode === 229) e.preventDefault();
     });
@@ -408,6 +466,7 @@ export class PropertiesWidget extends WidgetType {
       });
       return chip;
     }
+    if (e.cell === 'wikilink') return wikilinkCell(view, this.linkCell(e));
     if (e.cell === 'readOnly' || e.cell === 'nested') {
       const value = document.createElement('span');
       value.className = 'lno-props-value';
@@ -432,6 +491,11 @@ export class PropertiesWidget extends WidgetType {
     if (rowEls.length !== entries.length) return false;
     if (rowEls.some((r, i) => r.dataset.key !== entries[i].key || r.dataset.cell !== entries[i].cell)) return false;
     rowEls.forEach((r, i) => {
+      if (entries[i].cell === 'wikilink') {
+        const holder = r.querySelector<HTMLElement>('.lno-props-linkcell');
+        if (holder) updateLinkCell(view, holder, this.linkCell(entries[i]));
+        return;
+      }
       const v = r.querySelector<HTMLElement>('.lno-props-value');
       const text = cellText(entries[i]);
       if (v instanceof HTMLInputElement) {
@@ -541,11 +605,180 @@ function addRow(view: EditorView): HTMLElement {
   return row;
 }
 
+/** One link of a wikilink cell: the WikiTarget text (`note#heading`) and what it shows (the alias, else the text). */
+interface CellLink {
+  target: string;
+  shown: string;
+}
+
+/** A wikilink cell's latest content, kept on its holder so a later swap back to links draws the current value. */
+interface LinkCell {
+  entry: FrontEntry;
+  links: CellLink[];
+  version: number;
+  notePath: string;
+}
+
+const linkCells = new WeakMap<HTMLElement, LinkCell>();
+
+/** The front-matter wikilinks of each wikilink cell, from the key's line up to the next key's line. */
+function cellLinks(block: FrontBlock): Map<string, CellLink[]> {
+  const out = new Map<string, CellLink[]>();
+  const cells = block.entries.filter((e) => e.cell === 'wikilink' && e.line >= 0);
+  if (cells.length === 0) return out;
+  const starts = block.entries.map((e) => e.line).filter((l) => l >= 0);
+  const found = extractLinks(block.text).filter((l) => l.inFrontmatter && (l.kind === 'wiki' || l.kind === 'embed'));
+  for (const e of cells) {
+    const next = Math.min(Infinity, ...starts.filter((l) => l > e.line));
+    out.set(
+      e.key,
+      found.filter((l) => l.line >= e.line && l.line < next).map((l) => ({ target: l.target, shown: l.alias ?? l.target })),
+    );
+  }
+  return out;
+}
+
+/** The key that says what a display was drawn from. */
+const drawnKey = (cell: LinkCell) =>
+  [String(cell.version), cell.notePath, cellText(cell.entry), ...cell.links.map((l) => `${l.target}|${l.shown}`)].join('\n');
+
+/** Draws the link spans of a wikilink cell's display state (never by assigning textContent to the cell). */
+function drawLinks(view: EditorView, display: HTMLElement, cell: LinkCell): void {
+  const res = view.state.facet(linkResolution);
+  const parts: Node[] = [];
+  cell.links.forEach((l, i) => {
+    if (i > 0) parts.push(document.createTextNode(', '));
+    const span = document.createElement('span');
+    const missing = linkStateOf(res, 'wiki', l.target, cell.notePath) === 'unresolved';
+    span.className = missing ? 'lno-wikilink lno-unresolved' : 'lno-wikilink';
+    span.dataset.link = l.target;
+    if (missing) span.title = t('links.create.title');
+    span.textContent = l.shown;
+    parts.push(span);
+  });
+  // 링크를 찾지 못한 값(빈 `[[]]` 등)은 이름 글만 보인다
+  if (parts.length === 0) parts.push(document.createTextNode(cellText(cell.entry)));
+  display.replaceChildren(...parts);
+  display.setAttribute('aria-label', cellText(cell.entry));
+  drawn.set(display, drawnKey(cell));
+}
+
+/** What each display was last drawn from (`updateDOM` redraws only when it differs). */
+const drawn = new WeakMap<HTMLElement, string>();
+
+/** Opens the link `target` as the editor's own link click would (D5): a note, or a note to create. */
+function openCellLink(view: EditorView, target: string, notePath: string): void {
+  const { path, subpath } = splitLinktext(target);
+  const to = targetOf(view.state, { kind: 'wiki', from: 0, to: 0, linkpath: path, subpath, embed: false }, notePath);
+  // 이 노트 안의 자리(self)는 격자에서 옮기지 않는다: 머리말 링크가 자기 노트를 가리킬 일은 드물다
+  if (!to || to.kind === 'self') return;
+  view.state.facet(propertiesActions).onOpenLink?.(to);
+}
+
+/** The display state: one span per link; a click on a link opens it, a click beside them, Enter or F2 edits. */
+function linkDisplay(view: EditorView, holder: HTMLElement): HTMLElement {
+  const display = document.createElement('span');
+  display.className = 'lno-props-value lno-prop-links';
+  display.tabIndex = 0;
+  display.setAttribute('role', 'button');
+  drawLinks(view, display, linkCells.get(holder)!);
+  const linkOf = (e: Event) => (e.target instanceof Element ? e.target.closest<HTMLElement>('.lno-wikilink') : null);
+  display.addEventListener('mousedown', (e) => {
+    const link = linkOf(e);
+    if (!link || e.button !== 0 || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    openCellLink(view, link.dataset.link ?? '', linkCells.get(holder)?.notePath ?? '');
+  });
+  display.addEventListener('click', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    if (linkOf(e)) return; // the mousedown opened it
+    editLinkCell(view, holder);
+  });
+  display.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Enter' || e.key === 'F2') {
+      e.preventDefault();
+      editLinkCell(view, holder);
+    }
+  });
+  return display;
+}
+
+/** Back to the display state with the cell's latest value. Does nothing when the input is already gone. */
+function showLinks(view: EditorView, holder: HTMLElement, input: HTMLInputElement, focus: boolean): void {
+  if (input.parentElement !== holder) return;
+  const display = linkDisplay(view, holder);
+  holder.replaceChildren(display);
+  if (focus) display.focus();
+}
+
+/**
+ * The edit state: the grid's usual input (commit on Enter or blur, Escape reverts, nothing while composing),
+ * created on demand with the focus in it. Enter, Escape and a blur outside a composition go back to the links.
+ */
+function editLinkCell(view: EditorView, holder: HTMLElement): void {
+  const cell = linkCells.get(holder);
+  if (!cell || holder.querySelector('input')) return;
+  const key = cell.entry.key;
+  const input = gridInput(view, {
+    className: 'lno-props-value',
+    value: cellText(cell.entry),
+    label: t('props.value', key),
+    edit: (state, raw) => editValue(state, key, raw),
+  });
+  let composing = false;
+  input.addEventListener('compositionstart', () => (composing = true));
+  input.addEventListener('compositionend', () => {
+    composing = false;
+    // gridInput 이 먼저 조합이 끝난 글을 적는다(그쪽 마이크로태스크가 앞선다). 초점이 떠나 있으면 그 뒤에 링크로 돌아간다.
+    queueMicrotask(() => {
+      if (input.isConnected && !focused(input)) showLinks(view, holder, input, false);
+    });
+  });
+  input.addEventListener('keydown', (e) => {
+    if (composingKey(e, composing)) return;
+    if (e.key === 'Enter') showLinks(view, holder, input, true);
+    else if (e.key === 'Escape') showLinks(view, holder, input, false);
+  });
+  input.addEventListener('blur', () => {
+    // 조합 중의 blur 는 글을 적지 않았다: 입력을 떼지 않고 compositionend 가 적은 뒤 돌아간다
+    if (!composing) showLinks(view, holder, input, false);
+  });
+  holder.replaceChildren(input);
+  input.focus();
+}
+
+/** A wikilink cell: a holder that shows the links (display state) or the input (edit state). */
+function wikilinkCell(view: EditorView, cell: LinkCell): HTMLElement {
+  const holder = document.createElement('span');
+  holder.className = 'lno-props-linkcell';
+  linkCells.set(holder, cell);
+  holder.append(linkDisplay(view, holder));
+  return holder;
+}
+
+/**
+ * `updateDOM` for a wikilink cell: keeps the latest value on the holder; in the display state redraws the links
+ * when the resolution version, the text or the note differ. A cell in the edit state is never touched.
+ */
+function updateLinkCell(view: EditorView, holder: HTMLElement, cell: LinkCell): void {
+  linkCells.set(holder, cell);
+  const display = holder.querySelector<HTMLElement>(':scope > .lno-prop-links');
+  if (!display) return; // the edit state: the user's input stays as it is
+  if (drawn.get(display) !== drawnKey(cell)) drawLinks(view, display, cell);
+}
+
+/** The resolution version the grid draws with (-1: none yet). */
+const resolutionVersion = (state: EditorState) => state.facet(linkResolution)?.version ?? -1;
+const gridNotePath = (state: EditorState) => state.facet(imageLoader)?.notePath ?? '';
+
 function buildGrid(state: EditorState): DecorationSet {
   if (state.field(rawFront, false)) return Decoration.none;
   const block = frontBlock(state);
   if (!block) return Decoration.none;
-  return Decoration.set([Decoration.replace({ widget: new PropertiesWidget(block), block: true }).range(block.from, block.to)]);
+  const widget = new PropertiesWidget(block, resolutionVersion(state), gridNotePath(state));
+  return Decoration.set([Decoration.replace({ widget, block: true }).range(block.from, block.to)]);
 }
 
 /** 격자 블록 장식. 원자 범위이기도 하다: 커서가 격자 안에 떨어지지 않는다. */
@@ -555,7 +788,10 @@ export const propertiesField = StateField.define<DecorationSet>({
     const changed =
       tr.docChanged ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
-      tr.state.field(rawFront, false) !== tr.startState.field(rawFront, false);
+      tr.state.field(rawFront, false) !== tr.startState.field(rawFront, false) ||
+      // 링크 풀이(파일이 바뀔 때만 새 값이다)나 노트가 바뀌면 위키링크 칸을 제자리에서 다시 칠한다
+      tr.state.facet(linkResolution) !== tr.startState.facet(linkResolution) ||
+      gridNotePath(tr.state) !== gridNotePath(tr.startState);
     return changed ? buildGrid(tr.state) : deco;
   },
   provide: (f) => [EditorView.decorations.from(f), EditorView.atomicRanges.of((v) => v.state.field(f)), lockSync],

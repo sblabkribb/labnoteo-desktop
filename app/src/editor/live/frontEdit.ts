@@ -178,11 +178,16 @@ function splitLinks(raw: string): string[] {
 /** `k:` 로 시작하는 코어의 항목에서 키를 `token` 으로 바꾼다. */
 const withToken = (entry: string, token: string) => token + entry.slice(1);
 
-/** 칸의 종류에 맞춰 입력을 YAML 항목(`token: …`, 여러 줄일 수 있다)으로 적는다. */
-function entryText(cell: FrontEntry['cell'], token: string, raw: string): string {
+/** A single quoted link keeps its quote style (`'` doubles a quote inside, `"` is written as JSON). */
+const quoteLink = (link: string, quote: '"' | "'") => (quote === "'" ? `'${link.replace(/'/g, "''")}'` : JSON.stringify(link));
+
+/** 칸의 종류에 맞춰 입력을 YAML 항목(`token: …`, 여러 줄일 수 있다)으로 적는다. `quote`: 원래 값이 따옴표 친 링크 하나였다. */
+function entryText(cell: FrontEntry['cell'], token: string, raw: string, quote?: '"' | "'"): string {
   if (cell === 'wikilink') {
     const links = splitLinks(raw);
     if (links.length === 0) return `${token}: `;
+    // 따옴표 친 링크 하나(`author: "[[이서연]]"`)는 따옴표째 적는다: 따옴표가 없으면 YAML 은 중첩 목록으로 읽는다
+    if (links.length === 1 && quote) return `${token}: ${quoteLink(links[0], quote)}`;
     // 따옴표 없는 `[[a, b]]` 는 YAML 이 두 항목으로 읽는다: 쉼표가 든 링크 하나는 따옴표로 적는다
     if (links.length === 1) return `${token}: ${links[0].includes(',') ? JSON.stringify(links[0]) : links[0]}`;
     return [`${token}:`, ...links.map((l) => `  - ${JSON.stringify(l)}`)].join('\n');
@@ -221,7 +226,9 @@ export function editValue(state: EditorState, key: string, raw: string): Transac
   const { block, entry } = found;
   const span = keySpan(block.text, key);
   if (!span) return null;
-  let next = entryText(entry.cell, span.token, raw);
+  const first = block.text.slice(span.from + span.token.length, span.lineTo).replace(/^[ \t]*:[ \t]*/, '');
+  const quote = first.startsWith('"') ? '"' : first.startsWith("'") ? "'" : undefined;
+  let next = entryText(entry.cell, span.token, raw, quote);
   if (span.to === span.lineTo && !next.includes('\n')) {
     const comment = trailingComment(block.text.slice(span.from + span.token.length, span.lineTo).replace(/^[ \t]*:/, ''));
     if (comment) next = next.replace(/[ \t]+$/, '') + comment;

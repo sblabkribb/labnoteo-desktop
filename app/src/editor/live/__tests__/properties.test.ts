@@ -277,7 +277,12 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
   const original = '---\ntitle: a\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx';
   const rowEl = (v: EditorView, key: string) =>
     [...v.contentDOM.querySelectorAll<HTMLElement>('.lno-props-row')].find((r) => r.dataset.key === key)!;
-  const valueInput = (v: EditorView, key: string) => rowEl(v, key).querySelector<HTMLInputElement>('input.lno-props-value')!;
+  /** The value input of a row. A wikilink cell shows links until it is opened for editing (Enter on its links, SP4 Task 13). */
+  const valueInput = (v: EditorView, key: string) => {
+    const links = rowEl(v, key).querySelector<HTMLElement>('.lno-prop-links');
+    if (links) links.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    return rowEl(v, key).querySelector<HTMLInputElement>('input.lno-props-value')!;
+  };
   const keyInput = (v: EditorView, key: string) => rowEl(v, key).querySelector<HTMLInputElement>('input.lno-props-key')!;
   const enter = (el: Element, init: KeyboardEventInit = {}) =>
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
