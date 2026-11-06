@@ -16,6 +16,7 @@
   "vault_trash": ["path"],
   "vault_read_image": ["path"],
   "vault_list_images": [],
+  "vault_write_image": ["x-lno-dir", "x-lno-name"],
   "settings_vault_read": [],
   "settings_vault_write": ["content"],
   "settings_import_plugin": [],

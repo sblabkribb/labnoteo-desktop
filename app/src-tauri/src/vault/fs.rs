@@ -39,12 +39,14 @@ pub enum FsError {
     /// Windows refused the path as too long (`ERROR_FILENAME_EXCED_RANGE`, 206).
     /// A *missing* file is never this, however long its path: it stays `notFound`.
     PathTooLong(std::io::Error),
-    /// `rename` target is another file or folder that already exists.
+    /// `rename` target is another file or folder that already exists, or
+    /// `vault_write_image` found every name up to `stem 99.ext` taken.
     Exists,
     /// `vault_read_image` on a path whose extension is not in `IMAGE_EXTS`,
-    /// or on something that is not a regular file.
+    /// or on something that is not a regular file; `vault_write_image` on a
+    /// name that is not a writable image (SVG included).
     NotImage,
-    /// `vault_read_image` on a file over `MAX_IMAGE_BYTES`.
+    /// `vault_read_image` on a file, or `vault_write_image` on bytes, over `MAX_IMAGE_BYTES`.
     TooLarge,
 }
 
@@ -694,6 +696,87 @@ pub fn list_images(root: &Path) -> Result<Vec<String>, FsError> {
     Ok(out)
 }
 
+/// Split a pasted or dropped image's file name into `(stem, lowercase ext)`.
+/// The name must be one safe path component (no separators, ':', control
+/// characters, trailing dot or space, Windows reserved stem), have a non-empty
+/// stem, and end in an image extension. SVG is readable but never written: a
+/// pasted SVG could carry script, and nothing in the editor needs to create one.
+pub fn safe_image_name(name: &str) -> Result<(String, String), FsError> {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || !is_safe_component(name) {
+        return Err(FsError::Vault(VaultError::Escape));
+    }
+    let (stem, ext) = name.rsplit_once('.').ok_or(FsError::NotImage)?;
+    let ext = ext.to_ascii_lowercase();
+    if stem.is_empty() || ext == "svg" || !IMAGE_EXTS.contains(&ext.as_str()) {
+        return Err(FsError::NotImage);
+    }
+    Ok((stem.to_string(), ext))
+}
+
+/// Write a new image into vault folder `dir` (missing folders are created)
+/// without ever replacing an existing file: `stem.ext` is created with
+/// `create_new`, then `stem 1.ext` .. `stem 99.ext`, and the first free one
+/// wins. Creation is atomic in the file system, so two writers racing for the
+/// same name both succeed under different names. Returns the vault path written.
+pub fn write_image_free(locks: &PathLocks, root: &Path, dir: &str, name: &str, bytes: &[u8]) -> Result<String, FsError> {
+    let (stem, ext) = safe_image_name(name)?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(FsError::TooLarge);
+    }
+    if !dir.is_empty() {
+        let abs_dir = confine_write(root, dir)?;
+        std::fs::create_dir_all(&abs_dir)?;
+    }
+    for k in 0..=99u32 {
+        let file = if k == 0 { format!("{stem}.{ext}") } else { format!("{stem} {k}.{ext}") };
+        let rel = if dir.is_empty() { file } else { format!("{dir}/{file}") };
+        let written = locks.with(root, &rel, || -> Result<bool, FsError> {
+            // Confined again per candidate: the folder now exists, so a link
+            // planted in it is resolved before anything is created.
+            let abs = confine_write(root, &rel)?;
+            let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&abs) {
+                Ok(f) => f,
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => return Ok(false),
+                // A folder with this name reports access denied on Windows.
+                Err(e) if e.kind() == ErrorKind::PermissionDenied && abs.exists() => return Ok(false),
+                Err(e) => return Err(e.into()),
+            };
+            let result = f.write_all(bytes).and_then(|()| f.sync_all());
+            drop(f);
+            if let Err(e) = result {
+                let _ = std::fs::remove_file(&abs);
+                return Err(e.into());
+            }
+            Ok(true)
+        })?;
+        if written {
+            return Ok(rel);
+        }
+    }
+    Err(FsError::Exists)
+}
+
+/// Decode a `encodeURIComponent` header value. Malformed escapes and bytes
+/// that are not UTF-8 are refused rather than replaced.
+pub fn percent_decode(s: &str) -> Result<String, FsError> {
+    let bad = || FsError::Io(std::io::Error::new(ErrorKind::InvalidInput, "malformed percent-encoding"));
+    let src = s.as_bytes();
+    let mut out = Vec::with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        if src[i] == b'%' {
+            let hex = src.get(i + 1..i + 3).ok_or_else(bad)?;
+            let hex = std::str::from_utf8(hex).map_err(|_| bad())?;
+            out.push(u8::from_str_radix(hex, 16).map_err(|_| bad())?);
+            i += 3;
+        } else {
+            out.push(src[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| bad())
+}
+
 // ---- Tauri layer ----------------------------------------------------------
 
 #[tauri::command]
@@ -781,6 +864,39 @@ pub async fn vault_read_image(
 pub async fn vault_list_images(state: tauri::State<'_, super::VaultState>) -> Result<Vec<String>, FsError> {
     let root = state.root()?;
     tauri::async_runtime::spawn_blocking(move || list_images(&root))
+        .await
+        .map_err(join_error)?
+}
+
+/// One header of a raw-body command, percent-decoded.
+fn header(request: &tauri::ipc::Request<'_>, name: &str) -> Result<String, FsError> {
+    let value = request
+        .headers()
+        .get(name)
+        .ok_or_else(|| FsError::Io(std::io::Error::new(ErrorKind::InvalidInput, format!("missing header {name}"))))?;
+    let value = value
+        .to_str()
+        .map_err(|_| FsError::Io(std::io::Error::new(ErrorKind::InvalidInput, format!("header {name} is not ASCII"))))?;
+    percent_decode(value)
+}
+
+/// Paste and drop: the bytes arrive as the raw request body (no JSON number
+/// array), and the folder and file name as the percent-encoded headers
+/// `x-lno-dir` and `x-lno-name`. Async and off the main thread, like `vault_trash`.
+#[tauri::command]
+pub async fn vault_write_image(
+    state: tauri::State<'_, super::VaultState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, FsError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(FsError::Io(std::io::Error::new(ErrorKind::InvalidInput, "the image must be sent as raw bytes")));
+    };
+    let dir = header(&request, "x-lno-dir")?;
+    let name = header(&request, "x-lno-name")?;
+    let bytes = bytes.clone();
+    let root = state.root()?;
+    let locks = Arc::clone(&state.locks);
+    tauri::async_runtime::spawn_blocking(move || write_image_free(&locks, &root, &dir, &name, &bytes))
         .await
         .map_err(join_error)?
 }
@@ -1474,5 +1590,81 @@ mod tests {
         );
         std::fs::remove_dir(root.join("out")).unwrap();
         assert!(matches!(list_images(&t.0.join("missing")), Err(FsError::Vault(VaultError::NotFound))));
+    }
+
+    #[test]
+    fn vault_write_image_rejects_hostile_names_and_never_overwrites() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        for n in [
+            "../../evil.png", "a/b.png", "a:b.png", "CON.png", "x.html", "x.svg", "a\u{1}.png", "..", "x.png.",
+            r"a\b.png", ".png", "x.png ", "nul.jpg", "LPT9.gif", "", "png",
+        ] {
+            assert!(write_image_free(&l, &root, "exp/images", n, b"x").is_err(), "{n}");
+        }
+        assert!(write_image_free(&l, &root, "../out", "a.png", b"x").is_err());
+        assert!(matches!(write_image_free(&l, &root, "/abs", "a.png", b"x"), Err(FsError::Vault(VaultError::Escape))));
+        assert!(matches!(write_image_free(&l, &root, ".obsidian", "a.png", b"x"), Err(FsError::Forbidden)));
+        assert!(!t.0.join("out").exists() && !root.join("exp").exists(), "nothing was written by a refused call");
+        assert_eq!(write_image_free(&l, &root, "exp/images", "a.png", b"1").unwrap(), "exp/images/a.png");
+        assert_eq!(write_image_free(&l, &root, "exp/images", "a.png", b"2").unwrap(), "exp/images/a 1.png");
+        assert_eq!(
+            write_image_free(&l, &root, "exp/images", "A.PNG", b"3").unwrap(),
+            "exp/images/A 2.png",
+            "case-insensitive collision, lowercase extension"
+        );
+        assert_eq!(std::fs::read(root.join("exp/images/a.png")).unwrap(), b"1");
+        assert_eq!(std::fs::read(root.join("exp/images/a 1.png")).unwrap(), b"2");
+        assert_eq!(write_image_free(&l, &root, "", "붙여넣기.jpg", b"4").unwrap(), "붙여넣기.jpg", "the vault root is a valid folder");
+        assert_eq!(safe_image_name("Scan.JPEG").unwrap(), ("Scan".to_string(), "jpeg".to_string()));
+    }
+
+    #[test]
+    fn vault_write_image_gives_up_after_99_suffixes() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        std::fs::create_dir_all(t.0.join("i")).unwrap();
+        std::fs::write(t.0.join("i/p.png"), b"0").unwrap();
+        for k in 1..=99 {
+            std::fs::write(t.0.join(format!("i/p {k}.png")), b"0").unwrap();
+        }
+        assert!(matches!(write_image_free(&l, &t.0, "i", "p.png", b"x"), Err(FsError::Exists)));
+    }
+
+    #[test]
+    fn vault_write_image_rejects_too_large() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let big = vec![0u8; MAX_IMAGE_BYTES as usize + 1];
+        assert!(matches!(write_image_free(&l, &t.0, "exp/images", "a.png", &big), Err(FsError::TooLarge)));
+        assert!(!t.0.join("exp").exists());
+    }
+
+    #[test]
+    fn vault_write_image_rejects_junction_out_of_vault() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(t.0.join("outside")).unwrap();
+        junction(&root.join("out"), &t.0.join("outside"));
+        assert!(matches!(
+            write_image_free(&l, &root, "out/images", "a.png", b"x"),
+            Err(FsError::Vault(VaultError::Escape))
+        ));
+        assert!(!t.0.join("outside/images").exists());
+        std::fs::remove_dir(root.join("out")).unwrap();
+    }
+
+    #[test]
+    fn percent_decode_header_values() {
+        assert_eq!(percent_decode("exp%2Fimages").unwrap(), "exp/images");
+        assert_eq!(percent_decode("%EB%B6%99%EC%97%AC.png").unwrap(), "붙여.png");
+        assert_eq!(percent_decode("a%20b.png").unwrap(), "a b.png");
+        assert!(percent_decode("%").is_err());
+        assert!(percent_decode("%zz").is_err());
+        assert!(percent_decode("%FF").is_err(), "not UTF-8");
     }
 }

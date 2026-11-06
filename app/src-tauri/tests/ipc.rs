@@ -196,6 +196,54 @@ title: 실험
     assert_eq!(ok("vault_list_images", args("vault_list_images", vec![])), json!(["a.png"]));
     std::fs::remove_file(dir.join("vault").join("a.png")).unwrap();
 
+    // Image write: a raw body, so the fixture lists header names instead of
+    // JSON argument names. Values are percent-encoded (`encodeURIComponent`),
+    // because a header value must be ASCII and a Korean name is not.
+    let raw_call = |cmd: &str, vals: Vec<&str>, body: Vec<u8>| -> Result<Value, Value> {
+        used.borrow_mut().insert(cmd.to_string());
+        let names = fixture[cmd].as_array().unwrap_or_else(|| panic!("{cmd} missing from ipc-args.json"));
+        assert_eq!(names.len(), vals.len(), "{cmd}: fixture lists {names:?}");
+        let mut headers = tauri::http::HeaderMap::new();
+        for (n, v) in names.iter().zip(vals) {
+            headers.insert(
+                tauri::http::HeaderName::from_bytes(n.as_str().unwrap().as_bytes()).unwrap(),
+                tauri::http::HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        get_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: cmd.into(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: "http://tauri.localhost".parse().unwrap(),
+                body: InvokeBody::Raw(body),
+                headers,
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .map(|b| b.deserialize::<Value>().unwrap())
+    };
+    assert_eq!(
+        raw_call("vault_write_image", vec!["exp%2Fimages", "p.png"], vec![1, 2]).unwrap(),
+        json!("exp/images/p.png")
+    );
+    assert_eq!(std::fs::read(dir.join("vault").join("exp/images/p.png")).unwrap(), vec![1u8, 2]);
+    assert_eq!(
+        raw_call("vault_write_image", vec!["exp/images", "p.png"], vec![3]).unwrap(),
+        json!("exp/images/p 1.png"),
+        "never overwrites"
+    );
+    assert_eq!(
+        raw_call("vault_write_image", vec!["exp", "%EC%82%AC%EC%A7%84.png"], vec![4]).unwrap(),
+        json!("exp/사진.png")
+    );
+    assert!(raw_call("vault_write_image", vec!["..", "p.png"], vec![1]).is_err());
+    assert!(raw_call("vault_write_image", vec!["exp", "p.html"], vec![1]).is_err());
+    // A JSON body is refused: the bytes must come raw.
+    assert!(call("vault_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
+    std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());

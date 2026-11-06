@@ -5,18 +5,32 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
-import { listVaultImages, readVaultImage } from '../vaultImage';
+import { listVaultImages, readVaultImage, writeVaultImage } from '../vaultImage';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
   readFileSync('src-tauri/tests/ipc-args.json', 'utf-8'),
 );
 
-/** 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke. */
+/**
+ * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
+ * 본문이 원시 바이트(Uint8Array)면 인자 이름 대신 헤더 이름을 기록한다.
+ */
 function recorder() {
   const sent = new Map<string, string[]>();
-  const invoke = async (cmd: string, args?: Record<string, unknown>) => {
-    sent.set(cmd, Object.keys(args ?? {}).sort());
+  const headers = new Map<string, Record<string, string>>();
+  const invoke = async (
+    cmd: string,
+    args?: Record<string, unknown> | Uint8Array,
+    options?: { headers?: Record<string, string> },
+  ) => {
+    if (args instanceof Uint8Array) {
+      sent.set(cmd, Object.keys(options?.headers ?? {}).sort());
+      headers.set(cmd, options?.headers ?? {});
+    } else {
+      sent.set(cmd, Object.keys(args ?? {}).sort());
+    }
+    if (cmd === 'vault_write_image') return 'exp/images/p.png';
     if (cmd === 'vault_modify') return { kind: 'ok' };
     if (cmd === 'vault_read') return 'old';
     if (cmd === 'vault_list' || cmd === 'search') return [];
@@ -26,7 +40,7 @@ function recorder() {
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
   };
-  return { sent, invoke: invoke as never };
+  return { sent, headers, invoke: invoke as never };
 }
 
 describe('IPC 인자 이름 계약', () => {
@@ -56,8 +70,18 @@ describe('IPC 인자 이름 계약', () => {
     await saveVaultSettings(settings, r.invoke);
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
+    expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
 
     const expected = Object.fromEntries(Object.entries(fixture).map(([k, v]) => [k, [...v].sort()]));
     expect(Object.fromEntries(r.sent)).toEqual(expected);
+  });
+
+  it('writeVaultImage 는 바이트를 원시 본문으로, 폴더와 이름은 퍼센트 인코딩한 헤더로 보낸다', async () => {
+    const r = recorder();
+    await writeVaultImage('실험/images', '붙여 넣기.png', new Uint8Array([1, 2]), r.invoke);
+    expect(r.headers.get('vault_write_image')).toEqual({
+      'x-lno-dir': '%EC%8B%A4%ED%97%98%2Fimages',
+      'x-lno-name': '%EB%B6%99%EC%97%AC%20%EB%84%A3%EA%B8%B0.png',
+    });
   });
 });
