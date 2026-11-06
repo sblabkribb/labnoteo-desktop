@@ -132,13 +132,15 @@ function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: Rewri
 
 /** The new path text for a Markdown link in its original style (D13), or null when no safe text exists. */
 function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: string, ctx: RewriteContext): string | null {
-  let path: string;
-  if (oldPath.startsWith('/')) path = `/${want}`;
-  else {
-    path = relativePath(dirOf(sourceAfter), want);
+  const styled = (target: string): string[] => {
+    if (oldPath.startsWith('/')) return [`/${target}`];
+    let path = relativePath(dirOf(sourceAfter), target);
     if (oldPath.startsWith('./') && !path.startsWith('../')) path = `./${path}`;
-  }
-  for (const p of [path, `/${want}`]) {
+    return [path, `/${target}`];
+  };
+  // Keep '.md' only when the original had it; the post-condition decides whether the bare form still resolves.
+  const bare = hasMd(want) && !hasMd(oldPath) ? styled(stripMd(want)) : [];
+  for (const p of [...bare, ...styled(want)]) {
     const encoded = encodeMdPath(p, oldPath, angled);
     if (same(ctx.after.resolveMd(encoded, sourceAfter), want)) return encoded;
   }
@@ -154,6 +156,8 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
   for (const link of extractLinks(text)) {
     const isWiki = link.kind === 'wiki' || link.kind === 'embed';
     const linkpath = isWiki ? splitLinktext(link.target).path : link.target;
+    // A same-note link ([[#heading]], [[#^block]]) names no file: it follows its note wherever it goes.
+    if (isWiki && linkpath === '') continue;
     const resolveAs = (r: Resolver, source: string): string | null =>
       isWiki ? r.resolveWiki(linkpath, source) : r.resolveMd(link.target, source);
     const before = resolveAs(ctx.before, sourceBefore);
@@ -173,6 +177,12 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
       // A '"' or '\' would change a double-quoted YAML scalar: never write one there.
       if (insert !== null && quote === '"' && /["\\]/.test(insert)) insert = null;
       if (insert !== null && quote === "'") insert = insert.replace(/'/g, "''");
+      // Not directly quote-delimited: the link may sit inside a quoted or plain YAML scalar whose style is unknown
+      // here. Never introduce a quote, a backslash or a comma (flow sequences) there.
+      if (insert !== null && link.inFrontmatter && quote !== "'" && quote !== '"') {
+        const risky = [...insert].some((c) => `'"\\,`.includes(c) && !oldSlice.includes(c));
+        if (risky) insert = null;
+      }
     } else {
       insert = mdText(oldSlice, text[link.pathFrom - 1] === '<', want, sourceAfter, ctx);
     }

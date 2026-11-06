@@ -82,6 +82,33 @@ describe('rewriteLinks', () => {
     expect(out.text).toBe('---\na: "[[Home]]"\n---\n[[Say "hi"]]');
     expect(out).toMatchObject({ changed: 1, unsafe: 1 });
   });
+  it('same-note heading and block links are never rewritten into cross-note links', () => {
+    const text = 'a [[#A]] b ![[#^blk]] [[#A|x]]';
+    expect(rewriteLinks(text, 'Home.md', 'Start.md', ctxFor('Home.md', 'Start.md'))).toEqual({ text, changed: 0, unsafe: 0 });
+    expect(rewriteLinks(text, 'Home.md', 'Home.md', ctxFor('Home.md', 'Start.md'))).toEqual({ text, changed: 0, unsafe: 0 });
+  });
+  it('a quote or backslash is never written into the middle of a front-matter scalar', () => {
+    const files = ['Home.md', 'n.md'];
+    const single = "---\na: 'see [[Home]]'\n---\n";
+    const out = rewriteLinks(single, 'n.md', 'n.md', ctxFor('Home.md', "Bob's.md", false, files));
+    expect(out).toEqual({ text: single, changed: 0, unsafe: 1 });
+    const dbl = '---\na: "see [[Home]]"\n---\n';
+    expect(rewriteLinks(dbl, 'n.md', 'n.md', ctxFor('Home.md', 'Say "hi".md', false, files))).toEqual({ text: dbl, changed: 0, unsafe: 1 });
+    // A plain rename in the same spot is still written.
+    expect(rewriteLinks(single, 'n.md', 'n.md', ctxFor('Home.md', 'Start.md', false, files)).text).toBe("---\na: 'see [[Start]]'\n---\n");
+  });
+  it('a comma is never written into an unquoted front-matter wikilink', () => {
+    const text = '---\na: [[Home]]\n---\n';
+    expect(rewriteLinks(text, 'n.md', 'n.md', ctxFor('Home.md', 'x, y.md', false, ['Home.md', 'n.md']))).toEqual({ text, changed: 0, unsafe: 1 });
+  });
+  it('a markdown link without .md stays without .md', () => {
+    const out = rewriteLinks('[h](../Home) [i](../Home.md)', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'Start.md'));
+    expect(out.text).toBe('[h](../Start) [i](../Start.md)');
+  });
+  it('keeps a trailing backslash before the alias pipe outside a table', () => {
+    const out = rewriteLinks('[[Home\\|x]]', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'Start.md'));
+    expect(out.text).toBe('[[Start\\|x]]');
+  });
 });
 
 describe('moves', () => {
