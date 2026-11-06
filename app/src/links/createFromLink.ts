@@ -6,11 +6,14 @@
  * - `createFromLink` writes with the expect-empty `fs.modify` pattern of `newNoteIn`, so nothing is overwritten.
  * - `openLinkTarget` dispatches an editor `OpenTarget`: a note opens at its subpath line, an unresolved link
  *   creates its note, and an external URL goes to `openExternal`.
+ * - `handleOpenLink` is the editor's entry point: failures become notices (runCommand), and while the command
+ *   context is still loading a note link still opens and anything else says so.
  */
 import type { OpenTarget } from '../editor/live/links';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { t } from '../i18n/t';
 import type { CommandContext } from '../labnote/commands/context';
+import { runCommand } from '../labnote/commands/runCommand';
 import { warnIfWindowsPathTooLong } from '../labnote/port/experiments';
 import { ATTACHMENT_EXTS, IMAGE_EXTS } from './resolve';
 import { subpathLine } from './subpath';
@@ -38,8 +41,11 @@ function normalize(base: string, rel: string): string {
 }
 
 /** Where a note created from `linkpath` (written in `sourcePath`) goes (D6). */
-export function newNotePath(linkpath: string, sourcePath: string): string | { refused: 'notNote' } {
+export function newNotePath(linkpath: string, sourcePath: string): string | { refused: 'notNote' | 'invalid' } {
   const lp = linkpath.trim();
+  // `[[.]]`, `[[sub/..]]` and `[[sub/]]` name a folder, not a note.
+  const last = lp.slice(lp.lastIndexOf('/') + 1);
+  if (last === '' || last === '.' || last === '..') return { refused: 'invalid' };
   const ext = extOf(lp);
   if (IMAGE_EXTS.has(ext) || ATTACHMENT_EXTS.has(ext)) return { refused: 'notNote' };
   const relative = lp.startsWith('./') || lp.startsWith('../');
@@ -53,12 +59,24 @@ class NoteExistsError extends Error {}
 
 const refusedName = (e: unknown) => hasErrorKind(e, ERROR_KINDS.escape) || hasErrorKind(e, ERROR_KINDS.forbidden);
 
+/** True when `path` is a readable file whose name is spelled exactly so in its folder's listing. */
+async function isNoteAt(ctx: CommandContext, path: string): Promise<boolean> {
+  try {
+    const names = await ctx.host.fs.list(dirOf(path));
+    if (!names.includes(path.slice(path.lastIndexOf('/') + 1))) return false;
+    await ctx.host.fs.read(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Creates the empty note an unresolved link names and opens it. Returns its path, or undefined. */
 export async function createFromLink(ctx: CommandContext, linkpath: string, sourcePath: string): Promise<string | undefined> {
   const { host } = ctx;
   const path = newNotePath(linkpath, sourcePath);
   if (typeof path !== 'string') {
-    host.notify('warn', t('links.create.notNote', linkpath));
+    host.notify('warn', path.refused === 'notNote' ? t('links.create.notNote', linkpath) : t('fileOps.name.invalid'));
     return undefined;
   }
   // A path above the vault root, or one with no name left, can never be created.
@@ -66,11 +84,18 @@ export async function createFromLink(ctx: CommandContext, linkpath: string, sour
     host.notify('warn', t('fileOps.name.invalid'));
     return undefined;
   }
-  if (await host.fs.exists(path)) {
-    host.notify('warn', t('fileOps.exists'));
-    return undefined;
-  }
   try {
+    // Inside the try: the real vault_exists refuses names Windows refuses (CON, `: ? *`) with escape.
+    if (await host.fs.exists(path)) {
+      // The index may not have caught up with a note made a moment ago: open it if it is a note at exactly
+      // this path. Anything else (another case, a folder) is only reported. Nothing is ever overwritten.
+      if (await isNoteAt(ctx, path)) {
+        await ctx.openFile(path);
+        return path;
+      }
+      host.notify('warn', t('fileOps.exists'));
+      return undefined;
+    }
     await host.fs.modify(path, (current) => {
       if (current !== '') throw new NoteExistsError();
       return '';
@@ -120,4 +145,28 @@ export async function openLinkTarget(
       await openExternal(target.url);
       return;
   }
+}
+
+/** The editor's link click: never throws, never drops the click silently. */
+export async function handleOpenLink(
+  ctx: CommandContext | undefined,
+  target: OpenTarget,
+  sourcePath: string,
+  openExternal: (url: string) => Promise<unknown>,
+  fallback: { openFile: (path: string) => Promise<unknown>; notify: (kind: 'info', message: string) => void },
+): Promise<void> {
+  if (ctx) {
+    await runCommand(ctx, () => openLinkTarget(ctx, target, sourcePath, openExternal));
+    return;
+  }
+  // Vault settings are still loading: a note can open without the command context; the rest waits.
+  if (target.kind === 'note') {
+    try {
+      await fallback.openFile(target.path);
+    } catch (e) {
+      console.error('[labnoteo] open link failed:', e);
+    }
+    return;
+  }
+  fallback.notify('info', t('links.notReady'));
 }

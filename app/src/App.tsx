@@ -11,7 +11,7 @@ import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { useLinkIndex } from './links/useLinkIndex';
-import { openLinkTarget } from './links/createFromLink';
+import { handleOpenLink } from './links/createFromLink';
 import { Editor, type EditorHandle } from './editor/Editor';
 import type { OpenTarget } from './editor/live/links';
 import type { EditorView } from '@codemirror/view';
@@ -197,9 +197,10 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   // 편집기의 링크 열기(SP4 Task 10): 노트는 subpath/앵커 줄에서 열고, 없는 노트는 만들어 열고, 바깥 주소는 openExternal 로 보낸다.
   // 바깥 주소 열기는 Task 11 이 잇는다. 그때까지는 안내만 한다.
   const openExternalStub = async () => host.notify('info', t('live.link.externalLater'));
+  // 실패는 알림으로 바꾸고(runCommand), 설정을 읽는 중이면 노트 링크는 그대로 열고 나머지는 안내한다.
   const onOpenLink = (target: OpenTarget) => {
-    if (!ctx || !selected) return;
-    void openLinkTarget(ctx, target, selected, openExternalStub);
+    if (!selected) return;
+    void handleOpenLink(ctx, target, selected, openExternalStub, { openFile, notify: host.notify });
   };
   const onEditorMenu = (e: MouseEvent, view: EditorView) => {
     const path = notes.activePath();

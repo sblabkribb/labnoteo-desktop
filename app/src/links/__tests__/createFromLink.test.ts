@@ -2,7 +2,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { t } from '../../i18n/t';
 import { createTestHost } from '../../labnote/__tests__/testHost';
-import { createFromLink, newNotePath, openLinkTarget } from '../createFromLink';
+import { createFromLink, handleOpenLink, newNotePath, openLinkTarget } from '../createFromLink';
+import { coreT } from '../../labnote/i18n';
 
 describe('createFromLink', () => {
   it('places new notes per D6', () => {
@@ -23,8 +24,9 @@ describe('createFromLink', () => {
     expect(h.opened).toEqual(['notes/New idea.md']);
     expect(h.notes).toContainEqual({ kind: 'info', message: t('links.created', 'notes/New idea.md') });
   });
-  it('never overwrites a note that appeared meanwhile', async () => {
+  it('never overwrites a note that appeared between the check and the write', async () => {
     const h = createTestHost({ 'notes/a.md': '', 'notes/x.md': 'keep' });
+    vi.spyOn(h.ctx.host.fs, 'exists').mockResolvedValueOnce(false);
     expect(await createFromLink(h.ctx, 'x', 'notes/a.md')).toBeUndefined();
     expect(h.vault.files()['notes/x.md']).toBe('keep');
     expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.exists') });
@@ -33,6 +35,38 @@ describe('createFromLink', () => {
     const h = createTestHost({ 'a.md': '' });
     h.vault.failNext('vault_modify', 'forbidden');
     expect(await createFromLink(h.ctx, 'CON', 'a.md')).toBeUndefined();
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.name.invalid') });
+  });
+  it('reports a name Windows refuses when the existence check rejects it', async () => {
+    // The real vault_exists runs the path through Rust `confine`, which refuses CON, `: ? *` and the like.
+    const h = createTestHost({ 'a.md': '' });
+    h.vault.failNext('vault_exists', 'escape');
+    expect(await createFromLink(h.ctx, 'Exp 1: PCR', 'a.md')).toBeUndefined();
+    expect(h.vault.files()['Exp 1: PCR.md']).toBeUndefined();
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.name.invalid') });
+  });
+  it('opens the note when it already exists at exactly that path (index not refreshed yet)', async () => {
+    const h = createTestHost({ 'notes/a.md': '', 'notes/x.md': 'keep' });
+    expect(await createFromLink(h.ctx, 'x', 'notes/a.md')).toBe('notes/x.md');
+    expect(h.vault.files()['notes/x.md']).toBe('keep');
+    expect(h.opened).toEqual(['notes/x.md']);
+  });
+  it('warns rather than opens when only a different-case entry or a folder exists', async () => {
+    const h = createTestHost({ 'notes/a.md': '', 'notes/X.md': 'keep', 'notes/dir.md/inner.md': 'k' });
+    expect(await createFromLink(h.ctx, 'x', 'notes/a.md')).toBeUndefined();
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.exists') });
+    expect(await createFromLink(h.ctx, 'dir', 'notes/a.md')).toBeUndefined();
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.exists') });
+    expect(h.vault.files()['notes/X.md']).toBe('keep');
+    expect(h.opened).toEqual([]);
+  });
+  it('refuses a link path with no name', async () => {
+    expect(newNotePath('.', 'notes/a.md')).toEqual({ refused: 'invalid' });
+    expect(newNotePath('sub/..', 'notes/a.md')).toEqual({ refused: 'invalid' });
+    expect(newNotePath('sub/', 'notes/a.md')).toEqual({ refused: 'invalid' });
+    const h = createTestHost({ 'notes/a.md': '' });
+    expect(await createFromLink(h.ctx, '.', 'notes/a.md')).toBeUndefined();
+    expect(h.vault.files()['notes.md']).toBeUndefined();
     expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.name.invalid') });
   });
   it('refuses to create an attachment from a link', async () => {
@@ -65,5 +99,25 @@ describe('createFromLink', () => {
     await openLinkTarget(h.ctx, { kind: 'external', url: 'https://a.b' }, 'a.md', async (u) => void urls.push(u));
     expect(h.opened).toEqual(['B.md']);
     expect(urls).toEqual(['https://a.b']);
+  });
+  it('reports a failed create instead of leaving an unhandled rejection', async () => {
+    const h = createTestHost({ 'a.md': '' });
+    h.vault.failNext('vault_modify', 'io');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      handleOpenLink(h.ctx, { kind: 'create', linkpath: 'x' }, 'a.md', async () => {}, { openFile: async () => {}, notify: () => {} }),
+    ).resolves.toBeUndefined();
+    err.mockRestore();
+    expect(h.notes.at(-1)?.kind).toBe('error');
+    expect(h.notes.at(-1)?.message).toContain(coreT('Command failed: {0}', '').trim());
+  });
+  it('still opens a note while the command context is loading', async () => {
+    const openFile = vi.fn(async () => {});
+    const notify = vi.fn();
+    await handleOpenLink(undefined, { kind: 'note', path: 'Home.md' }, 'a.md', async () => {}, { openFile, notify });
+    expect(openFile).toHaveBeenCalledWith('Home.md');
+    await handleOpenLink(undefined, { kind: 'create', linkpath: 'x' }, 'a.md', async () => {}, { openFile, notify });
+    expect(notify).toHaveBeenCalledWith('info', t('links.notReady'));
+    expect(openFile).toHaveBeenCalledTimes(1);
   });
 });
