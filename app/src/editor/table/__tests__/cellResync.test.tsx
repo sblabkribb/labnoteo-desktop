@@ -62,15 +62,19 @@ describe('셀 편집기: 바깥에 쓰지 못한 입력', () => {
     expect(v.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| 1y | 2 |\n');
   });
 
-  it('표를 찾지 못하면 셀 편집기를 걷고, 칸에는 문서에 있던 글자를 그린다', () => {
+  it('표를 찾지 못하면 셀 편집기를 걷고, 칸에는 문서에 있던 글자를 그리며, 포커스는 바깥 편집기로 돌아온다', async () => {
     const v = mount(`${T}\n`);
     focusCell(v, 0, 1, 0, 'end');
     const nv = activeCellView(v)!;
+    expect(nv.hasFocus).toBe(true);
     const td = cellEl(v, 1, 0);
     v.dispatch({ effects: setActiveCell.of({ tableFrom: 5, r: 1, c: 0 }) }); // 그 자리에는 표가 없다
     typeIn(nv, 'x');
     expect(v.state.doc.toString()).toBe(`${T}\n`);
     expect(liveCellEditors()).toBe(0);
     expect(td.textContent).toBe('1');
+    // 포커스는 마이크로태스크에서 돌려준다(close 의 refocus)
+    await Promise.resolve();
+    expect(v.hasFocus).toBe(true);
   });
 });
