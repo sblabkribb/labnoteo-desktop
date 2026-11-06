@@ -26,6 +26,7 @@ import { closeAllDialogs } from './labnote/host/dialogStore';
 import { editorAwareFs } from './labnote/editorAwareFs';
 import { activeEditTarget } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
+import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
 import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
@@ -77,6 +78,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     closeActive,
   });
   usePaletteHotkey(ctx);
+  // 설정을 읽은 뒤 보관함마다 한 번: 번들 카탈로그가 바뀌었으면 알린다. 여는 것을 막지 않는다(기다리지 않고, 던지지 않는다).
+  const catalogNoticed = useRef(false);
+  useEffect(() => {
+    if (!ctx || catalogNoticed.current) return;
+    catalogNoticed.current = true;
+    void catalogNoticeOnOpen(ctx);
+  }, [ctx]);
   useEffect(() => {
     registerAllCommands();
     // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다

@@ -28,7 +28,7 @@ beforeEach(() => {
     if (cmd === 'vault_tree') return [];
     if (cmd === 'index_rebuild') return { indexed: 0, skipped: 0 };
     if (cmd === 'app_version') return '0.0.0';
-    if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+    if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -50,7 +50,7 @@ describe('앱', () => {
   });
   it('새 노트를 만들면 편집기가 그 노트를 연다', async () => {
     const user = userEvent.setup();
-    tauri.invoke.mockImplementation(async (cmd: string) => {
+    tauri.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === 'vault_current') return vaults.first;
       if (cmd === 'vault_tree') return [];
       if (cmd === 'index_rebuild') return { indexed: 0, skipped: 0 };
@@ -58,7 +58,7 @@ describe('앱', () => {
       if (cmd === 'vault_exists') return false;
       if (cmd === 'vault_modify') return { kind: 'ok' };
       if (cmd === 'vault_read') return '';
-      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+      if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
@@ -88,10 +88,10 @@ describe('앱', () => {
     expect(within(screen.getByRole('contentinfo')).getByText(/0\.0\.0/)).toBeTruthy();
   });
   it('보관함을 고르는 화면에도 main 이 하나 있다', async () => {
-    tauri.invoke.mockImplementation(async (cmd: string) => {
+    tauri.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === 'vault_current') return null;
       if (cmd === 'app_version') return '0.0.0';
-      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+      if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
@@ -102,12 +102,12 @@ describe('앱', () => {
   it('색인하는 동안 상태줄이 알리고, 끝난 뒤 건너뛴 노트 수를 role=status 로 알린다', async () => {
     let finish!: (v: { indexed: number; skipped: number }) => void;
     const pending = new Promise<{ indexed: number; skipped: number }>((r) => (finish = r));
-    tauri.invoke.mockImplementation(async (cmd: string) => {
+    tauri.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === 'vault_current') return vaults.first;
       if (cmd === 'vault_tree') return [];
       if (cmd === 'index_rebuild') return pending;
       if (cmd === 'app_version') return '0.0.0';
-      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+      if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
@@ -135,6 +135,7 @@ describe('앱', () => {
       if (cmd === 'app_version') return '0.0.0';
       if (cmd === 'settings_vault_read') return stored;
       if (cmd === 'settings_import_plugin') return JSON.stringify({ autoSyncUnitOpToc: false, llmApiKey: 'sk-secret' });
+      if (cmd === 'vault_exists') return false; // 카탈로그 알림: 아직 카탈로그 파일이 없다
       if (cmd === 'settings_vault_write') {
         stored = args?.content ?? null;
         return null;
@@ -174,10 +175,10 @@ describe('앱', () => {
     expect(container.querySelector('.shell')!.hasAttribute('inert')).toBe(false);
   });
   it('보관함을 고르는 첫 화면에서도 테마를 바꿀 수 있다', async () => {
-    tauri.invoke.mockImplementation(async (cmd: string) => {
+    tauri.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === 'vault_current') return null;
       if (cmd === 'app_version') return '0.0.0';
-      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+      if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);

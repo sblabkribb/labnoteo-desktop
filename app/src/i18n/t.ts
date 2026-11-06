@@ -116,6 +116,7 @@ const ko: Record<string, string> = {
   'command.noteBusy': '노트가 아직 열리는 중이거나 바깥 변경을 확인해야 해서 바꾸지 않았습니다.',
   'command.noteNotSaved': '변경은 편집기에 들어갔지만 저장하지 못했습니다. 편집기의 안내를 따르세요.',
   'command.noteChanged': '명령이 도는 동안 노트가 바뀌어 아무것도 넣지 않았습니다. 다시 실행하세요.',
+  'syncChecklist.partial': '목록에서 빼거나 고칠 항목도 있습니다. 그 정리는 이름 바꾸기 기능과 함께 추가됩니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -234,6 +235,7 @@ const en: Record<string, string> = {
   'command.noteBusy': 'The note is still loading or has an unresolved outside change, so nothing was changed.',
   'command.noteNotSaved': "The change is in the editor but could not be saved. Follow the editor's notice.",
   'command.noteChanged': 'The note changed while the command ran, so nothing was inserted. Run it again.',
+  'syncChecklist.partial': 'Some entries also need removing or fixing; that cleanup arrives with the rename feature.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

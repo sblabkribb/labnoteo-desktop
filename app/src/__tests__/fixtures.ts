@@ -16,10 +16,15 @@ export const EVENTS_FIXTURE = load<{
 }>('ipc-events.json');
 
 /**
- * `VaultView` 가 열릴 때마다 부르는 커맨드(보관함별 설정)에 답한다: 저장된 설정 없음, 가져올 data.json 없음, 저장 성공.
+ * `VaultView` 가 열릴 때마다 부르는 커맨드에 답한다:
+ * - 보관함별 설정: 저장된 설정 없음, 가져올 data.json 없음, 저장 성공.
+ * - 카탈로그 알림(catalogNoticeOnOpen)이 보는 `resources/workflows/*` : 아직 없다(`vault_exists` false). 카탈로그가 있는
+ *   보관함은 fakeVault 위의 App.catalogNotice.test.tsx 가 본다.
  * 그 밖의 커맨드에는 `undefined` 를 돌려주므로, 부르는 쪽은 이 뒤에 자기 "unexpected command" 던지기를 그대로 둔다.
  */
-export function baseInvoke(cmd: string, _args?: unknown): unknown {
+export function baseInvoke(cmd: string, args?: unknown): unknown {
   if (cmd === 'settings_vault_read' || cmd === 'settings_import_plugin' || cmd === 'settings_vault_write') return null;
+  const path = (args as { path?: unknown } | undefined)?.path;
+  if (cmd === 'vault_exists' && typeof path === 'string' && path.startsWith('resources/workflows/')) return false;
   return undefined;
 }

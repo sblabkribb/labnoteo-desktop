@@ -27,24 +27,24 @@ const NOTE = 'Day 1.labnote.md';
 
 /** 보관함이 열린 채로 시작한다. 노트 하나가 트리에 있다. 쓰기는 세어 둔다(저장되면 안 되는 곳을 본다). */
 function vaultReady(body = 'PCR 결과\n') {
-  tauri.invoke.mockImplementation(async (cmd: string) => {
+  tauri.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
     if (cmd === 'vault_current') return VAULT;
     if (cmd === 'vault_tree') return [{ path: NOTE, name: 'Day 1', isDir: false, depth: 0 }];
     if (cmd === 'index_rebuild') return { indexed: 1, skipped: 0 };
     if (cmd === 'app_version') return '0.0.0';
     if (cmd === 'vault_read') return body;
     if (cmd === 'vault_modify') return { kind: 'ok' };
-    if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+    if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
     throw new Error(`unexpected ${cmd}`);
   });
 }
 
 function picker() {
-  tauri.invoke.mockImplementation(async (cmd: string) => {
+  tauri.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
     if (cmd === 'vault_current') return null;
     if (cmd === 'app_version') return '0.0.0';
     if (cmd === 'vault_open') throw { kind: 'vaultNotFound', message: 'vault root not found' };
-    if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
+    if (baseInvoke(cmd, args) !== undefined) return baseInvoke(cmd, args);
     throw new Error(`unexpected ${cmd}`);
   });
 }
