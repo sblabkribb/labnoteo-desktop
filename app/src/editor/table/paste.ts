@@ -5,7 +5,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { pasteRect } from './model';
 import { isTabular, parseTSV } from './tsv';
-import { locateTable, placeBlock, shiftChanges, tableFromGrid } from './commands';
+import { locateTable, placeTable, shiftChanges, tableFromGrid } from './commands';
 import { findTables } from './field';
 import { activeCell, cellExtras, focusCell, outerOf } from './cellEditor';
 
@@ -75,7 +75,7 @@ function inRawText(state: EditorState, pos: number): boolean {
   return false;
 }
 
-/** 바깥 편집기의 선택 자리에 TSV 로 새 표를 넣는다. 커서는 표 끝. 넣었으면 true. 코드·머리말·표 안이면 false. */
+/** 바깥 편집기의 선택 자리에 TSV 로 새 표를 넣는다. 커서는 표 아래 빈 문단 줄. 넣었으면 true. 코드·머리말·표 안이면 false. */
 export function pasteAsTable(view: EditorView, text: string): boolean {
   const state = view.state;
   if (isLocked(state) || !isTabular(text) || touchesTable(state)) return false;
@@ -84,10 +84,9 @@ export function pasteAsTable(view: EditorView, text: string): boolean {
   const grid = parseTSV(text);
   const block = tableFromGrid(grid, state.lineBreak);
   const { from, to } = state.selection.main;
-  const { change, start } = placeBlock(state, from, to, block);
-  // 커서는 표의 끝(CodeMirror 위치는 줄바꿈을 한 칸으로 센다)
-  const length = state.toText(block).length;
-  view.dispatch({ changes: change, selection: { anchor: start + length }, annotations: annotations(), scrollIntoView: true });
+  // 표 뒤에는 빈 줄과 빈 문단 줄이 온다. 커서는 그 빈 문단 줄: 표 끝에 두면 Enter 다음에 친 글이 표의 행이 된다
+  const { change, after } = placeTable(state, from, to, block);
+  view.dispatch({ changes: change, selection: { anchor: after }, annotations: annotations(), scrollIntoView: true });
   return true;
 }
 

@@ -314,7 +314,7 @@ describe('insertTable', () => {
     v.dispatch({ selection: { anchor: 2 } });
     expect(insertTable(v)).toBe(true);
     const table = '|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |';
-    expect(v.state.doc.toString()).toBe(`앞 글\n\n${table}\n\n뒤 글`);
+    expect(v.state.doc.toString()).toBe(`앞 글\n\n${table}\n\n\n뒤 글`);
     expect(v.state.field(activeCell)).toEqual({ tableFrom: 5, r: 0, c: 0 });
     expect(activeCellView(v)).not.toBeNull();
     expect(wrapOf(v).querySelectorAll('tr')).toHaveLength(3);
@@ -327,18 +327,39 @@ describe('insertTable', () => {
   it('빈 문서와 빈 줄에서는 앞에 줄을 더하지 않는다', () => {
     const v = mount('');
     expect(insertTable(v, 2, 2)).toBe(true);
-    expect(v.state.doc.toString()).toBe('|  |  |\n| --- | --- |\n|  |  |');
+    expect(v.state.doc.toString()).toBe('|  |  |\n| --- | --- |\n|  |  |\n\n');
     const w = mount('앞\n\n');
     w.dispatch({ selection: { anchor: w.state.doc.length } });
     expect(insertTable(w, 2, 1)).toBe(true);
-    expect(w.state.doc.toString()).toBe('앞\n\n|  |\n| --- |\n|  |');
+    expect(w.state.doc.toString()).toBe('앞\n\n|  |\n| --- |\n|  |\n\n');
+  });
+
+  it('빈 노트: 표 아래에 빈 줄과 빈 문단 줄을 두어, 칸에서 나와 친 글이 숨은 행이 되지 않는다(되돌리기 한 번)', () => {
+    const v = mount('');
+    expect(insertTable(v, 2, 2)).toBe(true);
+    const table = '|  |  |\n| --- | --- |\n|  |  |';
+    expect(v.state.doc.toString()).toBe(`${table}\n\n`);
+    expect(undoDepth(v.state)).toBe(1);
+    // 칸에서 나오면 문서를 더 바꾸지 않고 빈 문단 줄로 간다
+    const nv = activeCellView(v)!;
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    expect(runScopeHandlers(nv, esc, 'editor')).toBe(true);
+    expect(v.state.doc.toString()).toBe(`${table}\n\n`);
+    expect(v.state.selection.main.head).toBe(v.state.doc.length);
+    const head = v.state.selection.main.head;
+    v.dispatch({ changes: { from: head, insert: '글' }, selection: { anchor: head + 1 }, userEvent: 'input.type' });
+    expect(v.state.doc.toString()).toBe(`${table}\n\n글`);
+    expect(wrapOf(v).querySelectorAll('tr')).toHaveLength(2);
+    undo(v);
+    undo(v);
+    expect(v.state.doc.toString()).toBe('');
   });
 
   it('CRLF 문서에서는 CRLF 로 넣는다', () => {
     const v = mount('앞\r\n', { extra: [EditorState.lineSeparator.of('\r\n')] });
     v.dispatch({ selection: { anchor: 0 } });
     insertTable(v, 2, 1);
-    expect(v.state.sliceDoc()).toBe('앞\r\n\r\n|  |\r\n| --- |\r\n|  |\r\n');
+    expect(v.state.sliceDoc()).toBe('앞\r\n\r\n|  |\r\n| --- |\r\n|  |\r\n\r\n');
     expect(v.state.field(activeCell)).toEqual({ tableFrom: 3, r: 0, c: 0 });
   });
 });
@@ -379,7 +400,7 @@ describe('편집기의 표 넣기 단추', () => {
     await waitFor(() => expect(button.disabled).toBe(false));
     await act(async () => button.click());
     const v = e.view();
-    expect(v.state.doc.toString()).toBe('# 노트\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n');
+    expect(v.state.doc.toString()).toBe('# 노트\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\n');
     expect(v.state.field(activeCell)).toMatchObject({ r: 0, c: 0 });
     expect(activeCellView(v)).not.toBeNull();
     e.utils.unmount();
@@ -392,7 +413,7 @@ describe('편집기의 표 넣기 단추', () => {
     const isMac = /Mac/.test(navigator.platform);
     const ev = new KeyboardEvent('keydown', { key: 't', altKey: true, ctrlKey: !isMac, metaKey: isMac, bubbles: true, cancelable: true });
     await act(async () => void runScopeHandlers(v, ev, 'editor'));
-    expect(v.state.doc.toString()).toBe('본문\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |');
+    expect(v.state.doc.toString()).toBe('본문\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\n');
     e.utils.unmount();
   });
 

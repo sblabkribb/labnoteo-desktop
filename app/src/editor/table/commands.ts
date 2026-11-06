@@ -205,6 +205,15 @@ export function runTableOp(view: EditorView, tableFrom: number, op: TableOp): bo
 
 // ---------------------------------------------------------------- 새 표
 
+/** 블록 앞에 둘 줄바꿈: 줄 가운데면 둘, 줄 시작이면 앞 줄이 빈 줄이 아닐 때 하나. */
+function gapBefore(state: EditorState, from: number): string {
+  const doc = state.doc;
+  const br = state.lineBreak;
+  const head = doc.lineAt(from);
+  if (from > head.from) return br + br;
+  return head.number > 1 && doc.line(head.number - 1).length > 0 ? br : '';
+}
+
 /**
  * `block`(여러 줄 글)을 [from, to) 에 따로 선 블록으로 넣는 변경: 앞뒤 글과는 빈 줄 하나로 떨어진다.
  * 이미 빈 줄이 있으면 더하지 않는다. `start` 는 새 문서에서 블록이 시작하는 위치.
@@ -212,16 +221,36 @@ export function runTableOp(view: EditorView, tableFrom: number, op: TableOp): bo
 export function placeBlock(state: EditorState, from: number, to: number, block: string): { change: Change; start: number } {
   const doc = state.doc;
   const br = state.lineBreak;
-  const head = doc.lineAt(from);
   const tail = doc.lineAt(to);
-  let before = '';
-  if (from > head.from) before = br + br;
-  else if (head.number > 1 && doc.line(head.number - 1).length > 0) before = br;
+  const before = gapBefore(state, from);
   let after = '';
   if (to < tail.to) after = br + br;
   else if (tail.number < doc.lines && doc.line(tail.number + 1).length > 0) after = br;
   // CodeMirror 의 위치는 줄바꿈(CRLF 도)을 한 칸으로 센다
   return { change: { from, to, insert: before + block + after }, start: from + state.toText(before).length };
+}
+
+/**
+ * 표의 원문 `block` 을 [from, to) 에 따로 선 블록으로 넣는 변경. 앞 글과는 `placeBlock` 처럼 빈 줄 하나로 떨어진다.
+ * 뒤에는 언제나 빈 줄 하나와 빈 문단 줄 하나가 온다: 표 바로 아래 줄(이나 표 끝)에 친 글은 GFM 이 표의 행으로 읽으므로,
+ * 표에서 나온 커서가 설 줄이 있어야 한다(셀 편집기의 `exitBelow` 와 같은 규칙). 뒤에 글이 이어지면 빈 문단 줄 바로 다음 줄이다.
+ * 이미 있는 빈 줄은 다시 쓴다. `start` 는 새 문서에서 표가 시작하는 위치, `after` 는 그 빈 문단 줄의 시작.
+ */
+export function placeTable(state: EditorState, from: number, to: number, block: string): { change: Change; start: number; after: number } {
+  const doc = state.doc;
+  const br = state.lineBreak;
+  const before = gapBefore(state, from);
+  const tail = doc.lineAt(to);
+  // 표 끝과 다음 글(이나 문서 끝) 사이에 줄바꿈 셋(표 끝, 빈 줄, 빈 문단 줄)이 있어야 한다.
+  // 줄 끝에 넣으면 그 줄의 줄바꿈과 뒤따르는 빈 줄마다 하나씩 이미 있다(문서 끝이면 마지막 줄의 것은 없지만 하나 덜 필요하다).
+  let after = br + br + br;
+  if (to === tail.to) {
+    let blank = 0;
+    for (let n = tail.number + 1; n <= doc.lines && blank < 2 && doc.line(n).length === 0; n++) blank++;
+    after = br.repeat(2 - blank);
+  }
+  const start = from + state.toText(before).length;
+  return { change: { from, to, insert: before + block + after }, start, after: start + state.toText(block).length + 2 };
 }
 
 /**
@@ -234,7 +263,7 @@ export function insertTable(view: EditorView, rowCount = 3, cols = 3): boolean {
   // 칸에 포커스가 있으면(바깥 커서가 표 안이면) 표를 가르지 않고 표 아래에 넣는다
   const line = state.doc.lineAt(tableAwareInsertPos(state, state.selection.main.head));
   const table = newTable(Math.max(0, rowCount - 1), cols, state.lineBreak);
-  const { change, start } = placeBlock(state, line.to, line.to, table);
+  const { change, start } = placeTable(state, line.to, line.to, table);
   view.dispatch({
     changes: change,
     selection: { anchor: start },
