@@ -9,7 +9,7 @@ export interface VaultChange {
 
 export const VAULT_CHANGED = 'vault://changed';
 
-type ListenFn = (
+export type ListenFn = (
   event: string,
   handler: (e: { payload: VaultChange }) => void,
 ) => Promise<UnlistenFn>;
