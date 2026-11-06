@@ -545,6 +545,7 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 }
 .context-menu-item:hover:not(:disabled), .context-menu-item:focus { background: var(--bg-selected); }
 .context-menu-item:disabled { color: var(--text-muted); }
+.context-menu-separator { flex: none; height: 1px; margin: var(--space-1) 0; background: var(--border); }
 
 /* 사이드바 탭: 파일 / 워크플로 */
 .sidebar-tabs {

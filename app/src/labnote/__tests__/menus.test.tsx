@@ -5,13 +5,14 @@ import { resolve } from 'node:path';
 import type { PickItem, WorkflowItem } from '@labnoteo/core';
 import type { EditorView } from '@codemirror/view';
 import { setLang } from '../../i18n/lang';
+import { t } from '../../i18n/t';
 import type { TreeEntry } from '../../tree/useTree';
 import { createFakeVault } from '../../__tests__/fakeVault';
 import { runCommand } from '../commands/runCommand';
 import { coreT } from '../i18n';
 import { editorMenu, noteTreeMenu } from '../menus';
 import { ContextMenu } from '../ui/ContextMenu';
-import { closeMenu, openMenu, type MenuItem } from '../ui/menuStore';
+import { closeMenu, openMenu, type MenuAction, type MenuItem } from '../ui/menuStore';
 import { mountEditor } from './editorHarness';
 import { createTestHost, type TestHost } from './testHost';
 
@@ -55,7 +56,9 @@ const ENTRIES: TreeEntry[] = [
 ];
 
 const labels = (items: MenuItem[]) => items.map((i) => (i.label !== undefined ? i.label : i.labelKey));
-const byLabel = (items: MenuItem[], label: string) => items.find((i) => i.label === label)!;
+const byLabel = (items: MenuItem[], label: string) => items.find((i): i is MenuAction => i.label === label)!;
+/** 서식 항목(구분선 뒤) 앞의 항목들. */
+const head = (items: MenuItem[]) => items.slice(0, items.findIndex((i) => i.separator));
 
 let h: TestHost;
 
@@ -123,24 +126,23 @@ describe('noteTreeMenu', () => {
 describe('editorMenu', () => {
   it('the editor menu on a workflow note offers Insert unit operation', () => {
     h = createTestHost();
-    expect(labels(editorMenu(h.ctx, WF_PATH))).toEqual([
+    expect(labels(head(editorMenu(h.ctx, WF_PATH)))).toEqual([
       coreT('Insert unit operation'),
       coreT('Insert date'),
       coreT('Insert date and time'),
       coreT('Insert issue marker'),
     ]);
     expect(coreT('Insert unit operation')).toBe('유닛 오퍼레이션 삽입');
-    expect(labels(editorMenu(h.ctx, 'notes/a.labnote.md'))).toEqual([
+    expect(labels(head(editorMenu(h.ctx, 'notes/a.labnote.md')))).toEqual([
       coreT('Insert date'),
       coreT('Insert date and time'),
       coreT('Insert issue marker'),
     ]);
-    expect(editorMenu(h.ctx, 'notes/plain.md')).toEqual([]);
   });
 
   it('the editor menu on a README offers Insert workflow, and running it inserts no link', async () => {
     h = createTestHost({ [README_PATH]: readme() });
-    expect(labels(editorMenu(h.ctx, README_PATH))).toEqual([
+    expect(labels(head(editorMenu(h.ctx, README_PATH)))).toEqual([
       coreT('Insert workflow'),
       coreT('Sync workflow checklist with folder'),
       coreT('Change experiment status'),
@@ -161,6 +163,62 @@ describe('editorMenu', () => {
     expect(buffer).toContain(`- [ ] ${link}`);
     expect(buffer.slice(buffer.indexOf('## Summary'))).toBe(before.slice(before.indexOf('## Summary')));
     expect(h.opened).toEqual([]);
+  });
+
+  it('editorMenu for a plain note now has the Format items', () => {
+    h = createTestHost();
+    const items = editorMenu(h.ctx, 'notes/plain.md');
+    expect(items[0].separator).toBe(true);
+    // 서식 항목은 labelKey(그릴 때 번역)다: 메뉴를 연 채 언어를 바꿔도 따라간다
+    const keys = items.filter((i) => !i.separator).map((i) => i.labelKey);
+    expect(keys).toEqual(expect.arrayContaining(['cmd.format.bold', 'cmd.format.codeBlock']));
+    expect(t('cmd.format.bold')).toBe('굵게');
+  });
+
+  it('every note ends with one separator and the flat Format items', () => {
+    h = createTestHost();
+    for (const p of [WF_PATH, README_PATH, 'notes/a.labnote.md', 'notes/plain.md']) {
+      const items = editorMenu(h.ctx, p);
+      expect(items.filter((i) => i.separator)).toHaveLength(1);
+      const tail = items.slice(items.findIndex((i) => i.separator) + 1).map((i) => i.labelKey);
+      expect(tail).toEqual([
+        'cmd.format.bold',
+        'cmd.format.italic',
+        'cmd.format.strike',
+        'cmd.format.code',
+        'cmd.format.highlight',
+        'cmd.format.link',
+        'cmd.format.heading1',
+        'cmd.format.heading2',
+        'cmd.format.heading3',
+        'cmd.format.heading4',
+        'cmd.format.heading5',
+        'cmd.format.heading6',
+        'cmd.format.paragraph',
+        'cmd.format.bullet',
+        'cmd.format.numbered',
+        'cmd.format.task',
+        'cmd.format.quote',
+        'cmd.format.codeBlock',
+      ]);
+    }
+  });
+
+  it('the Format menu item bolds the selection in the open note', async () => {
+    h = createTestHost({ 'notes/a.labnote.md': 'a b c' });
+    const m = await h.mount('notes/a.labnote.md');
+    act(() => m.view().dispatch({ selection: { anchor: 2, head: 3 } }));
+    await act(() => runCommand(h.ctx, editorMenu(h.ctx, 'notes/a.labnote.md').find((i) => i.labelKey === 'cmd.format.bold')!.run!));
+    expect(m.view().state.doc.toString()).toBe('a **b** c');
+  });
+
+  it('the context menu draws the separator as role=separator, not a menuitem', () => {
+    h = createTestHost();
+    render(<ContextMenu />);
+    act(() => openMenu(h.ctx, { x: 10, y: 10 }, editorMenu(h.ctx, 'notes/a.labnote.md')));
+    expect(screen.getAllByRole('separator')).toHaveLength(1);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(3 + 18);
+    for (const el of document.querySelectorAll('[role="separator"]')) expect(el.hasAttribute('style')).toBe(false);
   });
 
   it('menus have no style attribute', () => {

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent
 import { t } from '../../i18n/t';
 import { useLang } from '../../i18n/useLang';
 import { runCommand } from '../commands/runCommand';
-import { closeMenu, useMenu, type MenuAnchor, type MenuItem, type MenuState } from './menuStore';
+import { closeMenu, useMenu, type MenuAction, type MenuAnchor, type MenuItem, type MenuState } from './menuStore';
 
 /** 메뉴와 화면 가장자리 사이의 여백(px). */
 const EDGE = 4;
@@ -17,12 +17,12 @@ function anchorPoint(anchor: MenuAnchor): { x: number; y: number } {
 
 const clamp = (v: number, size: number, room: number) => Math.max(EDGE, Math.min(v, room - size - EDGE));
 
-function labelOf(item: MenuItem): string {
+function labelOf(item: MenuAction): string {
   return item.labelKey !== undefined ? t(item.labelKey) : item.label;
 }
 
 function activate(menu: MenuState, item: MenuItem): void {
-  if (item.disabled) return;
+  if (item.separator || item.disabled) return;
   closeMenu({ restoreFocus: true });
   void runCommand(menu.ctx, item.run);
 }
@@ -114,7 +114,10 @@ export function ContextMenu() {
       // 키보드로 연 뒤 메뉴 키를 뗄 때 메뉴 위에 오는 사건: 브라우저 기본 메뉴를 띄우지 않는다
       onContextMenu={(e) => e.preventDefault()}
     >
-      {menu.items.map((item, i) => (
+      {menu.items.map((item, i) =>
+        item.separator ? (
+          <div key={i} role="separator" className="context-menu-separator" />
+        ) : (
         <button
           key={i}
           type="button"
@@ -127,7 +130,8 @@ export function ContextMenu() {
         >
           {labelOf(item)}
         </button>
-      ))}
+        ),
+      )}
     </div>
   );
 }

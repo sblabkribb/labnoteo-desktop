@@ -16,6 +16,7 @@ import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } 
 import { livePreview } from './live';
 import { linkClickHandler } from './live/links';
 import { LIST_KEYS } from './live/listKeys';
+import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
 import { notify } from '../labnote/host/toastStore';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
@@ -376,8 +377,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           { key: INSERT_TABLE_KEY, preventDefault: true, run: (v) => insertTable(v) },
           // 라이브 미리보기 ↔ 소스 보기. 저장소를 바꾸면 띄워 둔 편집기마다(이 편집기 포함) 아래 구독이 모드 칸을 갈아 끼운다.
           { key: TOGGLE_MODE_KEY, preventDefault: true, run: () => (toggleMode(), true) },
+          // 서식(D10). 두 모드 모두에서 듣는다. 표 칸에서는 아래 cellOuterKeys 로 같은 키가 칸의 셀 편집기에 쓴다.
+          ...FORMAT_KEYS.map((f) => ({ key: f.key, preventDefault: true, run: (v: EditorView) => runFormat(v, f) })),
         ]),
       ),
+      // 서식 키를 칸 안에서도 듣는다. runFormat 은 바깥 편집기를 받아 그 칸의 셀 편집기에 쓴다(블록 서식은 칸에서 먹기만 한다).
+      FORMAT_KEYS.map((f) => cellOuterKeys.of({ key: f.key, run: (outer) => runFormat(outer, f) })),
+      // 조합 중의 서식 키(compositionend 뒤로 미룬다)와 Ctrl+Alt+C / Ctrl+Alt+T 의 물리 키 대체. 셀 편집기에도 실린다.
+      formatExtensions(),
       // 칸에 포커스가 있어도 듣는다. 모드를 바꾸면 표 확장이 빠지면서 셀 편집기가 부서지므로, 셀 편집기의 keydown 처리
       // 안에서 바꾸지 않고 그 처리가 끝난 뒤(마이크로태스크)에 바꾸고 바깥 편집기에 초점을 돌려준다.
       cellOuterKeys.of({

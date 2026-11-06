@@ -6,6 +6,7 @@ import * as posix from '@labnoteo/core/posix';
 import { diagnoseExperimentPath } from '@labnoteo/core/lib/labnoteStructure';
 import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
+import { FORMAT_KEYS, runFormatCommand } from '../editor/commands/formatCommands';
 import type { TreeEntry } from '../tree/useTree';
 import type { CommandContext } from './commands/context';
 import { insertDate, insertIssueMarker } from './commands/editorInserts';
@@ -16,7 +17,7 @@ import { insertUnitOp } from './commands/unitOp';
 import { createWorkflowIn, insertWorkflowOnReadme, isExperimentReadme } from './commands/workflow';
 import { coreT } from './i18n';
 import { README } from './paths';
-import type { MenuItem } from './ui/menuStore';
+import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
 
 /** 폴더가 실험 폴더이거나 그 안에 있으면 그 실험 폴더. */
 function experimentOf(dir: string): string | undefined {
@@ -29,9 +30,9 @@ function experimentOf(dir: string): string | undefined {
  * - 파일: 열기, 이름 바꾸기, 삭제. 실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다.
  * - 폴더: 여기에 새 노트, 새 폴더, 이름 바꾸기, 삭제. 실험 안의 폴더면 워크플로 생성(그 실험에)을 더한다.
  */
-export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: readonly TreeEntry[]): MenuItem[] {
+export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: readonly TreeEntry[]): MenuAction[] {
   const { path, isDir } = entry;
-  const tail: MenuItem[] = [
+  const tail: MenuAction[] = [
     { labelKey: 'menu.rename', run: () => renameEntry(ctx, path, isDir, entries) },
     { labelKey: 'menu.delete', run: () => deleteEntry(ctx, path, isDir) },
   ];
@@ -67,13 +68,25 @@ function insertItems(ctx: CommandContext): MenuItem[] {
 }
 
 /**
- * 편집기 본문의 메뉴(`path` 는 열린 노트). 표 칸의 메뉴는 표가 따로 띄운다.
+ * 서식 항목: 구분선 하나 뒤에 납작하게(MenuItem 에는 하위 메뉴가 없다). 이름은 labelKey 라 그릴 때 번역한다.
+ * 블록 서식은 표 칸에서 아무것도 하지 않는다(runFormat).
+ */
+function formatItems(ctx: CommandContext): MenuItem[] {
+  return [MENU_SEPARATOR, ...FORMAT_KEYS.map((f): MenuItem => ({ labelKey: f.nameKey, run: async () => runFormatCommand(ctx, f) }))];
+}
+
+/**
+ * 편집기 본문의 메뉴(`path` 는 열린 노트). 표 칸의 메뉴는 표가 따로 띄운다. 어느 노트든 끝에 서식 항목이 붙는다.
  * - 워크플로 노트: 유닛 오퍼레이션 삽입, 그리고 넣기 명령.
  * - 실험 README: 워크플로 삽입(만들고 체크리스트에 등록, 커서에는 링크를 넣지 않는다), 체크리스트 맞추기,
  *   실험 상태 변경, 논의 표시 전환, 그리고 넣기 명령.
- * - 그 밖의 .labnote.md: 넣기 명령. 일반 .md 에는 메뉴가 없다.
+ * - 그 밖의 .labnote.md: 넣기 명령. 일반 .md 는 서식 항목만.
  */
 export function editorMenu(ctx: CommandContext, path: string): MenuItem[] {
+  return [...noteItems(ctx, path), ...formatItems(ctx)];
+}
+
+function noteItems(ctx: CommandContext, path: string): MenuItem[] {
   if (isValidWorkflowPath(path)) {
     return [{ label: coreT('Insert unit operation'), run: () => insertUnitOp(ctx) }, ...insertItems(ctx)];
   }

@@ -169,7 +169,8 @@ describe('명령 팔레트', () => {
     render(<Harness ctx={makeCtx()} />);
     ctrlPInShadow();
     await screen.findByRole('dialog');
-    expect(optionLabels()).toEqual(['실험 생성 (Create experiment)', '워크플로 생성 (Create workflow)', '소스 보기 전환 (Ctrl+E)']);
+    expect(optionLabels().slice(0, 3)).toEqual(['실험 생성 (Create experiment)', '워크플로 생성 (Create workflow)', '소스 보기 전환 (Ctrl+E)']);
+    expect(optionLabels()).toContain('굵게 (Ctrl+B)'); // 서식 명령도 앱 명령으로 이어진다(formatCommands.test.tsx)
     await user.type(screen.getByRole('combobox'), 'editor-toggle-source');
     expect(optionLabels()[0]).toBe('소스 보기 전환 (Ctrl+E)');
     await user.keyboard('{Enter}');
