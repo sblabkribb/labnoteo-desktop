@@ -7,6 +7,12 @@
 //! argument on either side, or in the fixture alone, turns one of the two red.
 //! Neither test reads the other's source, and the fixture itself is only as
 //! right as the two tests that pin it.
+//!
+//! The other half of the wire gets the same treatment: `ipc-errors.json` (the
+//! `kind` strings of a rejected command) and `ipc-events.json` (the name,
+//! payload fields and `kind` values of `vault://changed`) are read here against
+//! the Rust `Serialize` impls and in `src/fs/__tests__/ipcErrors.test.ts` /
+//! the editor and events tests against the TypeScript consumers.
 
 use serde_json::{json, Value};
 use tauri::ipc::{CallbackFn, InvokeBody};
@@ -17,6 +23,8 @@ use labnoteo_app_lib::index::IndexState;
 use labnoteo_app_lib::vault::{SettingsFile, VaultState};
 
 const ARGS: &str = include_str!("ipc-args.json");
+const ERRORS: &str = include_str!("ipc-errors.json");
+const EVENTS: &str = include_str!("ipc-events.json");
 
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
@@ -168,4 +176,88 @@ fn fixture_covers_every_registered_command() {
     let stale: Vec<_> = in_fixture.difference(&registered).collect();
     assert!(missing.is_empty(), "registered but not in ipc-args.json: {missing:?}");
     assert!(stale.is_empty(), "in ipc-args.json but not registered: {stale:?}");
+}
+
+/// What `FsError` puts in `kind`, for each way it can be built.
+#[test]
+fn error_kinds_match_the_typescript_side() {
+    use labnoteo_app_lib::vault::fs::FsError;
+    use labnoteo_app_lib::vault::path::VaultError;
+    use std::io::{Error, ErrorKind};
+    let kind = |e: FsError| serde_json::to_value(&e).unwrap()["kind"].as_str().unwrap().to_string();
+    let message = |e: FsError| serde_json::to_value(&e).unwrap()["message"].is_string();
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a kind in the fixture.
+    let _: fn(&FsError) = |e| match e {
+        FsError::Forbidden | FsError::NoVault | FsError::Vault(_) | FsError::Io(_) => (),
+    };
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(ERRORS).unwrap();
+    let actual: std::collections::BTreeMap<String, String> = [
+        ("forbidden", kind(FsError::Forbidden)),
+        ("noVault", kind(FsError::NoVault)),
+        ("escape", kind(FsError::Vault(VaultError::Escape))),
+        ("vaultNotFound", kind(FsError::Vault(VaultError::NotFound))),
+        ("notFound", kind(FsError::Io(Error::from(ErrorKind::NotFound)))),
+        ("io", kind(FsError::Io(Error::from(ErrorKind::PermissionDenied)))),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    assert_eq!(actual, fixture, "kinds the Rust side sends vs ipc-errors.json");
+    // A missing file inside the vault layer is the same `notFound` as one at the top.
+    assert_eq!(kind(FsError::Vault(VaultError::Io(Error::from(ErrorKind::NotFound)))), fixture["notFound"]);
+    assert!(message(FsError::NoVault), "every error carries a display message");
+}
+
+#[test]
+fn event_name_and_payload_match_the_typescript_side() {
+    use labnoteo_app_lib::vault::watcher::{Change, Kind, EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let ev = &fixture["vaultChanged"];
+    assert_eq!(ev["name"], EVENT);
+    // Exhaustive on purpose: a new `Kind` stops compiling here.
+    let _: fn(Kind) = |k| match k {
+        Kind::Created | Kind::Modified | Kind::Removed => (),
+    };
+    let wire = |k: Kind| serde_json::to_value(Change { path: "a.md".into(), kind: k }).unwrap();
+    let fields: std::collections::BTreeSet<&str> =
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
+    for (name, k) in [("created", Kind::Created), ("modified", Kind::Modified), ("removed", Kind::Removed)] {
+        let payload = wire(k);
+        let keys: std::collections::BTreeSet<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, fields, "payload field names vs ipc-events.json");
+        assert_eq!(payload[ev["payload"]["fields"]["path"].as_str().unwrap()], "a.md");
+        assert_eq!(payload[ev["payload"]["fields"]["kind"].as_str().unwrap()], ev["payload"]["kinds"][name]);
+    }
+    assert_eq!(ev["payload"]["kinds"].as_object().unwrap().len(), 3);
+}
+
+/// The index is a cache. A vault whose index cannot open must still be watched:
+/// the tree refresh and the editor's external-change check depend on the events.
+#[test]
+fn the_app_starter_watches_a_vault_whose_index_cannot_open() {
+    use std::time::Duration;
+    use tauri::{Listener, Manager};
+    let dir = std::env::temp_dir().join(format!("labnoteo-starter-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("vault")).unwrap();
+    let vault = std::fs::canonicalize(dir.join("vault")).unwrap();
+    std::fs::write(vault.join("a.md"), "one").unwrap();
+    // The app data dir is a file, so no index database can be created in it.
+    let not_a_dir = dir.join("data");
+    std::fs::write(&not_a_dir, "x").unwrap();
+    let app = tauri::test::mock_app();
+    app.manage(IndexState::new(not_a_dir));
+    assert!(app.state::<IndexState>().get(&vault).is_err(), "the premise: this index cannot open");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let name = serde_json::from_str::<Value>(EVENTS).unwrap()["vaultChanged"]["name"].as_str().unwrap().to_string();
+    app.listen(name, move |ev| drop(tx.send(ev.payload().to_owned())));
+    let start = labnoteo_app_lib::vault::watcher::app_starter(app.handle().clone());
+    let _watcher = start(&vault).expect("a watcher even though the index would not open");
+    std::thread::sleep(Duration::from_millis(100));
+    std::fs::write(vault.join("a.md"), "two").unwrap();
+    let payload = rx.recv_timeout(Duration::from_secs(3)).expect("the window is still told");
+    assert_eq!(serde_json::from_str::<Value>(&payload).unwrap(), json!({"path": "a.md", "kind": "modified"}));
+    drop(_watcher);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -242,7 +242,7 @@ impl Index {
             tx.execute("DELETE FROM notes WHERE key = ?1", [key]).map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
-        Ok(IndexStats { indexed: seen.len() - skipped, skipped })
+        Ok(IndexStats { indexed: seen.len().saturating_sub(skipped), skipped })
     }
 
     /// Start a chunk: from here on, every `upsert` / `remove` is remembered
@@ -682,9 +682,22 @@ mod tests {
         ix.rebuild(&s.vault()).unwrap();
         // The whole word, a piece from the middle of a longer run, a two-character
         // piece (below the trigram size), a particle-attached form, and two terms.
-        for q in ["형질전환", "질전환", "형질", "플라스미드를", "전환 실험", "대장균"] {
+        use search::Plan::{Fts, FtsThenLike, Like};
+        let cases = [
+            ("형질전환", Fts),
+            ("질전환", Fts),
+            ("형질", Like),
+            ("플라스미드를", Fts),
+            ("전환 실험", Like),
+            ("대장균", Fts),
+        ];
+        for (q, plan) in cases {
+            assert_eq!(search::plan_for(q), plan, "plan for {q:?}");
             assert_eq!(found(&ix, q), ["k.md"], "query {q:?}");
         }
+        assert_eq!(search::plan_for("형질전환체"), Fts);
+        assert_eq!(search::plan_for("형질 대장균"), FtsThenLike);
+        assert_eq!(found(&ix, "형질 대장균"), ["k.md"]);
         assert!(found(&ix, "형질전환체").is_empty());
         assert_eq!(found(&ix, "내용"), ["other.md"]);
     }
@@ -803,6 +816,11 @@ mod tests {
         s.note("b.md", "100 percent");
         let ix = s.index();
         ix.rebuild(&s.vault()).unwrap();
+        use search::{plan_for, Plan};
+        assert_eq!(plan_for("0%"), Plan::Like);
+        assert_eq!(plan_for("\"quoted\""), Plan::Fts);
+        assert_eq!(plan_for("e_c"), Plan::Fts);
+        assert_eq!(plan_for("e_"), Plan::Like);
         assert_eq!(found(&ix, "0%"), ["a.md"]);
         assert_eq!(found(&ix, "\"quoted\""), ["a.md"]);
         assert_eq!(found(&ix, "e_c"), ["a.md"]);
@@ -914,7 +932,9 @@ title: 실험 노트
         ix.rebuild(&s.vault()).unwrap();
         // Alphabetical order would put a-late first; relevance puts the title match first,
         // then the earlier body match.
+        assert_eq!(search::plan_for("실험"), search::Plan::Like, "the hand-ranked plan");
         assert_eq!(found(&ix, "실험"), ["z-title.md", "b-early.md", "a-late.md"]);
+        assert_eq!(search::plan_for("md"), search::Plan::Like);
         // A two-character query does not match a note by its folder name alone.
         assert!(found(&ix, "md").is_empty());
     }
@@ -923,17 +943,30 @@ title: 실험 노트
     fn a_cut_off_result_list_says_so() {
         let s = Scratch::new();
         for i in 0..5 {
-            s.note(&format!("n{i}.md"), "실험 기록");
+            s.note(&format!("n{i}.md"), "실험기록");
         }
         let ix = s.index();
         ix.rebuild(&s.vault()).unwrap();
+        // Two characters: the LIKE plan.
+        assert_eq!(search::plan_for("실험"), search::Plan::Like);
         let cut = ix.search("실험", 3).unwrap();
         assert_eq!((cut.hits.len(), cut.truncated), (3, true));
         let exact = ix.search("실험", 5).unwrap();
         assert_eq!((exact.hits.len(), exact.truncated), (5, false));
-        // The same through the FTS branch.
-        let cut = ix.search("기록", 2).unwrap();
-        let fts = ix.search("실험 기록", 2).unwrap();
-        assert_eq!((cut.truncated, fts.hits.len(), fts.truncated), (true, 2, true));
+        // The same through the FTS plan: one term of three or more characters.
+        assert_eq!(search::plan_for("실험기록"), search::Plan::Fts);
+        let cut = ix.search("실험기록", 3).unwrap();
+        assert_eq!((cut.hits.len(), cut.truncated), (3, true));
+        let exact = ix.search("실험기록", 5).unwrap();
+        assert_eq!((exact.hits.len(), exact.truncated), (5, false));
+    }
+
+    #[test]
+    fn the_plan_follows_the_length_of_the_terms() {
+        use search::{plan_for, Plan};
+        assert_eq!(plan_for("   "), Plan::Empty);
+        assert_eq!(plan_for("실험 md"), Plan::Like);
+        assert_eq!(plan_for("실험기록 agarose"), Plan::Fts);
+        assert_eq!(plan_for("실험 agarose"), Plan::FtsThenLike);
     }
 }

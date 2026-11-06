@@ -239,12 +239,27 @@ pub fn modify(
     content: &str,
     expected_before: Option<&str>,
 ) -> Result<ModifyResult, FsError> {
+    modify_paused(locks, root, rel, content, expected_before, || {})
+}
+
+/// `modify`, with `pause` run between the compare and the write: the one place a
+/// missing lock would lose an update. Production passes a no-op; a test passes a
+/// sleep to widen that window.
+fn modify_paused(
+    locks: &PathLocks,
+    root: &Path,
+    rel: &str,
+    content: &str,
+    expected_before: Option<&str>,
+    pause: impl FnOnce(),
+) -> Result<ModifyResult, FsError> {
     locks.with(root, rel, || {
         let abs = confine_write(root, rel)?;
         let current = read_or_empty(&abs)?;
         if expected_before.is_some_and(|e| e != current) {
             return Ok(ModifyResult::Conflict { current });
         }
+        pause();
         write_atomic(&abs, content)?;
         Ok(ModifyResult::Ok)
     })
@@ -544,7 +559,10 @@ mod tests {
                 s.spawn(|| loop {
                     let cur = read(&l, &t.0, "c.md").unwrap();
                     let next = (cur.parse::<u32>().unwrap() + 1).to_string();
-                    if modify(&l, &t.0, "c.md", &next, Some(&cur)).unwrap() == ModifyResult::Ok {
+                    // The sleep sits between the compare and the write, inside the
+                    // critical section, as in the sibling test above.
+                    let pause = || std::thread::sleep(std::time::Duration::from_millis(2));
+                    if modify_paused(&l, &t.0, "c.md", &next, Some(&cur), pause).unwrap() == ModifyResult::Ok {
                         break;
                     }
                 });

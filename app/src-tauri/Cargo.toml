@@ -17,6 +17,11 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
+# The search index needs SQLite's FTS5 (trigram tokenizer). rusqlite 0.41 has no
+# `fts5` feature to pin: the "bundled" build compiles SQLite through
+# libsqlite3-sys, whose build.rs always passes -DSQLITE_ENABLE_FTS5. That
+# implicit default is what this relies on; `schema::open` fails loudly (and the
+# schema tests go red) if a libsqlite3-sys upgrade ever drops it.
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 notify = "8"
 tauri-plugin-updater = "2"

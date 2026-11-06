@@ -1,3 +1,4 @@
+import { ERROR_KINDS_FIXTURE } from '../../__tests__/fixtures';
 import { TauriLabnoteFs, FsCommandError, ModifyConflictError } from '../tauriLabnoteFs';
 
 type Reply = unknown | ((args: Record<string, unknown>) => unknown);
@@ -19,7 +20,7 @@ function fake(replies: Record<string, Reply[] | Reply>) {
   return { invoke: invoke as never, calls };
 }
 
-const notFound = { reject: { kind: 'notFound', message: 'x' } };
+const notFound = { reject: { kind: ERROR_KINDS_FIXTURE.notFound, message: 'x' } };
 
 describe('TauriLabnoteFs 매핑', () => {
   it('read 는 vault_read 를 경로와 함께 부른다', async () => {

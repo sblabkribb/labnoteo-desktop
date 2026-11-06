@@ -73,18 +73,50 @@ pub fn snippet(body: &str, terms: &[String]) -> String {
     format!("{}{text}{}", if start > 0 { "…" } else { "" }, if end < chars.len() { "…" } else { "" })
 }
 
+/// Which query plan a search uses. Decided in one place (`plan_for`) and read
+/// by `search`, so a test can assert the plan it meant to exercise instead of
+/// inferring it from the outcome (two plans that return the same notes made
+/// tests pass on the wrong branch more than once).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plan {
+    /// No terms: nothing is searched.
+    Empty,
+    /// Every term is shorter than three characters: substring tests only.
+    Like,
+    /// Every term is three or more characters: FTS5 only.
+    Fts,
+    /// Both: FTS5 for the long terms, a substring test on top for the short ones.
+    FtsThenLike,
+}
+
+fn is_long(term: &str) -> bool {
+    term.chars().count() >= 3
+}
+
+pub fn plan_for(query: &str) -> Plan {
+    let all = query.split_whitespace().count();
+    let long = query.split_whitespace().filter(|t| is_long(t)).count();
+    match (long, all - long) {
+        (0, 0) => Plan::Empty,
+        (0, _) => Plan::Like,
+        (_, 0) => Plan::Fts,
+        _ => Plan::FtsThenLike,
+    }
+}
+
 pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<SearchResults> {
     let terms: Vec<String> = query.split_whitespace().map(str::to_owned).collect();
-    if terms.is_empty() {
+    let plan = plan_for(query);
+    if plan == Plan::Empty {
         return Ok(SearchResults { hits: Vec::new(), truncated: false });
     }
     let limit = limit.clamp(1, MAX_LIMIT);
-    let (long, short): (Vec<&String>, Vec<&String>) = terms.iter().partition(|t| t.chars().count() >= 3);
+    let (long, short): (Vec<&String>, Vec<&String>) = terms.iter().partition(|t| is_long(t));
 
     let mut sql = String::from("SELECT n.path, n.title, n.body FROM ");
     let mut args: Vec<String> = Vec::new();
     let mut wheres: Vec<String> = Vec::new();
-    if long.is_empty() {
+    if plan == Plan::Like {
         sql.push_str("notes n");
     } else {
         sql.push_str("notes_fts JOIN notes n ON n.id = notes_fts.rowid");
@@ -98,13 +130,13 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<
     }
     sql.push_str(" WHERE ");
     sql.push_str(&wheres.join(" AND "));
-    if long.is_empty() {
+    if plan == Plan::Like {
         // No bm25 here, so rank by hand: a note whose title holds the term comes
         // before one that only has it in the body, then the earlier the first
         // body match the better, then title and path for a stable order.
         let mut title_miss = Vec::new();
         let mut offset = Vec::new();
-        for t in &short {
+        for _ in &short {
             title_miss.push("(instr(lower(n.title), lower(?)) = 0)");
             offset.push("(CASE WHEN instr(lower(n.body), lower(?)) = 0 THEN 1000000000 ELSE instr(lower(n.body), lower(?)) END)");
         }

@@ -1,3 +1,4 @@
+import { ERROR_KINDS_FIXTURE } from '../../__tests__/fixtures';
 import { restoreVault, openVault, type VaultInfo } from '../useVault';
 
 const info: VaultInfo = { root: 'D:\\lab', name: 'lab', hasObsidianConfig: true };
@@ -41,7 +42,7 @@ describe('보관함 열기', () => {
   });
 
   it('열기가 거부되면 선택 화면에 남고 오류 문구를 준다', async () => {
-    const f = fake({ vault_open: { reject: { kind: 'vaultNotFound', message: 'x' } } });
+    const f = fake({ vault_open: { reject: { kind: ERROR_KINDS_FIXTURE.vaultNotFound, message: 'x' } } });
     const s = await openVault(f.invoke, 'D:\\gone');
     expect(s.status).toBe('picker');
     expect(s.status === 'picker' && s.error).toBeTruthy();

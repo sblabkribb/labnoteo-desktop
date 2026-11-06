@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTLE_MS, VAULT_CHANGED, useVaultEvents, type VaultChange } from '../useVaultEvents';
+import { EVENTS_FIXTURE } from '../../__tests__/fixtures';
 import { useTree, type TreeEntry } from '../../tree/useTree';
 
-// 공유 픽스처. Rust 쪽 watcher.rs 의 테스트가 같은 파일을 읽어 `EVENT` 가 이 문자열인지 본다.
+// 공유 픽스처. Rust 쪽 tests/ipc.rs 가 같은 파일을 읽어 `EVENT` 가 이 문자열인지 본다.
 // 두 언어가 각자 자기 상수만 비교하면 한쪽 오타가 모든 테스트를 통과한다.
-const EVENT_NAME: string = JSON.parse(readFileSync('src-tauri/tests/ipc-events.json', 'utf-8')).vaultChanged;
+const EVENT_NAME: string = EVENTS_FIXTURE.vaultChanged.name;
 
 type Handler = (e: { payload: VaultChange }) => void;
 

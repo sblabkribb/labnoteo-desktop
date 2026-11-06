@@ -1,1 +1,9 @@
-{ "vaultChanged": "vault://changed" }
+{
+  "vaultChanged": {
+    "name": "vault://changed",
+    "payload": {
+      "fields": { "path": "path", "kind": "kind" },
+      "kinds": { "created": "created", "modified": "modified", "removed": "removed" }
+    }
+  }
+}

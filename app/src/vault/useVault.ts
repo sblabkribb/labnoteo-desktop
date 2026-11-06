@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
+import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 
 /** Rust 의 `VaultInfo` 직렬화 모양(camelCase). `root` 는 표시용이다. */
 export interface VaultInfo {
@@ -36,8 +37,7 @@ async function enter(invoke: InvokeFn, cmd: 'vault_open' | 'vault_create', path:
     const vault = await invoke<VaultInfo>(cmd, { path });
     return { status: 'ready', vault };
   } catch (e) {
-    const kind = e && typeof e === 'object' && 'kind' in e ? (e as { kind: unknown }).kind : undefined;
-    const missing = kind === 'vaultNotFound' || kind === 'notFound';
+    const missing = hasErrorKind(e, ERROR_KINDS.vaultNotFound) || hasErrorKind(e, ERROR_KINDS.notFound);
     return { status: 'picker', error: t(missing ? 'vault.error.missing' : 'vault.error.generic') };
   }
 }

@@ -8,6 +8,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { t } from '../i18n/t';
+import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
 
@@ -198,7 +199,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       try {
         raw = await latest.current.invoke<string>('vault_read', { path: doc.path });
       } catch (e) {
-        if ((e as { kind?: string } | null)?.kind === 'notFound') {
+        if (hasErrorKind(e, ERROR_KINDS.notFound)) {
           clearTimers();
           setExternal({ kind: 'gone' });
           setDialogOpen(true);
@@ -243,7 +244,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           try {
             adopt(await loadDocument(path, latest.current.invoke));
           } catch (e) {
-            if ((e as { kind?: string } | null)?.kind === 'notFound') setExternal({ kind: 'gone' });
+            if (hasErrorKind(e, ERROR_KINDS.notFound)) setExternal({ kind: 'gone' });
             else setSaveError(true);
           }
         }),
@@ -355,7 +356,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     w.onCloseRequested(async (ev) => {
       if (!api.current.isDirty()) return; // 잃을 것이 없다: 기본 동작대로 닫힌다
       ev.preventDefault();
-      if (await api.current.flush()) await w.destroy();
+      // flush() 는 지금은 자기 실패를 직접 잡는다. 그래도 거부되면 이 핸들러가 죽어 창이 닫히지도 묻지도 않는다 —
+      // 닫기 버튼이 아무 말 없이 먹통이 된다. 던진 저장은 저장되지 않은 것이므로 묻는다.
+      let saved = false;
+      try {
+        saved = await api.current.flush();
+      } catch {
+        saved = false;
+      }
+      if (saved) await w.destroy();
       else setCloseAsk(true);
     }).then(
       (fn) => (live ? (unlisten = fn) : fn()),

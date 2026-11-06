@@ -1,3 +1,4 @@
+import { ERROR_KINDS_FIXTURE } from '../../__tests__/fixtures';
 import { loadDocument, saveDocument, toRaw } from '../documentIo';
 
 /** 가짜 보관함. Rust 의 vault_read / vault_modify 와 같은 의미: expectedBefore 가 없으면 비교하지 않는다. */
@@ -7,7 +8,7 @@ function fakeVault(files: Record<string, string>) {
     calls.push({ cmd, args });
     const path = args.path as string;
     if (cmd === 'vault_read') {
-      if (!(path in files)) throw { kind: 'notFound', message: 'not found' };
+      if (!(path in files)) throw { kind: ERROR_KINDS_FIXTURE.notFound, message: 'not found' };
       return files[path];
     }
     if (cmd === 'vault_modify') {

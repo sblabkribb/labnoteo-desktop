@@ -297,37 +297,53 @@ fn apply_to_index(ix: &crate::index::Index, root: &Path, deltas: &[Delta]) {
     }
 }
 
+/// Watch `root`, keep `index` in line when there is one, and hand every change
+/// to `emit`. The index is a cache and is best-effort here: a vault whose index
+/// would not open still gets its watcher, because the tree refresh and the
+/// editor's external-change check depend on the events, not on the cache.
+fn start_watching(
+    root: &Path,
+    index: Option<Arc<crate::index::Index>>,
+    emit: impl Fn(Change) + Send + 'static,
+) -> Option<Watcher> {
+    let root_owned = root.to_path_buf();
+    let sink = move |deltas: Vec<Delta>| {
+        if let Some(ix) = &index {
+            apply_to_index(ix, &root_owned, &deltas);
+        }
+        for delta in deltas {
+            emit(match delta {
+                Delta::Change(c) => c,
+                Delta::Rescan => Change { path: String::new(), kind: Kind::Modified },
+            });
+        }
+    };
+    match Watcher::start(root, sink) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("labnoteO: could not watch the vault for changes: {e}");
+            None
+        }
+    }
+}
+
 /// The app's starter: watch the vault, keep its index in line, tell the window.
 pub fn app_starter<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> impl Fn(&Path) -> Option<Watcher> + Send + Sync + 'static {
     use tauri::{Emitter, Manager};
     move |root| {
-        let ix = match app.state::<crate::index::IndexState>().get(root) {
-            Ok(ix) => ix,
+        let index = match app.state::<crate::index::IndexState>().get(root) {
+            Ok(ix) => Some(ix),
             Err(e) => {
-                eprintln!("labnoteO: not watching the vault, its index would not open: {e}");
-                return None;
-            }
-        };
-        let (app, root_owned) = (app.clone(), root.to_path_buf());
-        let sink = move |deltas: Vec<Delta>| {
-            apply_to_index(&ix, &root_owned, &deltas);
-            for delta in deltas {
-                let payload = match delta {
-                    Delta::Change(c) => c,
-                    Delta::Rescan => Change { path: String::new(), kind: Kind::Modified },
-                };
-                let _ = app.emit(EVENT, payload);
-            }
-        };
-        match Watcher::start(root, sink) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("labnoteO: could not watch the vault for changes: {e}");
+                eprintln!("labnoteO: the search index would not open, watching without it: {e}");
                 None
             }
-        }
+        };
+        let app = app.clone();
+        start_watching(root, index, move |change| {
+            let _ = app.emit(EVENT, change);
+        })
     }
 }
 
@@ -652,10 +668,14 @@ mod tests {
     }
 
     #[test]
-    fn the_event_name_is_the_one_the_typescript_side_listens_for() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/ipc-events.json")).unwrap();
-        assert_eq!(fixture["vaultChanged"], EVENT);
-        assert_eq!(EVENT, "vault://changed");
+    fn a_watcher_without_an_index_still_reports_changes() {
+        let s = Scratch::new();
+        s.write("a.md", "one");
+        let (tx, rx) = channel();
+        let _w = start_watching(&s.0, None, move |c| drop(tx.send(c))).expect("a watcher without an index");
+        std::thread::sleep(Duration::from_millis(100));
+        s.write("a.md", "two");
+        assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Change { path: "a.md".into(), kind: Kind::Modified });
     }
 
     /// A sink holding a token: a worker that is gone has released it.

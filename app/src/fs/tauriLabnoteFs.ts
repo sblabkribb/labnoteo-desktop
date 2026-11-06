@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import type { LabnoteFs } from '@labnoteo/core';
+import { ERROR_KINDS } from './errorKinds';
 
 /** `vault_modify` 의 응답. Rust 의 `ModifyResult` 직렬화 모양. */
 type ModifyResult = { kind: 'ok' } | { kind: 'conflict'; current: string };
@@ -21,7 +22,7 @@ export class FsCommandError extends Error {
   ) {
     super(message);
     this.name = 'FsCommandError';
-    if (kind === 'notFound') this.code = 'ENOENT';
+    if (kind === ERROR_KINDS.notFound) this.code = 'ENOENT';
   }
 }
 
@@ -76,7 +77,7 @@ export class TauriLabnoteFs implements LabnoteFs {
     try {
       current = await this.read(path);
     } catch (e) {
-      if (!(e instanceof FsCommandError) || e.kind !== 'notFound') throw e;
+      if (!(e instanceof FsCommandError) || e.kind !== ERROR_KINDS.notFound) throw e;
       current = '';
     }
     for (let attempt = 1; attempt <= MAX_MODIFY_ATTEMPTS; attempt++) {

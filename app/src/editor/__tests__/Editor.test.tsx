@@ -7,7 +7,7 @@ import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
 import { Editor, MAX_SAVE_ATTEMPTS, type EditorHandle, type WindowApi } from '../Editor';
 import type { VaultChange } from '../../vault/useVaultEvents';
-
+import { ERROR_KINDS_FIXTURE, EVENTS_FIXTURE } from '../../__tests__/fixtures';
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
 Range.prototype.getClientRects ??= emptyRects;
@@ -23,11 +23,11 @@ function setup(files: Record<string, string>, failWrites = 0) {
     calls.push(cmd);
     const path = args.path as string;
     if (cmd === 'vault_read') {
-      if (!(path in files)) throw { kind: 'notFound', message: 'x' };
+      if (!(path in files)) throw { kind: ERROR_KINDS_FIXTURE.notFound, message: 'x' };
       return files[path];
     }
     if (cmd === 'vault_modify') {
-      if (failures-- > 0) throw { kind: 'io', message: 'locked' };
+      if (failures-- > 0) throw { kind: ERROR_KINDS_FIXTURE.io, message: 'locked' };
       const current = files[path] ?? '';
       const expected = args.expectedBefore as string | undefined;
       if (expected !== undefined && expected !== current) return { kind: 'conflict', current };
@@ -251,6 +251,16 @@ describe('편집기', () => {
     expect(m.calls.filter((c) => c === 'vault_read').length).toBe(reads);
   });
 
+  it('이벤트 페이로드의 필드 이름은 Rust 가 보내는 이름이다(공유 픽스처)', async () => {
+    const { fields, kinds } = EVENTS_FIXTURE.vaultChanged.payload;
+    const m = mount({ [P]: 'mine\n' }, 40);
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+    await m.type('!');
+    m.files[P] = 'theirs\n';
+    await m.emit({ [fields.path]: P, [fields.kind]: kinds.modified } as unknown as VaultChange);
+    expect(await screen.findByRole('button', { name: /다시 불러오기/ })).toBeTruthy();
+  });
+
   it('연 노트가 밖에서 지워지면 알리고, 자동 저장으로 되살리지 않는다', async () => {
     const user = userEvent.setup();
     const m = mount({ [P]: 'a\n' }, 40);
@@ -359,6 +369,31 @@ describe('편집기', () => {
       expect(await w.requestClose()).toBe(true); // 기본 닫기를 막고
       expect(m.files[P]).toBe('a\nb'); // 저장했고
       expect(w.destroy).toHaveBeenCalledTimes(1); // 그다음에 닫았다
+    });
+
+    it('저장이 던지면 닫기가 먹통이 되지 않고 저장 없이 닫을지 묻는다', async () => {
+      const w = fakeWindow();
+      const m = mount({ [P]: 'a\n' }, 60_000, { windowApi: w.api });
+      await waitFor(() => expect(m.view().state.doc.toString()).toBe('a\n'));
+      await m.type('b');
+      // flush() 가 거부되게 한다: 닫기 핸들러의 isDirty() 는 통과시키고, flush 안의 두 번째 읽기에서 편집기 상태가 던진다.
+      // 그 읽기는 doSave 의 try 밖이다. 한 번만 던지게 해서 CodeMirror 내부에는 영향이 없다.
+      const v = m.view();
+      const real = v.state;
+      let reads = 0;
+      Object.defineProperty(v, 'state', {
+        configurable: true,
+        get() {
+          if (++reads === 2) {
+            Object.defineProperty(v, 'state', { configurable: true, value: real, writable: true });
+            throw new Error('boom');
+          }
+          return real;
+        },
+      });
+      expect(await w.requestClose()).toBe(true);
+      expect(w.destroy).not.toHaveBeenCalled();
+      expect(await screen.findByText(/저장하지 못해 창을 닫지 않았습니다/)).toBeTruthy();
     });
 
     it('고친 것이 없으면 그냥 닫는다', async () => {
