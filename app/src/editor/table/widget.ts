@@ -137,10 +137,12 @@ export class TableWidget extends WidgetType {
     const doc = view.dom.ownerDocument;
     const wrap = doc.createElement('div');
     wrap.className = 'lno-table-wrap';
-    // 막대의 이름표는 열 때 다시 단다: 언어를 바꾼 뒤에 다시 그리지 않아도 새 언어로 읽힌다
+    // 막대의 이름표와 넘치는 셀의 title 은 열 때 다시 단다: 언어를 바꾼 뒤에 다시 그리지 않아도 새 언어로 읽힌다
     const relabel = () => {
       const bar = toolbarOf(wrap);
       if (bar) labelToolbar(bar);
+      const title = t('table.overflow');
+      for (const c of wrap.querySelectorAll<HTMLElement>('.lno-cell-overflow')) c.title = title;
     };
     wrap.addEventListener('pointerenter', relabel);
     wrap.addEventListener('focusin', relabel);

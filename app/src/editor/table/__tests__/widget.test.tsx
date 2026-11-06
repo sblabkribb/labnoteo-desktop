@@ -118,6 +118,20 @@ describe('표 위젯: 렌더링', () => {
     expect(over.getAttribute('title')).toBe(catalogs.ko['table.overflow']);
   });
 
+  it('넘치는 셀의 title 도 언어를 바꾼 뒤 표에 들어오면 새 언어로 바뀐다', () => {
+    setLang('ko');
+    const v = mount('| a | b |\n| --- | --- |\n| 1 | 2 | 3 |\n');
+    const [w] = wraps(v);
+    const over = w.querySelector('.lno-cell-overflow')!;
+    expect(over.getAttribute('title')).toBe(catalogs.ko['table.overflow']);
+    setLang('en');
+    w.dispatchEvent(new Event('pointerenter'));
+    expect(over.getAttribute('title')).toBe(catalogs.en['table.overflow']);
+    setLang('ko');
+    w.dispatchEvent(new Event('focusin'));
+    expect(over.getAttribute('title')).toBe(catalogs.ko['table.overflow']);
+  });
+
   it('CRLF 문서에서도 셀이 맞다', () => {
     const v = mount('앞\r\n\r\n| a | b |\r\n| --- | --- |\r\n| 1 | 2 |\r\n', { extra: [EditorState.lineSeparator.of('\r\n')] });
     expect(cellTexts(wraps(v)[0])).toEqual([['a', 'b'], ['1', '2']]);
@@ -301,6 +315,57 @@ describe('표 위젯: 도구 막대와 원문 편집', () => {
     expect(wraps(v)).toHaveLength(0);
     v.dispatch({ effects: toggleRawTable.of(from + 2) });
     expect(wraps(v)).toHaveLength(1);
+  });
+
+  it('원문 표시를 켜는 트랜잭션의 선택이 표 밖이어도 그 트랜잭션에서는 꺼지지 않는다', () => {
+    const doc = `앞\n\n${T1}\n`;
+    const v = mount(doc);
+    const from = doc.indexOf('| a');
+    v.dispatch({ effects: toggleRawTable.of(from), selection: { anchor: 0 } });
+    expect(v.state.field(rawTables).size).toBe(1);
+    expect(wraps(v)).toHaveLength(0);
+    // 다음 선택 변경에서 머리가 밖이면 격자로 돌아온다
+    v.dispatch({ selection: { anchor: 1 } });
+    expect(v.state.field(rawTables).size).toBe(0);
+    expect(wraps(v)).toHaveLength(1);
+  });
+
+  it('원문 표시 중 첫 줄 앞에서 Enter 를 쳐도 원문으로 남는다', () => {
+    const doc = `앞\n\n${T1}\n`;
+    const v = mount(doc);
+    const from = doc.indexOf('| a');
+    v.dispatch({ effects: toggleRawTable.of(from), selection: { anchor: from } });
+    v.dispatch({ changes: { from, insert: '\n' }, selection: { anchor: from + 1 } });
+    expect(v.state.field(rawTables).size).toBe(1);
+    expect(wraps(v)).toHaveLength(0);
+    v.dispatch({ selection: { anchor: from + 4 } });
+    expect(wraps(v)).toHaveLength(0);
+    // 표 밖으로 나가면 격자
+    v.dispatch({ selection: { anchor: 0 } });
+    expect(v.state.field(rawTables).size).toBe(0);
+    expect(wraps(v)).toHaveLength(1);
+  });
+
+  it('원문 표시 중 구분 줄을 지웠다 다시 쳐도, 선택이 표 안이면 원문으로 남는다', () => {
+    const doc = `앞\n\n${T1}\n\n뒤`;
+    const v = mount(doc);
+    const from = doc.indexOf('| a');
+    const dash = doc.indexOf('---', from);
+    v.dispatch({ effects: toggleRawTable.of(from), selection: { anchor: from } });
+    // 첫 칸의 `---` 를 지워 잠깐 표가 아니게 된다
+    v.dispatch({ changes: { from: dash, to: dash + 3 }, selection: { anchor: dash } });
+    expect(findTables(v.state)).toHaveLength(0);
+    expect(v.state.field(rawTables).size).toBe(1);
+    // `:--` 로 다시 친다
+    v.dispatch({ changes: { from: dash, insert: ':--' }, selection: { anchor: dash + 3 } });
+    expect(findTables(v.state)).toHaveLength(1);
+    expect(v.state.field(rawTables).size).toBe(1);
+    expect(wraps(v)).toHaveLength(0);
+    // 표 밖으로 나가면 격자로 돌아오고 정렬이 반영된다
+    v.dispatch({ selection: { anchor: v.state.doc.length } });
+    expect(v.state.field(rawTables).size).toBe(0);
+    expect(wraps(v)).toHaveLength(1);
+    expect(cellTexts(wraps(v)[0])).toEqual([['a', 'b'], ['1', '2']]);
   });
 });
 
