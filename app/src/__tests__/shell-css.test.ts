@@ -1,15 +1,20 @@
 import { readFileSync } from 'node:fs';
 
-import { parseRules } from './css';
+import { declarations, parseRules } from './css';
 
 const css = readFileSync('src/app.css', 'utf-8');
 
 /** 선택자 목록에 `selector` 가 들어 있는 규칙의 선택자들과 본문. 없으면 null. */
-function ruleFor(selector: string): { selectors: string[]; body: string } | null {
+function ruleFor(selector: string): { selectors: string[]; body: string; decls: Record<string, string> } | null {
   const re = /([^{}]+)\{([^{}]*)\}/g;
   for (const m of css.matchAll(re)) {
     const selectors = m[1].replace(/\/\*[\s\S]*?\*\//g, '').split(',').map((s) => s.trim());
-    if (selectors.includes(selector)) return { selectors, body: m[2] };
+    if (selectors.includes(selector)) {
+      const body = m[2];
+      const clean = body.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+      const decls = Object.fromEntries(declarations(clean.replace(/;\s*$/, '')).map((d) => [d.prop, d.value]));
+      return { selectors, body, decls };
+    }
   }
   return null;
 }
@@ -86,5 +91,16 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.editor-path')).not.toBeNull();
     expect(ruleFor('.editor-frame')).not.toBeNull();
     expect(sels.some((s) => s.includes('.content [role="alertdialog"]'))).toBe(false);
+  });
+  it('layers use the z-index scale', () => {
+    expect(ruleFor('.dialog-layer')!.decls['z-index']).toBe('var(--z-dialog)');
+    expect(ruleFor('.context-menu')!.decls['z-index']).toBe('var(--z-menu)');
+    expect(ruleFor('.toaster')!.decls['z-index']).toBe('var(--z-toast)');
+    expect(ruleFor('.dialog-backdrop')!.decls.background).toBe('var(--scrim)');
+  });
+  it('editor frame: strong border and 2px accent focus ring', () => {
+    expect(ruleFor('.editor-frame')!.decls.border).toBe('1px solid var(--border-strong)');
+    expect(ruleFor('.editor-frame:focus-within')!.decls.outline).toBe('2px solid var(--accent)');
+    expect(ruleFor('.editor-frame')!.decls.isolation).toBe('isolate');
   });
 });

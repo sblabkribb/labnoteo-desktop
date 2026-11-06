@@ -102,6 +102,7 @@ const REQUIRED = [
   '--bg', '--bg-elevated', '--bg-hover', '--bg-selected', '--bg-selection', '--border', '--border-strong', '--text', '--text-muted',
   '--accent', '--accent-text', '--danger', '--radius', '--space-1', '--space-2', '--space-3', '--space-4', '--space-5',
   '--space-6', '--indent', '--font-ui', '--font-mono', '--font-size',
+  '--warning', '--success', '--shadow', '--scrim',
 ];
 
 describe('디자인 토큰', () => {
@@ -131,8 +132,8 @@ describe('디자인 토큰', () => {
 
   it('토큰 검사기 자기 점검: 일부러 망가뜨린 사본을 잡아낸다', () => {
     // :root 에만 넣은 색 토큰
-    expect(parityGaps(css.replace('--danger: #a31d15;', '--danger: #a31d15;\n  --warning: #b45309;'))).toEqual([
-      'light: --warning', 'dark: --warning', 'darkSystem: --warning',
+    expect(parityGaps(css.replace('--danger: #a31d15;', '--danger: #a31d15;\n  --probe: #b45309;'))).toEqual([
+      'light: --probe', 'dark: --probe', 'darkSystem: --probe',
     ]);
     // :root 에 있는 숫자·글꼴 토큰은 색이 아니라 테마 블록에 없어도 된다
     expect(parityGaps(css)).toEqual([]);
@@ -155,6 +156,7 @@ describe('디자인 토큰', () => {
         ['--text', '--bg'], ['--text-muted', '--bg'], ['--text', '--bg-elevated'], ['--text-muted', '--bg-elevated'],
         ['--text', '--bg-hover'], ['--text-muted', '--bg-hover'], ['--text', '--bg-selected'], ['--text-muted', '--bg-selected'],
         ['--accent-text', '--accent'], ['--accent', '--bg-selected'], ['--accent', '--bg-hover'], ['--danger', '--bg-selected'], ['--danger', '--bg'], ['--danger', '--bg-elevated'],
+        ['--warning', '--bg'], ['--warning', '--bg-elevated'], ['--success', '--bg'],
       ]) {
         expect(ratio(t[fg], t[bg]), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
       }

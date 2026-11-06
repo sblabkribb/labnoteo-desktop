@@ -16,6 +16,10 @@
   --accent: #4338ca;
   --accent-text: #ffffff;
   --danger: #a31d15;
+  --warning: #8a5a00;
+  --success: #1f7a3a;
+  --shadow: rgba(0, 0, 0, 0.16);
+  --scrim: rgba(255, 255, 255, 0.6);
   color-scheme: light;
 
   /* 테마와 무관한 값 */
@@ -30,6 +34,16 @@
   --font-ui: "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, "D2Coding", "Malgun Gothic", ui-monospace, monospace;
   --font-size: 14px;
+  --font-size-xs: 0.8em;
+  --font-size-sm: 0.9em;
+  --font-size-lg: 1.15rem;
+  /* 쌓임 순서: 편집기 그림자 루트 안(--z-widget, --z-widget-menu, --z-popover)은 .editor-frame 의 isolation 으로 그 틀 안에 갇힌다. 앱 층(대화상자·메뉴·알림)은 밝은 DOM 에 있다 */
+  --z-widget: 5;
+  --z-widget-menu: 10;
+  --z-popover: 600;
+  --z-dialog: 100;
+  --z-menu: 105;
+  --z-toast: 110;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -46,6 +60,10 @@
     --accent: #a0a4ff;
     --accent-text: #10102a;
     --danger: #ff8a80;
+    --warning: #e0b050;
+    --success: #5cc27a;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --scrim: rgba(30, 30, 30, 0.6);
     color-scheme: dark;
   }
 }
@@ -63,6 +81,10 @@
     --accent: #a0a4ff;
     --accent-text: #10102a;
     --danger: #ff8a80;
+    --warning: #e0b050;
+    --success: #5cc27a;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --scrim: rgba(30, 30, 30, 0.6);
     color-scheme: dark;
 }
 
@@ -79,6 +101,10 @@
     --accent: #4338ca;
     --accent-text: #ffffff;
     --danger: #a31d15;
+    --warning: #8a5a00;
+    --success: #1f7a3a;
+    --shadow: rgba(0, 0, 0, 0.16);
+    --scrim: rgba(255, 255, 255, 0.6);
     color-scheme: light;
 }
 
@@ -397,12 +423,14 @@ input, select, textarea {
   border-radius: var(--radius);
   color: var(--text);
 }
+/* isolation: 편집기 안의 z-index(--z-popover 등)를 이 틀 안에 가둔다. 앱의 대화상자·메뉴·알림 층보다 위로 올라가지 않는다 */
 .editor-frame {
+  isolation: isolate;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
 }
-.editor-frame:focus-within { border-color: var(--accent); }
+.editor-frame:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 /* 편집기가 띄우는 확인 창은 대화상자 층 밖(본문 흐름 안)에 놓이지만 모양은 하나의 .dialog 규칙을 따른다. 틀과의 간격만 둔다. */
 .editor-frame + .dialog { margin-top: var(--space-3); }
@@ -445,7 +473,7 @@ input, select, textarea {
 .dialog-layer {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--z-dialog);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -454,8 +482,7 @@ input, select, textarea {
 .dialog-backdrop {
   position: absolute;
   inset: 0;
-  background: var(--bg);
-  opacity: 0.6;
+  background: var(--scrim);
 }
 .dialog {
   position: relative;
@@ -481,7 +508,7 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 
 .prompt-question { color: var(--text); }
 .prompt-hint { margin: 0; color: var(--text-muted); font-size: 0.93em; }
-.prompt-hint.warn { color: var(--danger); font-weight: 600; }
+.prompt-hint.warn { color: var(--warning); font-weight: 600; }
 .prompt-error { margin: 0; }
 .confirm-message p { margin: 0 0 var(--space-2); white-space: pre-line; }
 
@@ -506,7 +533,7 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
   position: fixed;
   right: var(--space-4);
   bottom: var(--space-4);
-  z-index: 110;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -526,7 +553,8 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
   color: var(--text);
   pointer-events: auto;
 }
-.toast.warn, .toast.error { border-left-color: var(--danger); }
+.toast.warn { border-left-color: var(--warning); }
+.toast.error { border-left-color: var(--danger); }
 .toast-message { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .toast-close { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--text-muted); }
 .toast-close::before { content: "×"; content: "×" / ""; }
@@ -539,7 +567,7 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 105;
+  z-index: var(--z-menu);
   display: flex;
   flex-direction: column;
   min-width: 12rem;
