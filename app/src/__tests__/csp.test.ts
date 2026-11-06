@@ -62,11 +62,14 @@ describe('index.html', () => {
   const page = readFileSync('index.html', 'utf-8');
   const scripts = [...page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)].map((m) => ({ attrs: m[1], body: m[2], at: m.index! }));
   const head = page.slice(0, page.search(/<\/head\s*>/i));
+  // 따옴표가 든 정규식은 String.raw 로 쓴다: escapes.test.ts 는 정규식 리터럴 안의 따옴표를 문자열의 시작으로 읽는다.
+  const SRC = new RegExp(String.raw`\bsrc="([^"]*)"`);
+  const srcOf = (attrs: string) => SRC.exec(attrs)?.[1];
 
   it('인라인 스크립트가 없다: 모든 <script> 는 src 로 같은 출처의 파일을 부르고 본문이 비어 있다', () => {
     expect(scripts.length).toBeGreaterThanOrEqual(2); // 부트 스크립트와 앱 진입점을 실제로 읽었다
     for (const s of scripts) {
-      expect(s.attrs, s.attrs).toMatch(/\bsrc="\/[^"/][^"]*"/); // 루트 기준 경로: http(s):, //host 가 아니다
+      expect(srcOf(s.attrs), s.attrs).toMatch(/^\/[^/]/); // 루트 기준 경로: http(s):, //host 가 아니다
       expect(s.body.trim(), s.attrs).toBe('');
     }
     // 인라인 이벤트 처리기와 javascript: URL 도 인라인 스크립트다
@@ -75,8 +78,8 @@ describe('index.html', () => {
   });
 
   it('테마 부트 스크립트는 <head> 에서 앱보다 먼저, 막는 고전 스크립트로 돈다 (첫 그림 전에 data-theme 이 걸린다)', () => {
-    const boot = scripts.find((s) => /src="\/theme-boot\.js"/.test(s.attrs));
-    const app = scripts.find((s) => /src="\/src\/main\.tsx"/.test(s.attrs));
+    const boot = scripts.find((s) => srcOf(s.attrs) === '/theme-boot.js');
+    const app = scripts.find((s) => srcOf(s.attrs) === '/src/main.tsx');
     expect(boot).toBeDefined();
     expect(app).toBeDefined();
     expect(boot!.at).toBeLessThan(head.length); // <head> 안
