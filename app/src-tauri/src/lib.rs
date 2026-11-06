@@ -31,6 +31,8 @@ macro_rules! register_commands {
             $crate::vault::fs::vault_rmdir,
             $crate::vault::fs::vault_rename,
             $crate::vault::fs::vault_trash,
+            $crate::vault::fs::vault_read_image,
+            $crate::vault::fs::vault_list_images,
             $crate::vault::settings::settings_vault_read,
             $crate::vault::settings::settings_vault_write,
             $crate::vault::settings::settings_import_plugin,

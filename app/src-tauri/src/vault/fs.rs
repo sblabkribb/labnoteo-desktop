@@ -41,6 +41,11 @@ pub enum FsError {
     PathTooLong(std::io::Error),
     /// `rename` target is another file or folder that already exists.
     Exists,
+    /// `vault_read_image` on a path whose extension is not in `IMAGE_EXTS`,
+    /// or on something that is not a regular file.
+    NotImage,
+    /// `vault_read_image` on a file over `MAX_IMAGE_BYTES`.
+    TooLarge,
 }
 
 /// `ERROR_FILENAME_EXCED_RANGE`: a component over 255 characters, or a long path
@@ -60,6 +65,8 @@ impl fmt::Display for FsError {
             FsError::Io(e) => write!(f, "io error: {e}"),
             FsError::PathTooLong(e) => write!(f, "path too long: {e}"),
             FsError::Exists => write!(f, "the target already exists"),
+            FsError::NotImage => write!(f, "not an image file"),
+            FsError::TooLarge => write!(f, "the image is larger than {} bytes", MAX_IMAGE_BYTES),
         }
     }
 }
@@ -67,7 +74,7 @@ impl fmt::Display for FsError {
 impl std::error::Error for FsError {}
 
 /// Wire shape of errors: `{kind: "forbidden" | "escape" | "vaultNotFound" |
-/// "noVault" | "notFound" | "pathTooLong" | "exists" | "io", message}`. `notFound` is a missing file or
+/// "noVault" | "notFound" | "pathTooLong" | "exists" | "notImage" | "tooLarge" | "io", message}`. `notFound` is a missing file or
 /// directory; `vaultNotFound` is a missing vault root. `message` is for
 /// display only; callers branch on `kind`.
 impl Serialize for FsError {
@@ -80,6 +87,8 @@ impl Serialize for FsError {
             FsError::Vault(VaultError::NotFound) => "vaultNotFound",
             FsError::PathTooLong(_) => "pathTooLong",
             FsError::Exists => "exists",
+            FsError::NotImage => "notImage",
+            FsError::TooLarge => "tooLarge",
             FsError::Vault(VaultError::Io(e)) | FsError::Io(e) => {
                 if is_too_long(e) {
                     "pathTooLong"
@@ -582,6 +591,109 @@ pub fn sweep_temp(root: &Path) -> Result<usize, FsError> {
     Ok(removed)
 }
 
+// ---- Images ---------------------------------------------------------------
+
+/// Extensions (lowercase) the previews may read. Anything else is `NotImage`,
+/// so the image IPC can never be used to read notes, settings or HTML.
+pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "svg"];
+/// Larger files are refused (`TooLarge`) rather than copied over IPC.
+pub const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+/// `list_images` stops after this many paths.
+pub const MAX_IMAGE_LIST: usize = 20_000;
+
+fn is_image_name(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, ext)| IMAGE_EXTS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
+/// The bytes of one vault image. `confine` resolves links before the
+/// containment check, so a junction out of the vault is `escape`.
+pub fn read_image(locks: &PathLocks, root: &Path, rel: &str) -> Result<Vec<u8>, FsError> {
+    locks.with(root, rel, || {
+        let abs = confine(root, rel)?;
+        let name = rel.rsplit('/').next().unwrap_or(rel);
+        if !is_image_name(name) {
+            return Err(FsError::NotImage);
+        }
+        let meta = std::fs::metadata(&abs)?;
+        if !meta.is_file() {
+            return Err(FsError::NotImage);
+        }
+        if meta.len() > MAX_IMAGE_BYTES {
+            return Err(FsError::TooLarge);
+        }
+        let bytes = std::fs::read(&abs)?;
+        // The file may have grown between the check and the read.
+        if bytes.len() as u64 > MAX_IMAGE_BYTES {
+            return Err(FsError::TooLarge);
+        }
+        Ok(bytes)
+    })
+}
+
+#[cfg(windows)]
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    meta.file_type().is_symlink() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    meta.file_type().is_symlink()
+}
+
+/// Every image in the vault as a '/'-separated vault-relative path, sorted.
+/// Dot-folders (`.obsidian`, `.git`, `.trash` ...) are skipped, and links and
+/// other reparse points are never followed, so nothing outside the vault is
+/// listed. Stops at `MAX_IMAGE_LIST` paths.
+pub fn list_images(root: &Path) -> Result<Vec<String>, FsError> {
+    fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> {
+        let rd = match std::fs::read_dir(dir) {
+            Ok(rd) => rd,
+            // A folder that vanished or cannot be opened mid-walk is skipped.
+            Err(_) => return Ok(()),
+        };
+        let mut entries: Vec<(String, PathBuf)> = Vec::new();
+        for entry in rd {
+            let entry = entry?;
+            entries.push((entry.file_name().to_string_lossy().into_owned(), entry.path()));
+        }
+        entries.sort();
+        for (name, path) in entries {
+            if out.len() >= MAX_IMAGE_LIST {
+                return Ok(());
+            }
+            if name.starts_with('.') || is_tmp_name(&name) {
+                continue;
+            }
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if is_reparse_point(&meta) {
+                continue;
+            }
+            let rel = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+            if meta.is_dir() {
+                walk(&path, &rel, out)?;
+            } else if meta.is_file() && is_image_name(&name) {
+                out.push(rel);
+            }
+        }
+        Ok(())
+    }
+    let canon = std::fs::canonicalize(root).map_err(|e| match e.kind() {
+        ErrorKind::NotFound => FsError::Vault(VaultError::NotFound),
+        _ => FsError::from(e),
+    })?;
+    let mut out = Vec::new();
+    walk(&canon, "", &mut out)?;
+    out.truncate(MAX_IMAGE_LIST);
+    out.sort();
+    Ok(out)
+}
+
 // ---- Tauri layer ----------------------------------------------------------
 
 #[tauri::command]
@@ -644,6 +756,33 @@ pub async fn vault_trash(state: tauri::State<'_, super::VaultState>, path: Strin
     tauri::async_runtime::spawn_blocking(move || trash(&locks, &root, &path))
         .await
         .map_err(|e| FsError::Io(std::io::Error::new(ErrorKind::Other, e.to_string())))?
+}
+
+fn join_error(e: impl std::fmt::Display) -> FsError {
+    FsError::Io(std::io::Error::new(ErrorKind::Other, e.to_string()))
+}
+
+/// Async and off the main thread, like `vault_trash`. The bytes go back as a
+/// raw IPC response, which reaches JS as an `ArrayBuffer` (no JSON number array).
+#[tauri::command]
+pub async fn vault_read_image(
+    state: tauri::State<'_, super::VaultState>,
+    path: String,
+) -> Result<tauri::ipc::Response, FsError> {
+    let root = state.root()?;
+    let locks = Arc::clone(&state.locks);
+    let bytes = tauri::async_runtime::spawn_blocking(move || read_image(&locks, &root, &path))
+        .await
+        .map_err(join_error)??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+pub async fn vault_list_images(state: tauri::State<'_, super::VaultState>) -> Result<Vec<String>, FsError> {
+    let root = state.root()?;
+    tauri::async_runtime::spawn_blocking(move || list_images(&root))
+        .await
+        .map_err(join_error)?
 }
 
 #[cfg(test)]
@@ -1254,5 +1393,86 @@ mod tests {
         assert_eq!(read(&l, &t.0, ".obsidian/app.json").unwrap(), "{}");
         assert!(exists(&l, &t.0, ".obsidian").unwrap());
         assert_eq!(list(&t.0, ".obsidian").unwrap(), vec!["app.json"]);
+    }
+
+    #[test]
+    fn vault_read_image_reads_png_inside_vault() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        std::fs::create_dir_all(t.0.join("exp/images")).unwrap();
+        std::fs::write(t.0.join("exp/images/a.png"), [137u8, 80, 78, 71]).unwrap();
+        std::fs::write(t.0.join("B.PNG"), [1u8, 2]).unwrap();
+        assert_eq!(read_image(&l, &t.0, "exp/images/a.png").unwrap(), vec![137u8, 80, 78, 71]);
+        assert_eq!(read_image(&l, &t.0, "B.PNG").unwrap(), vec![1u8, 2], "the extension check ignores case");
+    }
+
+    #[test]
+    fn vault_read_image_rejects_escapes_and_non_images() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::write(t.0.join("x.png"), [1u8]).unwrap();
+        for p in ["../x.png", r"C:\x.png", r"\\server\s\x.png", "a/../../x.png", "/x.png", "%2e%2e/x.png"] {
+            let r = read_image(&l, &root, p);
+            assert!(r.is_err(), "{p} was read");
+            if p != "%2e%2e/x.png" {
+                assert!(matches!(r, Err(FsError::Vault(VaultError::Escape))), "{p}: {r:?}");
+            }
+        }
+        // `%2e%2e` is a literal folder name here, so it is simply missing, never decoded.
+        assert_eq!(kind_of(read_image(&l, &root, "%2e%2e/x.png").unwrap_err()), "notFound");
+        std::fs::write(root.join("a.html"), "<script></script>").unwrap();
+        assert!(matches!(read_image(&l, &root, "a.html"), Err(FsError::NotImage)));
+        assert!(matches!(read_image(&l, &root, "a.png.html"), Err(FsError::NotImage)));
+        assert!(matches!(read_image(&l, &root, "png"), Err(FsError::NotImage)));
+        std::fs::create_dir_all(root.join("d.png")).unwrap();
+        assert!(read_image(&l, &root, "d.png").is_err(), "a folder named like an image is not read");
+        let big = std::fs::File::create(root.join("big.png")).unwrap();
+        big.set_len(MAX_IMAGE_BYTES + 1).unwrap();
+        drop(big);
+        assert!(matches!(read_image(&l, &root, "big.png"), Err(FsError::TooLarge)));
+        let edge = std::fs::File::create(root.join("edge.png")).unwrap();
+        edge.set_len(MAX_IMAGE_BYTES).unwrap();
+        drop(edge);
+        assert_eq!(read_image(&l, &root, "edge.png").unwrap().len() as u64, MAX_IMAGE_BYTES);
+    }
+
+    #[test]
+    fn vault_read_image_rejects_junction_out_of_vault() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(t.0.join("outside")).unwrap();
+        std::fs::write(t.0.join("outside/y.png"), [1u8]).unwrap();
+        junction(&root.join("out"), &t.0.join("outside"));
+        assert!(matches!(read_image(&l, &root, "out/y.png"), Err(FsError::Vault(VaultError::Escape))));
+        std::fs::remove_dir(root.join("out")).unwrap();
+    }
+
+    #[test]
+    fn list_images_finds_scans_and_skips_dot_folders() {
+        let t = Tmp::new();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(root.join("exp/images/scans")).unwrap();
+        std::fs::write(root.join("exp/images/scans/LN-1.jpg"), [1u8]).unwrap();
+        std::fs::create_dir_all(root.join(".obsidian")).unwrap();
+        std::fs::write(root.join(".obsidian/x.png"), [1u8]).unwrap();
+        std::fs::create_dir_all(root.join("exp/.trash")).unwrap();
+        std::fs::write(root.join("exp/.trash/z.png"), [1u8]).unwrap();
+        std::fs::write(root.join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(t.0.join("outside")).unwrap();
+        std::fs::write(t.0.join("outside/y.png"), [1u8]).unwrap();
+        junction(&root.join("out"), &t.0.join("outside"));
+        assert_eq!(list_images(&root).unwrap(), vec!["exp/images/scans/LN-1.jpg".to_string()]);
+        std::fs::write(root.join("B.PNG"), [1u8]).unwrap();
+        std::fs::write(root.join("a.svg"), "<svg/>").unwrap();
+        assert_eq!(
+            list_images(&root).unwrap(),
+            vec!["B.PNG".to_string(), "a.svg".to_string(), "exp/images/scans/LN-1.jpg".to_string()]
+        );
+        std::fs::remove_dir(root.join("out")).unwrap();
+        assert!(matches!(list_images(&t.0.join("missing")), Err(FsError::Vault(VaultError::NotFound))));
     }
 }

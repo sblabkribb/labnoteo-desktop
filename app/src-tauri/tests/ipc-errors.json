@@ -6,5 +6,7 @@
   "notFound": "notFound",
   "pathTooLong": "pathTooLong",
   "exists": "exists",
+  "notImage": "notImage",
+  "tooLarge": "tooLarge",
   "io": "io"
 }

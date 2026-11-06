@@ -5,6 +5,7 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
+import { listVaultImages, readVaultImage } from '../vaultImage';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -20,6 +21,8 @@ function recorder() {
     if (cmd === 'vault_read') return 'old';
     if (cmd === 'vault_list' || cmd === 'search') return [];
     if (cmd === 'vault_exists') return true;
+    if (cmd === 'vault_read_image') return new ArrayBuffer(0);
+    if (cmd === 'vault_list_images') return [];
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
   };
@@ -51,6 +54,8 @@ describe('IPC 인자 이름 계약', () => {
     await createVault(r.invoke, 'D:\\lab');
     const { settings } = await loadVaultSettings(r.invoke);
     await saveVaultSettings(settings, r.invoke);
+    expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
+    expect(await listVaultImages(r.invoke)).toEqual([]);
 
     const expected = Object.fromEntries(Object.entries(fixture).map(([k, v]) => [k, [...v].sort()]));
     expect(Object.fromEntries(r.sent)).toEqual(expected);

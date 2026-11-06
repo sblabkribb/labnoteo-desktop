@@ -12,6 +12,10 @@ export const ERROR_KINDS = {
   pathTooLong: 'pathTooLong',
   /** rename 대상에 다른 파일·폴더가 이미 있다. */
   exists: 'exists',
+  /** `vault_read_image` 대상이 이미지 확장자의 일반 파일이 아니다. */
+  notImage: 'notImage',
+  /** `vault_read_image` 대상이 20 MiB 를 넘는다. */
+  tooLarge: 'tooLarge',
   io: 'io',
 } as const;
 

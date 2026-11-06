@@ -15,7 +15,7 @@
 //! the editor and events tests against the TypeScript consumers.
 
 use serde_json::{json, Value};
-use tauri::ipc::{CallbackFn, InvokeBody};
+use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
 use tauri::WebviewWindowBuilder;
@@ -166,6 +166,36 @@ title: 실험
     ok("vault_rmdir", args("vault_rmdir", vec![json!("notes")]));
     assert_eq!(std::fs::read_dir(dir.join("vault")).unwrap().count(), 0);
 
+    // Images: raw bytes, not JSON (`Response::new`), so this goes straight
+    // through `get_ipc_response` instead of `call`, which would deserialize.
+    let png = [137u8, 80, 78, 71, 13, 10, 26, 10];
+    std::fs::write(dir.join("vault").join("a.png"), png).unwrap();
+    let raw = get_ipc_response(
+        &webview,
+        InvokeRequest {
+            cmd: "vault_read_image".into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: "http://tauri.localhost".parse().unwrap(),
+            body: InvokeBody::Json(args("vault_read_image", vec![json!("a.png")])),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        },
+    )
+    .unwrap_or_else(|e| panic!("vault_read_image was refused: {e}"));
+    match raw {
+        InvokeResponseBody::Raw(bytes) => assert_eq!(bytes, png.to_vec()),
+        other => panic!("expected raw bytes, got {other:?}"),
+    }
+    std::fs::write(dir.join("vault").join("a.html"), "<p>").unwrap();
+    assert_eq!(
+        call("vault_read_image", args("vault_read_image", vec![json!("a.html")])).unwrap_err()["kind"],
+        "notImage"
+    );
+    std::fs::remove_file(dir.join("vault").join("a.html")).unwrap();
+    assert_eq!(ok("vault_list_images", args("vault_list_images", vec![])), json!(["a.png"]));
+    std::fs::remove_file(dir.join("vault").join("a.png")).unwrap();
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
@@ -223,7 +253,9 @@ fn error_kinds_match_the_typescript_side() {
         | FsError::Vault(_)
         | FsError::Io(_)
         | FsError::PathTooLong(_)
-        | FsError::Exists => (),
+        | FsError::Exists
+        | FsError::NotImage
+        | FsError::TooLarge => (),
     };
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(ERRORS).unwrap();
     let actual: std::collections::BTreeMap<String, String> = [
@@ -235,6 +267,8 @@ fn error_kinds_match_the_typescript_side() {
         ("io", kind(FsError::Io(Error::from(ErrorKind::PermissionDenied)))),
         ("pathTooLong", kind(FsError::PathTooLong(Error::from_raw_os_error(206)))),
         ("exists", kind(FsError::Exists)),
+        ("notImage", kind(FsError::NotImage)),
+        ("tooLarge", kind(FsError::TooLarge)),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
