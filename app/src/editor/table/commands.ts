@@ -23,7 +23,7 @@ import { displayText } from './renderInline';
 import { tableOpRunner, toggleRawTable, type TableAction } from './widget';
 // field.ts 와 cellEditor.ts 도 이 파일을 (간접적으로) 가져온다. 순환이므로 그 값은 함수 안에서만 쓴다.
 import { findTables, type TableSpan } from './field';
-import { cellOuterKeys, focusCell } from './cellEditor';
+import { cellOuterKeys, focusCell, missingBelowTable } from './cellEditor';
 import { tableAwareInsertPos } from './target';
 
 export type { TableAction };
@@ -236,24 +236,23 @@ export function placeBlock(state: EditorState, from: number, to: number, block: 
 /**
  * 표의 원문 `block` 을 [from, to) 에 따로 선 블록으로 넣는 변경. 앞 글과는 `placeBlock` 처럼 빈 줄 하나로 떨어진다.
  * 뒤에는 언제나 빈 줄 하나와 빈 문단 줄 하나가 온다: 표 바로 아래 줄(이나 표 끝)에 친 글은 GFM 이 표의 행으로 읽으므로,
- * 표에서 나온 커서가 설 줄이 있어야 한다(셀 편집기의 `exitBelow` 와 같은 규칙). 뒤에 글이 이어지면 빈 문단 줄 바로 다음 줄이다.
- * 이미 있는 빈 줄은 다시 쓴다. `start` 는 새 문서에서 표가 시작하는 위치, `after` 는 그 빈 문단 줄의 시작.
+ * 표에서 나온 커서가 설 줄이 있어야 한다. 뒤에 글이 이어지면 그 글과의 사이에도 빈 줄 하나를 둔다: 빈 문단 줄에 친 글이
+ * 다음 문단과 이어지지 않게(셀 편집기의 `exitBelow` 와 같은 규칙, `missingBelowTable`). 이미 있는 빈 줄(공백뿐인 줄 포함)은
+ * 다시 쓴다. `start` 는 새 문서에서 표가 시작하는 위치, `after` 는 그 빈 문단 줄의 시작.
  */
 export function placeTable(state: EditorState, from: number, to: number, block: string): { change: Change; start: number; after: number } {
   const doc = state.doc;
   const br = state.lineBreak;
   const before = gapBefore(state, from);
   const tail = doc.lineAt(to);
-  // 표 끝과 다음 글(이나 문서 끝) 사이에 줄바꿈 셋(표 끝, 빈 줄, 빈 문단 줄)이 있어야 한다.
-  // 줄 끝에 넣으면 그 줄의 줄바꿈과 뒤따르는 빈 줄마다 하나씩 이미 있다(문서 끝이면 마지막 줄의 것은 없지만 하나 덜 필요하다).
-  let after = br + br + br;
-  if (to === tail.to) {
-    let blank = 0;
-    for (let n = tail.number + 1; n <= doc.lines && blank < 2 && doc.line(n).length === 0; n++) blank++;
-    after = br.repeat(2 - blank);
-  }
   const start = from + state.toText(before).length;
-  return { change: { from, to, insert: before + block + after }, start, after: start + state.toText(block).length + 2 };
+  // CodeMirror 의 위치는 줄바꿈(CRLF 도)을 한 칸으로 센다
+  const end = start + state.toText(block).length;
+  // 줄 가운데면 남은 글이 바로 뒤에 온다: 표 끝, 빈 줄, 빈 문단 줄, 빈 줄의 줄바꿈 넷.
+  // 줄 끝이면 표는 그 줄의 마지막 줄 자리에 서고, 뒤따르는 줄은 그대로 남는다(`missingBelowTable`).
+  const missing = to < tail.to ? 4 : missingBelowTable(doc, tail.number);
+  const after = missing ? end + 2 : end + 1 + doc.line(tail.number + 1).length + 1;
+  return { change: { from, to, insert: before + block + br.repeat(missing) }, start, after };
 }
 
 /**

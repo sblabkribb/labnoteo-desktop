@@ -9,6 +9,7 @@ import {
   StateField,
   Transaction,
   type ChangeSpec,
+  type Text,
   type Extension,
   type TransactionSpec,
 } from '@codemirror/state';
@@ -55,6 +56,19 @@ const LOCKED = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
 const isLocked = (state: EditorState) => state.readOnly || !state.facet(EditorView.editable);
 /** 빈 줄: 공백뿐인 줄도 빈 줄로 본다(GFM 도 그렇게 읽는다). */
 const isBlank = (text: string) => text.trim() === '';
+
+/**
+ * 표의 마지막 줄(줄 번호 `last`) 끝에 더 넣어야 할 줄바꿈 수. 넣은 뒤 커서가 설 줄은 표 끝에서 두 줄 아래다.
+ * 표 바로 아래 줄에 친 글은 GFM 이 표의 행으로 읽고, 문단 바로 위 줄에 친 글은 그 문단과 이어진다. 그래서 커서 줄 위에는
+ * 언제나 빈 줄 하나, 뒤에 글이 이어지면 아래에도 빈 줄 하나가 있어야 한다: 표, 빈 줄, 커서, 빈 줄, 문단.
+ * 이미 있는 빈 줄(공백뿐인 줄 포함)은 다시 쓴다. 0 이면 문서를 바꾸지 않고 `last + 2` 번째 줄에 커서를 둔다.
+ */
+export function missingBelowTable(doc: Text, last: number): number {
+  let blank = 0;
+  while (last + blank < doc.lines && isBlank(doc.line(last + 1 + blank).text)) blank++;
+  const textFollows = last + blank < doc.lines;
+  return Math.max(0, (textFollows ? 3 : 2) - blank);
+}
 
 // ---------------------------------------------------------------- 표 찾기
 
@@ -471,8 +485,8 @@ class Session implements CellHandle {
   }
 
   /**
-   * 표 아래 새 줄로 나간다(Escape, Mod-Enter, 마지막 행의 ArrowDown·ArrowRight). 표 바로 아래 줄에 글자를 치면 GFM 이
-   * 표의 행으로 읽으므로, 빈 줄 하나를 사이에 둔 줄에 커서를 둔다. 그런 줄이 없으면 만든다(되돌리기 한 번).
+   * 표 아래 새 줄로 나간다(Escape, Mod-Enter, 마지막 행의 ArrowDown·ArrowRight). 커서 줄은 표와 빈 줄 하나로 떨어지고,
+   * 뒤에 글이 이어지면 그 글과도 빈 줄 하나로 떨어진다(`missingBelowTable`). 모자란 줄은 만든다(되돌리기 한 번).
    */
   private exitBelow(): boolean {
     const at = this.located();
@@ -488,12 +502,10 @@ class Session implements CellHandle {
       this.leave(pos);
       return true;
     }
-    const next = end < doc.length ? doc.lineAt(end + 1) : null;
-    if (next && next.length === 0) {
-      const after = next.number < doc.lines ? doc.line(next.number + 1) : null;
-      if (after && after.length === 0) this.leave(after.from);
-      else this.leave(next.to + 1, { from: next.to, insert: br });
-    } else this.leave(end + 2, { from: end, insert: br + br });
+    const last = doc.lineAt(end).number;
+    const missing = missingBelowTable(doc, last);
+    if (missing) this.leave(end + 2, { from: end, insert: br.repeat(missing) });
+    else this.leave(doc.line(last + 2).from);
     return true;
   }
 

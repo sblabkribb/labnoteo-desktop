@@ -141,7 +141,7 @@ describe('칸에 포커스가 있을 때의 블록 넣기', () => {
     expect(focusCell(v, 0, 0, 1)).toBe(true); // 머리 행: 커서 줄 다음에 넣으면 표가 둘로 갈라진다
     expect(activeCellView(v)).not.toBeNull();
     expect(insertTable(v, 2, 1)).toBe(true);
-    expect(v.state.doc.toString()).toBe(`${T}\n\n|  |\n| --- |\n|  |\n\n\n# 다음`);
+    expect(v.state.doc.toString()).toBe(`${T}\n\n|  |\n| --- |\n|  |\n\n\n\n# 다음`);
     expect(v.state.field(activeCell)).toEqual({ tableFrom: T.length + 2, r: 0, c: 0 });
     expect(undoDepth(v.state)).toBe(1);
     undo(v);

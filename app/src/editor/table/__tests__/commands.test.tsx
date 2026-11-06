@@ -314,7 +314,7 @@ describe('insertTable', () => {
     v.dispatch({ selection: { anchor: 2 } });
     expect(insertTable(v)).toBe(true);
     const table = '|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |';
-    expect(v.state.doc.toString()).toBe(`앞 글\n\n${table}\n\n\n뒤 글`);
+    expect(v.state.doc.toString()).toBe(`앞 글\n\n${table}\n\n\n\n뒤 글`);
     expect(v.state.field(activeCell)).toEqual({ tableFrom: 5, r: 0, c: 0 });
     expect(activeCellView(v)).not.toBeNull();
     expect(wrapOf(v).querySelectorAll('tr')).toHaveLength(3);
@@ -353,6 +353,31 @@ describe('insertTable', () => {
     undo(v);
     undo(v);
     expect(v.state.doc.toString()).toBe('');
+  });
+
+  it('뒤에 글이 이어지면 커서 줄 위아래에 빈 줄을 둔다: 있는 빈 줄(공백뿐인 줄 포함)은 다시 쓰고, 칸에서 나와도 문서는 그대로다', () => {
+    const table = '|  |\n| --- |\n|  |';
+    const cases: Array<[string, string]> = [
+      ['앞\n뒤', `앞\n\n${table}\n\n\n\n뒤`],
+      ['앞\n \n뒤', `앞\n\n${table}\n\n\n \n뒤`],
+      ['앞\n\n\t\n뒤', `앞\n\n${table}\n\n\n\t\n뒤`],
+      ['앞\n\n\n\n뒤', `앞\n\n${table}\n\n\n\n뒤`],
+    ];
+    for (const [doc, out] of cases) {
+      const v = mount(doc);
+      v.dispatch({ selection: { anchor: 0 } });
+      expect(insertTable(v, 2, 1)).toBe(true);
+      expect(v.state.doc.toString()).toBe(out);
+      expect(undoDepth(v.state)).toBe(1);
+      const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      expect(runScopeHandlers(activeCellView(v)!, esc, 'editor')).toBe(true);
+      expect(v.state.doc.toString()).toBe(out);
+      const head = v.state.selection.main.head;
+      expect(head).toBe(3 + table.length + 2);
+      v.dispatch({ changes: { from: head, insert: '새 글' }, userEvent: 'input.type' });
+      expect(v.state.doc.toString()).toBe(out.replace(`${table}\n\n`, `${table}\n\n새 글`));
+      expect(v.state.doc.line(v.state.doc.lineAt(head).number + 1).text.trim()).toBe('');
+    }
   });
 
   it('CRLF 문서에서는 CRLF 로 넣는다', () => {

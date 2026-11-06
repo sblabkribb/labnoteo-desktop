@@ -319,8 +319,8 @@ describe('셀 편집기: 키보드 이동', () => {
     key(nested(m.view), 'Escape');
     expect(liveCellEditors()).toBe(0);
     expect(m.view.state.field(activeCell)).toBeNull();
-    // 빈 줄 하나를 사이에 둔 새 줄(표 바로 아래 줄에 치면 표의 행이 된다)
-    expect(m.view.state.doc.toString()).toBe(`${T}\n\n\n뒤`);
+    // 위아래로 빈 줄을 둔 새 줄(표 바로 아래 줄에 치면 표의 행이 되고, 문단 바로 위 줄에 치면 그 문단과 이어진다)
+    expect(m.view.state.doc.toString()).toBe(`${T}\n\n\n\n뒤`);
     expect(m.view.state.selection.main.head).toBe(T.length + 2);
     expect(td.textContent).toBe('1');
     expect(td.classList.contains('lno-cell-active')).toBe(false);
@@ -349,7 +349,7 @@ describe('셀 편집기: 키보드 이동', () => {
     expect(m.view.state.field(activeCell)).toMatchObject({ r: 1, c: 0 });
     key(nested(m.view), 'ArrowDown');
     expect(liveCellEditors()).toBe(0);
-    expect(m.view.state.doc.toString()).toBe(`앞\n\n${T}\n\n\n뒤`);
+    expect(m.view.state.doc.toString()).toBe(`앞\n\n${T}\n\n\n\n뒤`);
     expect(m.view.state.selection.main.head).toBe(from + T.length + 2);
     focusCell(m.view, from, 0, 1);
     key(nested(m.view), 'ArrowUp');
@@ -398,6 +398,7 @@ describe('셀 편집기: 표 아래로 나가기', () => {
       expect(m.view.state.doc.toString()).toBe(`${T}
 
 새 글
+
 문단`);
       expect(m.view.dom.querySelectorAll('.lno-table-wrap')).toHaveLength(1);
       expect(cellEl(m.view, 1, 1).closest('table')!.rows).toHaveLength(2);
@@ -426,16 +427,26 @@ describe('셀 편집기: 표 아래로 나가기', () => {
     });
   }
 
-  it('표 아래에 이미 빈 줄 둘이 있으면 문서를 바꾸지 않고 둘째 빈 줄로 간다', () => {
-    const doc = `${T}
+  it('표와 문단 사이에 이미 빈 줄 셋이 있으면 문서를 바꾸지 않고 둘째 빈 줄로 간다: 공백뿐인 줄도 빈 줄이다', () => {
+    for (const gap of ['\n\n\n', '\n \n\t\n  ']) {
+      const doc = `${T}${gap}\n문단`;
+      const m = mount(doc);
+      focusCell(m.view, 0, 1, 0);
+      key(nested(m.view), 'Escape');
+      expect(m.view.state.doc.toString()).toBe(doc);
+      expect(m.view.state.selection.main.head).toBe(m.view.state.doc.line(5).from);
+    }
+  });
 
-
-문단`;
+  it('표와 문단 사이의 빈 줄이 둘이면(공백뿐인 줄 포함) 하나만 더한다 (되돌리기 한 번)', () => {
+    const doc = `${T}\n \n\n문단`;
     const m = mount(doc);
     focusCell(m.view, 0, 1, 0);
     key(nested(m.view), 'Escape');
+    expect(m.view.state.doc.toString()).toBe(`${T}\n\n \n\n문단`);
+    expect(m.view.state.selection.main.head).toBe(m.view.state.doc.line(5).from);
+    undo(m.view);
     expect(m.view.state.doc.toString()).toBe(doc);
-    expect(m.view.state.selection.main.head).toBe(T.length + 2);
   });
 });
 

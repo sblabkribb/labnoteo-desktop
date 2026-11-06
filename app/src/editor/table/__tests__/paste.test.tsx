@@ -74,7 +74,9 @@ describe('바깥 편집기에 붙여 넣기', () => {
     const v = mount('앞뒤');
     v.dispatch({ selection: { anchor: 1 } });
     paste(v.contentDOM, 'a\tb');
-    expect(v.state.doc.toString()).toBe('앞\n\n| a | b |\n| --- | --- |\n\n\n뒤');
+    // 커서는 위아래에 빈 줄을 둔 빈 문단 줄: 거기 친 글이 뒤 글과 이어지지 않는다
+    expect(v.state.doc.toString()).toBe('앞\n\n| a | b |\n| --- | --- |\n\n\n\n뒤');
+    expect(v.state.selection.main.head).toBe(v.state.doc.length - 3);
   });
 
   it('표가 아닌 글은 그대로 붙는다', () => {
@@ -117,9 +119,9 @@ describe('바깥 편집기에 붙여 넣기', () => {
     const w = mount('앞\n뒤');
     w.dispatch({ selection: { anchor: 1 } });
     paste(w.contentDOM, 'a\tb');
-    expect(w.state.doc.toString()).toBe('앞\n\n| a | b |\n| --- | --- |\n\n\n뒤');
-    expect(w.state.selection.main.head).toBe(w.state.doc.length - 2);
-  });
+    // 커서 줄 위아래에 빈 줄: 거기 친 글이 뒤 문단과 이어지지 않는다
+    expect(w.state.doc.toString()).toBe('앞\n\n| a | b |\n| --- | --- |\n\n\n\n뒤');
+    expect(w.state.selection.main.head).toBe(w.state.doc.length - 3);  });
 
   it('한글 입력 상태의 Ctrl+Shift+V(key 가 ㅍ 이나 Process 여도 code 는 KeyV)도 원문으로 붙인다', () => {
     for (const key of ['ㅍ', 'Process']) {
