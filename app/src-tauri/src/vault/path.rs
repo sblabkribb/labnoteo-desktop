@@ -100,7 +100,7 @@ pub fn confine(root: &Path, rel: &str) -> Result<PathBuf, VaultError> {
 }
 
 /// Drop the Win32 verbatim prefix (`\\?\C:\x` -> `C:\x`, `\\?\UNC\s\x` -> `\\s\x`).
-fn strip_verbatim(p: &Path) -> String {
+pub(crate) fn strip_verbatim(p: &Path) -> String {
     let s = p.to_string_lossy();
     if let Some(rest) = s.strip_prefix("\\\\?\\UNC\\") {
         format!("\\\\{rest}")
