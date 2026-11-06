@@ -4,7 +4,7 @@
 #
 # One-time setup: repository secret TAURI_SIGNING_PRIVATE_KEY (the updater's
 # private key; the matching public key is in tauri.conf.json) and, only if the
-# key has a password, TAURI_SIGNING_PRIVATE_KEY_PASSWORD. See docs/RELEASING.md.
+# key has a password, TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
 # The installer itself is not code-signed: Windows SmartScreen warns on first install.
 name: release
 

@@ -103,11 +103,6 @@ labnoteO Desktop은 labnoteO의 기능을 모두 옮겨, 누구도 Obsidian 없�
 
 API 키(PartBank, bfworkflow, LLM)는 보관함이 아니라 Windows 자격 증명 저장소에 보관합니다.
 
-## 문서
-
-- [수동 스모크 테스트](docs/SMOKE-TEST.md): 릴리스 전에 빌드를 손으로 확인하는 절차
-- [릴리스](docs/RELEASING.md): 서명 키, 태그, 업데이트 피드
-
 ## 라이선스
 
 [Apache License 2.0](LICENSE).

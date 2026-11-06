@@ -108,11 +108,6 @@ labnoteO Desktop aims to carry over every labnoteO feature, so nobody needs Obsi
 API keys (PartBank, bfworkflow, LLM) will be stored in the Windows credential store, never in the
 vault.
 
-## Documentation
-
-- [Manual smoke test](docs/SMOKE-TEST.md): check a build by hand before release
-- [Releasing](docs/RELEASING.md): signing keys, tags and the update feed
-
 ## License
 
 [Apache License 2.0](LICENSE).
