@@ -51,6 +51,29 @@ describe('subpathLine', () => {
   });
 });
 
+describe('subpathLine review fixes', () => {
+  it('sanitised links resolve when a reserved character sits between two non-space characters', () => {
+    const H = '# Top\n## Step 1:PCR\n## Sample#3\n## a[b]c\n## 37°C:30s\n';
+    for (const [heading, line] of [['Step 1:PCR', 1], ['Sample#3', 2], ['a[b]c', 3], ['37°C:30s', 4]] as const) {
+      expect(subpathLine(H, { subpath: sanitizeHeading(heading) })).toBe(line);
+    }
+  });
+
+  it('does not take block ids from fenced code or front matter', () => {
+    expect(subpathLine('# T\n```\nx ^blk\n```\ny ^blk\n', { subpath: '^blk' })).toBe(4);
+    expect(subpathLine('---\nk: v ^blk\n---\ny ^blk\n', { subpath: '^blk' })).toBe(3);
+    expect(subpathLine('# T\n~~~\nx ^blk\n~~~\n', { subpath: '^blk' })).toBeUndefined();
+  });
+
+  it('prefers a heading matching as written over a coded heading matching on its label alone', () => {
+    const W = '# T\n## [WB030 Western] blot\n## Western blot\n';
+    expect(subpathLine(W, { subpath: 'Western blot' })).toBe(2);
+    expect(subpathLine(W, { subpath: '[WB030 Western] blot' })).toBe(1);
+    // with no plain heading, the label alone still finds the coded one
+    expect(subpathLine('# T\n## [WB030 Western] blot\n', { subpath: 'Western blot' })).toBe(1);
+  });
+});
+
 describe('looseHeadingKey', () => {
   it('lowercases, keeps letters, digits and spaces, collapses and trims', () => {
     expect(looseHeadingKey('  Step 1:  PCR  ')).toBe('step 1 pcr');

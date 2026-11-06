@@ -26,19 +26,16 @@ const FRONTMATTER_CLOSE = /^(?:---|\.\.\.)[ \t]*$/;
 const WORKFLOW_HEADING = /^##\s+\[([A-Z]+\d+)\s+(.+?)\]\s*(.*)/;
 
 /**
- * ATX 제목만 읽는다. 맨 앞의 머리말(`---` … `---`/`...`)과 ``` / ~~~ 울타리 코드 안은 건너뛴다.
- * 줄 끝의 `\r` 과 닫는 `#` 들은 떼고, 글이 빈 제목은 넣지 않는다.
- *
- * 줄 배열을 주면 그 배열의 번호를 쓴다. 편집기는 CodeMirror 의 줄(`doc.iterLines()`)을 넘겨야 한다: CRLF 가 많은
- * 섞인 파일은 CRLF 로만 줄을 나누므로, `doc.toString().split('\n')` 은 외톨이 LF 마다 줄 번호가 하나씩 밀린다.
+ * 본문 줄 표시: 맨 앞 머리말(`---` … `---`/`...`)과 ``` / ~~~ 울타리(여닫는 줄 포함) 안의 줄은 false.
+ * 제목 목록과 링크의 블록 id 찾기가 같은 규칙을 쓴다.
  */
-export function extractOutline(text: string | readonly string[]): OutlineItem[] {
-  const lines = typeof text === 'string' ? text.split('\n') : text;
-  const items: OutlineItem[] = [];
+export function bodyLineMask(lines: readonly string[]): boolean[] {
+  const body = new Array<boolean>(lines.length).fill(true);
   let i = 0;
   if (lines.length > 1 && FRONTMATTER_OPEN.test(lines[0].replace(/\r$/, ''))) {
     for (let j = 1; j < lines.length; j++) {
       if (FRONTMATTER_CLOSE.test(lines[j].replace(/\r$/, ''))) {
+        body.fill(false, 0, j + 1);
         i = j + 1;
         break;
       }
@@ -50,13 +47,32 @@ export function extractOutline(text: string | readonly string[]): OutlineItem[] 
     const raw = lines[i].replace(/\r$/, '');
     const f = FENCE.exec(raw);
     if (fence) {
+      body[i] = false;
       if (f && f[1][0] === fence.ch && f[1].length >= fence.len && raw.slice(f[0].length).trim() === '') fence = null;
       continue;
     }
     if (f) {
+      body[i] = false;
       fence = { ch: f[1][0], len: f[1].length };
-      continue;
     }
+  }
+  return body;
+}
+
+/**
+ * ATX 제목만 읽는다. 맨 앞의 머리말(`---` … `---`/`...`)과 ``` / ~~~ 울타리 코드 안은 건너뛴다(`bodyLineMask`).
+ * 줄 끝의 `\r` 과 닫는 `#` 들은 떼고, 글이 빈 제목은 넣지 않는다.
+ *
+ * 줄 배열을 주면 그 배열의 번호를 쓴다. 편집기는 CodeMirror 의 줄(`doc.iterLines()`)을 넘겨야 한다: CRLF 가 많은
+ * 섞인 파일은 CRLF 로만 줄을 나누므로, `doc.toString().split('\n')` 은 외톨이 LF 마다 줄 번호가 하나씩 밀린다.
+ */
+export function extractOutline(text: string | readonly string[]): OutlineItem[] {
+  const lines = typeof text === 'string' ? text.split('\n') : text;
+  const body = bodyLineMask(lines);
+  const items: OutlineItem[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!body[i]) continue;
+    const raw = lines[i].replace(/\r$/, '');
     const m = ATX.exec(raw);
     if (!m) continue;
     const level = m[1].length as OutlineItem['level'];

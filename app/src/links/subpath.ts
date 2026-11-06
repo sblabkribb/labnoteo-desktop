@@ -7,13 +7,16 @@
  */
 import { resolveGithubAnchor } from '@labnoteo/core';
 import { lineSeparatorOf, parseRaw } from '../editor/documentIo';
-import { extractOutline } from '../editor/outline/extract';
+import { bodyLineMask, extractOutline } from '../editor/outline/extract';
 
-/** Lowercase, keep letters, digits and spaces, collapse spaces, trim (D5). */
+/**
+ * Lowercase, turn every run of other characters into a space, collapse spaces, trim (D5).
+ * Punctuation reads as a space so `sanitizeHeading` output (`Step 1:PCR` -> `Step 1 PCR`) keys the same as its heading.
+ */
 export function looseHeadingKey(s: string): string {
   return s
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -36,20 +39,21 @@ function editorLines(raw: string): string[] {
 function headingLine(lines: string[], text: string): number | undefined {
   const key = looseHeadingKey(text);
   if (!key) return undefined;
-  for (const item of extractOutline(lines)) {
-    // A coded heading `## [WB030 Western] blot` is listed as code + label; both keys read the same as the written text.
-    if (looseHeadingKey(item.text) === key || (item.code && looseHeadingKey(`${item.code} ${item.text}`) === key)) {
-      return item.line - 1;
-    }
-  }
-  return undefined;
+  const items = extractOutline(lines);
+  // A heading as written wins: a coded heading `## [WB030 Western] blot` (listed as code + label) is written as
+  // `WB030 Western blot`. Only when nothing matches that way does a coded heading match on its label alone.
+  const written = items.find((item) => looseHeadingKey(item.code ? `${item.code} ${item.text}` : item.text) === key);
+  const found = written ?? items.find((item) => item.code && looseHeadingKey(item.text) === key);
+  return found ? found.line - 1 : undefined;
 }
 
 function blockLine(lines: string[], id: string): number | undefined {
   if (!id) return undefined;
   const escaped = id.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&');
   const re = new RegExp('(?:^|\\s)\\^' + escaped + '\\s*$');
-  const i = lines.findIndex((l) => re.test(l));
+  // Obsidian does not index block ids inside front matter or fenced code.
+  const body = bodyLineMask(lines);
+  const i = lines.findIndex((l, n) => body[n] && re.test(l));
   return i === -1 ? undefined : i;
 }
 
