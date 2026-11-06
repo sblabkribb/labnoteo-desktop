@@ -44,10 +44,12 @@ import { EditorActions } from './labnote/ui/EditorActions';
 import { editorMenu, noteTreeMenu } from './labnote/menus';
 import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
 import { OutlinePanel } from './editor/outline/OutlinePanel';
+import { LinksPanel } from './links/LinksPanel';
+import { createFromLink } from './links/createFromLink';
 
-type SidebarTab = 'files' | 'workflows' | 'outline';
+type SidebarTab = 'files' | 'workflows' | 'outline' | 'links';
 
-const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'outline'];
+const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'outline', 'links'];
 
 /** 보관함마다 기억하는 사이드바 탭(이 PC 의 브라우저 저장소). 읽거나 쓰지 못하면 기억하지 않는다. */
 const tabKey = (root: string) => `labnoteo-sidebar-tab:${root}`;
@@ -203,6 +205,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     if (!selected) return;
     void handleOpenLink(ctx, target, selected, openExternalUrl, { openFile, notify: host.notify });
   };
+  // 링크 탭(SP4 Task 17): 백링크는 그 줄에서 열고, 나가는 링크의 없는 노트는 열린 노트 기준으로 만든다.
+  const onLinksOpen = (path: string, line?: number) => void openFile(path, line === undefined ? undefined : { line });
+  const onLinksCreate = (linkpath: string) => {
+    if (!ctx || !selected) return;
+    void runCommand(ctx, () => createFromLink(ctx, linkpath, selected));
+  };
   const onEditorMenu = (e: MouseEvent, view: EditorView) => {
     const path = notes.activePath();
     if (!ctx || !path) return;
@@ -287,6 +295,18 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
             >
               {t('sidebar.outline')}
             </button>
+            <button
+              type="button"
+              role="tab"
+              id="sidebar-tab-links"
+              aria-controls="sidebar-panel-links"
+              aria-selected={tab === 'links'}
+              tabIndex={tab === 'links' ? 0 : -1}
+              className="sidebar-tab"
+              onClick={() => showPanel('links')}
+            >
+              {t('sidebar.tab.links')}
+            </button>
           </div>
           {/* 파일 탭은 숨겨도 내리지 않는다: 접어 둔 폴더와 찾던 말이 남는다 */}
           <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
@@ -302,6 +322,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           {tab === 'outline' && (
             <div role="tabpanel" id="sidebar-panel-outline" className="sidebar-panel" aria-labelledby="sidebar-tab-outline">
               <OutlinePanel onReveal={onOutlineReveal} />
+            </div>
+          )}
+          {tab === 'links' && (
+            <div role="tabpanel" id="sidebar-panel-links" className="sidebar-panel" aria-labelledby="sidebar-tab-links">
+              <LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} />
             </div>
           )}
         </aside>

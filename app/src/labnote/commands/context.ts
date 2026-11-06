@@ -20,7 +20,7 @@ export interface CommandContext {
   /** 트리를 다시 읽고 vaultRefresh 를 알린다(Workflows 패널이 구독한다, Task 12). */
   refresh(): void;
   /** 사이드바 탭을 바꾼다. */
-  showPanel(panel: 'files' | 'workflows' | 'outline'): void;
+  showPanel(panel: 'files' | 'workflows' | 'outline' | 'links'): void;
 }
 
 const listeners = new Set<() => void>();

@@ -70,7 +70,7 @@ export interface CommandContextDeps {
   reloadTree(): void;
   openFile(path: string, at?: At): Promise<void>;
   closeActive(): Promise<boolean>;
-  showPanel?: (p: 'files' | 'workflows' | 'outline') => void;
+  showPanel?: (p: 'files' | 'workflows' | 'outline' | 'links') => void;
 }
 
 /**

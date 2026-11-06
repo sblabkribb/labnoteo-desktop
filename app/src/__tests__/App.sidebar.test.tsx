@@ -104,6 +104,7 @@ describe('사이드바 탭', () => {
     const files = () => tabs().getByRole('tab', { name: '파일' });
     const workflows = () => tabs().getByRole('tab', { name: '워크플로' });
     const outline = () => tabs().getByRole('tab', { name: t('sidebar.outline') });
+    const links = () => tabs().getByRole('tab', { name: t('sidebar.tab.links') });
     await waitFor(() => expect(workflows().getAttribute('aria-selected')).toBe('true'));
 
     workflows().focus();
@@ -111,6 +112,10 @@ describe('사이드바 탭', () => {
     expect(files().getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(files());
     expect(await screen.findByRole('navigation', { name: '노트' })).toBeTruthy();
+
+    await user.keyboard('{ArrowLeft}');
+    expect(links().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(links());
 
     await user.keyboard('{ArrowLeft}');
     expect(outline().getAttribute('aria-selected')).toBe('true');
@@ -121,8 +126,8 @@ describe('사이드바 탭', () => {
     expect(document.activeElement).toBe(files());
 
     await user.keyboard('{End}');
-    expect(outline().getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement).toBe(outline());
+    expect(links().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(links());
 
     await user.keyboard('{ArrowRight}');
     expect(files().getAttribute('aria-selected')).toBe('true');
@@ -148,6 +153,41 @@ describe('사이드바 탭', () => {
     render(<App />);
     await screen.findByText('보관함: fake-vault');
     await waitFor(() => expect(outline().getAttribute('aria-selected')).toBe('true'));
+  });
+
+  it('the Links tab is reachable with ArrowRight and remembered per vault', async () => {
+    const user = userEvent.setup();
+    installFakeVault({ 'labnote/001_GFP/README.labnote.md': README });
+    const first = render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    const outline = () => tabs().getByRole('tab', { name: t('sidebar.outline') });
+    const links = () => tabs().getByRole('tab', { name: t('sidebar.tab.links') });
+    outline().click();
+    outline().focus();
+    await user.keyboard('{ArrowRight}');
+    expect(links().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(links());
+    expect(screen.getByRole('tabpanel', { name: t('sidebar.tab.links') })).toBeTruthy();
+    first.unmount();
+
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await waitFor(() => expect(links().getAttribute('aria-selected')).toBe('true'));
+  });
+
+  it('links-show switches the sidebar to links', async () => {
+    const user = userEvent.setup();
+    installFakeVault({ 'Day 1.labnote.md': 'x' });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    const button = within(screen.getByRole('banner')).getByRole('button', { name: '명령 팔레트 (Ctrl+P)' }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    await user.click(button);
+    await user.type(within(await screen.findByRole('dialog', { name: '명령' })).getByRole('combobox'), t('cmd.linksShow'));
+    await act(async () => {
+      await user.keyboard('{Enter}');
+    });
+    await waitFor(() => expect(tabs().getByRole('tab', { name: t('sidebar.tab.links') }).getAttribute('aria-selected')).toBe('true'));
   });
 
   it('outline-show switches the sidebar to outline', async () => {

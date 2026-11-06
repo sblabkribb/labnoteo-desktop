@@ -615,6 +615,46 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 .wf-tree-row[aria-expanded="false"]::before { content: "▸"; content: "▸" / ""; }
 .wf-tree-row:not([aria-expanded])::before { content: ""; flex: none; width: 1em; }
 
+/* 링크 패널(SP4 Task 17): 백링크 묶음(출처 노트 머리, 흐린 폴더), 링크 부분을 mark 로 칠한 맥락 줄 */
+.links-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); }
+.links-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.links-heading { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted); }
+.links-empty { margin: 0; color: var(--text-muted); }
+.links-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.links-source,
+.links-context {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.links-source { display: flex; align-items: baseline; gap: var(--space-2); font-weight: 600; }
+.links-source:hover,
+.links-context:hover { background: var(--bg-hover); }
+.links-source:focus-visible,
+.links-context:focus-visible { outline-offset: -2px; }
+.links-source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.links-source-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+.links-list { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
+.links-context { font-size: var(--font-size-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.links-context mark { background: var(--bg-selection); color: var(--text); border-radius: var(--radius); }
+
 /* 트리 아이콘(treeIcons.ts): CSS 글리프만, 토큰 색 */
 .tree-icon { flex: none; width: 1.2em; text-align: center; color: var(--text-muted); }
 .ti-none::before { content: ""; }
