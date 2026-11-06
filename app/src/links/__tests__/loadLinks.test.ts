@@ -137,11 +137,61 @@ describe('loadLinks', () => {
     expect(linkIndex.files()).not.toContain('gone.md');
     expect(linkIndex.backlinks('b.md').map((b) => b.source)).not.toContain('gone.md');
   });
-  it('a read that fails otherwise keeps what the index had', async () => {
-    const read = vi.spyOn(api, 'read').mockRejectedValueOnce({ kind: 'io', message: 'locked' });
-    await applyChanges(linkIndex, api, [{ path: 'a.md', kind: 'modified' }]);
-    expect(read).toHaveBeenCalled();
+  it('skips body page entries that vault_tree does not list', async () => {
+    const ghost = fakeApi({ 'a.md': '[[b]]', 'b.md': 'x', 'ghost.md': '[[b]]' }, [], {
+      tree: [
+        { path: 'a.md', isDir: false },
+        { path: 'b.md', isDir: false },
+      ],
+    });
+    await loadAll(linkIndex, ghost);
+    expect(linkIndex.files()).not.toContain('ghost.md');
+    expect(linkIndex.backlinks('b.md').map((b) => b.source)).toEqual(['a.md']);
+  });
+  it('a removed note that exists again on disk keeps its links', async () => {
+    // remove + re-create collapsed by the watcher, or a removal reported late
+    await applyChanges(linkIndex, api, [{ path: 'a.md', kind: 'removed' }]);
+    expect(linkIndex.files()).toContain('a.md');
     expect(linkIndex.backlinks('b.md').map((b) => b.source)).toEqual(['a.md', 'c.md']);
+  });
+  it('the completion pass retries a failed read once before ready', async () => {
+    api.failBodies = true;
+    const read = vi.spyOn(api, 'read').mockRejectedValueOnce({ kind: 'io', message: 'locked' });
+    await loadAll(linkIndex, api);
+    expect(read.mock.calls.filter(([p]) => p === 'a.md')).toHaveLength(2);
+    expect(linkIndex.backlinks('b.md').map((b) => b.source)).toEqual(['a.md', 'c.md']);
+  });
+  it('warns about notes the completion pass could not read', async () => {
+    api.failBodies = true;
+    const real = api.read.bind(api);
+    vi.spyOn(api, 'read').mockImplementation(async (p: string) => {
+      if (p === 'a.md') throw { kind: 'io', message: 'locked' };
+      return real(p);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await loadAll(linkIndex, api);
+    expect(linkIndex.ready()).toBe(true);
+    expect(warn.mock.calls.some((c) => JSON.stringify(c).includes('a.md'))).toBe(true);
+    warn.mockRestore();
+  });
+  it('warns when a created folder cannot be listed', async () => {
+    vi.spyOn(api, 'tree').mockRejectedValueOnce(new Error('tree failed'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await applyChanges(linkIndex, api, [{ path: 'f', kind: 'created' }]);
+    expect(warn.mock.calls.some((c) => JSON.stringify(c).includes('f'))).toBe(true);
+    warn.mockRestore();
+  });
+  it('a read that fails otherwise keeps what the index had', async () => {
+    api.add('a.md', 'none'); // a successful read would drop a.md's link
+    const read = vi
+      .spyOn(api, 'read')
+      .mockRejectedValueOnce({ kind: 'io', message: 'locked' })
+      .mockRejectedValueOnce({ kind: 'io', message: 'locked' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await applyChanges(linkIndex, api, [{ path: 'a.md', kind: 'modified' }]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(linkIndex.backlinks('b.md').map((b) => b.source)).toEqual(['a.md', 'c.md']);
+    warn.mockRestore();
   });
   it('falls back to tree + read when index_bodies fails', async () => {
     api.failBodies = true;
@@ -192,17 +242,23 @@ describe('loadLinks', () => {
     const rebuild = deferred<void>();
     const sync = createLinkSync(linkIndex, api);
     linkIndex.clear();
+    const tree = vi.spyOn(api, 'tree');
+    const bodiesBefore = api.calls.bodies;
     void sync.load(rebuild.promise);
     let settled = false;
     void linkIndex.settled().then(() => {
       settled = true;
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    // The load must not start before the FTS rebuild: earlier body pages may be stale.
+    expect(tree).not.toHaveBeenCalled();
+    expect(api.calls.bodies).toBe(bodiesBefore);
     expect(settled).toBe(false);
     expect(linkIndex.ready()).toBe(false);
     rebuild.resolve();
     await linkIndex.whenReady();
+    expect(tree).toHaveBeenCalled();
+    expect(api.calls.bodies).toBe(bodiesBefore + 1);
     expect(linkIndex.ready()).toBe(true);
     await linkIndex.settled();
     expect(settled).toBe(true);

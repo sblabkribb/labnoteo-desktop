@@ -57,15 +57,21 @@ describe('useLinkIndex', () => {
     const api = source({ 'a.md': '[[b]]', 'b.md': 'x' });
     const w = watcher();
     const done = Promise.resolve();
-    const { rerender, unmount } = renderHook(
+    // `ready()` as each render saw it, before that render's effects (and their cleanups) ran
+    const seen: { root: string; ready: boolean }[] = [];
+    const { result, rerender, unmount } = renderHook(
       ({ root, rebuild }: { root: string; rebuild: Promise<unknown> | undefined }) => {
         useLinkIndex(root, rebuild, w.listen, api);
-        return linkIndex.ready();
+        const ready = linkIndex.ready();
+        seen.push({ root, ready });
+        return ready;
       },
       { initialProps: { root: 'D:/one', rebuild: done as Promise<unknown> | undefined } },
     );
     await waitFor(() => expect(linkIndex.ready()).toBe(true));
     rerender({ root: 'D:/two', rebuild: undefined });
+    expect(result.current).toBe(false);
+    expect(seen.filter((s) => s.root === 'D:/two').map((s) => s.ready)).toEqual([false]);
     expect(linkIndex.ready()).toBe(false);
     expect(linkIndex.files()).toEqual([]);
     rerender({ root: 'D:/two', rebuild: Promise.resolve() });
@@ -73,5 +79,29 @@ describe('useLinkIndex', () => {
     unmount();
     expect(linkIndex.ready()).toBe(false);
     expect(linkIndex.files()).toEqual([]);
+  });
+  it("an old vault's load that finishes after a vault switch never writes into the index", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const held = source({ 'old.md': '[[b]]', 'b.md': 'x' });
+    const heldApi: LinkSourceApi = {
+      ...held,
+      bodies: async (after, limit) => {
+        await gate;
+        return held.bodies(after, limit);
+      },
+    };
+    const w = watcher();
+    const { rerender } = renderHook(
+      ({ root, rebuild }: { root: string; rebuild: Promise<unknown> | undefined }) =>
+        useLinkIndex(root, rebuild, w.listen, heldApi),
+      { initialProps: { root: 'D:/old', rebuild: Promise.resolve() as Promise<unknown> | undefined } },
+    );
+    await new Promise((r) => setTimeout(r, 0)); // the old load is waiting on its body page
+    rerender({ root: 'D:/new', rebuild: undefined });
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(linkIndex.files()).toEqual([]);
+    expect(linkIndex.ready()).toBe(false);
   });
 });

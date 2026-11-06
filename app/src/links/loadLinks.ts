@@ -87,18 +87,39 @@ async function eachLimited<T>(items: readonly T[], limit: number, fn: (item: T) 
 
 /**
  * Reads one note from disk into the index. A note that is gone (`notFound`) is dropped; any other
- * failure leaves what the index had (the next change or a reload will read it again).
+ * failure leaves what the index had (the next change or a reload will read it again) and returns false.
  */
-async function readNote(ix: LinkIndex, api: LinkSourceApi, path: string): Promise<void> {
+async function readNote(ix: LinkIndex, api: LinkSourceApi, path: string): Promise<boolean> {
   let raw: string;
   try {
     raw = await api.read(path);
   } catch (e) {
-    if (hasErrorKind(e, ERROR_KINDS.notFound)) ix.removeTree(path);
-    return;
+    if (hasErrorKind(e, ERROR_KINDS.notFound)) {
+      ix.removeTree(path);
+      return true;
+    }
+    return false;
   }
   ix.addFiles([path]);
   ix.setNote(path, parseRaw(path, raw).text);
+  return true;
+}
+
+/**
+ * Reads `paths` into the index, retries each failed read once (a file briefly locked by antivirus or
+ * OneDrive), and warns about the ones still unread: their links are missing from the index.
+ */
+async function readNotes(ix: LinkIndex, api: LinkSourceApi, paths: readonly string[]): Promise<void> {
+  const failed: string[] = [];
+  await eachLimited(paths, READ_PARALLEL, async (p) => {
+    if (!(await readNote(ix, api, p))) failed.push(p);
+  });
+  if (failed.length === 0) return;
+  const unread: string[] = [];
+  await eachLimited(failed, READ_PARALLEL, async (p) => {
+    if (!(await readNote(ix, api, p))) unread.push(p);
+  });
+  if (unread.length > 0) console.warn('[links] notes could not be read; their links are missing', unread);
 }
 
 /** Clears the index, loads the universe and every note, then marks it ready. */
@@ -135,7 +156,7 @@ export async function loadAll(ix: LinkIndex, api: LinkSourceApi, clock: LoadCloc
   }
 
   const missing = notes.filter((p) => !seen.has(linkKey(p)));
-  await eachLimited(missing, READ_PARALLEL, (p) => readNote(ix, api, p));
+  await readNotes(ix, api, missing);
   ix.markReady();
 }
 
@@ -179,18 +200,19 @@ export async function applyChanges(
     } else if (kind === 'removed') ix.removeTree(path);
     else if (kind === 'created') createdFolders.push(path);
   }
-  await eachLimited(notes, READ_PARALLEL, (p) => readNote(ix, api, p));
+  await readNotes(ix, api, notes);
   if (createdFolders.length === 0) return;
   let tree: { path: string; isDir: boolean }[];
   try {
     tree = await api.tree();
-  } catch {
+  } catch (e) {
+    console.warn('[links] created folders could not be listed; their notes are missing', createdFolders, e);
     tree = [];
   }
   const inside = tree
     .filter((e) => !e.isDir && isNote(e.path) && createdFolders.some((f) => under(e.path, f)))
     .map((e) => e.path);
-  await eachLimited(inside, READ_PARALLEL, (p) => readNote(ix, api, p));
+  await readNotes(ix, api, inside);
   await refreshImages(ix, api);
 }
 
