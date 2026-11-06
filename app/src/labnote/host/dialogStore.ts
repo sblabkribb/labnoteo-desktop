@@ -7,7 +7,7 @@ import type { PickItem, PromptOpts } from '@labnoteo/core';
  * React 밖의 작은 저장소이고, DialogLayer 가 useSyncExternalStore 로 읽는다. 한 번에 하나만 보이고 나머지는 연 순서대로 기다린다
  * (명령이 확인을 묻는 사이 다른 명령이 고르기를 열어도 두 창이 겹치지 않는다). 각 대화상자는 정확히 한 번 끝난다.
  *
- * 처음 대화상자가 열릴 때(줄이 비어 있을 때) 초점이 있던 요소를 적어 둔다. 편집기의 그림자 루트 안까지 따라 들어간다.
+ * 처음 대화상자가 열릴 때(줄이 비어 있고 복귀 자리가 아직 꺼내지지 않았을 때) 초점이 있던 요소를 적어 둔다. 편집기의 그림자 루트 안까지 따라 들어간다.
  * 마지막 대화상자가 닫히면 DialogLayer 가 .shell 의 inert 를 푼 뒤 그 요소로 초점을 돌려준다.
  */
 export type DialogSpec =
@@ -49,7 +49,12 @@ export function openDialog<R>(spec: DialogSpec, cancelValue: R): Promise<R> {
   return new Promise<R>((resolve) => {
     const id = nextId++;
     const onAbort = () => settleDialog(id, cancelValue);
-    if (queue.length === 0) returnFocus = deepActiveElement();
+    // 이어 연 대화상자: 명령의 다음 줄은 앞 대화상자의 닫힘이 그려지기 전에 돈다. 그때 줄은 비었지만 초점은 아직 앞 대화상자
+    // 안이다. 아직 꺼내지 않은(그리고 아직 문서에 있는) 복귀 자리는 덮어쓰지 않고, 대화상자 층 안의 요소는 복귀 자리로 적지 않는다.
+    if (queue.length === 0 && !returnFocus?.isConnected) {
+      const el = deepActiveElement();
+      if (!el?.closest('.dialog-layer')) returnFocus = el;
+    }
     queue = [
       ...queue,
       {

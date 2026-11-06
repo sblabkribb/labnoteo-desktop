@@ -84,7 +84,7 @@ export function Picker(props: {
         }}
         onKeyDown={onKeyDown}
       />
-      <ul ref={list} id={`${id}-list`} role="listbox" aria-label={spec.title ?? t('picker.label')} className="picker-list">
+      <ul ref={list} id={`${id}-list`} role="listbox" aria-label={spec.title ?? t('picker.list')} className="picker-list">
         {shown.map((item, i) => (
           <li
             key={i}
@@ -106,7 +106,7 @@ export function Picker(props: {
 }
 
 /**
- * 여러 개 고르기: 검색 칸 아래 체크 상자 목록. 검색 칸에서 아래 화살표로 목록에 들어가 Space 로 체크하고(검색 칸의 빈칸은 글자다),
+ * 여러 개 고르기: 검색 칸(searchbox: 팝업을 여는 combobox 가 아니다) 아래 체크 상자 목록(group). 검색 칸에서 아래 화살표로 목록에 들어가 Space 로 체크하고(검색 칸의 빈칸은 글자다),
  * Enter 나 확인 단추로 체크한 것을 원래 순서로 돌려준다. 걸러서 안 보이는 항목의 체크도 남는다.
  */
 export function PickManyDialog(props: {
@@ -121,7 +121,6 @@ export function PickManyDialog(props: {
   );
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
-  const id = useId();
   const indexOf = useMemo(() => new Map(spec.items.map((item, i) => [item, i])), [spec.items]);
   const ranked = useMemo(() => rankPickItems(spec.items, query), [spec.items, query]);
   const shown = ranked.slice(0, PICKER_MAX_ROWS);
@@ -162,16 +161,13 @@ export function PickManyDialog(props: {
         <input
           ref={input}
           type="text"
-          role="combobox"
+          role="searchbox"
           aria-label={t('picker.label')}
-          aria-expanded="true"
-          aria-controls={`${id}-list`}
-          aria-autocomplete="list"
           placeholder={spec.placeholder}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ul ref={list} id={`${id}-list`} role="group" aria-label={spec.title ?? t('picker.label')} className="picker-list">
+        <ul ref={list} role="group" aria-label={spec.title ?? t('picker.list')} className="picker-list">
           {shown.map((item) => {
             const index = indexOf.get(item) ?? -1;
             return (

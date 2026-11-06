@@ -4,7 +4,8 @@ import { DialogFrame, isComposing } from './DialogFrame';
 import type { DialogSpec } from './dialogStore';
 
 /**
- * 한 줄 입력. `validate`(동기 또는 비동기)의 메시지는 보이고 제출을 막는다. 검사가 도는 동안 다시 제출하지 않는다.
+ * 한 줄 입력. `validate`(동기 또는 비동기)의 메시지는 보이고 제출을 막는다. 검사가 도는 동안 다시 제출하지 않고, 입력 칸은
+ * 읽기 전용(aria-busy)이라 검사한 글자가 곧 화면의 글자다. 검사가 던지면 그 메시지를 오류로 보이고 대화상자는 열려 있다.
  * `hint` 는 입력이 바뀔 때마다 다시 계산하고, `warn` 이면 경고색(.warn)이다. 한글 조합을 끝내는 Enter 는 제출하지 않는다.
  */
 export function PromptDialog(props: {
@@ -16,6 +17,7 @@ export function PromptDialog(props: {
   const [value, setValue] = useState(opts.value ?? '');
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
+  const [checking, setChecking] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
   const hint = opts.hint?.(value);
@@ -27,11 +29,15 @@ export function PromptDialog(props: {
     const submitted = value;
     if (opts.validate) {
       busy.current = true;
+      setChecking(true);
       let message: string | null | undefined;
       try {
         message = await opts.validate(submitted);
+      } catch (err) {
+        message = (err instanceof Error && err.message) || String(err);
       } finally {
         busy.current = false;
+        setChecking(false);
       }
       if (message) {
         setError(message);
@@ -62,6 +68,8 @@ export function PromptDialog(props: {
         aria-label={opts.prompt ? undefined : t('prompt.label')}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy}
+        aria-busy={checking || undefined}
+        readOnly={checking}
         placeholder={opts.placeholder}
         value={value}
         onChange={(e) => {

@@ -87,6 +87,30 @@ describe('입력 대화상자', () => {
     await expect(p).resolves.toBe('dup2');
   });
 
+  it('while async validate runs the input is read-only and aria-busy, so the checked text is the text on screen', async () => {
+    renderLayer();
+    let release!: (msg: string | null) => void;
+    const p = openIn(() => promptDialog({ validate: () => new Promise<string | null>((r) => (release = r)) }));
+    await userEvent.type(box(), 'dup{Enter}');
+    expect(box().readOnly).toBe(true);
+    expect(box().getAttribute('aria-busy')).toBe('true');
+    await userEvent.type(box(), 'x');
+    expect(box().value).toBe('dup');
+    await act(async () => release(null));
+    await expect(p).resolves.toBe('dup');
+  });
+
+  it('a rejecting validate shows its message as the error and keeps the dialog open', async () => {
+    renderLayer();
+    const p = openIn(() => promptDialog({ validate: () => Promise.reject(new Error('검사 실패')) }));
+    const state = settled(p);
+    await userEvent.type(box(), 'a{Enter}');
+    expect(screen.getByRole('alert').textContent).toBe('검사 실패');
+    expect(box().readOnly).toBe(false);
+    expect(box().hasAttribute('aria-busy')).toBe(false);
+    expect(state.done).toBe(false);
+  });
+
   it('hint warn adds the warn class, and the hint follows every input', async () => {
     renderLayer();
     void openIn(() =>

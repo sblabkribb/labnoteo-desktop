@@ -103,6 +103,7 @@ const ko: Record<string, string> = {
   'picker.empty': '맞는 항목이 없습니다.',
   'picker.more': '{0}개가 더 있습니다. 검색어를 더 적어 좁히세요.',
   'picker.label': '검색',
+  'picker.list': '항목',
   'prompt.label': '입력',
 };
 
@@ -209,6 +210,7 @@ const en: Record<string, string> = {
   'picker.empty': 'No matches.',
   'picker.more': '{0} more. Type more to narrow the list.',
   'picker.label': 'Search',
+  'picker.list': 'Items',
   'prompt.label': 'Input',
 };
 

@@ -132,13 +132,29 @@ describe('고르기 대화상자', () => {
     await userEvent.keyboard(' ');
     expect(box('planned').checked).toBe(true);
     // 검색 칸에서 친 빈칸은 글자다(primer design 같은 검색어)
-    await userEvent.click(combobox());
-    await userEvent.type(combobox(), '재실험');
+    const search = screen.getByRole('searchbox', { name: '검색' });
+    await userEvent.click(search);
+    await userEvent.type(search, '재실험');
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
     await userEvent.keyboard('{ArrowDown} ');
     expect(box('needs-repeat').checked).toBe(true);
     await userEvent.keyboard('{Enter}');
     await expect(p).resolves.toEqual(['planned', 'completed', 'needs-repeat']);
+  });
+
+  it('pickMany filter is a searchbox, not a combobox; lists are named apart from the search box', () => {
+    renderLayer();
+    void openIn(() => pickManyDialog(STATUSES));
+    expect(screen.queryByRole('combobox')).toBeNull();
+    const search = screen.getByRole('searchbox', { name: '검색' });
+    expect(search.hasAttribute('aria-controls')).toBe(false);
+    expect(screen.getByRole('group').getAttribute('aria-label')).toBe('항목');
+    cleanupDialogs();
+    void openIn(() => pickDialog(STATUSES));
+    expect(screen.getByRole('listbox').getAttribute('aria-label')).toBe('항목');
+    cleanupDialogs();
+    void openIn(() => pickDialog(STATUSES, { title: '상태' }));
+    expect(screen.getByRole('listbox').getAttribute('aria-label')).toBe('상태');
   });
 
   it('pickMany 의 확인 단추도 체크한 것을 돌려준다', async () => {
