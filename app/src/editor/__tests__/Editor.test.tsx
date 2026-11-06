@@ -10,10 +10,13 @@ import { defaultHighlightStyle } from '@codemirror/language';
 import { editorTheme, editorThemeSpec, highlightSpec } from '../theme';
 import type { VaultChange } from '../../vault/useVaultEvents';
 import { ERROR_KINDS_FIXTURE, EVENTS_FIXTURE } from '../../__tests__/fixtures';
+import { SYSTEM_COLOURS } from '../../__tests__/css';
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
 Range.prototype.getClientRects ??= emptyRects;
 Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+// 그림자 루트 안에서 포커스를 주면 CodeMirror 가 선택을 읽으려고 execCommand 를 부른다(jsdom 에는 없다).
+document.execCommand ??= () => false;
 
 const P = 'lab/a.labnote.md';
 
@@ -188,6 +191,23 @@ describe('편집기', () => {
     m.ctrlS();
     expect(await screen.findByRole('alertdialog')).toBeTruthy();
     expect(m.writes()).toBe(0);
+  });
+
+  it('closing the external-change dialog returns focus to the editor', async () => {
+    const user = userEvent.setup();
+    const m = mount({ [P]: 'mine\n' });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+    await m.type('!');
+    const shadow = m.view().root as ShadowRoot;
+    act(() => m.view().contentDOM.focus());
+    expect(shadow.activeElement).toBe(shadow.querySelector('.cm-content'));
+    m.files[P] = 'theirs\n';
+    await m.emit({ path: P, kind: 'modified' });
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.contains(document.activeElement)).toBe(true); // 대화상자가 초점을 가져갔다
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(shadow.activeElement).toBe(shadow.querySelector('.cm-content'));
   });
 
   it('덮어쓰기를 고르면 내 내용이 저장되고 대화상자가 닫힌다', async () => {
@@ -559,26 +579,59 @@ function colourByClass(css: string): Map<string, string> {
   return out;
 }
 
+const COLOUR_PROP = /color|background|border|outline|shadow|decoration|fill|stroke/i;
+const STRICT_PROP = /^(color|backgroundColor|background|caretColor|borderLeftColor)$/;
+const SYSTEM = new Set(SYSTEM_COLOURS);
+
+/**
+ * 테마 스펙(EditorView.theme 의 객체)을 걸으며 박힌 색을 모은다. 비면 통과다. `checked` 에 본 선언을 적는다.
+ * 시스템 색(Highlight, CanvasText …)은 키에 forced-colors 가 든 @-규칙 안에서만 허용한다: 그 밖에서는 토큰을 따라야 한다.
+ */
+function themeColourLeaks(spec: object, checked: string[] = [], atRule = ''): string[] {
+  const leaks: string[] = [];
+  for (const [prop, value] of Object.entries(spec)) {
+    if (prop === 'tag') continue; // 구문 태그 객체는 색이 아니다
+    if (value && typeof value === 'object') {
+      leaks.push(...themeColourLeaks(value, checked, prop.startsWith('@') ? `${atRule} ${prop}`.trim() : atRule));
+      continue;
+    }
+    if (!COLOUR_PROP.test(prop) || typeof value !== 'string') continue;
+    checked.push(`${prop}: ${value}`);
+    const forced = atRule.includes('forced-colors');
+    const system = (w: string) => forced && SYSTEM.has(w.toLowerCase());
+    const bare = bareColours(value).filter((w) => !system(w));
+    if (bare.length) leaks.push(`${atRule} ${prop}: ${value}`.trim());
+    else if (STRICT_PROP.test(prop) && !/^var\(--[\w-]+\)$/.test(value) && !system(value)) leaks.push(`${atRule} ${prop}: ${value}`.trim());
+  }
+  return leaks;
+}
+
 describe('편집기 테마', () => {
   it('에디터 테마가 색을 직접 박지 않고 토큰을 읽는다', () => {
-    const colourProp = /color|background|border|outline|shadow|decoration|fill|stroke/i;
     const checked: string[] = [];
-    const walk = (rules: object) => {
-      for (const [prop, value] of Object.entries(rules)) {
-        if (prop === 'tag') continue; // 구문 태그 객체는 색이 아니다
-        if (typeof value === 'object') walk(value);
-        else if (colourProp.test(prop) && typeof value === 'string') {
-          checked.push(`${prop}: ${value}`);
-          expect(bareColours(value), `${prop}: ${value}`).toEqual([]);
-          if (/^(color|backgroundColor|background|caretColor|borderLeftColor)$/.test(prop)) expect(value).toMatch(/^var\(--[\w-]+\)$/);
-        }
-      }
-    };
-    walk(editorThemeSpec);
-    for (const spec of highlightSpec) walk(spec);
+    expect(themeColourLeaks(editorThemeSpec, checked)).toEqual([]);
+    for (const spec of highlightSpec) expect(themeColourLeaks(spec, checked)).toEqual([]);
     expect(checked.length).toBeGreaterThan(10); // 검사기가 아무것도 안 본 게 아니다
     expect(checked).toContain('color: var(--text)');
     expect(checked).toContain('color: var(--accent)');
+  });
+
+  it('system colours pass only inside a forced-colors key', () => {
+    expect(themeColourLeaks({ '@media (forced-colors: active)': { '.x': { outlineColor: 'Highlight' } } })).toEqual([]);
+    expect(themeColourLeaks({ '@media (forced-colors: active)': { '.x': { outline: '2px solid CanvasText' } } })).toEqual([]);
+    expect(themeColourLeaks({ '.x': { outlineColor: 'Highlight' } })).not.toEqual([]);
+    // forced-colors 안에서도 시스템 색이 아닌 박힌 색은 걸린다
+    expect(themeColourLeaks({ '@media (forced-colors: active)': { '.x': { outlineColor: 'red' } } })).not.toEqual([]);
+    expect(themeColourLeaks({ '@media (forced-colors: active)': { '.x': { outline: '2px solid #fff' } } })).not.toEqual([]);
+    // 다른 @media 키는 허용하지 않는다
+    expect(themeColourLeaks({ '@media print': { '.x': { outlineColor: 'Highlight' } } })).not.toEqual([]);
+  });
+
+  it('forced-colors: the active table cell keeps a system-colour outline', () => {
+    const fc = Object.entries(editorThemeSpec).filter(([k]) => k.includes('forced-colors'));
+    expect(fc).toHaveLength(1);
+    const rules = fc[0][1] as Record<string, Record<string, string>>;
+    expect(rules['.lno-table .lno-cell-active']?.outline).toMatch(/Highlight|CanvasText/);
   });
 
   it('검사기는 박힌 색을 잡아낸다 (자기 점검)', () => {

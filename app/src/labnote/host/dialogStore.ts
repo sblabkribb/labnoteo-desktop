@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from 'react';
 import type { PickItem, PromptOpts } from '@labnoteo/core';
 import type { AliasOpts } from './AliasDialog';
+import { deepActiveElement } from '../../ui/returnFocus';
+
+// 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
+export { deepActiveElement };
 
 /**
  * 앱 LabnoteHost 의 대화상자(고르기, 여러 개 고르기, 입력, 별칭, 확인) 저장소.
@@ -35,14 +39,6 @@ let returnFocus: HTMLElement | null = null;
 const listeners = new Set<() => void>();
 
 const emit = () => listeners.forEach((l) => l());
-
-/** 문서의 실제 초점 요소: 그림자 루트(CodeMirror) 안의 요소까지 따라간다. */
-export function deepActiveElement(): HTMLElement | null {
-  if (typeof document === 'undefined') return null;
-  let el: Element | null = document.activeElement;
-  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
-  return el instanceof HTMLElement && el !== document.body ? el : null;
-}
 
 /** `spec` 을 줄에 넣는다. 사용자가 답하면 그 값으로, 닫히면 `cancelValue` 로 끝난다. */
 export function openDialog<R>(spec: DialogSpec, cancelValue: R): Promise<R> {

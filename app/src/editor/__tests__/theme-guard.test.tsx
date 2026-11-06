@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { render, waitFor } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { Editor } from '../Editor';
-import { compareSpecificity, declarations, literalColours, parseRules, specificity, type Rule } from '../../__tests__/css';
+import { compareSpecificity, declarations, literalColours, parseRules, specificity, SYSTEM_COLOURS, type Rule } from '../../__tests__/css';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -59,12 +59,14 @@ const covers = (over: string, literal: string, literalValue: string) =>
   // `-color` 하위 속성은 색 층만 덮는다: 그라디언트나 url 그림 층 안의 색은 그대로 남는다(background: radial-gradient(#aaa …))
   (over === `${literal}-color` && !/gradient\(|url\(/i.test(literalValue));
 
+const SYSTEM = new Set(SYSTEM_COLOURS);
+
 interface Finding {
   selector: string;
   target: string;
   prop: string;
   value: string;
-  status: 'overridden' | 'dark' | 'dormant' | 'LEAK';
+  status: 'overridden' | 'dark' | 'dormant' | 'system' | 'LEAK';
 }
 
 /** 그림자 루트 CSS 의 날것의 색 선언을 하나씩 분류한다. rootClasses 는 편집기 루트에 붙은 CodeMirror 클래스, dark 는 다크 클래스. */
@@ -82,6 +84,11 @@ function audit(css: string, rootClasses: string[], dark: string): Finding[] {
       const base = { selector, target: t, prop: d.prop, value: d.value };
       if (darkRe.test(selector)) {
         out.push({ ...base, status: 'dark' });
+        continue;
+      }
+      // 고대비(forced-colors) 블록 안의 시스템 색(Highlight, CanvasText …)은 운영체제가 정하는 색이라 토큰을 따르지 않는다
+      if (r.atRule?.includes('forced-colors') && literalColours(d.value).every((c) => SYSTEM.has(c.toLowerCase()))) {
+        out.push({ ...base, status: 'system' });
         continue;
       }
       const spec = specificity(selector);
@@ -254,6 +261,11 @@ describe('편집기 그림자 루트의 날것의 색', () => {
     // data: URL 안의 퍼센트 인코딩된 색, 새 색 함수
     expect(status(`.ͼ1 .cm-y {background-image: url('data:image/svg+xml,<svg><path stroke="%23888"/></svg>');}`)).toEqual(['& .cm-y|background-image|LEAK']);
     expect(status('.ͼ1 .cm-y {color: oklch(0.5 0.1 200);}')).toEqual(['& .cm-y|color|LEAK']);
+    // 시스템 색은 forced-colors 블록 안에서만 통과한다. 그 블록 안의 다른 박힌 색, 다른 @media 안의 시스템 색은 걸린다
+    expect(status('@media (forced-colors: active) {.ͼo .cm-x {outline: 2px solid Highlight;}}')).toEqual(['& .cm-x|outline|system']);
+    expect(status('@media (forced-colors: active) {.ͼo .cm-x {outline: 2px solid #fff;}}')).toEqual(['& .cm-x|outline|LEAK']);
+    expect(status('@media print {.ͼo .cm-x {outline: 2px solid Highlight;}}')).toEqual(['& .cm-x|outline|LEAK']);
+    expect(status('.ͼo .cm-x {outline: 2px solid Highlight;}')).toEqual(['& .cm-x|outline|LEAK']);
     // 토큰과 투명은 색으로 세지 않는다
     expect(status('.ͼ1 .cm-y {color: var(--text); background: transparent; border-color: currentColor;}')).toEqual([]);
   });

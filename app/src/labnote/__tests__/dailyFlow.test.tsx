@@ -308,7 +308,7 @@ describe('하루의 흐름(앱 전체)', () => {
     vault = installFakeVault({ [NOTE]: `# 표\n\n${TABLE}` });
     render(<App />);
     await screen.findByText('보관함: fake-vault');
-    await user.click(await screen.findByRole('button', { name: /^표/ }));
+    await user.click(await screen.findByRole('treeitem', { name: /^표/ }));
     await editorReady(NOTE, '| A | 1234 |');
 
     // 칸(A 행의 부피)에 들어가 커서를 "12|34" 로 옮긴다(선택만 바뀌는 셀 편집기 트랜잭션)

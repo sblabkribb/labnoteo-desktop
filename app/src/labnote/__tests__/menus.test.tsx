@@ -225,13 +225,13 @@ describe('NoteTree context menu', () => {
     const { NoteTree } = await import('../../tree/NoteTree');
     const onContextMenu = vi.fn();
     render(<NoteTree entries={ENTRIES} onSelect={() => undefined} onContextMenu={onContextMenu} />);
-    const row = screen.getByRole('button', { name: 'a.labnote.md' });
+    const row = screen.getByRole('treeitem', { name: 'a.labnote.md' });
     fireEvent.contextMenu(row, { clientX: 12, clientY: 34 });
     expect(onContextMenu).toHaveBeenLastCalledWith(ENTRIES[6], { x: 12, y: 34 });
     fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
     expect(onContextMenu).toHaveBeenLastCalledWith(ENTRIES[6], { element: row });
-    fireEvent.keyDown(screen.getByRole('button', { name: 'notes' }), { key: 'ContextMenu' });
-    expect(onContextMenu).toHaveBeenLastCalledWith(ENTRIES[5], { element: screen.getByRole('button', { name: 'notes' }) });
+    fireEvent.keyDown(screen.getByRole('treeitem', { name: 'notes' }), { key: 'ContextMenu' });
+    expect(onContextMenu).toHaveBeenLastCalledWith(ENTRIES[5], { element: screen.getByRole('treeitem', { name: 'notes' }) });
     expect(onContextMenu).toHaveBeenCalledTimes(3);
   });
 });

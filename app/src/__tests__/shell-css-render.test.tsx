@@ -144,19 +144,20 @@ describe('경고 글자색은 둘러싼 규칙에 지지 않는다', () => {
 });
 
 describe('열린 노트의 강조 막대', () => {
-  it('보관함 맨 위(깊이 0)의 열린 노트도 막대가 보인다: 막대는 줄이 아니라 줄을 덮는 단추에 그린다', () => {
+  it('보관함 맨 위(깊이 0)의 열린 노트도 막대가 보인다: 막대는 줄(treeitem)에 그린다', () => {
     render(
       <aside className="sidebar">
         <NoteTree entries={[{ path: 'a.labnote.md', name: 'a', isDir: false, depth: 0 }]} selected="a.labnote.md" onSelect={() => {}} />
       </aside>,
     );
-    const button = screen.getByRole('button', { name: 'a' });
-    expect(button.closest('li')!.getAttribute('data-depth')).toBe('0'); // 깊이 0 은 들여쓰기 규칙이 없다: 단추가 줄을 다 덮는다
-    expect(winning(button, 'box-shadow')).toBe('inset 3px 0 0 var(--accent)');
+    const row = screen.getByRole('treeitem', { name: 'a' });
+    expect(row.getAttribute('data-depth')).toBe('0'); // 깊이 0 은 들여쓰기 규칙이 없다
+    expect(winning(row, 'box-shadow')).toBe('inset 3px 0 0 var(--accent)');
+    expect(winning(row, 'background')).toBe('var(--bg-selected)');
   });
 
   it('열린 줄의 hover 규칙은 막대(box-shadow)를 건드리지 않는다', () => {
-    const hover = APP_RULES.filter((r) => r.selectors.includes('.note-tree li > button[aria-current="true"]:hover:not(:disabled)'));
+    const hover = APP_RULES.filter((r) => r.selectors.includes('.note-tree [role="treeitem"][aria-current="true"]:hover'));
     expect(hover.length).toBe(1);
     expect(hover[0].body).not.toMatch(/box-shadow/);
   });

@@ -5,6 +5,16 @@
  * 콜론 없는 선언. 그 밖의 낯선 모양(이상한 선택자, 모르는 @-규칙)은 그대로 문자열로 돌려줄 뿐 검사하지 않는다.
  */
 
+/**
+ * CSS 시스템 색(소문자): 운영체제가 정하는 색이라 토큰을 따르지 않는다. 고대비(forced-colors) 블록 안에서만 쓸 수 있다
+ * (tokens.test.ts 의 rawColoursOutside, Editor.test.tsx 의 themeColourLeaks).
+ */
+export const SYSTEM_COLOURS = [
+  'accentcolor', 'accentcolortext', 'activetext', 'buttonborder', 'buttonface', 'buttontext', 'canvas', 'canvastext',
+  'field', 'fieldtext', 'graytext', 'highlight', 'highlighttext', 'linktext', 'mark', 'marktext', 'selecteditem',
+  'selecteditemtext', 'visitedtext',
+];
+
 /** CSS Color 4 의 이름 있는 색 전부와 시스템 색. `transparent`·`currentColor` 는 일부러 뺐다(토큰을 따르는 값). */
 export const NAMED_COLOURS = [
   'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige', 'bisque', 'black', 'blanchedalmond', 'blue',
@@ -24,10 +34,8 @@ export const NAMED_COLOURS = [
   'rebeccapurple', 'red', 'rosybrown', 'royalblue', 'saddlebrown', 'salmon', 'sandybrown', 'seagreen', 'seashell',
   'sienna', 'silver', 'skyblue', 'slateblue', 'slategray', 'slategrey', 'snow', 'springgreen', 'steelblue', 'tan', 'teal',
   'thistle', 'tomato', 'turquoise', 'violet', 'wheat', 'white', 'whitesmoke', 'yellow', 'yellowgreen',
-  // 시스템 색: 운영체제가 정하는 색이라 토큰을 따르지 않는다
-  'accentcolor', 'accentcolortext', 'activetext', 'buttonborder', 'buttonface', 'buttontext', 'canvas', 'canvastext',
-  'field', 'fieldtext', 'graytext', 'highlight', 'highlighttext', 'linktext', 'mark', 'marktext', 'selecteditem',
-  'selecteditemtext', 'visitedtext',
+  // 시스템 색
+  ...SYSTEM_COLOURS,
 ];
 
 const NAMED = new RegExp(String.raw`(?<![\w-])(?:${NAMED_COLOURS.join('|')})(?![\w-])`, 'gi');

@@ -171,6 +171,11 @@ export const editorThemeSpec = {
     borderRadius: 'var(--radius)',
   },
   '.lno-table-menu .lno-table-tool': { textAlign: 'left', border: 'none' },
+  // 고대비(forced-colors): 운영체제가 색을 정하는 모드에서도 지금 고치는 칸이 보이게 시스템 색으로 윤곽선을 그린다.
+  // 시스템 색은 이 키 안에서만 쓴다(Editor.test.tsx 의 themeColourLeaks 가 그 밖에서는 막는다).
+  '@media (forced-colors: active)': {
+    '.lno-table .lno-cell-active': { outline: '2px solid Highlight', outlineOffset: '-2px' },
+  },
 };
 
 /**

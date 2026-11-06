@@ -27,6 +27,8 @@ export interface TreeViewProps {
   onContext?(node: TreeNode, anchor: MenuAnchor): void;
   /** 지금 열린 노트에 해당하는 노드(aria-current). */
   isCurrent?(node: TreeNode): boolean;
+  /** 목록(role=tree)의 클래스. 기본은 워크플로 패널의 'wf-tree', 노트 트리는 'plain-list note-tree'. */
+  className?: string;
 }
 
 function flatten(nodes: readonly TreeNode[], expanded: ReadonlySet<string>): Row[] {
@@ -49,7 +51,7 @@ function flatten(nodes: readonly TreeNode[], expanded: ReadonlySet<string>): Row
  * - 키보드는 vendor 의 treeKeyAction(WAI-ARIA 트리 패턴)을 따른다. 탭 정지는 한 줄(roving tabindex).
  * - 들여쓰기는 data-depth(app.css 의 NoteTree 와 같은 규칙), 아이콘은 TREE_ICON_CLASS, tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, className = 'wf-tree' }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -103,7 +105,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
   };
 
   return (
-    <ul role="tree" aria-label={label} className="wf-tree">
+    <ul role="tree" aria-label={label} className={className}>
       {rows.map((row, i) => (
         <li
           key={row.key}

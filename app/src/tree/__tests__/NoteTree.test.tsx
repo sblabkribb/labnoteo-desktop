@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NoteTree } from '../NoteTree';
 import type { TreeEntry } from '../useTree';
@@ -17,13 +17,13 @@ describe('노트 트리', () => {
     render(<NoteTree entries={entries} onSelect={() => {}} />);
     expect(screen.getByText('02.md')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /labnote/ }));
+    await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
     // 하위 폴더와 노트가 모두 사라지고, 같은 깊이의 다른 노트는 남는다.
     expect(screen.queryByText('02.md')).toBeNull();
     expect(screen.queryByText('001')).toBeNull();
     expect(screen.getByText('top.md')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /labnote/ }));
+    await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
     expect(screen.getByText('02.md')).toBeTruthy();
   });
 
@@ -42,7 +42,7 @@ describe('노트 트리', () => {
     await user.click(screen.getByText('02.md'));
     expect(picked).toEqual(['labnote/001/02.md']);
     // 폴더를 누르는 것은 노트를 고르는 것이 아니다.
-    await user.click(screen.getByRole('button', { name: /001/ }));
+    await user.click(screen.getByRole('treeitem', { name: '001' }));
     expect(picked).toEqual(['labnote/001/02.md']);
   });
 
@@ -53,9 +53,9 @@ describe('노트 트리', () => {
   });
 
   it('열린 노트의 줄은 app.css 의 강조 막대 선택자와 맞는다: 열린 줄 하나만 걸린다', () => {
-    // app.css 는 li:has(> button[aria-current="true"]) 에 막대를 그린다. 마크업이 바뀌어 이 선택자가 빗나가면 단서가 조용히 사라진다.
+    // app.css 는 .note-tree [role="treeitem"][aria-current="true"] 에 막대를 그린다. 마크업이 바뀌어 이 선택자가 빗나가면 단서가 조용히 사라진다.
     const { container } = render(<NoteTree entries={entries} selected="labnote/001/02.md" onSelect={() => {}} />);
-    const rows = container.querySelectorAll('li:has(> button[aria-current="true"])');
+    const rows = container.querySelectorAll('.note-tree [role="treeitem"][aria-current="true"]');
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toBe('02.md');
   });
@@ -71,10 +71,55 @@ describe('노트 트리', () => {
         onSelect={() => {}}
       />,
     );
-    const folder = screen.getByRole('button', { name: long });
-    const note = screen.getByRole('button', { name: `${long}.labnote.md` });
+    const folder = screen.getByRole('treeitem', { name: long });
+    const note = screen.getByRole('treeitem', { name: `${long}.labnote.md` });
     expect(folder.getAttribute('title')).toBe(long);
     expect(note.getAttribute('title')).toBe(`${long}.labnote.md`);
+  });
+
+  it('is a tree with one tab stop and arrow navigation', async () => {
+    const user = userEvent.setup();
+    render(<NoteTree entries={entries} onSelect={() => {}} />);
+    expect(screen.getByRole('tree', { name: '노트' })).toBeTruthy();
+    const items = () => screen.getAllByRole('treeitem');
+    expect(items()).toHaveLength(4);
+    expect(items().filter((e) => e.tabIndex === 0)).toHaveLength(1);
+    await user.tab();
+    expect(document.activeElement).toBe(items()[0]);
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(items()[1]);
+    expect(items().filter((e) => e.tabIndex === 0)).toEqual([items()[1]]);
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(items()[3]);
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(items()[0]);
+    // 왼쪽 화살표는 펼친 폴더를 접는다, 오른쪽은 다시 편다
+    await user.keyboard('{ArrowLeft}');
+    expect(items()).toHaveLength(2);
+    expect(items()[0].getAttribute('aria-expanded')).toBe('false');
+    await user.keyboard('{ArrowRight}');
+    expect(items()).toHaveLength(4);
+  });
+
+  it('Enter on a note row opens it; folders and notes carry their aria-level', async () => {
+    const user = userEvent.setup();
+    const picked: string[] = [];
+    render(<NoteTree entries={entries} onSelect={(p) => picked.push(p)} />);
+    const note = screen.getByRole('treeitem', { name: '02.md' });
+    expect(note.getAttribute('aria-level')).toBe('3');
+    expect(note.hasAttribute('aria-expanded')).toBe(false);
+    act(() => note.focus());
+    await user.keyboard('{Enter}');
+    expect(picked).toEqual(['labnote/001/02.md']);
+  });
+
+  it('the open note starts with its ancestors expanded even after the user collapsed them', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<NoteTree entries={entries} onSelect={() => {}} />);
+    await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
+    expect(screen.queryByText('02.md')).toBeNull();
+    rerender(<NoteTree entries={entries} selected="labnote/001/02.md" onSelect={() => {}} />);
+    expect(screen.getByRole('treeitem', { name: '02.md' }).getAttribute('aria-current')).toBe('true');
   });
 
   it('노트가 없으면 빈 상태 문구를 보여준다', () => {

@@ -139,7 +139,7 @@ describe('영어 화면', () => {
     setLang('en');
     vaultReady('PCR result\n'); // 노트 본문은 사용자의 글이라 영어로 둔다: 남은 한글이 있다면 화면의 것이다
     render(<App />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Day 1' }));
+    await userEvent.setup().click(await screen.findByRole('treeitem', { name: 'Day 1' }));
     const host = screen.getByRole('main').querySelector('.editor-frame') as HTMLElement;
     await waitFor(() => expect(host.hidden).toBe(false));
     const shadow = host.shadowRoot!;
@@ -203,7 +203,7 @@ describe('언어 선택', () => {
     const user = userEvent.setup();
     vaultReady();
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Day 1' }));
+    await user.click(await screen.findByRole('treeitem', { name: 'Day 1' }));
     // 화면이 다시 마운트되면 main 도 새것이 된다: 매번 새로 찾아, 다시 마운트됐다면 아래 toBe(before) 가 그것을 드러내게 한다.
     const main = () => screen.getByRole('main');
     // 편집기는 그림자 루트 안에 있다(CSP 때문에): 질의가 들어가지 못하므로 뷰로 직접 간다.

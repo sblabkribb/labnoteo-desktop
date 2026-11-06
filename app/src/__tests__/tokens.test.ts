@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { declarations, literalColours, parseRules } from './css';
+import { declarations, literalColours, parseRules, SYSTEM_COLOURS } from './css';
 
 const css = readFileSync('src/app.css', 'utf-8');
 
@@ -54,23 +54,50 @@ function mediaExtras(source: string): string {
   return stripComments(media.slice(0, inner.start) + media.slice(inner.end)).trim();
 }
 
-/**
- * 토큰 블록(:root, 라이트, 다크, 시스템 다크 @media) 밖의 날것의 색. 글자 전체에서 #hex 와 색 함수를, 규칙 본문의 선언 값에서
- * 이름 있는 색까지 찾는다(이름 있는 색은 선택자의 낱말과 섞이지 않게 값에서만 찾는다).
- * `transparent`·`currentColor`·`inherit`·`none` 은 색으로 세지 않는다.
- */
-function rawColoursOutside(source: string): string[] {
-  const blocks = [SEL.light, SEL.dark, SEL.media, SEL.root].map((sel) => block(sel, source));
-  let outside = source;
-  for (const b of blocks.sort((a, b) => b.start - a.start)) outside = outside.slice(0, b.start) + outside.slice(b.end);
-  outside = stripComments(outside);
-  if (outside.length < 200) throw new Error('토큰 블록 밖의 규칙을 거의 읽지 못했다');
-  const found = [...(outside.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [])];
-  for (const m of outside.matchAll(/\{([^{}]*)\}/g)) {
+/** 규칙 본문들(`{ … }`)의 선언 값에서 이름 있는 색을 찾는다. 선택자의 낱말과 섞이지 않게 값에서만 찾는다. */
+function namedInValues(source: string): string[] {
+  const found: string[] = [];
+  for (const m of source.matchAll(/\{([^{}]*)\}/g)) {
     for (const decl of m[1].split(';')) {
       const value = decl.slice(decl.indexOf(':') + 1);
       if (decl.includes(':')) found.push(...literalColours(value).filter((c) => !c.startsWith('#')));
     }
+  }
+  return found;
+}
+
+/** `@media … forced-colors …` 블록 전부(머리 포함, 시작·끝 위치). */
+function forcedColourBlocks(source: string): { text: string; start: number; end: number }[] {
+  const out: { text: string; start: number; end: number }[] = [];
+  for (const m of source.matchAll(/@media[^{]*forced-colors[^{]*\{/g)) {
+    const b = block(m[0].slice(0, -1).trim(), source.slice(m.index!));
+    out.push({ text: source.slice(m.index! + b.start, m.index! + b.end), start: m.index! + b.start, end: m.index! + b.end });
+  }
+  return out;
+}
+
+const SYSTEM = new Set(SYSTEM_COLOURS);
+
+/**
+ * 토큰 블록(:root, 라이트, 다크, 시스템 다크 @media) 밖의 날것의 색. 글자 전체에서 #hex 와 색 함수를, 규칙 본문의 선언 값에서
+ * 이름 있는 색까지 찾는다(이름 있는 색은 선택자의 낱말과 섞이지 않게 값에서만 찾는다).
+ * `transparent`·`currentColor`·`inherit`·`none` 은 색으로 세지 않는다.
+ * `allowSystemIn` 을 주면 머리에 그 낱말이 든 @media 블록(고대비 forced-colors) 안에서만 CSS 시스템 색(Highlight, CanvasText …)을
+ * 허용한다. 그 블록 안에서도 #hex, 색 함수, 시스템 색이 아닌 이름 있는 색은 걸린다.
+ */
+function rawColoursOutside(source: string, opts: { allowSystemIn?: string } = {}): string[] {
+  const blocks = [SEL.light, SEL.dark, SEL.media, SEL.root].map((sel) => block(sel, source));
+  const forced = opts.allowSystemIn ? forcedColourBlocks(source).filter((b) => b.text.slice(0, b.text.indexOf('{')).includes(opts.allowSystemIn!)) : [];
+  let outside = source;
+  for (const b of [...blocks, ...forced].sort((a, b) => b.start - a.start)) outside = outside.slice(0, b.start) + outside.slice(b.end);
+  outside = stripComments(outside);
+  if (outside.length < 200) throw new Error('토큰 블록 밖의 규칙을 거의 읽지 못했다');
+  const found = [...(outside.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [])];
+  found.push(...namedInValues(outside));
+  for (const b of forced) {
+    const inner = stripComments(b.text);
+    found.push(...(inner.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []));
+    found.push(...namedInValues(inner).filter((c) => !SYSTEM.has(c.toLowerCase())));
   }
   return found;
 }
@@ -143,10 +170,21 @@ describe('디자인 토큰', () => {
     expect(mediaExtras(smuggled)).toBe('.sidebar { background: #000000; }');
     // 블록 밖의 이름 있는 색과 새 색 함수
     for (const bad of ['gray', 'White', 'oklch(0.5 0.1 200)', 'lab(50% 0 0)', 'lch(50% 0 0)', 'hwb(0 0% 0%)', 'color-mix(in srgb, var(--accent), white)', 'color(display-p3 1 0 0)', 'Canvas']) {
-      expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`)), bad).not.toEqual([]);
+      expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`), { allowSystemIn: 'forced-colors' }), bad).not.toEqual([]);
     }
+    // 시스템 색은 forced-colors 블록 안에서만 통과한다
+    const inForced = (decl: string) => `${css}
+@media (forced-colors: active) {
+  .probe { ${decl} }
+}
+`;
+    expect(rawColoursOutside(inForced('outline-color: Highlight;'), { allowSystemIn: 'forced-colors' })).toEqual([]);
+    expect(rawColoursOutside(inForced('outline-color: Highlight;'))).not.toEqual([]);
+    expect(rawColoursOutside(inForced('outline: 2px solid #ffffff;'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
+    expect(rawColoursOutside(inForced('outline-color: red;'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
+    expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', '.empty-state { color: Highlight; }'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
     for (const ok of ['transparent', 'currentColor', 'inherit', 'none']) {
-      expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`)), ok).toEqual([]);
+      expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`), { allowSystemIn: 'forced-colors' }), ok).toEqual([]);
     }
   });
 
@@ -207,7 +245,18 @@ describe('디자인 토큰', () => {
   });
 
   it('토큰 블록 밖에는 날것의 색 값이 없다', () => {
-    expect(rawColoursOutside(css)).toEqual([]);
+    expect(rawColoursOutside(css, { allowSystemIn: 'forced-colors' })).toEqual([]);
+  });
+
+  it('forced-colors block exists and system colours appear only inside it', () => {
+    const fc = parseRules(css)
+      .filter((r) => r.atRule?.includes('forced-colors'))
+      .flatMap((r) => r.selectors)
+      .join(' ');
+    expect(fc).toMatch(/\[aria-current\]/);
+    expect(fc).toMatch(/\[aria-selected="true"\]/);
+    expect(fc).toMatch(/:focus-visible/);
+    expect(rawColoursOutside(css, { allowSystemIn: 'forced-colors' })).toEqual([]);
   });
 
   it('CDN 글꼴을 부르지 않는다', () => {

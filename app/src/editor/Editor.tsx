@@ -15,6 +15,7 @@ import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
 import { registerOpenNote } from '../labnote/openNotes';
+import { captureFocus } from '../ui/returnFocus';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -129,7 +130,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const firstReveal = useRef(initialReveal);
   const [dirty, setDirty] = useState(false);
   const [external, setExternalState] = useState<External | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpenState] = useState(false);
+  /** 충돌 대화상자가 열릴 때 초점이 있던 자리(대개 편집 영역). 닫히면 그리로 돌려준다. */
+  const restoreFocus = useRef<(() => void) | null>(null);
+  /**
+   * 대화상자를 열고 닫는다. 여는 순간(autoFocus 가 초점을 가져가기 전, 렌더 전에) 초점 자리를 적어 둔다:
+   * effect 에서 적으면 이미 대화상자의 단추가 초점을 가진 뒤다.
+   */
+  const setDialogOpen = (open: boolean) => {
+    if (open && !restoreFocus.current) restoreFocus.current = captureFocus();
+    setDialogOpenState(open);
+  };
   const [saveError, setSaveError] = useState(false);
   const [closeAsk, setCloseAsk] = useState(false);
   const win = useRef<WindowApi>();
@@ -417,6 +428,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     locked.current = status !== 'ready' || dialogOpen;
     viewRef.current?.dispatch({ effects: lock.current.reconfigure(locked.current ? LOCKED : []) });
   }, [status, dialogOpen]);
+
+  // 대화상자가 닫히면 열 때의 초점 자리로 돌려준다. 위의 잠금 effect 가 먼저 돌아 편집 영역은 이미 다시 편집할 수 있다.
+  useEffect(() => {
+    if (dialogOpen || !restoreFocus.current) return;
+    const restore = restoreFocus.current;
+    restoreFocus.current = null;
+    restore();
+  }, [dialogOpen]);
 
   // 밖에서 바뀜: 이 노트나 이 노트를 담은 폴더가 바뀌었거나, 무엇이 바뀌었는지 놓쳤다(빈 경로).
   useEffect(() => {
