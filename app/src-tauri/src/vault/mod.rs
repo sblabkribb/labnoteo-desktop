@@ -1,5 +1,6 @@
 pub mod fs;
 pub mod path;
+pub mod settings;
 pub mod tree;
 pub mod watcher;
 
@@ -51,7 +52,8 @@ fn info_for(root: &Path) -> VaultInfo {
             .map(|n| n.to_string_lossy().into_owned())
             // A drive root such as `D:\` has no file name.
             .unwrap_or_else(|| shown.clone()),
-        // A stat only. Nothing inside `.obsidian/` is ever opened, listed or written.
+        // A stat only. Nothing inside `.obsidian/` is listed or written; the one file
+        // ever read is `plugins/labnoteo/data.json`, once, by `settings_import_plugin`.
         has_obsidian_config: root.join(".obsidian").is_dir(),
         root: shown,
     }

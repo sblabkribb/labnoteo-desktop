@@ -82,6 +82,23 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(info["hasObsidianConfig"], false);
     assert_eq!(ok("vault_current", args("vault_current", vec![]))["name"], "vault");
 
+    // Per-vault settings: kept in the app config dir, never in the vault. The
+    // plugin import reads only `.obsidian/plugins/labnoteo/data.json`.
+    assert_eq!(ok("settings_vault_read", args("settings_vault_read", vec![])), Value::Null);
+    assert_eq!(ok("settings_import_plugin", args("settings_import_plugin", vec![])), Value::Null);
+    let plugin = dir.join("vault").join(".obsidian").join("plugins").join("labnoteo");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("data.json"), r#"{"autoSyncUnitOpToc":false}"#).unwrap();
+    assert_eq!(ok("settings_import_plugin", args("settings_import_plugin", vec![])), r#"{"autoSyncUnitOpToc":false}"#);
+    std::fs::remove_dir_all(dir.join("vault").join(".obsidian")).unwrap();
+    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
+    assert_eq!(ok("settings_vault_read", args("settings_vault_read", vec![])), r#"{"schemaVersion":2}"#);
+    assert_eq!(
+        call("settings_vault_write", args("settings_vault_write", vec![json!("{not json")])).unwrap_err()["kind"],
+        "io"
+    );
+    assert!(dir.join("config").join("vaults").is_dir());
+
     // A new vault: one folder is made next to the first one, opened and remembered.
     let fresh = dir.join("fresh").to_string_lossy().into_owned();
     let created = ok("vault_create", args("vault_create", vec![json!(fresh)]));

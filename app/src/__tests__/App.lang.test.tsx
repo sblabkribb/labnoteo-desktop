@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@codemirror/view';
 import { App } from '../App';
+import { baseInvoke } from './fixtures';
 import { AUTOSAVE_MS, MAX_AUTOSAVE_MS } from '../editor/Editor';
 import { getLang, LANG_KEY, setLang } from '../i18n/lang';
 
@@ -33,6 +34,7 @@ function vaultReady(body = 'PCR 결과\n') {
     if (cmd === 'app_version') return '0.0.0';
     if (cmd === 'vault_read') return body;
     if (cmd === 'vault_modify') return { kind: 'ok' };
+    if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
     throw new Error(`unexpected ${cmd}`);
   });
 }
@@ -42,6 +44,7 @@ function picker() {
     if (cmd === 'vault_current') return null;
     if (cmd === 'app_version') return '0.0.0';
     if (cmd === 'vault_open') throw { kind: 'vaultNotFound', message: 'vault root not found' };
+    if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
     throw new Error(`unexpected ${cmd}`);
   });
 }

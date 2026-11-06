@@ -14,3 +14,12 @@ export const EVENTS_FIXTURE = load<{
     payload: { fields: Record<'path' | 'kind', string>; kinds: Record<'created' | 'modified' | 'removed', string> };
   };
 }>('ipc-events.json');
+
+/**
+ * `VaultView` 가 열릴 때마다 부르는 커맨드(보관함별 설정)에 답한다: 저장된 설정 없음, 가져올 data.json 없음, 저장 성공.
+ * 그 밖의 커맨드에는 `undefined` 를 돌려주므로, 부르는 쪽은 이 뒤에 자기 "unexpected command" 던지기를 그대로 둔다.
+ */
+export function baseInvoke(cmd: string, _args?: unknown): unknown {
+  if (cmd === 'settings_vault_read' || cmd === 'settings_import_plugin' || cmd === 'settings_vault_write') return null;
+  return undefined;
+}

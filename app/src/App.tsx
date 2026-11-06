@@ -17,6 +17,7 @@ import { useTheme, type Theme } from './theme/useTheme';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
+import { useVaultSettings } from './labnote/settings';
 
 interface ViewProps {
   vault: VaultInfo;
@@ -39,6 +40,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     if (editor.current && !(await editor.current.flush())) return;
     setSelected(path);
   };
+  // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
+  const { imported: settingsImported } = useVaultSettings(vault.root);
   const [indexing, setIndexing] = useState(true);
   const [skipped, setSkipped] = useState(0);
   // 색인은 캐시다: 보관함을 열 때마다 파일에서 다시 채운다. 실패해도 노트 사용은 막지 않는다.
@@ -72,6 +75,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       <div className="notices">
         <UpdateBanner beforeInstall={flush} />
         {failed && <p role="alert">{t('tree.error')}</p>}
+        {settingsImported && <p role="status">{t('settings.imported')}</p>}
       </div>
       <aside className="sidebar" aria-label={t('app.sidebar')}>
         <SearchPanel onOpen={openNote} />

@@ -2,6 +2,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App';
+import { baseInvoke } from './fixtures';
 
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -27,6 +28,7 @@ beforeEach(() => {
     if (cmd === 'vault_tree') return [];
     if (cmd === 'index_rebuild') return { indexed: 0, skipped: 0 };
     if (cmd === 'app_version') return '0.0.0';
+    if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
     throw new Error(`unexpected ${cmd}`);
   });
 });
@@ -56,6 +58,7 @@ describe('앱', () => {
       if (cmd === 'vault_exists') return false;
       if (cmd === 'vault_modify') return { kind: 'ok' };
       if (cmd === 'vault_read') return '';
+      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
@@ -88,6 +91,7 @@ describe('앱', () => {
     tauri.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'vault_current') return null;
       if (cmd === 'app_version') return '0.0.0';
+      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
@@ -103,6 +107,7 @@ describe('앱', () => {
       if (cmd === 'vault_tree') return [];
       if (cmd === 'index_rebuild') return pending;
       if (cmd === 'app_version') return '0.0.0';
+      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
@@ -121,10 +126,41 @@ describe('앱', () => {
     await waitFor(() => expect(screen.queryByText('색인을 만드는 중입니다')).toBeNull());
     expect(within(screen.getByRole('contentinfo')).queryByRole('status')).toBeNull();
   });
+  it('App shows the imported notice once: Obsidian 플러그인 설정을 처음 가져올 때만 알린다', async () => {
+    let stored: string | null = null;
+    tauri.invoke.mockImplementation(async (cmd: string, args?: { content?: string }) => {
+      if (cmd === 'vault_current') return vaults.first;
+      if (cmd === 'vault_tree') return [];
+      if (cmd === 'index_rebuild') return { indexed: 0, skipped: 0 };
+      if (cmd === 'app_version') return '0.0.0';
+      if (cmd === 'settings_vault_read') return stored;
+      if (cmd === 'settings_import_plugin') return JSON.stringify({ autoSyncUnitOpToc: false, llmApiKey: 'sk-secret' });
+      if (cmd === 'settings_vault_write') {
+        stored = args?.content ?? null;
+        return null;
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const first = render(<App />);
+    await screen.findByText('보관함: wrong');
+    const notice = await screen.findByText('labnoteO(Obsidian) 설정을 이 보관함으로 가져왔습니다.');
+    expect(notice.closest('.notices')).toBeTruthy();
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(stored).not.toBeNull();
+    expect(stored).not.toContain('sk-secret');
+    first.unmount();
+
+    render(<App />);
+    await screen.findByText('보관함: wrong');
+    await waitFor(() => expect(tauri.invoke.mock.calls.filter(([c]) => c === 'settings_vault_read')).toHaveLength(2));
+    expect(screen.queryByText('labnoteO(Obsidian) 설정을 이 보관함으로 가져왔습니다.')).toBeNull();
+    expect(tauri.invoke.mock.calls.filter(([c]) => c === 'settings_import_plugin')).toHaveLength(1);
+  });
   it('보관함을 고르는 첫 화면에서도 테마를 바꿀 수 있다', async () => {
     tauri.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'vault_current') return null;
       if (cmd === 'app_version') return '0.0.0';
+      if (baseInvoke(cmd) !== undefined) return baseInvoke(cmd);
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
