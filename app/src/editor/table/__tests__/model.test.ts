@@ -322,6 +322,22 @@ describe('setCell', () => {
     expect(shape(parseTable('a | b\n--- | ---\n1 | |', 0, 21)!)).toEqual([['a', 'b'], ['1', '']]);
   });
 
+  it('treats whitespace-only text as clearing a cell', () => {
+    const doc = 'a | b\n--- | ---\n1 | 2\nplain';
+    for (const ws of [' ', '\t', '  ']) {
+      const at = JSON.stringify(ws);
+      expect(run(doc, (m) => setCell(m, 0, 0, ws)), at).toBe('|  | b\n--- | ---\n1 | 2\nplain');
+      expect(run(doc, (m) => setCell(m, 0, 1, ws)), at).toBe('a | |\n--- | ---\n1 | 2\nplain');
+      expect(run(doc, (m) => setCell(m, 1, 0, ws)), at).toBe('a | b\n--- | ---\n|  | 2\nplain');
+      expect(run(doc, (m) => setCell(m, 1, 1, ws)), at).toBe('a | b\n--- | ---\n1 | |\nplain');
+      expect(run(doc, (m) => setCell(m, 2, 0, ws)), at).toBe('a | b\n--- | ---\n1 | 2\n|  |');
+    }
+    const out = run(doc, (m) => setCell(m, 0, 1, ' '));
+    expect(shape(parseTable(out, 0, out.length)!)).toEqual([['a', ''], ['1', '2'], ['plain', null]]);
+    // 바깥 파이프가 있는 행에서도 빈 셀이 된다
+    expect(run(BASIC, (m) => setCell(m, 1, 1, '\t'))).toBe('| a | b |\n| --- | --- |\n| 1 |  |\n| 3 | 4 |');
+  });
+
   it('opens a pipe-less row before a first cell that would start a block', () => {
     const doc = 'a | b\n--- | ---\n1 | 2\n3 | 4';
     const keepsTable = (out: string, want: string[][]) => {
@@ -525,7 +541,7 @@ function refOp(ref0: Ref, op: Op): Ref {
   const R = ref.rows;
   switch (op.k) {
     case 'setCell':
-      setAt(R[op.r], op.c, escapeCellText(op.v));
+      setAt(R[op.r], op.c, escapeCellText(op.v.trim()));
       break;
     case 'insertRow':
       R.splice(op.at + 1, 0, Array(ref.width).fill(''));
@@ -674,7 +690,7 @@ describe('property: random operation sequences never lose cell text', () => {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
-  const POOL = ['x', '시료 A', 'a|b', '', '1 mM', '`c|d`', 'l1\nl2', '007', 'a\\|b', '**굵게**', 'C:\\', '- x', '> 5', '# h', '1. x', '<div>'];
+  const POOL = ['x', ' ', '\t','시료 A', 'a|b', '', '1 mM', '`c|d`', 'l1\nl2', '007', 'a\\|b', '**굵게**', 'C:\\', '- x', '> 5', '# h', '1. x', '<div>'];
   const ALIGNS: Align[] = ['left', 'center', 'right', null];
 
   it('holds for 200 seeded sequences', () => {

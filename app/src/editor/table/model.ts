@@ -333,6 +333,8 @@ const BLOCK_START = /^(?:(?:[-+*]|\d{1,9}[.)]|#{1,6})(?:[ \t]|$)|>|```|~~~|<)/;
  * 파이프를 보태 빈 셀로 남긴다. 같은 줄의 첫 셀에 블록을 여는 글자를 쓰면 앞에 `| ` 를 붙인다.
  */
 function contentChange(row: Row, cell: Cell, text: string, appending: boolean): Change {
+  // 공백뿐인 글자는 GFM 이 빈 셀로 읽는다. 그대로 쓰면 위의 빈 셀 규칙을 건너뛰어 가장자리 셀이 사라진다.
+  if (text.trim() === '') text = '';
   let insert = endsWithOpenEscape(text) ? text + ' ' : text;
   if (cell.contentFrom === cell.contentTo && text !== '') {
     if (cell.contentFrom === cell.from) insert = ' ' + insert;
