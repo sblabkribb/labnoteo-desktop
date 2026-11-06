@@ -436,19 +436,21 @@ class Session implements CellHandle {
     return r < at.m.body.length ? this.go(r + 1, c, 'end') : this.addRow(c);
   }
 
-  /** 표 위(앞 줄의 끝)나 아래(다음 줄의 시작, 없으면 표 끝)로 나간다. */
+  /**
+   * 표 위(앞 줄의 끝)나 아래로 나간다. 아래로는 언제나 `exitBelow` 와 같다: 표 바로 아래 줄(이나 표 끝)에 커서를 두면
+   * 이어 친 글이 표의 행(이나 넘치는 칸)이 되고 그 아래 문단까지 표에 빨려 든다.
+   */
   private exit(dir: -1 | 1): boolean {
+    if (dir > 0) return this.exitBelow();
     const at = this.located();
     if (!at) return false;
-    const { from, to } = at.span;
-    const len = this.outer.state.doc.length;
-    this.leave(dir < 0 ? Math.max(0, from - 1) : to < len ? to + 1 : to);
+    this.leave(Math.max(0, at.span.from - 1));
     return true;
   }
 
   /**
-   * 표 아래 새 줄로 나간다. 표 바로 아래 줄에 글자를 치면 GFM 이 표의 행으로 읽으므로,
-   * 빈 줄 하나를 사이에 둔 줄에 커서를 둔다. 그런 줄이 없으면 만든다(되돌리기 한 번).
+   * 표 아래 새 줄로 나간다(Escape, Mod-Enter, 마지막 행의 ArrowDown·ArrowRight). 표 바로 아래 줄에 글자를 치면 GFM 이
+   * 표의 행으로 읽으므로, 빈 줄 하나를 사이에 둔 줄에 커서를 둔다. 그런 줄이 없으면 만든다(되돌리기 한 번).
    */
   private exitBelow(): boolean {
     const at = this.located();

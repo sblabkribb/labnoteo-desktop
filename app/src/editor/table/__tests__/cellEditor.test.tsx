@@ -3,7 +3,7 @@ import { createRef } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
-import { history } from '@codemirror/commands';
+import { history, undo } from '@codemirror/commands';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { Editor, type EditorHandle } from '../../Editor';
 import { catalogs } from '../../../i18n/t';
@@ -319,7 +319,9 @@ describe('셀 편집기: 키보드 이동', () => {
     key(nested(m.view), 'Escape');
     expect(liveCellEditors()).toBe(0);
     expect(m.view.state.field(activeCell)).toBeNull();
-    expect(m.view.state.selection.main.head).toBe(T.length + 1);
+    // 빈 줄 하나를 사이에 둔 새 줄(표 바로 아래 줄에 치면 표의 행이 된다)
+    expect(m.view.state.doc.toString()).toBe(`${T}\n\n\n뒤`);
+    expect(m.view.state.selection.main.head).toBe(T.length + 2);
     expect(td.textContent).toBe('1');
     expect(td.classList.contains('lno-cell-active')).toBe(false);
   });
@@ -347,7 +349,8 @@ describe('셀 편집기: 키보드 이동', () => {
     expect(m.view.state.field(activeCell)).toMatchObject({ r: 1, c: 0 });
     key(nested(m.view), 'ArrowDown');
     expect(liveCellEditors()).toBe(0);
-    expect(m.view.state.selection.main.head).toBe(from + T.length + 1);
+    expect(m.view.state.doc.toString()).toBe(`앞\n\n${T}\n\n\n뒤`);
+    expect(m.view.state.selection.main.head).toBe(from + T.length + 2);
     focusCell(m.view, from, 0, 1);
     key(nested(m.view), 'ArrowUp');
     expect(liveCellEditors()).toBe(0);
@@ -364,9 +367,75 @@ describe('셀 편집기: 키보드 이동', () => {
     expect(runScopeHandlers(m.view, new KeyboardEvent('keydown', { key: 'ArrowDown' }), 'editor')).toBe(true);
     expect(m.view.state.field(activeCell)).toMatchObject({ tableFrom: 3, r: 0, c: 0 });
     key(nested(m.view), 'Escape');
-    m.view.dispatch({ selection: { anchor: m.view.state.doc.length - 2 } }); // 표 아래 빈 줄
+    m.view.dispatch({ selection: { anchor: 3 + T.length + 1 } }); // 표 바로 아래 빈 줄
     expect(runScopeHandlers(m.view, new KeyboardEvent('keydown', { key: 'ArrowUp' }), 'editor')).toBe(true);
     expect(m.view.state.field(activeCell)).toMatchObject({ tableFrom: 3, r: 1, c: 0 });
+  });
+});
+
+describe('셀 편집기: 표 아래로 나가기', () => {
+  /** 바깥 편집기의 커서 자리에 사용자가 글자를 친 것과 같다. */
+  const typeOuter = (v: EditorView, text: string) => {
+    const head = v.state.selection.main.head;
+    v.dispatch({ changes: { from: head, insert: text }, selection: { anchor: head + text.length }, userEvent: 'input.type' });
+  };
+  const exits: Array<{ name: string; r: number; c: number; run: (nv: EditorView) => void }> = [
+    { name: 'Escape', r: 1, c: 0, run: (nv) => key(nv, 'Escape') },
+    { name: '마지막 행의 ArrowDown', r: 1, c: 0, run: (nv) => key(nv, 'ArrowDown') },
+    { name: '마지막 칸 끝의 ArrowRight', r: 1, c: 1, run: (nv) => key(nv, 'ArrowRight') },
+  ];
+  for (const k of exits) {
+    it(`${k.name} 뒤에 친 글은 표의 행이 되지 않는다: 문서 가운데 (되돌리기 한 번)`, () => {
+      const doc = `${T}
+
+문단`;
+      const m = mount(doc);
+      focusCell(m.view, 0, k.r, k.c, 'end');
+      k.run(nested(m.view));
+      expect(liveCellEditors()).toBe(0);
+      const left = m.view.state.doc.toString();
+      typeOuter(m.view, '새 글');
+      expect(m.view.state.doc.toString()).toBe(`${T}
+
+새 글
+문단`);
+      expect(m.view.dom.querySelectorAll('.lno-table-wrap')).toHaveLength(1);
+      expect(cellEl(m.view, 1, 1).closest('table')!.rows).toHaveLength(2);
+      undo(m.view);
+      expect(m.view.state.doc.toString()).toBe(left);
+      undo(m.view);
+      expect(m.view.state.doc.toString()).toBe(doc);
+    });
+
+    it(`${k.name} 뒤에 친 글은 표의 행이 되지 않는다: 문서 끝의 표 (되돌리기 한 번)`, () => {
+      const m = mount(T);
+      focusCell(m.view, 0, k.r, k.c, 'end');
+      k.run(nested(m.view));
+      expect(liveCellEditors()).toBe(0);
+      expect(m.view.state.doc.toString()).toBe(`${T}
+
+`);
+      typeOuter(m.view, '새 글');
+      expect(m.view.state.doc.toString()).toBe(`${T}
+
+새 글`);
+      expect(cellEl(m.view, 1, 1).closest('table')!.rows).toHaveLength(2);
+      undo(m.view);
+      undo(m.view);
+      expect(m.view.state.doc.toString()).toBe(T);
+    });
+  }
+
+  it('표 아래에 이미 빈 줄 둘이 있으면 문서를 바꾸지 않고 둘째 빈 줄로 간다', () => {
+    const doc = `${T}
+
+
+문단`;
+    const m = mount(doc);
+    focusCell(m.view, 0, 1, 0);
+    key(nested(m.view), 'Escape');
+    expect(m.view.state.doc.toString()).toBe(doc);
+    expect(m.view.state.selection.main.head).toBe(T.length + 2);
   });
 });
 
