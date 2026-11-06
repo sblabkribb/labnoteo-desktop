@@ -56,3 +56,33 @@ describe('인라인 스타일', () => {
     for (let d = 1; d <= 24; d++) expect(css).toContain(`[data-depth="${d}"] { padding-left: calc(var(--indent) * ${d}); }`);
   });
 });
+
+// script-src 'self' 는 같은 출처의 파일은 허용하고 인라인 스크립트는 막는다. 개발 서버의 CSP 는 느슨해서 인라인을 써도 개발 중에는 보이지 않는다.
+describe('index.html', () => {
+  const page = readFileSync('index.html', 'utf-8');
+  const scripts = [...page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)].map((m) => ({ attrs: m[1], body: m[2], at: m.index! }));
+  const head = page.slice(0, page.search(/<\/head\s*>/i));
+
+  it('인라인 스크립트가 없다: 모든 <script> 는 src 로 같은 출처의 파일을 부르고 본문이 비어 있다', () => {
+    expect(scripts.length).toBeGreaterThanOrEqual(2); // 부트 스크립트와 앱 진입점을 실제로 읽었다
+    for (const s of scripts) {
+      expect(s.attrs, s.attrs).toMatch(/\bsrc="\/[^"/][^"]*"/); // 루트 기준 경로: http(s):, //host 가 아니다
+      expect(s.body.trim(), s.attrs).toBe('');
+    }
+    // 인라인 이벤트 처리기와 javascript: URL 도 인라인 스크립트다
+    expect(page).not.toMatch(/\son[a-z]+\s*=/i);
+    expect(page).not.toMatch(/javascript:/i);
+  });
+
+  it('테마 부트 스크립트는 <head> 에서 앱보다 먼저, 막는 고전 스크립트로 돈다 (첫 그림 전에 data-theme 이 걸린다)', () => {
+    const boot = scripts.find((s) => /src="\/theme-boot\.js"/.test(s.attrs));
+    const app = scripts.find((s) => /src="\/src\/main\.tsx"/.test(s.attrs));
+    expect(boot).toBeDefined();
+    expect(app).toBeDefined();
+    expect(boot!.at).toBeLessThan(head.length); // <head> 안
+    expect(boot!.at).toBeLessThan(app!.at);
+    expect(boot!.attrs).not.toMatch(/\b(type|async|defer)\b/); // 모듈·async·defer 는 첫 그림 뒤로 밀릴 수 있다
+    // Vite 는 public/ 을 dist 맨 위로 그대로 복사한다: 앱과 같은 출처의 /theme-boot.js 가 된다
+    expect(statSync('public/theme-boot.js').isFile()).toBe(true);
+  });
+});

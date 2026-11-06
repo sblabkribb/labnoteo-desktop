@@ -25,8 +25,9 @@ function apply(theme: Theme) {
 
 export function useTheme(): { theme: Theme; setTheme: (theme: Theme) => void } {
   const [theme, set] = useState<Theme>(load);
-  // 첫 그림 전에 적용한다. 그래도 수동 선택은 React 가 뜬 뒤에야 적용되므로 시스템 테마가 한 프레임 보일 수 있다:
-  // CSP(script-src 'self')가 index.html 의 인라인 스크립트를 막아 흔한 해법을 쓸 수 없다. 감수한 비용이다.
+  // React 가 뜬 뒤의 기준은 이 훅이다. 그 전의 첫 프레임은 public/theme-boot.js 가 맡는다: index.html 의 <head> 에서
+  // 같은 출처의 막는 고전 스크립트로 불려(CSP script-src 'self' 는 인라인 스크립트만 막는다) 같은 키의 저장값을 data-theme 에 미리 건다.
+  // 그래서 수동 선택이 시스템 테마와 달라도 시스템 테마가 한 프레임 비치지 않는다. 여기서 다시 적용해도 같은 값이라 바뀌는 것이 없다.
   useLayoutEffect(() => apply(theme), [theme]);
   const setTheme = (next: Theme) => {
     set(next);
