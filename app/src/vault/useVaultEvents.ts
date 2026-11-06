@@ -70,7 +70,7 @@ export function subscribeVaultChanges(listen: ListenFn, onEvent: (change: VaultC
 
 /**
  * 보관함 밖에서 파일이 바뀌면(Rust 가 200ms 디바운스 후 보낸다) `onChange` 를 부른다. 그 전에 바뀐 경로들을
- * `vaultImages.onChanged` 에 넘겨 바뀐 이미지의 blob: URL 과 이름 색인을 버린다.
+ * `vaultImages.onChanged` 에 넘겨 이름 색인을 버리고(묶음마다) 지워진 이미지의 blob: URL 을 거둔다.
  * 이벤트가 몰려 와도 한 번만 부르되(끝없이 이어지면 `MAX_SETTLE_MS` 마다), 마운트가 끝나면 구독과 대기 중인 호출을 모두 거둔다.
  */
 export function useVaultEvents(onChange: () => void, listen: ListenFn = tauriListen as ListenFn) {
@@ -78,7 +78,7 @@ export function useVaultEvents(onChange: () => void, listen: ListenFn = tauriLis
   latest.current = onChange;
 
   useEffect(() => {
-    // 한 묶음에서 바뀐 경로들: 라이브 미리보기의 이미지 캐시와 이름 색인이 그 이미지만 버린다('' 이면 모두).
+    // 한 묶음에서 바뀐 경로들: 이름 색인은 묶음마다 버리고, 이미지 캐시는 그 이미지 경로만 버린다('' 이면 모두).
     let paths: string[] = [];
     const settler = createSettler(() => {
       const changed = paths;

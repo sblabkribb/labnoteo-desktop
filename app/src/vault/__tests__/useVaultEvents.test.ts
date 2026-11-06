@@ -71,12 +71,13 @@ describe('보관함 이벤트 훅', () => {
     renderHook(() => useVaultEvents(onChange, f.listen as never));
     await vi.waitFor(() => expect(f.handlers.size).toBe(1));
     await act(async () => {
-      f.emit({ path: 'exp/images/a.png', kind: 'modified' });
-      f.emit({ path: 'n.md', kind: 'created' });
+      // 감시(watcher.rs)가 보내는 것: 노트, 새 폴더, 지운 경로(이미지 포함). 이미지의 생성·수정은 오지 않는다.
+      f.emit({ path: 'exp/images', kind: 'created' });
+      f.emit({ path: 'n.md', kind: 'modified' });
       await vi.advanceTimersByTimeAsync(SETTLE_MS);
     });
     expect(onChanged).toHaveBeenCalledTimes(1);
-    expect(onChanged).toHaveBeenCalledWith(['exp/images/a.png', 'n.md']);
+    expect(onChanged).toHaveBeenCalledWith(['exp/images', 'n.md']);
     expect(order).toEqual(['images', 'change']);
     await act(async () => {
       f.emit({ path: 'b.png', kind: 'removed' });

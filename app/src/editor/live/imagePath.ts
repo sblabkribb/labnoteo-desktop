@@ -35,7 +35,8 @@ export function isImageTarget(target: string): boolean {
   return IMAGE_EXTS.includes(extOf(target.trim()));
 }
 
-export type ImageRef = { kind: 'paths'; candidates: string[] } | { kind: 'name'; name: string };
+/** `name` 으로 찾지 못하면 `fallback`(위키 대상의 `%XX` 를 푼 이름)으로 한 번 더 찾는다. */
+export type ImageRef = { kind: 'paths'; candidates: string[] } | { kind: 'name'; name: string; fallback?: string };
 
 /** 두 글자 이상의 URI 스킴(`https:`, `data:`). 한 글자(`C:`)는 드라이브라 아래에서 따로 거른다. */
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
@@ -53,32 +54,41 @@ function join(base: string[], rel: string): string | null {
   return parts.length ? parts.join('/') : null;
 }
 
+/** 보관함 안의 상대 경로로 쓸 수 없는 글: 비었거나, 절대(`/`), UNC·역슬래시, 드라이브·콜론, 제어 문자. */
+const unusable = (rel: string) => !rel || rel.startsWith('/') || rel.includes('\\') || rel.includes(':') || /[\u0000-\u001f]/.test(rel);
+
 /**
  * 노트 `notePath`(보관함 기준 POSIX 경로) 안의 이미지 대상이 가리키는 곳.
- * - `%XX` 를 먼저 푼다(위키 대상은 풀 수 없으면 글자 그대로).
- * - 스킴, 절대(`/`), UNC·역슬래시, 드라이브(`C:`), 콜론, 제어 문자는 null.
- * - Markdown 이거나 `/` 가 든 위키 대상: 노트 기준, 그다음 보관함 기준 후보(보관함을 벗어나는 후보는 뺀다. 둘 다 벗어나면 null).
+ * - `%XX` 를 푼다. Markdown 은 푼 것만 쓴다(풀 수 없으면 null). 위키 대상은 Obsidian 처럼 글자 그대로를 먼저,
+ *   푼 것을 다음으로 찾는다(풀 수 없으면 글자 그대로만).
+ * - 스킴, 절대(`/`), UNC·역슬래시, 드라이브(`C:`), 콜론, 제어 문자는 null: 푼 것으로도 가린다.
+ * - Markdown 이거나 `/` 가 든 위키 대상: 노트 기준, 그다음 보관함 기준 후보(보관함을 벗어나는 후보는 뺀다.
+ *   푼 경로의 후보가 모두 벗어나면 null: `%2e%2e` 로 감싼 넘침은 글자 그대로의 후보로도 읽지 않는다).
  * - `/` 가 없는 위키 대상: 이름(보관함 이미지 색인에서 찾는다, Obsidian 과 같다).
  */
 export function resolveImagePath(notePath: string, target: string, kind: 'md' | 'wiki'): ImageRef | null {
   let t = target.trim();
   if (kind === 'md' && t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1).trim();
   if (!t || SCHEME.test(t)) return null;
-  t = kind === 'md' ? pathPart(t) : t.split('#')[0];
-  let rel: string;
+  t = (kind === 'md' ? pathPart(t) : t.split('#')[0]).trim();
+  let decoded: string;
   try {
-    rel = decodeURIComponent(t);
+    decoded = decodeURIComponent(t).trim();
   } catch {
     if (kind === 'md') return null;
-    rel = t;
+    decoded = t;
   }
-  rel = rel.trim();
-  if (!rel || rel.startsWith('/') || rel.includes('\\') || rel.includes(':') || /[\u0000-\u001f]/.test(rel)) return null;
-  if (kind === 'wiki' && !rel.includes('/')) return { kind: 'name', name: rel };
+  if (unusable(decoded)) return null;
+  const literal = kind === 'wiki' && t !== decoded && !unusable(t) ? t : null;
+  if (kind === 'wiki' && !decoded.includes('/') && !(literal ?? '').includes('/')) {
+    return literal === null ? { kind: 'name', name: decoded } : { kind: 'name', name: literal, fallback: decoded };
+  }
   const noteDir = notePath.split('/').slice(0, -1);
-  const candidates = [join(noteDir, rel), join([], rel)].filter((p): p is string => p !== null);
-  const unique = [...new Set(candidates)];
-  return unique.length ? { kind: 'paths', candidates: unique } : null;
+  const from = (rel: string) => [join(noteDir, rel), join([], rel)].filter((p): p is string => p !== null);
+  const decodedCandidates = from(decoded);
+  if (!decodedCandidates.length) return null;
+  const unique = [...new Set([...(literal === null ? [] : from(literal)), ...decodedCandidates])];
+  return { kind: 'paths', candidates: unique };
 }
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);

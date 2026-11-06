@@ -23,11 +23,13 @@ export const imageLoader = Facet.define<ImageLoaderConfig, ImageLoaderConfig | u
 type Size = { width: number; height?: number } | null;
 
 const sameRef = (a: ImageRef, b: ImageRef) =>
-  a.kind === 'name' ? b.kind === 'name' && a.name === b.name : b.kind === 'paths' && a.candidates.join('\n') === b.candidates.join('\n');
+  a.kind === 'name' ? b.kind === 'name' && a.name === b.name && a.fallback === b.fallback : b.kind === 'paths' && a.candidates.join('\n') === b.candidates.join('\n');
 
-/** DOM 마다의 상태: 쥔 캐시 경로, 부서졌는가, 바뀜 구독 해제. */
+/** DOM 마다의 상태: 쥔 캐시 경로, 그릴 수 없었던 URL, 부서졌는가, 바뀜 구독 해제. */
 interface Live {
   held: string | null;
+  /** img 가 그리지 못한(onerror) blob: URL. 같은 URL 을 다시 받으면 img 를 되살리지 않고 찾을 수 없음으로 둔다. */
+  failed: string | null;
   destroyed: boolean;
   generation: number;
   unsubscribe?: () => void;
@@ -82,10 +84,12 @@ export class ImageWidget extends WidgetType {
     }
     img.onload = () => view.requestMeasure();
     img.onerror = () => {
-      if (wrap.contains(img)) this.missing(wrap);
+      if (!wrap.contains(img)) return;
+      live.failed = img.getAttribute('src');
+      this.missing(wrap);
     };
     wrap.appendChild(img);
-    const live: Live = { held: null, destroyed: false, generation: 0, images: config.images };
+    const live: Live = { held: null, failed: null, destroyed: false, generation: 0, images: config.images };
     lives.set(wrap, live);
     const load = () => void this.load(config, wrap, img, live);
     live.unsubscribe = config.images.subscribe?.(load);
@@ -98,7 +102,10 @@ export class ImageWidget extends WidgetType {
     const gen = ++live.generation;
     const { cache, index } = config.images;
     const stale = () => live.destroyed || gen !== live.generation;
-    const candidates = this.ref.kind === 'name' ? [await index.find(config.notePath, this.ref.name).catch(() => null)] : this.ref.candidates;
+    const ref = this.ref;
+    const byName = async (name: string) => index.find(config.notePath, name).catch(() => null);
+    const candidates =
+      ref.kind === 'name' ? [(await byName(ref.name)) ?? (ref.fallback === undefined || stale() ? null : await byName(ref.fallback))] : ref.candidates;
     for (const path of candidates) {
       if (stale()) return;
       if (path === null) break;
@@ -111,6 +118,11 @@ export class ImageWidget extends WidgetType {
       if (stale()) {
         cache.release(path);
         return;
+      }
+      if (url === live.failed) {
+        // 같은 바이트를 img 가 이미 그리지 못했다: 되살리면 onerror 가 다시 오지 않아 깨진 그림만 남는다.
+        cache.release(path);
+        continue;
       }
       const prev = live.held;
       live.held = path;

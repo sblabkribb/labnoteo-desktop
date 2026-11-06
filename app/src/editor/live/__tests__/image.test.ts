@@ -6,7 +6,7 @@ import { labnoteMarkdown } from '../../markdownSyntax';
 import { livePreview } from '../index';
 import { IMAGE_EXTS, isImageTarget, parseSize, pickByName, resolveImagePath, splitAltSize } from '../imagePath';
 import { createImageCache } from '../imageCache';
-import { createImageIndex, type VaultImages } from '../vaultImages';
+import { createImageIndex, createVaultImages, MISS_RELIST_MS, type VaultImages } from '../vaultImages';
 import { imageLoader } from '../imageWidget';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
@@ -18,14 +18,14 @@ type ReadFn = (path: string) => Promise<ArrayBuffer>;
 type ListFn = () => Promise<string[]>;
 
 let read: ReturnType<typeof vi.fn<ReadFn>>;
+let current: VaultImages | null = null;
 let list: ReturnType<typeof vi.fn<ListFn>>;
 let urls: { create: ReturnType<typeof vi.fn<(b: Blob) => string>>; revoke: ReturnType<typeof vi.fn<(u: string) => void>> };
 const views: EditorView[] = [];
 
 function images(): VaultImages {
-  const cache = createImageCache(read, urls);
-  const index = createImageIndex(list);
-  return { cache, index, onChanged: () => {}, clear: () => cache.clear() };
+  current = createVaultImages(createImageCache(read, urls), createImageIndex(list));
+  return current;
 }
 
 /** 'exp/wf.labnote.md' 노트를 연 라이브 미리보기 편집기. */
@@ -86,6 +86,25 @@ describe('image paths', () => {
     expect(resolveImagePath('exp/n.md', 'images/a%20b.png', 'md')).toEqual({ kind: 'paths', candidates: ['exp/images/a b.png', 'images/a b.png'] });
     expect(resolveImagePath('n.md', 'a.png', 'md')).toEqual({ kind: 'paths', candidates: ['a.png'] });
     expect(resolveImagePath('exp/n.md', 'sub/x.png', 'wiki')).toEqual({ kind: 'paths', candidates: ['exp/sub/x.png', 'sub/x.png'] });
+  });
+
+  it('wiki targets try the literal name first, then the decoded one, still refusing decoded traversal', () => {
+    expect(resolveImagePath('n.md', 'a%20b.png', 'wiki')).toEqual({ kind: 'name', name: 'a%20b.png', fallback: 'a b.png' });
+    expect(resolveImagePath('exp/n.md', 'sub/a%20b.png', 'wiki')).toEqual({
+      kind: 'paths',
+      candidates: ['exp/sub/a%20b.png', 'sub/a%20b.png', 'exp/sub/a b.png', 'sub/a b.png'],
+    });
+    expect(resolveImagePath('e/n.md', '%2e%2e/%2e%2e/x.png', 'wiki')).toBeNull();
+    expect(resolveImagePath('n.md', '%2Fx.png', 'wiki')).toBeNull();
+  });
+
+  it('a wiki name that is literally percent-encoded is found under that name', async () => {
+    list = vi.fn<ListFn>(async () => ['a%20b.png', 'a b.png']);
+    const v = view('![[a%20b.png]]\n\nx', 17);
+    await flush();
+    await flush();
+    expect(read).toHaveBeenCalledWith('a%20b.png');
+    expect(v.contentDOM.querySelector('img.lno-image')).not.toBeNull();
   });
 
   it('bare-name scan embed resolves under images/scans', () => {
@@ -161,6 +180,61 @@ describe('image cache', () => {
     await expect(c.url('a.png')).rejects.toThrow();
     await expect(c.url('a.png')).rejects.toThrow();
     expect(r).toHaveBeenCalledTimes(2);
+  });
+
+  it('a release owed to an invalidated entry does not free the newly read one', async () => {
+    let n = 0;
+    urls.create.mockImplementation(() => `blob:${++n}`);
+    const c = createImageCache(async () => new ArrayBuffer(1), urls);
+    expect(await c.url('a.png')).toBe('blob:1');
+    c.invalidate('a.png');
+    expect(urls.revoke).toHaveBeenLastCalledWith('blob:1');
+    expect(await c.url('a.png')).toBe('blob:2'); // new entry, held once
+    c.release('a.png'); // the old holder lets go: consumes the ghost, not the new ref
+    for (let i = 0; i < 70; i++) {
+      await c.url(`${i}.png`);
+      c.release(`${i}.png`);
+    }
+    expect(urls.revoke).not.toHaveBeenCalledWith('blob:2');
+    c.release('a.png');
+    for (let i = 70; i < 140; i++) {
+      await c.url(`${i}.png`);
+      c.release(`${i}.png`);
+    }
+    expect(urls.revoke).toHaveBeenCalledWith('blob:2');
+  });
+
+  it('an index miss re-lists once when the list is older than MISS_RELIST_MS, not when fresh', async () => {
+    let clock = 0;
+    const l = vi.fn<ListFn>(async () => ['a.png']);
+    const ix = createImageIndex(l, () => clock);
+    expect(await ix.find('n.md', 'new.png')).toBeNull();
+    expect(l).toHaveBeenCalledTimes(1); // fresh list: no re-list
+    l.mockImplementation(async () => ['a.png', 'images/new.png']);
+    clock = MISS_RELIST_MS;
+    expect(await ix.find('n.md', 'new.png')).toBe('images/new.png');
+    expect(l).toHaveBeenCalledTimes(2);
+    expect(await ix.find('n.md', 'gone.png')).toBeNull();
+    expect(l).toHaveBeenCalledTimes(2); // the new list is fresh again
+  });
+
+  it('every settled watcher batch drops the name index and notifies; only image paths drop cached bytes', async () => {
+    const cache = createImageCache(read, urls);
+    const index = createImageIndex(list);
+    const vi_ = createVaultImages(cache, index);
+    const inv = vi.spyOn(cache, 'invalidate');
+    const ixInv = vi.spyOn(index, 'invalidate');
+    const heard = vi.fn();
+    vi_.subscribe!(heard);
+    vi_.onChanged(['exp/new-folder']);
+    expect(ixInv).toHaveBeenCalledTimes(1);
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(inv).not.toHaveBeenCalled();
+    vi_.onChanged(['n.md', 'gone.png']); // removals are the image events the watcher does send
+    expect(inv).toHaveBeenCalledWith('gone.png');
+    expect(inv).toHaveBeenCalledTimes(1);
+    expect(ixInv).toHaveBeenCalledTimes(2);
+    expect(heard).toHaveBeenCalledTimes(2);
   });
 
   it('the index lists once and finds by name until invalidated', async () => {
@@ -242,6 +316,38 @@ describe('image widgets', () => {
     const v = view('![[a.png]]\nx', 3);
     expect(visibleText(v, 1)).toBe('![[a.png]]');
     expect(v.contentDOM.querySelector('img.lno-image')).not.toBeNull();
+  });
+
+  it('a change notice re-reads only the invalidated path and swaps its src', async () => {
+    let n = 0;
+    urls.create.mockImplementation(() => `blob:${++n}`);
+    const v = view('![[a.png]]\n![[LN-1.jpg]]\n\nx', 27);
+    await flush();
+    await flush();
+    expect(read).toHaveBeenCalledTimes(2);
+    const imgs = () => [...v.contentDOM.querySelectorAll<HTMLImageElement>('img.lno-image')];
+    const before = imgs().map((i) => i.getAttribute('src'));
+    current!.onChanged(['a.png']);
+    await flush();
+    await flush();
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(read).toHaveBeenLastCalledWith('a.png');
+    const after = imgs().map((i) => i.getAttribute('src'));
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+  });
+
+  it('an image that failed to decode stays not-found when a notice reloads the same cached URL', async () => {
+    const v = view('![[a.png]]\n\nx', 13);
+    await flush();
+    await flush();
+    v.contentDOM.querySelector('img.lno-image')!.dispatchEvent(new Event('error'));
+    expect(v.contentDOM.querySelector('.lno-image-missing')).not.toBeNull();
+    current!.onChanged(['n.md']);
+    await flush();
+    await flush();
+    expect(v.contentDOM.querySelector('img.lno-image')).toBeNull();
+    expect(v.contentDOM.querySelector('.lno-image-missing')).not.toBeNull();
   });
 
   it('without an image loader the widget shows missing and reads nothing', () => {
