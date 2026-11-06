@@ -6,40 +6,30 @@ import { FirstRun } from '../onboarding/FirstRun';
 import { NewNote } from '../tree/NewNote';
 import { NoteTree } from '../tree/NoteTree';
 
+import { compareSpecificity, declarations, parseRules, specificity, type Rule } from './css';
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }));
 
 /**
- * app.css 를 실제 마크업에 대어 본다. jsdom 의 getComputedStyle 은 선택자 특이도를 따지지 않아서(문서 순서만 본다)
- * 이긴 선언을 직접 고른다: 특이도, 같으면 뒤에 오는 것. "이 요소의 글자색은 무엇인가" 를 묻는 테스트용 작은 계단식이다.
+ * app.css 를 실제 마크업에 대어 보는 작은 계단식. jsdom 의 getComputedStyle 은 선택자 특이도를 따지지 않아서(문서 순서만 본다)
+ * 이긴 선언을 직접 고른다: 특이도가 높은 것, 같으면 뒤에 오는 것.
+ *
+ * 이것이 답하는 것은 정확히 "이 요소에 직접 선언된 값 가운데, 미디어 쿼리 밖에서, !important 없이, 상속 없이 이긴 값" 이다.
+ * - 상속은 보지 않는다: 요소 자신에게 선언돼 이겨야 하는 속성을 묻는 용도다. 맞는 규칙이 없으면 undefined.
+ * - @media 등 @-규칙 안의 규칙이 이 요소에 맞고 묻는 속성을 선언하면 던진다: 조건부 값을 무조건 값으로 셈하지 않고, 답할 수 없다고 말한다.
+ *   (@-규칙 안 규칙이 맞더라도 다른 속성만 선언하면 상관없다.)
+ * - 맞는 선언에 !important 가 있으면 던진다: 이 계단식은 중요도 단계를 모른다.
+ * - :hover 같은 상태는 jsdom 에서 맞지 않고, jsdom 이 못 읽는 선택자(:has 등)는 맞지 않은 것으로 친다.
+ * - 한 규칙 안에 같은 속성이 두 번이면 뒤의 것이 이긴다. 단축 속성과 하위 속성(background 와 background-color)은 서로 다른 속성으로 본다.
  */
-const css = readFileSync('src/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
-const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-  .map((m) => ({ selectors: m[1].split(',').map((s) => s.trim()), body: m[2] }))
-  .filter((r) => !r.selectors[0].startsWith('@'));
+const APP_RULES = parseRules(readFileSync('src/app.css', 'utf-8'));
 
-function specificity(selector: string): [number, number, number] {
-  let [a, b, c] = [0, 0, 0];
-  let s = selector.replace(/:(?:not|has|is)\(((?:[^()]|\([^()]*\))*)\)/g, (_m, arg: string) => {
-    const [x, y, z] = specificity(arg);
-    a += x; b += y; c += z;
-    return '';
-  });
-  s = s.replace(/\[[^\]]*\]/g, () => (b++, ''));
-  s = s.replace(/::[\w-]+/g, () => (c++, ''));
-  s = s.replace(/:[\w-]+/g, () => (b++, ''));
-  s = s.replace(/#[\w-]+/g, () => (a++, ''));
-  s = s.replace(/\.[\w-]+/g, () => (b++, ''));
-  s = s.replace(/(^|[\s>+~])([a-z][\w-]*)/gi, (_m, p: string) => (c++, p));
-  return [a, b, c];
-}
-const higher = (x: number[], y: number[]) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
-
-/** 요소에 직접 선언돼 이긴 값. (상속은 보지 않는다: 직접 이겨야 하는 속성을 묻는 용도.) */
-function winning(el: Element, prop: string): string | undefined {
+function winning(el: Element, prop: string, rules: Rule[] = APP_RULES): string | undefined {
   let best: { spec: number[]; value: string } | undefined;
   for (const r of rules) {
-    const decl = new RegExp(String.raw`(?:^|;)\s*${prop}\s*:\s*([^;]+)`).exec(r.body);
-    if (!decl) continue;
+    const decls = declarations(r.body).filter((d) => d.prop === prop);
+    if (decls.length === 0) continue;
+    const decl = decls[decls.length - 1];
     for (const sel of r.selectors) {
       let hit = false;
       try {
@@ -48,8 +38,10 @@ function winning(el: Element, prop: string): string | undefined {
         hit = false; // 이 jsdom 이 못 읽는 선택자(:has 등)
       }
       if (!hit) continue;
+      if (r.atRule) throw new Error(`${r.atRule} 안의 규칙이 맞는다: ${sel} { ${prop} } — 이 계단식은 조건부 값을 답하지 않는다`);
+      if (decl.important) throw new Error(`!important 선언이 맞는다: ${sel} { ${prop} } — 이 계단식은 중요도를 모른다`);
       const spec = specificity(sel);
-      if (!best || higher(spec, best.spec) >= 0) best = { spec, value: decl[1].trim() };
+      if (!best || compareSpecificity(spec, best.spec) >= 0) best = { spec, value: decl.value };
     }
   }
   return best?.value;
@@ -67,6 +59,47 @@ describe('계단식 자기 점검', () => {
     expect(specificity('.sidebar nav li:has(> button[aria-current="true"]):hover')).toEqual([0, 3, 3]);
     document.body.innerHTML = '<div class="first-run"><p>hint</p><p role="alert">err</p></div>';
     expect(winning(document.querySelector('p')!, 'color')).toBe('var(--text-muted)');
+  });
+
+  it('특이도가 높은 색 규칙이 순서와 상관없이 이긴다', () => {
+    document.body.innerHTML = '<div class="box"><p class="note">x</p></div>';
+    const p = document.querySelector('p')!;
+    expect(winning(p, 'color', parseRules('.box .note { color: var(--a); } .note { color: var(--b); }'))).toBe('var(--a)');
+    expect(winning(p, 'color', parseRules('.note { color: var(--b); } .box .note { color: var(--a); }'))).toBe('var(--a)');
+  });
+
+  it('특이도가 같으면 뒤에 오는 색 규칙이 이긴다', () => {
+    document.body.innerHTML = '<p class="note" role="alert">x</p>';
+    const p = document.querySelector('p')!;
+    expect(winning(p, 'color', parseRules('.note { color: var(--a); } [role="alert"] { color: var(--b); }'))).toBe('var(--b)');
+    expect(winning(p, 'color', parseRules('[role="alert"] { color: var(--b); } .note { color: var(--a); }'))).toBe('var(--a)');
+    // 한 규칙 안에서 같은 속성을 두 번 쓰면 뒤의 것
+    expect(winning(p, 'color', parseRules('.note { color: var(--a); color: var(--b); }'))).toBe('var(--b)');
+  });
+
+  it('@media 안의 규칙은 이기지 못한다: 맞고 그 속성을 선언하면 답하지 않고 던진다', () => {
+    document.body.innerHTML = '<p role="alert">x</p>';
+    const p = document.querySelector('p')!;
+    // 바깥 규칙보다 특이도가 높고 뒤에 있어도 무조건 값으로 세지 않는다
+    const conditional = parseRules('p { color: var(--a); } @media (prefers-color-scheme: dark) { p[role="alert"] { color: var(--b); } }');
+    expect(() => winning(p, 'color', conditional)).toThrow(/@media \(prefers-color-scheme: dark\)/);
+    // @media 안의 규칙이 맞아도 다른 속성만 선언하면 상관없다
+    expect(winning(p, 'color', parseRules('p { color: var(--a); } @media (max-width: 640px) { p { margin: 0; } }'))).toBe('var(--a)');
+    // 맞지 않는 @media 규칙도 상관없다
+    expect(winning(p, 'color', parseRules('p { color: var(--a); } @media (max-width: 640px) { .shell { color: var(--b); } }'))).toBe('var(--a)');
+  });
+
+  it('!important 선언이 맞으면 던진다', () => {
+    document.body.innerHTML = '<p>x</p>';
+    expect(() => winning(document.querySelector('p')!, 'color', parseRules('p { color: var(--a) !important; }'))).toThrow(/important/);
+  });
+
+  it('app.css 의 @media 안 규칙을 @-규칙 안의 것으로 읽는다 (예전 정규식은 머리를 못 잡아 무조건 규칙으로 셌다)', () => {
+    const heads = APP_RULES.filter((r) => r.atRule).map((r) => r.atRule);
+    expect(heads).toContain('@media (max-width: 640px)');
+    expect(heads).toContain('@media (prefers-color-scheme: dark)');
+    expect(APP_RULES.find((r) => r.selectors.includes('.shell') && r.atRule)).toBeDefined();
+    expect(APP_RULES.filter((r) => !r.atRule).length).toBeGreaterThan(50);
   });
 });
 
@@ -113,7 +146,7 @@ describe('열린 노트의 강조 막대', () => {
   });
 
   it('열린 줄의 hover 규칙은 막대(box-shadow)를 건드리지 않는다', () => {
-    const hover = rules.filter((r) => r.selectors.includes('.sidebar nav li > button[aria-current="true"]:hover:not(:disabled)'));
+    const hover = APP_RULES.filter((r) => r.selectors.includes('.sidebar nav li > button[aria-current="true"]:hover:not(:disabled)'));
     expect(hover.length).toBe(1);
     expect(hover[0].body).not.toMatch(/box-shadow/);
   });
