@@ -13,14 +13,15 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use crate::vault::fs::FsError;
-pub use search::SearchHit;
+pub use search::{SearchHit, SearchResults};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexStats {
-    /// Notes now in the index.
+    /// Notes read and written by this rebuild.
     pub indexed: usize,
-    /// Notes the walk listed but that could not be read; they are not indexed.
+    /// Notes the walk listed but that could not be read this time. Their previous
+    /// row, if any, is kept (stale rather than missing); a note never read has none.
     pub skipped: usize,
 }
 
@@ -99,6 +100,8 @@ fn read_row(root: &Path, rel: &str) -> Option<Row> {
         return None;
     }
     let bytes = std::fs::read(&abs).ok()?;
+    // TODO(NFD): Hangul pasted from macOS can be decomposed; fold to NFC here and in the query
+    // so it matches. Needs a normalisation crate; not done yet.
     let body = String::from_utf8_lossy(&bytes).into_owned();
     Some(Row { key: schema::fold(rel), path: rel.to_string(), title: title_of(rel, &body), body })
 }
@@ -130,7 +133,9 @@ impl Index {
     /// batch. Every batch leaves rows that are each correct; closing the app
     /// part way keeps what was committed (nothing is half-written) and the next
     /// rebuild finishes the job. Stale rows are only removed at the very end, so
-    /// an interrupted rebuild can leave a deleted note findable until then.
+    /// an interrupted rebuild can leave a deleted note findable until then. A listed
+    /// note that cannot be read keeps its previous row and is only counted in
+    /// `skipped`; only notes the walk no longer lists are dropped.
     pub fn rebuild(&self, root: &Path) -> Result<IndexStats, FsError> {
         let _one_at_a_time = lock(&self.rebuilding);
         let root = std::fs::canonicalize(root).map_err(FsError::Io)?;
@@ -139,7 +144,10 @@ impl Index {
             .filter(|e| !e.is_dir && crate::vault::tree::is_listed_path(&e.path, false))
             .map(|e| e.path)
             .collect();
-        let mut seen = std::collections::HashSet::with_capacity(files.len());
+        // Every path the walk listed counts as present, readable or not: a note that
+        // cannot be read right now (locked, not yet downloaded, too big) keeps its
+        // previous row instead of vanishing from search.
+        let seen: std::collections::HashSet<String> = files.iter().map(|f| schema::fold(f)).collect();
         let mut skipped = 0;
         for chunk in files.chunks(BATCH) {
             let rows: Vec<Row> = chunk
@@ -156,7 +164,6 @@ impl Index {
             let tx = conn.unchecked_transaction().map_err(db_err)?;
             for row in &rows {
                 put(&tx, row).map_err(db_err)?;
-                seen.insert(row.key.clone());
             }
             tx.commit().map_err(db_err)?;
         }
@@ -171,7 +178,7 @@ impl Index {
             tx.execute("DELETE FROM notes WHERE key = ?1", [key]).map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
-        Ok(IndexStats { indexed: seen.len(), skipped })
+        Ok(IndexStats { indexed: seen.len() - skipped, skipped })
     }
 
     /// Re-read one note and replace its row. What is not part of the vault
@@ -220,7 +227,7 @@ impl Index {
         Ok(())
     }
 
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>, FsError> {
+    pub fn search(&self, query: &str, limit: usize) -> Result<SearchResults, FsError> {
         search::search(&lock(&self.conn), query, limit).map_err(db_err)
     }
 
@@ -305,7 +312,7 @@ pub async fn search(
     state: tauri::State<'_, IndexState>,
     query: String,
     limit: u32,
-) -> Result<Vec<SearchHit>, FsError> {
+) -> Result<SearchResults, FsError> {
     let root = vault.root()?;
     let ix = state.get(&root)?;
     blocking(move || ix.search(&query, limit as usize)).await
@@ -353,7 +360,7 @@ mod tests {
     }
 
     fn found(ix: &Index, q: &str) -> Vec<String> {
-        ix.search(q, 50).unwrap().into_iter().map(|h| h.path).collect()
+        ix.search(q, 50).unwrap().hits.into_iter().map(|h| h.path).collect()
     }
 
     #[test]
@@ -380,7 +387,7 @@ mod tests {
         s.note("b.md", "Nothing relevant here.");
         let ix = s.index();
         ix.rebuild(&s.vault()).unwrap();
-        let hits = ix.search("overnight", 10).unwrap();
+        let hits = ix.search("overnight", 10).unwrap().hits;
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "a.md");
         assert!(hits[0].snippet.contains("overnight"), "{}", hits[0].snippet);
@@ -399,14 +406,14 @@ mod tests {
         s.note("x/crlf.md", "---\r\ntitle: Gel run\r\n---\r\ntext");
         let ix = s.index();
         ix.rebuild(&s.vault()).unwrap();
-        let hits = ix.search("plasmid prep", 10).unwrap();
+        let hits = ix.search("plasmid prep", 10).unwrap().hits;
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "x/0001.labnote.md");
         assert_eq!(hits[0].title, "Plasmid prep protocol");
         // No title: the file name without its extension.
-        let hit = &ix.search("frontmatter", 10).unwrap()[0];
+        let hit = &ix.search("frontmatter", 10).unwrap().hits[0];
         assert_eq!(hit.title, "plain-note");
-        assert_eq!(ix.search("gel run", 10).unwrap()[0].title, "Gel run");
+        assert_eq!(ix.search("gel run", 10).unwrap().hits[0].title, "Gel run");
     }
 
     #[test]
@@ -433,7 +440,7 @@ mod tests {
         let before = {
             let ix = s.index();
             ix.rebuild(&s.vault()).unwrap();
-            ix.search("형질전환", 10).unwrap()
+            ix.search("형질전환", 10).unwrap().hits
         };
         assert_eq!(before.len(), 2);
         // The index is a cache: delete the database and its WAL files.
@@ -444,9 +451,9 @@ mod tests {
             let _ = std::fs::remove_file(PathBuf::from(p));
         }
         let ix = s.index();
-        assert!(ix.search("형질전환", 10).unwrap().is_empty(), "a fresh index starts empty");
+        assert!(ix.search("형질전환", 10).unwrap().hits.is_empty(), "a fresh index starts empty");
         ix.rebuild(&s.vault()).unwrap();
-        assert_eq!(ix.search("형질전환", 10).unwrap(), before);
+        assert_eq!(ix.search("형질전환", 10).unwrap().hits, before);
         // The notes themselves were never touched.
         assert_eq!(std::fs::read_to_string(s.vault().join("sub/b.md")).unwrap(), "beta text 형질전환");
     }
@@ -510,6 +517,13 @@ mod tests {
         assert_eq!(ix.paths().unwrap().len(), 2);
         ix.remove("a").unwrap();
         assert_eq!(ix.paths().unwrap(), ["ab.md"], "a folder takes its notes, not a sibling sharing its prefix");
+        // `_` in a folder name is literal: removing `a_b` must not take `axb`.
+        s.note("a_b/n.md", "x");
+        s.note("axb/n.md", "x");
+        ix.rebuild(&s.vault()).unwrap();
+        ix.remove("a_b").unwrap();
+        let left = ix.paths().unwrap();
+        assert!(left.contains(&"axb/n.md".to_string()) && !left.contains(&"a_b/n.md".to_string()), "{left:?}");
     }
 
     #[test]
@@ -536,6 +550,12 @@ mod tests {
         assert_eq!(found(&ix, "\"quoted\""), ["a.md"]);
         assert_eq!(found(&ix, "e_c"), ["a.md"]);
         assert!(found(&ix, "x_y").is_empty());
+        // Two characters travel the LIKE branch, where `_` must not be a wildcard:
+        // `e_` would match "e " in b.md if it were.
+        s.note("c.md", "scale tool");
+        ix.rebuild(&s.vault()).unwrap();
+        assert_eq!(found(&ix, "e_"), ["a.md"]);
+        assert_eq!(found(&ix, "0%"), ["a.md"]);
     }
 
     #[test]
@@ -583,7 +603,7 @@ mod tests {
         assert!(Arc::ptr_eq(&one, &state.get(&s.vault()).unwrap()));
         let other = std::fs::canonicalize(other).unwrap();
         let two = state.get(&other).unwrap();
-        assert!(two.search("alpha", 5).unwrap().is_empty(), "another vault does not see this one's rows");
+        assert!(two.search("alpha", 5).unwrap().hits.is_empty(), "another vault does not see this one's rows");
         two.rebuild(&other).unwrap();
         assert_eq!(found(&two, "beta"), ["b.md"]);
     }
@@ -597,5 +617,66 @@ mod tests {
         // Only the frontmatter block counts, not a `title:` line in the body.
         assert_eq!(title_of("a/b.md", "text\ntitle: Nope\n"), "b");
         assert_eq!(title_of("a/b.md", "---\nother: 1\n---\ntitle: Nope\n"), "b");
+    }
+
+    #[test]
+    fn an_unreadable_note_keeps_its_previous_row() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let s = Scratch::new();
+        s.note("locked.md", "original text");
+        s.note("other.md", "x");
+        let ix = s.index();
+        assert_eq!(ix.rebuild(&s.vault()).unwrap(), IndexStats { indexed: 2, skipped: 0 });
+        // Another program holds the file exclusively: it lists, but cannot be read.
+        let hold = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(s.vault().join("locked.md"))
+            .unwrap();
+        let stats = ix.rebuild(&s.vault()).unwrap();
+        assert_eq!(stats, IndexStats { indexed: 1, skipped: 1 });
+        assert_eq!(found(&ix, "original"), ["locked.md"], "its old row survives a failed read");
+        drop(hold);
+        // A note the walk no longer lists is still dropped.
+        std::fs::remove_file(s.vault().join("locked.md")).unwrap();
+        ix.rebuild(&s.vault()).unwrap();
+        assert!(found(&ix, "original").is_empty());
+    }
+
+    #[test]
+    fn short_terms_rank_title_before_body_then_earlier_match_and_skip_the_path() {
+        let s = Scratch::new();
+        s.note("a-late.md", &format!("{} 실험", "가".repeat(40)));
+        s.note("b-early.md", "실험 이른 본문");
+        s.note("z-title.md", "---
+title: 실험 노트
+---
+본문");
+        s.note("md/plain.md", "nothing");
+        let ix = s.index();
+        ix.rebuild(&s.vault()).unwrap();
+        // Alphabetical order would put a-late first; relevance puts the title match first,
+        // then the earlier body match.
+        assert_eq!(found(&ix, "실험"), ["z-title.md", "b-early.md", "a-late.md"]);
+        // A two-character query does not match a note by its folder name alone.
+        assert!(found(&ix, "md").is_empty());
+    }
+
+    #[test]
+    fn a_cut_off_result_list_says_so() {
+        let s = Scratch::new();
+        for i in 0..5 {
+            s.note(&format!("n{i}.md"), "실험 기록");
+        }
+        let ix = s.index();
+        ix.rebuild(&s.vault()).unwrap();
+        let cut = ix.search("실험", 3).unwrap();
+        assert_eq!((cut.hits.len(), cut.truncated), (3, true));
+        let exact = ix.search("실험", 5).unwrap();
+        assert_eq!((exact.hits.len(), exact.truncated), (5, false));
+        // The same through the FTS branch.
+        let cut = ix.search("기록", 2).unwrap();
+        let fts = ix.search("실험 기록", 2).unwrap();
+        assert_eq!((cut.truncated, fts.hits.len(), fts.truncated), (true, 2, true));
     }
 }

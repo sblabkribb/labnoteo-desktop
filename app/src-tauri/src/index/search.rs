@@ -4,7 +4,9 @@
 //! two-character words are everywhere in Korean (`형질`). So each whitespace
 //! separated term is routed by length: three or more characters go to FTS5 as a
 //! quoted phrase, shorter ones are a case-insensitive substring test (`LIKE`)
-//! on the same row. All terms must match (AND).
+//! on the title and body (not the path: a two-character query such as `md` or
+//! `01` would match nearly every note by its path, which is noise; longer
+//! terms still match the path through FTS). All terms must match (AND).
 
 use rusqlite::{params_from_iter, Connection};
 use serde::Serialize;
@@ -14,6 +16,13 @@ pub struct SearchHit {
     pub path: String,
     pub title: String,
     pub snippet: String,
+}
+
+/// One page of results. `truncated` means more notes matched than `hits` holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchResults {
+    pub hits: Vec<SearchHit>,
+    pub truncated: bool,
 }
 
 pub const MAX_LIMIT: usize = 200;
@@ -64,10 +73,10 @@ pub fn snippet(body: &str, terms: &[String]) -> String {
     format!("{}{text}{}", if start > 0 { "…" } else { "" }, if end < chars.len() { "…" } else { "" })
 }
 
-pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
+pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<SearchResults> {
     let terms: Vec<String> = query.split_whitespace().map(str::to_owned).collect();
     if terms.is_empty() {
-        return Ok(Vec::new());
+        return Ok(SearchResults { hits: Vec::new(), truncated: false });
     }
     let limit = limit.clamp(1, MAX_LIMIT);
     let (long, short): (Vec<&String>, Vec<&String>) = terms.iter().partition(|t| t.chars().count() >= 3);
@@ -83,22 +92,49 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> rusqlite::Result<
         args.push(long.iter().map(|t| fts_phrase(t)).collect::<Vec<_>>().join(" AND "));
     }
     for t in &short {
-        wheres.push("(n.title LIKE ? ESCAPE '\\' OR n.body LIKE ? ESCAPE '\\' OR n.path LIKE ? ESCAPE '\\')".into());
+        wheres.push("(n.title LIKE ? ESCAPE '\\' OR n.body LIKE ? ESCAPE '\\')".into());
         let p = like_pattern(t);
-        args.extend([p.clone(), p.clone(), p]);
+        args.extend([p.clone(), p]);
     }
     sql.push_str(" WHERE ");
     sql.push_str(&wheres.join(" AND "));
-    sql.push_str(if long.is_empty() { " ORDER BY n.title, n.path" } else { " ORDER BY rank" });
-    sql.push_str(&format!(" LIMIT {limit}"));
+    if long.is_empty() {
+        // No bm25 here, so rank by hand: a note whose title holds the term comes
+        // before one that only has it in the body, then the earlier the first
+        // body match the better, then title and path for a stable order.
+        let mut title_miss = Vec::new();
+        let mut offset = Vec::new();
+        for t in &short {
+            title_miss.push("(instr(lower(n.title), lower(?)) = 0)");
+            offset.push("(CASE WHEN instr(lower(n.body), lower(?)) = 0 THEN 1000000000 ELSE instr(lower(n.body), lower(?)) END)");
+        }
+        // Placeholders appear in SQL order: all title terms, then all offset terms.
+        args.extend(short.iter().map(|t| (*t).clone()));
+        for t in &short {
+            args.extend([(*t).clone(), (*t).clone()]);
+        }
+        sql.push_str(&format!(
+            " ORDER BY ({}), ({}), n.title, n.path",
+            title_miss.join(" + "),
+            offset.join(" + ")
+        ));
+    } else {
+        sql.push_str(" ORDER BY rank");
+    }
+    // One more than asked for tells whether the list was cut.
+    sql.push_str(&format!(" LIMIT {}", limit + 1));
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
     })?;
-    rows.map(|row| {
-        let (path, title, body) = row?;
-        Ok(SearchHit { snippet: snippet(&body, &terms), path, title })
-    })
-    .collect()
+    let mut hits = rows
+        .map(|row| {
+            let (path, title, body) = row?;
+            Ok(SearchHit { snippet: snippet(&body, &terms), path, title })
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let truncated = hits.len() > limit;
+    hits.truncate(limit);
+    Ok(SearchResults { hits, truncated })
 }

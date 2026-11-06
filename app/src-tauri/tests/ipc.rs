@@ -103,16 +103,18 @@ title: 실험
 ---
 형질전환 효율")]));
     assert_eq!(ok("index_rebuild", args("index_rebuild", vec![]))["indexed"], 2);
-    let hits = ok("search", args("search", vec![json!("형질전환"), json!(10)]));
+    let res = ok("search", args("search", vec![json!("형질전환"), json!(10)]));
+    assert_eq!(res["truncated"], false);
+    let hits = &res["hits"];
     assert_eq!(hits.as_array().unwrap().len(), 1);
     assert_eq!(hits[0]["path"], "notes/k.md");
     assert_eq!(hits[0]["title"], "실험");
     assert!(hits[0]["snippet"].as_str().unwrap().contains("형질전환"));
     ok("vault_write", args("vault_write", vec![json!("notes/k.md"), json!("agarose")]));
     ok("index_upsert", args("index_upsert", vec![json!("notes/k.md")]));
-    assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)]))[0]["path"], "notes/k.md");
+    assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)]))["hits"][0]["path"], "notes/k.md");
     ok("index_remove", args("index_remove", vec![json!("notes/k.md")]));
-    assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)])), json!([]));
+    assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)])), json!({"hits": [], "truncated": false}));
     ok("vault_remove", args("vault_remove", vec![json!("notes/k.md")]));
     ok("vault_remove", args("vault_remove", vec![json!("notes/a.md")]));
     ok("vault_rmdir", args("vault_rmdir", vec![json!("notes")]));

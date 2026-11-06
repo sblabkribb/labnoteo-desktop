@@ -18,6 +18,8 @@ const ko: Record<string, string> = {
   'search.placeholder': '노트 내용에서 찾기',
   'search.none': '검색 결과가 없습니다',
   'search.error': '검색할 수 없습니다.',
+  'search.truncated': '{0}개 이상 일치합니다. 앞의 {0}개만 보입니다. 더 구체적으로 검색해 보세요.',
+  'search.skipped': '읽을 수 없어 색인하지 못한 노트가 {0}개 있습니다. 검색에서 빠질 수 있습니다.',
   'search.indexing': '색인을 만드는 중입니다',
   'test.greeting': '{0} 에 노트 {1} 개',
 };

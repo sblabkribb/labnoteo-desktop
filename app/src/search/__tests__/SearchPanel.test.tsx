@@ -2,17 +2,17 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SearchPanel } from '../SearchPanel';
-import type { SearchHit } from '../indexApi';
+import type { SearchHit, SearchResults } from '../indexApi';
 
 const hit: SearchHit = { path: 'lab/001/02.labnote.md', title: '형질전환 실험', snippet: '…대장균 형질전환 효율…' };
 
 /** 가짜 invoke: search 호출의 인자를 기록하고 hits 를 돌려준다. */
-function fake(hits: SearchHit[]) {
+function fake(hits: SearchHit[], truncated = false) {
   const calls: Array<Record<string, unknown> | undefined> = [];
   const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd !== 'search') throw new Error(`unexpected ${cmd}`);
     calls.push(args);
-    return hits;
+    return { hits, truncated } satisfies SearchResults;
   }) as never;
   return { calls, invoke };
 }
@@ -62,5 +62,27 @@ describe('검색 패널', () => {
     render(<SearchPanel invoke={invoke} onOpen={() => {}} />);
     await user.type(screen.getByRole('searchbox'), '가나다');
     expect((await screen.findByRole('alert')).textContent).toBe('검색할 수 없습니다.');
+  });
+
+  it('결과가 잘렸으면 몇 개까지만 보이는지 알려 준다', async () => {
+    const user = userEvent.setup();
+    render(<SearchPanel invoke={fake([hit], true).invoke} onOpen={() => {}} />);
+    await user.type(screen.getByRole('searchbox'), '실험');
+    expect(await screen.findByText(/1개 이상 일치합니다/)).toBeTruthy();
+  });
+
+  it('잘리지 않았으면 그런 문구가 없다', async () => {
+    const user = userEvent.setup();
+    render(<SearchPanel invoke={fake([hit]).invoke} onOpen={() => {}} />);
+    await user.type(screen.getByRole('searchbox'), '실험');
+    await screen.findByRole('button', { name: /형질전환 실험/ });
+    expect(screen.queryByText(/개 이상 일치/)).toBeNull();
+  });
+
+  it('색인하지 못한 노트가 있으면 그 수를 알린다', () => {
+    const { rerender } = render(<SearchPanel invoke={fake([]).invoke} onOpen={() => {}} skipped={2} />);
+    expect(screen.getByRole('status').textContent).toContain('2개');
+    rerender(<SearchPanel invoke={fake([]).invoke} onOpen={() => {}} skipped={0} />);
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

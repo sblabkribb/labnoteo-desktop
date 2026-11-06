@@ -9,6 +9,12 @@ export interface SearchHit {
   snippet: string;
 }
 
+/** Rust 의 `SearchResults`. `truncated` 는 `hits` 보다 더 많은 노트가 일치했다는 뜻이다. */
+export interface SearchResults {
+  hits: SearchHit[];
+  truncated: boolean;
+}
+
 /** Rust 의 `IndexStats`(camelCase). */
 export interface IndexStats {
   indexed: number;
@@ -30,6 +36,6 @@ export function removeNote(path: string, invoke: InvokeFn = tauriInvoke): Promis
   return invoke<void>('index_remove', { path });
 }
 
-export function searchNotes(query: string, limit: number, invoke: InvokeFn = tauriInvoke): Promise<SearchHit[]> {
-  return invoke<SearchHit[]>('search', { query, limit });
+export function searchNotes(query: string, limit: number, invoke: InvokeFn = tauriInvoke): Promise<SearchResults> {
+  return invoke<SearchResults>('search', { query, limit });
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
-import { searchNotes, type SearchHit } from './indexApi';
+import { searchNotes, type SearchResults } from './indexApi';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -14,12 +14,14 @@ interface Props {
   onOpen: (path: string) => void;
   /** 색인을 만드는 중이면 결과가 아직 덜 찼음을 알린다. */
   indexing?: boolean;
+  /** 마지막 색인에서 읽지 못해 건너뛴 노트 수. 0 이 아니면 알린다. */
+  skipped?: number;
   invoke?: InvokeFn;
 }
 
-type Result = { status: 'idle' } | { status: 'ok'; hits: SearchHit[] } | { status: 'failed' };
+type Result = { status: 'idle' } | ({ status: 'ok' } & SearchResults) | { status: 'failed' };
 
-export function SearchPanel({ onOpen, indexing = false, invoke = tauriInvoke }: Props) {
+export function SearchPanel({ onOpen, indexing = false, skipped = 0, invoke = tauriInvoke }: Props) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<Result>({ status: 'idle' });
 
@@ -32,7 +34,7 @@ export function SearchPanel({ onOpen, indexing = false, invoke = tauriInvoke }: 
     let live = true;
     const timer = setTimeout(() => {
       searchNotes(query, LIMIT, invoke).then(
-        (hits) => live && setResult({ status: 'ok', hits }),
+        (r) => live && setResult({ status: 'ok', hits: r.hits, truncated: r.truncated }),
         () => live && setResult({ status: 'failed' }),
       );
     }, DEBOUNCE_MS);
@@ -53,8 +55,10 @@ export function SearchPanel({ onOpen, indexing = false, invoke = tauriInvoke }: 
         onChange={(e) => setQuery(e.target.value)}
       />
       {indexing && <p>{t('search.indexing')}</p>}
+      {skipped > 0 && <p role="status">{t('search.skipped', skipped)}</p>}
       {result.status === 'failed' && <p role="alert">{t('search.error')}</p>}
       {result.status === 'ok' && result.hits.length === 0 && <p>{t('search.none')}</p>}
+      {result.status === 'ok' && result.truncated && <p>{t('search.truncated', result.hits.length)}</p>}
       {result.status === 'ok' && result.hits.length > 0 && (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {result.hits.map((h) => (
