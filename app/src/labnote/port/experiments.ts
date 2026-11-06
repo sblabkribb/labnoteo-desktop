@@ -6,6 +6,7 @@
 // Changes: warnIfWindowsPathTooLong(app, host, path) -> warnIfWindowsPathTooLong(host, vaultRoot, path), exported, host narrowed to notify and t.
 // Changes: windowsPathsOver(app, ...) -> windowsPathsOver(vaultRoot, ...): the base path is the vault root the app opened; no `Platform.isWin` check (the app is Windows only).
 // Changes: README is imported from ../paths; the imports below replace the top of commands.ts.
+// Changes: experimentReadmes reads front matter through frontMatterText, which strips a leading UTF-8 BOM as well as CRLF.
 
 import type { LabnoteHost, PromptHint } from '@labnoteo/core';
 import { parseFrontMatterYaml } from '@labnoteo/core';
@@ -18,6 +19,7 @@ import {
   sanitizeTitle,
 } from '@labnoteo/core/lib/labnoteStructure';
 import { fullPathLength, WINDOWS_PATH_MAX } from '@labnoteo/core/lib/regexUtils';
+import { frontMatterText } from '../frontMatterText';
 import { README } from '../paths';
 
 /**
@@ -112,7 +114,7 @@ export async function experimentReadmes(host: Pick<LabnoteHost, 'fs'>): Promise<
     let frontMatter: Record<string, unknown> = {};
     try {
       if (await host.fs.exists(readmePath)) {
-        frontMatter = parseFrontMatterYaml((await host.fs.read(readmePath)).replace(/\r\n/g, '\n')).frontMatter;
+        frontMatter = parseFrontMatterYaml(frontMatterText(await host.fs.read(readmePath))).frontMatter;
       }
     } catch {
       // Unreadable README: the folder name stands for the title.

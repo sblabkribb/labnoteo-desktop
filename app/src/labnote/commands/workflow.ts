@@ -26,7 +26,7 @@ import { t } from '../../i18n/t';
 import { coreLocale } from '../i18n';
 import { NoteBusyError, NoteSaveError } from '../noteErrors';
 import { processNote } from '../openNotes';
-import { README, VAULT_ROOT } from '../paths';
+import { README, VAULT_ROOT, samePath } from '../paths';
 import {
   catalogDescription,
   catalogKoFields,
@@ -188,9 +188,9 @@ export async function createWorkflowIn(ctx: CommandContext, labnoteDir: string, 
 
 /** 그 경로가 실험의 README(labnote 아래 ###_ 폴더 바로 안의 README.labnote.md)인가. 편집기 메뉴가 "워크플로 삽입"을 보일지 정한다. */
 export function isExperimentReadme(path: string | undefined): boolean {
-  if (!path || posix.basename(path) !== README) return false;
+  if (!path || posix.basename(path).toLowerCase() !== README.toLowerCase()) return false;
   const found = diagnoseExperimentPath(path);
-  return found.kind === 'ok' && posix.join(found.folder, README) === path;
+  return found.kind === 'ok' && samePath(posix.join(found.folder, README), path);
 }
 
 /**

@@ -23,7 +23,8 @@ import {
 import { experimentMarkerSpots, formatMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerIndex';
 import { coreLocale, overrideOr } from '../i18n';
 import { processNote } from '../openNotes';
-import { README, VAULT_ROOT } from '../paths';
+import { frontMatterText } from '../frontMatterText';
+import { README, VAULT_ROOT, samePath } from '../paths';
 import {
   experimentFolderNames,
   experimentReadmes,
@@ -72,7 +73,10 @@ export async function createExperiment(
   await host.fs.mkdir(structure.resourcesFolder);
   let readme = structure.readmeContent;
   if (opts.retryOf) readme = setRetryOf(readme, retryOfLink(opts.retryOf));
-  if (opts.retryReadme !== undefined) readme = copyFrontMatterKeys(opts.retryReadme, readme, ['author', 'project']);
+  // 원래 README 에는 BOM 이나 CRLF 가 있을 수 있다: 읽을 수 있는 꼴로 넘긴다. 새 README 는 앱의 기본 꼴(BOM 없음, LF)이다.
+  if (opts.retryReadme !== undefined) {
+    readme = copyFrontMatterKeys(frontMatterText(opts.retryReadme), readme, ['author', 'project']);
+  }
   await host.fs.write(structure.readmePath, readme);
 
   ctx.refresh();
@@ -87,7 +91,7 @@ export async function retryExperiment(ctx: CommandContext, folder: string): Prom
   const { host } = ctx;
   const readmePath = posix.join(folder, README);
   const text = (await host.fs.exists(readmePath)) ? await host.fs.read(readmePath) : '';
-  const { frontMatter } = parseFrontMatterYaml(text.replace(/\r\n/g, '\n'));
+  const { frontMatter } = parseFrontMatterYaml(frontMatterText(text));
   const original =
     typeof frontMatter.title === 'string' && frontMatter.title.trim()
       ? frontMatter.title
@@ -117,7 +121,7 @@ export async function retryFromActive(ctx: CommandContext): Promise<void> {
     host.notify('warn', host.t('This experiment has no README.labnote.md.'));
     return;
   }
-  const { frontMatter } = parseFrontMatterYaml((await host.fs.read(readmePath)).replace(/\r\n/g, '\n'));
+  const { frontMatter } = parseFrontMatterYaml(frontMatterText(await host.fs.read(readmePath)));
   const status = typeof frontMatter.status === 'string' ? frontMatter.status.trim() : '';
   if (status !== 'failed' && status !== 'needs-repeat') {
     host.notify(
@@ -205,7 +209,7 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
   }
   // Ctrl+Z 는 README 가 열린 노트일 때만 닿는다.
   const active = ctx.activePath();
-  if (active !== readmePath) {
+  if (!samePath(active, readmePath)) {
     const sameExperiment = active !== undefined && getExperimentDir(active) === labnoteDir;
     const fromView = experimentDir !== undefined && !sameExperiment;
     if (!fromView) message += ` ${host.t("Changed {0}'s README, not this note.", folderName)}`;
@@ -280,7 +284,7 @@ export async function toggleDiscussionFlag(ctx: CommandContext, experimentDir?: 
       )}`;
     }
   }
-  if (ctx.activePath() !== readmePath) {
+  if (!samePath(ctx.activePath(), readmePath)) {
     message += ` ${host.t("Changed {0}'s README, not this note.", posix.basename(labnoteDir))}`;
   }
   host.notify('info', message);

@@ -4,10 +4,12 @@
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: statusMeanings and readNoteForFrontMatterEdit are exported; statusMeanings and statusNames take `Pick<LabnoteHost, 't'>`.
 // Changes: the imports below replace the top of commands.ts. The host's fs is the app's editor-aware fs, so these reads see an open note's unsaved text.
+// Changes: front matter is read through frontMatterText, which strips a leading UTF-8 BOM as well as CRLF, so a README saved with a BOM parses.
 
 import type { ExperimentStatus, LabnoteHost } from '@labnoteo/core';
 import { EXPERIMENT_STATUSES, parseFrontMatterYaml } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
+import { frontMatterText } from '../frontMatterText';
 import {
   normalizeChecklistLink,
   parseWorkflowChecklistFromReadme,
@@ -103,7 +105,7 @@ export async function confirmCompleted(
     if (name.includes('/')) continue;
     const path = posix.join(labnoteDir, name);
     if (!(await host.fs.exists(path))) continue;
-    const content = (await host.fs.read(path)).replace(/\r\n/g, '\n');
+    const content = frontMatterText(await host.fs.read(path));
     const { frontMatter } = parseFrontMatterYaml(content);
     const end = frontMatter.end_date;
     const empty = 'end_date' in frontMatter && (end === null || end === undefined || String(end).trim() === '');
@@ -161,9 +163,9 @@ export async function readNoteForFrontMatterEdit(
   host: LabnoteHost,
   readmePath: string
 ): Promise<{ frontMatter: Record<string, unknown>; body: string; text: string } | undefined> {
-  // `parseFrontMatterYaml` requires LF-normalised text (a bare `\n` after the
-  // opening `---`); normalise CRLF so Windows-authored notes parse correctly.
-  const original = (await host.fs.read(readmePath)).replace(/\r\n/g, '\n');
+  // `parseFrontMatterYaml` requires LF-normalised text with no BOM (a bare `\n`
+  // right after the opening `---`); Windows-authored notes have CRLF and often a BOM.
+  const original = frontMatterText(await host.fs.read(readmePath));
   const { frontMatter, body, parseError } = parseFrontMatterYaml(original);
   if (parseError) {
     host.notify(

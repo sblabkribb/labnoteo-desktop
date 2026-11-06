@@ -9,6 +9,7 @@ import * as posix from '@labnoteo/core/posix';
 import { retryOfLinkpath } from '@labnoteo/core/lib/labnoteStructure';
 import { parseWorkflowChecklistFromReadme } from '@labnoteo/core/lib/workflowStructure';
 import { experimentMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerIndex';
+import { frontMatterText } from '../frontMatterText';
 import { README } from '../paths';
 import { checklistProgress } from '../port/workflowView';
 
@@ -36,7 +37,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     // 읽지 못한 README: 폴더 이름만으로 보인다
   }
   // Windows 에서 만든 README: BOM 과 CRLF 를 걷어 낸 뒤 읽는다
-  text = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+  text = frontMatterText(text);
   const parsed = parseFrontMatterYaml(text);
   const fm: Record<string, unknown> = parsed.frontMatter ?? {};
   const updated = fm.last_updated_date;

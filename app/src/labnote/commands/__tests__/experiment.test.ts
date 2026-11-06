@@ -304,6 +304,70 @@ describe('toggle-discussion-flag', () => {
   });
 });
 
+const BOM = String.fromCharCode(0xfeff);
+/** Windows 에서 만든 README: UTF-8 BOM 과 CRLF. */
+const windows = (text: string) => `${BOM}${text.replace(/\n/g, '\r\n')}`;
+
+describe('README with a BOM and CRLF line endings', () => {
+  it('toggle-discussion-flag clears discuss: true and keeps the BOM and CRLF', async () => {
+    const plain = readme('in-progress');
+    h = createTestHost({ [README_PATH]: windows(readme('in-progress', 'discuss: true\n')) }, { autoUpdateLastUpdated: false });
+    h.setActive(README_PATH);
+    await toggleDiscussionFlag(h.ctx);
+    expect(h.vault.files()[README_PATH]).toBe(windows(plain));
+    expect(h.notes.map((n) => n.message)).toEqual(['논의 표시를 해제했습니다.']);
+  });
+
+  it('retry-experiment accepts a failed experiment and copies author/project', async () => {
+    h = createTestHost({ [README_PATH]: windows(readme('failed')) });
+    h.setActive(README_PATH);
+    let proposed: string | undefined;
+    h.answer.prompt((opts) => (proposed = opts.value));
+    await retryFromActive(h.ctx);
+    expect(proposed).toBe('실험 2차');
+    const made = h.vault.files()['labnote/002_실험_2차/README.labnote.md'];
+    expect(made).toBeDefined();
+    expect(made).toMatch(/^author: '?김연구'?$/m);
+    expect(made).toMatch(/^project: 단백질$/m);
+    expect(made.startsWith(BOM)).toBe(false);
+    expect(made.includes('\r')).toBe(false);
+  });
+
+  it('change-experiment-status shows the current status and writes back with the BOM and CRLF', async () => {
+    h = createTestHost({ [README_PATH]: windows(readme('in-progress')) }, { autoUpdateLastUpdated: false });
+    h.setActive(README_PATH);
+    h.answer.pick((items: Array<{ value: unknown; description?: string }>, opts) => {
+      expect(opts?.selected).toBe('in-progress');
+      expect(items.find((i) => i.value === 'in-progress')?.description).toBe(h.host.t('current'));
+      return 'failed';
+    });
+    await changeExperimentStatus(h.ctx);
+    expect(h.vault.files()[README_PATH]).toBe(windows(readme('failed')));
+    expect(h.notes[0].message).toContain('in-progress → failed');
+  });
+});
+
+describe('path comparison folds case (NTFS)', () => {
+  it('the README open under another letter case is "this note"', async () => {
+    h = createTestHost({ [README_PATH]: readme('in-progress') }, { autoUpdateLastUpdated: false });
+    h.setActive(README_PATH);
+    await toggleDiscussionFlag(h.ctx);
+    const exact = h.notes[0].message;
+    h.cleanup();
+    h = createTestHost({ [README_PATH]: readme('in-progress') }, { autoUpdateLastUpdated: false });
+    h.setActive(`${DIR}/readme.LABNOTE.md`);
+    await toggleDiscussionFlag(h.ctx);
+    expect(h.notes[0].message).toBe(exact);
+
+    h.cleanup();
+    h = createTestHost({ [README_PATH]: readme('planned') }, { autoUpdateLastUpdated: false });
+    h.setActive(`${DIR}/readme.LABNOTE.md`);
+    h.answer.pick('in-progress');
+    await changeExperimentStatus(h.ctx, DIR);
+    expect(h.notes[0].message).not.toContain('README');
+  });
+});
+
 describe('registration', () => {
   it('registerAllCommands registers the four experiment commands', () => {
     h = createTestHost();

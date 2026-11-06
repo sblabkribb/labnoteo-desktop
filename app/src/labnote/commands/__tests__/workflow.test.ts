@@ -245,6 +245,11 @@ describe('Insert workflow (README editor menu)', () => {
     expect(isExperimentReadme('notes/README.labnote.md')).toBe(false);
     expect(isExperimentReadme(undefined)).toBe(false);
   });
+
+  it('isExperimentReadme folds case like NTFS', () => {
+    h = createTestHost();
+    expect(isExperimentReadme(`${DIR}/readme.LABNOTE.md`)).toBe(true);
+  });
 });
 
 describe('registration', () => {

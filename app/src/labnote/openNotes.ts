@@ -3,9 +3,10 @@ import { isolateHistory } from '@codemirror/commands';
 import { EditorState, Transaction } from '@codemirror/state';
 import type { EditorHandle } from '../editor/Editor';
 import { lineSeparatorOf, parseRaw, toRaw } from '../editor/documentIo';
-import { normalizeVaultPath, type AppFs } from '../fs/tauriLabnoteFs';
+import type { AppFs } from '../fs/tauriLabnoteFs';
 import { editTargetFor, toDocBreaks } from './editTarget';
 import { NoteBusyError, NoteSaveError } from './noteErrors';
+import { pathKey } from './paths';
 
 export { NoteBusyError, NoteSaveError } from './noteErrors';
 
@@ -16,13 +17,8 @@ export { NoteBusyError, NoteSaveError } from './noteErrors';
 const registry = new Map<string, EditorHandle>();
 
 function keyOf(path: string): string {
-  let p = path;
-  try {
-    p = normalizeVaultPath(path);
-  } catch {
-    // 보관함을 벗어나는 경로는 열린 노트가 될 수 없다: 그대로 두면 아무것과도 맞지 않는다.
-  }
-  return p.toLowerCase();
+  // 보관함을 벗어나는 경로는 열린 노트가 될 수 없다: 그대로 두면 아무것과도 맞지 않는다.
+  return pathKey(path);
 }
 
 /** 편집기가 부른다. 돌려준 함수로 지운다(그 사이 같은 경로에 다른 손잡이가 등록됐으면 그것은 두고). */
