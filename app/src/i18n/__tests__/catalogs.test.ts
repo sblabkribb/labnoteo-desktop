@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { catalogs } from '../t';
+import { firstArgsOf } from './callArgs';
 
 /** 템플릿이 쓰는 자리 표시 목록(정렬, 중복 포함): `{0}` 을 두 번 쓰는 문장에서 하나를 빠뜨리면 다르다. */
 const placeholders = (s: string) => (s.match(/\{\d+\}/g) ?? []).sort();
@@ -51,30 +52,8 @@ const literals = (code: string) => [...code.matchAll(QUOTED)].map((m) => m[1] ??
 
 /** `t(` 뒤 첫 인자(최상위 쉼표나 닫는 괄호까지)의 글자. `t(gone ? 'a' : 'b')` 처럼 삼항으로 고른 키도 잡는다. */
 export function firstArgsOfT(code: string): string[] {
-  const out: string[] = [];
   // `function t(` 는 부르는 곳이 아니라 정의다
-  for (const m of code.matchAll(/(?<![\w.$]|function\s+)t\(/g)) {
-    let depth = 0;
-    let quote = '';
-    let i = m.index! + m[0].length;
-    const start = i;
-    for (; i < code.length; i++) {
-      const c = code[i];
-      if (quote) {
-        if (c === '\\') i++;
-        else if (c === quote) quote = '';
-        continue;
-      }
-      if (c === "'" || c === '"' || c === '`') quote = c;
-      else if (c === '(' || c === '[' || c === '{') depth++;
-      else if (c === ')' || c === ']' || c === '}') {
-        if (depth === 0) break;
-        depth--;
-      } else if (c === ',' && depth === 0) break;
-    }
-    out.push(code.slice(start, i));
-  }
-  return out;
+  return firstArgsOf(code, /(?<![\w.$]|function\s+)t\(/g);
 }
 
 describe('소스가 부르는 번역 키', () => {
@@ -90,6 +69,7 @@ describe('소스가 부르는 번역 키', () => {
     'src/theme/ThemeToggle.tsx': ['key'], // OPTIONS 의 'theme.*' 글자
     'src/tree/NewNote.tsx': ['error'], // createNote 가 주는 'newNote.error.*' 글자
     'src/onboarding/FirstRun.tsx': ["error ?? 'vault.error.generic'"], // useVault 의 VaultErrorKey
+    'src/labnote/i18n.ts': ['key'], // overrideOr: OverrideKey 합집합의 글자
   };
   const LIT = String.raw`(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")`;
   const ALLOWED_ARG = new RegExp(String.raw`^\s*(?:${LIT}|!?[\w.]+\s*\?\s*${LIT}\s*:\s*${LIT})\s*$`);
@@ -103,6 +83,8 @@ describe('소스가 부르는 번역 키', () => {
 
   it('t 의 첫 인자는 글자, 글자 삼항, 또는 허용 목록의 변수 식이다 (템플릿 글자 금지)', () => {
     expect(files.flatMap(({ f, code }) => badArgs(f, code))).toEqual([]);
+    // 옮겨 온 플러그인 코드(port/)도 이 검사를 지난다: bilingualName 의 매개변수 t 는 translate 로 바꿔 두었다
+    expect(files.some(({ f }) => f.split('\\').join('/') === 'src/labnote/port/bilingualName.ts')).toBe(true);
     // 검사 자체: 템플릿 글자와 목록에 없는 변수는 걸리고, 글자와 글자 삼항은 지나간다
     expect(badArgs('src/x.tsx', "t(`a.${b}`) + t(k) + t(cond ? key : 'a.b') + t('a.b') + t(gone ? 'a.b' : \"c.d\")")).toEqual([
       'src/x.tsx: t(`a.${b}`)',

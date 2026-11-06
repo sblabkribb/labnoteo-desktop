@@ -94,6 +94,9 @@ const ko: Record<string, string> = {
   'table.deleteTableConfirm': '다시 누르면 지웁니다',
   'table.alignCycle': '정렬 바꾸기 (왼쪽 → 가운데 → 오른쪽)',
   'table.more': '표 메뉴 더 보기',
+  'insertDate.metaDateFilled': '이 Start_date/End_date 에는 이미 값이 있습니다. 날짜를 선택해 덮어 쓰세요.',
+  'insertDate.noNote': '노트를 열고 날짜를 넣을 곳에 커서를 둔 다음 다시 실행하세요.',
+  'issueMarker.noNote': '노트를 열고 논의할 줄에 커서를 둔 다음 다시 실행하세요.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -190,6 +193,9 @@ const en: Record<string, string> = {
   'table.deleteTableConfirm': 'Click again to delete',
   'table.alignCycle': 'Change alignment (left → center → right)',
   'table.more': 'More table actions',
+  'insertDate.metaDateFilled': 'This Start_date/End_date already has a value. Select the date and type over it.',
+  'insertDate.noNote': 'Open a note and put the cursor where the date goes, then run this again.',
+  'issueMarker.noNote': 'Open a note and put the cursor on the line to discuss, then run this again.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
