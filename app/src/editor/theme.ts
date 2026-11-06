@@ -155,6 +155,33 @@ export const editorThemeSpec = {
     cursor: 'pointer',
   },
   '.lno-task-done': { color: 'var(--text-muted)', textDecorationLine: 'line-through' },
+  // 인용(live/inline.ts): 왼쪽 선과 흐린 글. 콜아웃은 종류별 선 색과 옅은 바탕, 첫 줄의 제목은 굵게.
+  '.lno-quote': { borderLeft: '3px solid var(--border-strong)', color: 'var(--text-muted)' },
+  '.lno-callout': { borderLeft: '3px solid var(--border)', backgroundColor: 'var(--bg-elevated)' },
+  '.lno-callout-note': { borderLeftColor: 'var(--accent)' },
+  '.lno-callout-info': { borderLeftColor: 'var(--accent)' },
+  '.lno-callout-tip': { borderLeftColor: 'var(--success)' },
+  '.lno-callout-warning': { borderLeftColor: 'var(--warning)' },
+  '.lno-callout-danger': { borderLeftColor: 'var(--danger)' },
+  '.lno-callout-title': { fontWeight: '700' },
+  // 울타리 코드 블록: 고정폭 글꼴과 바탕. 첫·끝 줄만 모서리를 둥글린다. 울타리 줄(```)은 숨기지 않고 흐리게.
+  '.lno-codeblock': { backgroundColor: 'var(--bg-elevated)', fontFamily: 'var(--font-mono)', fontSize: '0.93em' },
+  '.lno-codeblock-first': { borderTopLeftRadius: 'var(--radius)', borderTopRightRadius: 'var(--radius)' },
+  '.lno-codeblock-last': { borderBottomLeftRadius: 'var(--radius)', borderBottomRightRadius: 'var(--radius)' },
+  '.lno-fence': { color: 'var(--text-muted)' },
+  // 가로줄: 숨긴 `---` 자리 가운데에 선 하나. 누름을 가로채지 않는다.
+  '.lno-hr': { position: 'relative' },
+  '.lno-hr::before': {
+    content: '""',
+    position: 'absolute',
+    left: 'var(--space-3)',
+    right: 'var(--space-3)',
+    top: '50%',
+    borderTop: '1px solid var(--border-strong)',
+    pointerEvents: 'none',
+  },
+  // 스캔 주석(<!-- labnoteo-scan … -->): 흐리고 작게.
+  '.lno-scan-meta': { color: 'var(--text-muted)', fontSize: '0.8em' },
   // 유닛 오퍼레이션·워크플로 제목의 코드 칩: .lno-chip 위에 고정폭 글꼴과 종류별 테두리색.
   '.lno-uo-code': { fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text)', verticalAlign: 'middle' },
   '.lno-uo-uhw': { borderColor: 'var(--accent)' },

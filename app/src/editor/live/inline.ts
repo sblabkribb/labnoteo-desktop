@@ -2,7 +2,7 @@ import type { Extension, Range } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
-import { revealInline, revealLine, skipRanges, touchedLines } from './reveal';
+import { isFenceMark, revealInline, revealLine, skipRanges, touchedLines } from './reveal';
 import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
 import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
@@ -19,6 +19,12 @@ import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
  *   대괄호를 숨긴 뒤 코드를 칩(lno-chip lno-uo-code lno-uo-…)으로 단다.
  * - 할 일: 줄이 드러나지 않았으면 `- ` 를 숨기고 `[ ]`·`[x]` 를 체크박스(CheckboxWidget)로 바꾼다. 끝난 항목 줄은
  *   lno-task-done. 누름은 taskHandlers 가 받는다.
+ * - 인용: 모든 줄에 lno-quote, 줄이 드러나지 않았으면 `> ` 를 숨긴다. 첫 줄이 `> [!type]` 이면 콜아웃: 모든 줄에
+ *   lno-callout lno-callout-<type>(모르는 종류는 note), 드러나지 않은 첫 줄은 `[!type]` 을 숨기고 나머지를 lno-callout-title 로.
+ * - 울타리 코드 블록: 모든 줄에 lno-codeblock, 첫·끝 줄에 -first·-last, 울타리 줄에 lno-fence(흐리게, 숨기지 않는다).
+ *   블록 안은 장식하지 않는다.
+ * - 가로줄: 줄에 lno-hr, 드러나지 않았으면 글을 빈 인라인 바꾸기로 숨긴다.
+ * - 스캔 주석(`<!-- labnoteo-scan …`): 그 줄에 lno-scan-meta(흐리고 작게).
  *
  * 무엇을 원문으로 보일지는 reveal.ts 가 정한다. 표 구역과 머리말은 건너뛴다(skipRanges).
  * 한글 조합 중에는 다시 만들지 않고 바뀐 위치로 옮기기만 한다: 조합 중인 줄에 장식을 더하거나 빼면 IME 가 깨진다.
@@ -54,6 +60,28 @@ const olMark = Decoration.mark({ class: 'lno-ol-mark' });
 const bullet = Decoration.replace({ widget: bulletWidget });
 const checkbox = [false, true].map((checked) => Decoration.replace({ widget: new CheckboxWidget(checked) }));
 const taskDoneLine = Decoration.line({ class: 'lno-task-done' });
+
+const quoteLine = Decoration.line({ class: 'lno-quote' });
+/** 콜아웃 첫 줄. 인용 노드의 시작(`>`)부터 읽는다. */
+const CALLOUT = /^>\s*\[!(\w+)\][+-]?/;
+const CALLOUT_TYPES = ['note', 'info', 'tip', 'warning', 'danger'] as const;
+type CalloutType = (typeof CALLOUT_TYPES)[number];
+const calloutLine = Object.fromEntries(
+  CALLOUT_TYPES.map((k) => [k, Decoration.line({ class: `lno-callout lno-callout-${k}` })]),
+) as Record<CalloutType, Decoration>;
+/** 모르는 종류는 note 로 그린다. */
+const calloutType = (name: string): CalloutType => {
+  const k = name.toLowerCase();
+  return (CALLOUT_TYPES as readonly string[]).includes(k) ? (k as CalloutType) : 'note';
+};
+const calloutTitle = Decoration.mark({ class: 'lno-callout-title' });
+const codeLine = Decoration.line({ class: 'lno-codeblock' });
+const codeFirstLine = Decoration.line({ class: 'lno-codeblock-first' });
+const codeLastLine = Decoration.line({ class: 'lno-codeblock-last' });
+const fenceLine = Decoration.line({ class: 'lno-fence' });
+const hrLine = Decoration.line({ class: 'lno-hr' });
+const scanLine = Decoration.line({ class: 'lno-scan-meta' });
+const SCAN_COMMENT = /^<!-- labnoteo-scan /;
 
 const isBlank = (ch: string) => ch === ' ' || ch === '\t';
 
@@ -178,6 +206,43 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     conceal(mark.from, end, bullet);
   };
 
+  /** 인용 줄 클래스를 이미 단 줄: 겹친 인용은 바깥(먼저 들어온) 인용의 클래스만 단다. */
+  const quoted = new Set<number>();
+  /** 인용·콜아웃: 줄 클래스, 콜아웃이면 드러나지 않은 첫 줄의 `[!type]` 숨김과 제목 표시. `> ` 는 QuoteMark 가 숨긴다. */
+  const blockquote = (node: SyntaxNode) => {
+    const first = state.doc.lineAt(node.from);
+    const last = state.doc.lineAt(node.to).number;
+    const m = CALLOUT.exec(state.sliceDoc(node.from, first.to));
+    const type = m ? calloutType(m[1]) : null;
+    for (let n = first.number; n <= last; n++) {
+      if (quoted.has(n)) continue;
+      quoted.add(n);
+      decos.push((type ? calloutLine[type] : quoteLine).range(state.doc.line(n).from));
+    }
+    if (!m || revealLine(state, first.number, lines)) return;
+    const markFrom = node.from + m[0].indexOf('[');
+    let end = node.from + m[0].length;
+    const lineEnd = first.text.endsWith('\r') ? first.to - 1 : first.to;
+    while (end < lineEnd && isBlank(first.text[end - first.from])) end++;
+    conceal(markFrom, end);
+    if (end < lineEnd) decos.push(calloutTitle.range(end, lineEnd));
+  };
+
+  /** 울타리 코드 블록: 줄 클래스만. 안의 글은 장식하지 않는다. */
+  const fencedCode = (node: SyntaxNode) => {
+    const first = state.doc.lineAt(node.from).number;
+    const last = state.doc.lineAt(node.to).number;
+    for (let n = first; n <= last; n++) {
+      const from = state.doc.line(n).from;
+      decos.push(codeLine.range(from));
+      if (n === first) decos.push(codeFirstLine.range(from));
+      if (n === last) decos.push(codeLastLine.range(from));
+    }
+    const fences = new Set<number>();
+    for (let c = node.firstChild; c; c = c.nextSibling) if (isFenceMark(c)) fences.add(state.doc.lineAt(c.from).from);
+    for (const from of fences) decos.push(fenceLine.range(from));
+  };
+
   // 접힌 곳·표 틈으로 나뉜 보이는 범위들에 걸친 노드는 범위마다 다시 들어온다: 한 번만 장식한다
   const seen = new Set<string>();
   for (const { from, to } of view.visibleRanges) {
@@ -195,6 +260,39 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
           heading(ref.node, Number(m[1]));
           unitOp(ref.node, Number(m[1]));
           return;
+        }
+        if (ref.name === 'Blockquote') {
+          blockquote(ref.node);
+          return;
+        }
+        if (ref.name === 'QuoteMark') {
+          const line = state.doc.lineAt(ref.from);
+          if (revealLine(state, line.number, lines)) return;
+          // 기호 뒤의 공백 한 칸까지 숨긴다
+          const end = ref.to < line.to && isBlank(line.text[ref.to - line.from]) ? ref.to + 1 : ref.to;
+          conceal(ref.from, end);
+          return;
+        }
+        if (ref.name === 'FencedCode') {
+          fencedCode(ref.node);
+          // 안은 장식하지 않는다. 인용 안의 코드 블록이면 줄마다 `> ` 가 있으니 그것만 숨긴다(아래 QuoteMark).
+          return;
+        }
+        if (ref.name === 'HorizontalRule') {
+          const line = state.doc.lineAt(ref.from);
+          decos.push(hrLine.range(line.from));
+          // 줄 끝의 '\r' 까지 숨긴다(섞인 줄바꿈 노트)
+          if (!revealLine(state, line.number, lines)) conceal(ref.from, line.to);
+          return;
+        }
+        if (ref.name === 'CommentBlock') {
+          const first = state.doc.lineAt(ref.from).number;
+          const last = state.doc.lineAt(ref.to).number;
+          for (let n = first; n <= last; n++) {
+            const line = state.doc.line(n);
+            if (SCAN_COMMENT.test(line.text)) decos.push(scanLine.range(line.from));
+          }
+          return false;
         }
         if (ref.name === 'ListItem') {
           listItem(ref.node);
