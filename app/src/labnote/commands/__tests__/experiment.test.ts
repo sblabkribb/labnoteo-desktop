@@ -3,6 +3,7 @@ import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { undo } from '@codemirror/commands';
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
+import { editYaml } from '../../../editor/live/properties';
 import { setLang } from '../../../i18n/lang';
 import { t } from '../../../i18n/t';
 import { createTestHost, type TestHost } from '../../__tests__/testHost';
@@ -219,9 +220,11 @@ describe('change-experiment-status', () => {
     const before = readme('in-progress');
     h = createTestHost({ [README_PATH]: before });
     const m = await h.mount(README_PATH);
-    // 사용자가 저장하지 않고 status 를 completed 로 고쳐 쓰고, 끝에 메모를 더했다
+    // 사용자가 저장하지 않고 status 를 completed 로 고쳐 쓰고, 끝에 메모를 더했다.
+    // 라이브 미리보기에서는 머리말이 속성 격자라 그 위에 바로 칠 수 없다: "YAML로 편집"으로 원문을 연 뒤 고친다.
     const at = before.indexOf('in-progress');
     await act(async () => {
+      m.view().dispatch({ effects: editYaml.of(true), selection: { anchor: at } });
       m.view().dispatch({ changes: { from: at, to: at + 'in-progress'.length, insert: 'completed' }, userEvent: 'input.type' });
     });
     await m.type('손으로 쓴 메모\n');

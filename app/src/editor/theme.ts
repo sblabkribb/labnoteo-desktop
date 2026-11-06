@@ -201,6 +201,28 @@ export const editorThemeSpec = {
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
   // 틀은 표 폭만큼만 차지해 도구 줄이 표 오른쪽 끝에 붙는다. 넓은 표는 100% 에서 멈추고 안쪽 틀이 스크롤한다.
+  // 속성(머리말) 격자: 키와 값 두 칸. 값 칸의 글은 줄을 넘기면 감싼다.
+  '.lno-props': {
+    margin: 'var(--space-2) var(--space-3)',
+    padding: 'var(--space-1) var(--space-2)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    backgroundColor: 'var(--bg-elevated)',
+  },
+  '.lno-props-head': { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)', padding: 'var(--space-1) 0' },
+  '.lno-props-title': { fontWeight: '700', color: 'var(--text-muted)' },
+  '.lno-props-row': {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(8em, 30%) 1fr auto',
+    alignItems: 'baseline',
+    gap: 'var(--space-2)',
+    padding: 'var(--space-1) 0',
+    borderTop: '1px solid var(--border)',
+  },
+  '.lno-props-key': { color: 'var(--text-muted)', overflowWrap: 'anywhere' },
+  '.lno-props-value': { color: 'var(--text)', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
+  '.lno-props-row[data-cell="readOnly"] .lno-props-value, .lno-props-row[data-cell="nested"] .lno-props-value': { color: 'var(--text-muted)' },
+  '.lno-props-raw': { fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' },
   '.lno-table-wrap': { position: 'relative', padding: 'var(--space-2) var(--space-3)', width: 'fit-content', maxWidth: '100%', boxSizing: 'border-box' },
   '.lno-table-scroll': { overflowX: 'auto' },
   // 칸 사이 선이 겹치지 않게: 칸은 오른쪽·아래 선만, 표가 왼쪽·위 선을 긋는다(border-collapse 의 값이 색 이름 검사에 걸린다)
