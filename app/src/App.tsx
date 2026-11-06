@@ -326,7 +326,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           )}
           {tab === 'links' && (
             <div role="tabpanel" id="sidebar-panel-links" className="sidebar-panel" aria-labelledby="sidebar-tab-links">
-              <LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} />
+              <LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />
             </div>
           )}
         </aside>

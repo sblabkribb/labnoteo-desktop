@@ -654,6 +654,21 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 .links-list { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
 .links-context { font-size: var(--font-size-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 .links-context mark { background: var(--bg-selection); color: var(--text); border-radius: var(--radius); }
+.links-unlinked > summary { cursor: pointer; }
+.links-mention { display: flex; align-items: flex-start; gap: var(--space-1); }
+.links-mention .links-context { flex: 1 1 auto; }
+.links-mention-link {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.links-mention-link:hover { background: var(--bg-hover); }
 .links-target {
   display: block;
   width: 100%;

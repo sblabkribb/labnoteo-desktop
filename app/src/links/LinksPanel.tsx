@@ -6,12 +6,20 @@
  * - Outgoing links (Task 18) come from `linkIndex.resolved(activePath)` in document order, deduplicated by target key
  *   (unresolved and unknown links by link-path key). A resolved row opens its target, an unresolved row (marked
  *   "not created") creates the note, and an unknown attachment target is shown plain and is not clickable.
+ * - Unlinked mentions (Task 19) are collapsed in a `<details>`; the search starts on the first open. Each mention
+ *   has a Link button that rewrites that one mention through `processNote`, then searches again. The button is not
+ *   shown when the target has no link text from that source (`linktextFor` is null).
  * - The panel re-renders through `useLinkIndexState` (index readiness, `filesVersion`, `linksVersion`).
  */
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import { t } from '../i18n/t';
+import type { CommandContext } from '../labnote/commands/context';
+import { runCommand } from '../labnote/commands/runCommand';
+import { processNote } from '../labnote/openNotes';
+import { searchNotes } from '../search/indexApi';
 import type { ExtractedLink } from './extract';
 import { linkIndex, linkPathOf, type Backlink, type ResolvedLink } from './linkIndex';
+import { linkMention, MENTION_LIMIT, unlinkedMentions, type Mention, type MentionResult } from './mentions';
 import { linkKey } from './resolve';
 import { useLinkIndexState } from './useLinkIndexState';
 
@@ -22,6 +30,8 @@ export interface LinksPanelProps {
   onOpen(path: string, line?: number): void;
   /** Creates the note an unresolved link names (outgoing links, Task 18). */
   onCreate(linkpath: string): void;
+  /** The command context for reading notes and the Link action; undefined before a vault is open. */
+  ctx: CommandContext | undefined;
 }
 
 function folderOf(path: string): string {
@@ -79,7 +89,13 @@ function OutgoingItem({ row, onOpen, onCreate }: { row: OutgoingRow } & Pick<Lin
   );
 }
 
-function ContextLine({ link, onClick }: { link: ExtractedLink; onClick(): void }) {
+function ContextLine({
+  link,
+  onClick,
+}: {
+  link: Pick<ExtractedLink, 'context' | 'contextFrom' | 'contextTo'>;
+  onClick(): void;
+}) {
   const { context, contextFrom, contextTo } = link;
   return (
     <button type="button" className="links-context" onClick={onClick}>
@@ -109,7 +125,116 @@ function BacklinkGroup({ backlink, onOpen }: { backlink: Backlink; onOpen: Links
   );
 }
 
-export function LinksPanel({ activePath, onOpen, onCreate }: LinksPanelProps) {
+/** The target's aliases and (labnote) title, from the link index. */
+function metaOf(target: string): { aliases: string[]; title?: string } {
+  const key = linkKey(target);
+  const aliases = linkIndex
+    .aliases()
+    .filter((a) => linkKey(a.path) === key)
+    .map((a) => a.alias);
+  const title = linkIndex.title(target);
+  return title === undefined ? { aliases } : { aliases, title };
+}
+
+function MentionItem({
+  source,
+  mention,
+  linktext,
+  onOpen,
+  onLink,
+}: {
+  source: string;
+  mention: Mention;
+  linktext: string | null;
+  onOpen: LinksPanelProps['onOpen'];
+  onLink(mention: Mention, linktext: string): void;
+}) {
+  return (
+    <li className="links-mention">
+      <ContextLine link={mention} onClick={() => onOpen(source, mention.line)} />
+      {linktext !== null && (
+        <button type="button" className="links-mention-link" onClick={() => onLink(mention, linktext)}>
+          {t('links.unlinked.link')}
+        </button>
+      )}
+    </li>
+  );
+}
+
+function UnlinkedMentions({ target, ctx, onOpen }: { target: string; ctx: CommandContext; onOpen: LinksPanelProps['onOpen'] }) {
+  const [result, setResult] = useState<MentionResult | null>(null);
+  const [started, setStarted] = useState(false);
+  const run = useRef(0);
+
+  const search = useCallback(async () => {
+    const id = ++run.current;
+    try {
+      const out = await unlinkedMentions(target, {
+        search: (q, limit) => searchNotes(q, limit),
+        read: (p) => ctx.host.fs.read(p),
+        meta: metaOf(target),
+      });
+      if (id === run.current) setResult(out);
+    } catch (err) {
+      if (id !== run.current) return;
+      setResult({ groups: [], truncated: false });
+      await runCommand(ctx, () => Promise.reject(err));
+    }
+  }, [target, ctx]);
+
+  const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
+    if (!e.currentTarget.open || started) return;
+    setStarted(true);
+    void search();
+  };
+
+  const onLink = (source: string, mention: Mention, linktext: string) => {
+    void (async () => {
+      await runCommand(ctx, () => processNote(ctx.host.fs, source, (text) => linkMention(text, mention, linktext)));
+      await search();
+    })();
+  };
+
+  const resolver = linkIndex.resolver();
+  return (
+    <details className="links-section links-unlinked" onToggle={onToggle}>
+      <summary className="links-heading">{t('links.unlinked')}</summary>
+      {result === null ? (
+        started && <p className="links-empty">{t('links.loading')}</p>
+      ) : (
+        <>
+          {result.groups.length === 0 && <p className="links-empty">{t('links.unlinked.none')}</p>}
+          {result.groups.map(({ source, mentions }) => {
+            const linktext = resolver.linktextFor(target, source);
+            return (
+              <section className="links-group" key={source}>
+                <button type="button" className="links-source" title={source} onClick={() => onOpen(source)}>
+                  <span className="links-source-name">{sourceName(source)}</span>
+                  <span className="links-source-folder">{folderOf(source)}</span>
+                </button>
+                <ul className="links-list">
+                  {mentions.map((m) => (
+                    <MentionItem
+                      key={`${m.from}:${m.to}`}
+                      source={source}
+                      mention={m}
+                      linktext={linktext}
+                      onOpen={onOpen}
+                      onLink={(mention, lt) => onLink(source, mention, lt)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+          {result.truncated && <p className="links-empty">{t('links.unlinked.more')}</p>}
+        </>
+      )}
+    </details>
+  );
+}
+
+export function LinksPanel({ activePath, onOpen, onCreate, ctx }: LinksPanelProps) {
   const state = useLinkIndexState();
   const backlinks = useMemo(
     () => (state.ready && activePath ? linkIndex.backlinks(activePath) : []),
@@ -152,6 +277,7 @@ export function LinksPanel({ activePath, onOpen, onCreate }: LinksPanelProps) {
           </ul>
         )}
       </section>
+      {ctx && <UnlinkedMentions key={activePath} target={activePath} ctx={ctx} onOpen={onOpen} />}
     </div>
   );
 }
