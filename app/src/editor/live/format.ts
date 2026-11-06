@@ -2,6 +2,8 @@ import { ChangeSet, EditorSelection, type ChangeSpec, type EditorState, type Sel
 import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, language, syntaxTree } from '@codemirror/language';
 import type { SyntaxNode, Tree } from '@lezer/common';
+import { FRONTMATTER_CLOSE, FRONTMATTER_OPEN } from '../markdownSyntax';
+import { findTables } from '../table/field';
 
 /**
  * 서식 명령의 순수 빌더(계획 Task 17). 상태를 받아 트랜잭션 명세를 돌려줄 뿐 dispatch 하지 않는다:
@@ -12,6 +14,7 @@ import type { SyntaxNode, Tree } from '@lezer/common';
  * - 줄 표시(목록·할 일·인용·제목)는 구문 트리로 찾고 그 자리에서 바꾼다: 앞 들여쓰기는 남기고 표시는 겹쳐 쌓지 않는다.
  *   마크다운 언어가 없는 상태(한 줄 칸 등)에서는 같은 규칙의 정규식으로 찾는다.
  * - 넣는 줄바꿈은 `state.lineBreak` 이다.
+ * - 줄 빌더와 코드 블록은 맨 앞의 머리말과 SP1 표 줄을 건드리지 않는다(전체 선택 뒤의 서식 키 등).
  */
 
 export type InlineMark = '**' | '*' | '~~' | '`' | '==';
@@ -45,6 +48,13 @@ function enclosing(tree: Tree, kind: string, from: number, to: number): SyntaxNo
     if (n.from <= from && to <= n.to && (from !== to || (n.from < from && from < n.to))) return n;
   }
   return null;
+}
+
+/** 위치가 같은 종류 노드 둘의 맞닿은 곳(앞 노드가 끝나거나 뒤 노드가 시작하는 곳)인가. `**a**|**b**` 를 하나로 합치지 않는다. */
+function atSeam(tree: Tree, kind: string, pos: number): boolean {
+  for (let n: SyntaxNode | null = tree.resolveInner(pos, -1); n; n = n.parent) if (n.name === kind && n.to === pos) return true;
+  for (let n: SyntaxNode | null = tree.resolveInner(pos, 1); n; n = n.parent) if (n.name === kind && n.from === pos) return true;
+  return false;
 }
 
 /** 위치에서 한쪽으로 이어진 같은 글자의 수. */
@@ -89,8 +99,8 @@ export function toggleInline(state: EditorState, mark: InlineMark): TransactionS
         return { changes, range: EditorSelection.range(a, Math.max(a, cs.mapPos(to, -1))) };
       }
     }
-    // 풀기: 범위 바로 바깥이 표시일 때. 트리가 있는 상태의 빈 커서는 이 규칙을 쓰지 않는다(`**|**` 는 트리로 판단).
-    if ((from !== to || !tree) && markedOutside(state, mark, from, to)) {
+    // 풀기: 범위 바로 바깥이 표시일 때(빈 커서의 `**|**` 포함). 같은 종류 노드 둘의 맞닿은 곳은 빼 둔다.
+    if (!(from === to && tree && atSeam(tree, NODE_OF[mark], from)) && markedOutside(state, mark, from, to)) {
       return {
         changes: [
           { from: from - len, to: from },
@@ -159,23 +169,38 @@ function skipSpaces(text: string, i: number): number {
   return i;
 }
 
-/** 구문 트리로 찾은 줄의 첫 표시(인용 또는 목록, 할 일 포함). */
-function treeMarker(state: EditorState, tree: Tree, lineNo: number): Marker | null {
+/**
+ * 어느 표시를 바꿀까. `> - a` 처럼 인용과 목록이 겹친 줄에서 'quote' 는 바깥 인용 표시를, 'list' 는 안쪽 목록 표시를 고른다.
+ * 고른 종류가 없으면 다른 종류를 쓴다(있던 표시를 그 자리에서 바꾼다).
+ */
+type Prefer = 'quote' | 'list';
+
+/** 줄 앞의 들여쓰기 뒤, 새 표시를 넣을 자리. 들여쓰기가 공백 셋을 넘으면(들여 쓴 코드) 줄 맨 앞이다. */
+function prefixAt(line: { from: number; text: string }): number {
+  const ws = /^[ \t]*/.exec(line.text)![0];
+  return /^ {0,3}$/.test(ws) ? line.from + ws.length : line.from;
+}
+
+/** 구문 트리로 찾은 줄의 표시(인용 또는 목록, 할 일 포함). */
+function treeMarker(state: EditorState, tree: Tree, lineNo: number, prefer: Prefer): Marker | null {
   const line = state.doc.line(lineNo);
-  let mark: SyntaxNode | null = null;
+  let quote: SyntaxNode | null = null;
+  let list: SyntaxNode | null = null;
   tree.iterate({
     from: line.from,
     to: line.to,
     enter: (ref) => {
-      if (mark) return false;
       if ((ref.name === 'QuoteMark' || ref.name === 'ListMark') && ref.from >= line.from && ref.to <= line.to) {
-        mark = ref.node;
+        if (ref.name === 'QuoteMark') quote ??= ref.node;
+        else list = ref.node; // 마지막(가장 안쪽) 목록 표시
         return false;
       }
       return undefined;
     },
   });
-  const m = mark as SyntaxNode | null;
+  const q = quote as SyntaxNode | null;
+  const l = list as SyntaxNode | null;
+  const m = prefer === 'quote' ? (q ?? l) : (l ?? q);
   if (!m) return null;
   const text = line.text;
   const rel = (p: number) => p - line.from;
@@ -199,27 +224,62 @@ function treeMarker(state: EditorState, tree: Tree, lineNo: number): Marker | nu
   return { kind: ordered ? 'ordered' : 'bullet', from: m.from, to: line.from + skipSpaces(text, rel(m.to)), listTo: m.to };
 }
 
-const LINE_RE = /^([ \t]*)(?:(>[ \t]?)|((?:[-*+]|\d{1,9}[.)]))(?:[ \t]+\[([ xX])\])?(?:[ \t]+|(?=\r?$)))/;
+const QUOTE_RE = /^([ \t]*)>[ \t]?/;
+const LIST_RE = /^([ \t]*)((?:[-*+]|\d{1,9}[.)]))(?:[ \t]+\[([ xX])\])?(?:[ \t]+|(?=\r?$))/;
 
-/** 언어가 없는 상태: 같은 규칙의 정규식. */
-function regexMarker(state: EditorState, lineNo: number): Marker | null {
+/** 언어가 없는 상태: 같은 규칙의 정규식(인용 표시 하나와 그 뒤의 목록 표시). */
+function regexMarker(state: EditorState, lineNo: number, prefer: Prefer): Marker | null {
   const line = state.doc.line(lineNo);
-  const m = LINE_RE.exec(line.text);
-  if (!m) return null;
-  const from = line.from + m[1].length;
-  const to = line.from + m[0].length;
-  if (m[2] !== undefined) return { kind: 'quote', from, to };
-  const listTo = from + m[3].length;
-  if (m[4] !== undefined) {
-    const boxAt = line.from + line.text.indexOf('[', listTo - line.from) + 1;
-    return { kind: 'task', from, to, listTo, boxAt, checked: m[4] !== ' ' };
+  const q = QUOTE_RE.exec(line.text);
+  const quote: Marker | null = q ? { kind: 'quote', from: line.from + q[1].length, to: line.from + q[0].length } : null;
+  const base = q ? q[0].length : 0;
+  const m = LIST_RE.exec(line.text.slice(base));
+  let list: Marker | null = null;
+  if (m) {
+    const from = line.from + base + m[1].length;
+    const to = line.from + base + m[0].length;
+    const listTo = from + m[2].length;
+    if (m[3] !== undefined) {
+      const boxAt = line.from + line.text.indexOf('[', listTo - line.from) + 1;
+      list = { kind: 'task', from, to, listTo, boxAt, checked: m[3] !== ' ' };
+    } else {
+      list = { kind: /\d/.test(m[2]) ? 'ordered' : 'bullet', from, to, listTo };
+    }
   }
-  return { kind: /\d/.test(m[3]) ? 'ordered' : 'bullet', from, to, listTo };
+  return prefer === 'quote' ? (quote ?? list) : (list ?? quote);
 }
 
-function markerFinder(state: EditorState): (lineNo: number) => Marker | null {
+function markerFinder(state: EditorState, prefer: Prefer): (lineNo: number) => Marker | null {
   const tree = treeOf(state);
-  return tree ? (n) => treeMarker(state, tree, n) : (n) => regexMarker(state, n);
+  return tree ? (n) => treeMarker(state, tree, n, prefer) : (n) => regexMarker(state, n, prefer);
+}
+
+/**
+ * 서식이 손대지 않을 줄: 문서 맨 앞의 머리말(트리가 없으면 맨 앞 `---` 줄부터 닫는 줄까지)과 SP1 표 줄.
+ * 표는 트리가 있을 때만 있다(`findTables`).
+ */
+function protectedLine(state: EditorState): (lineNo: number) => boolean {
+  const tree = treeOf(state);
+  const spans: { from: number; to: number }[] = [];
+  if (tree) {
+    const first = tree.topNode.firstChild;
+    if (first && first.name === 'Frontmatter' && first.from === 0) spans.push({ from: first.from, to: first.to });
+    spans.push(...findTables(state));
+  } else if (state.doc.lines > 1 && FRONTMATTER_OPEN.test(state.doc.line(1).text)) {
+    let end = state.doc.lines;
+    for (let n = 2; n <= state.doc.lines; n++) {
+      if (FRONTMATTER_CLOSE.test(state.doc.line(n).text)) {
+        end = n;
+        break;
+      }
+    }
+    spans.push({ from: 0, to: state.doc.line(end).to });
+  }
+  if (!spans.length) return () => false;
+  return (n) => {
+    const line = state.doc.line(n);
+    return spans.some((s) => line.from <= s.to && line.to >= s.from);
+  };
 }
 
 /** 범위가 닿은 줄 구간. 다음 줄 맨 앞에서 끝난 범위는 그 줄을 건드리지 않은 것으로 본다. */
@@ -230,12 +290,13 @@ function lineSpan(state: EditorState, r: SelectionRange): [number, number] {
   return [a, b];
 }
 
-/** 선택이 닿은 줄 번호(겹침 없이, 오름차순). 여러 줄이면 빈 줄은 뺀다(모두 비었으면 그대로). */
+/** 선택이 닿은 줄 번호(겹침 없이, 오름차순). 머리말·표 줄은 뺀다. 여러 줄이면 빈 줄도 뺀다(모두 비었으면 그대로). */
 function touchedLines(state: EditorState): number[] {
+  const skip = protectedLine(state);
   const set = new Set<number>();
   for (const r of state.selection.ranges) {
     const [a, b] = lineSpan(state, r);
-    for (let n = a; n <= b; n++) set.add(n);
+    for (let n = a; n <= b; n++) if (!skip(n)) set.add(n);
   }
   const all = [...set].sort((x, y) => x - y);
   const filled = all.filter((n) => !isBlank(state.doc.line(n).text));
@@ -261,7 +322,7 @@ function lineSpec(state: EditorState, changes: ChangeSpec[]): TransactionSpec | 
  */
 export function toggleLinePrefix(state: EditorState, kind: 'bullet' | 'ordered' | 'quote'): TransactionSpec | null {
   if (state.readOnly) return null;
-  const find = markerFinder(state);
+  const find = markerFinder(state, kind === 'quote' ? 'quote' : 'list');
   const lines = touchedLines(state).map((n) => ({ line: state.doc.line(n), marker: find(n) }));
   const remove = lines.every((l) => l.marker?.kind === kind);
   const changes: ChangeSpec[] = [];
@@ -271,7 +332,7 @@ export function toggleLinePrefix(state: EditorState, kind: 'bullet' | 'ordered' 
     if (marker) {
       if (state.sliceDoc(marker.from, marker.to) !== insert) changes.push({ from: marker.from, to: marker.to, insert });
     } else if (insert) {
-      changes.push({ from: line.from, insert });
+      changes.push({ from: prefixAt(line), insert });
     }
   }
   return lineSpec(state, changes);
@@ -283,7 +344,7 @@ export function toggleLinePrefix(state: EditorState, kind: 'bullet' | 'ordered' 
  */
 export function cycleTask(state: EditorState): TransactionSpec | null {
   if (state.readOnly) return null;
-  const find = markerFinder(state);
+  const find = markerFinder(state, 'list');
   const lines = touchedLines(state).map((n) => ({ line: state.doc.line(n), marker: find(n) }));
   const head = lines[0]?.marker;
   const check = head?.kind === 'task' && !head.checked;
@@ -297,7 +358,7 @@ export function cycleTask(state: EditorState): TransactionSpec | null {
     } else if (marker) {
       changes.push({ from: marker.from, to: marker.to, insert: '- ' + box });
     } else {
-      changes.push({ from: line.from, insert: '- ' + box });
+      changes.push({ from: prefixAt(line), insert: '- ' + box });
     }
   }
   return lineSpec(state, changes);
@@ -348,25 +409,42 @@ export function setHeading(state: EditorState, level: 0 | 1 | 2 | 3 | 4 | 5 | 6)
     if (h) {
       if (state.sliceDoc(h.from, h.to) !== insert) changes.push({ from: h.from, to: h.to, insert });
     } else if (insert) {
-      changes.push({ from: line.from, insert });
+      changes.push({ from: prefixAt(line), insert });
     }
   }
   return lineSpec(state, changes);
 }
 
-/** 닿은 줄들을 펜스 코드 블록으로 감싼다. 커서 하나가 빈 줄에 있으면 빈 블록을 넣고 커서를 그 안에 둔다. */
+/**
+ * 닿은 줄들을 펜스 코드 블록으로 감싼다. 커서 하나가 빈 줄에 있으면 빈 블록을 넣고 커서를 그 안에 둔다.
+ * 머리말·표 줄은 감싸지 않는다: 블록은 그 줄들을 뺀 나머지의 이어진 구간마다 만든다.
+ */
 export function wrapCodeBlock(state: EditorState): TransactionSpec | null {
   if (state.readOnly) return null;
   const br = state.lineBreak;
   const fence = '```';
-  // 범위마다 닿은 줄 구간. 겹치거나 맞닿은 구간은 합친다.
-  const blocks: { a: number; b: number }[] = [];
-  for (const r of [...state.selection.ranges].sort((x, y) => x.from - y.from)) {
+  const skip = protectedLine(state);
+  const set = new Set<number>();
+  for (const r of state.selection.ranges) {
     const [a, b] = lineSpan(state, r);
-    const last = blocks[blocks.length - 1];
-    if (last && a <= last.b + 1) last.b = Math.max(last.b, b);
-    else blocks.push({ a, b });
+    for (let n = a; n <= b; n++) if (!skip(n)) set.add(n);
   }
+  // 이어진 줄끼리 한 블록(겹치거나 맞닿은 범위는 합쳐진다).
+  const blocks: { a: number; b: number }[] = [];
+  for (const n of [...set].sort((x, y) => x - y)) {
+    const last = blocks[blocks.length - 1];
+    if (last && n === last.b + 1) last.b = n;
+    else blocks.push({ a: n, b: n });
+  }
+  // 글이 있는 블록은 앞뒤 빈 줄을 펜스 밖에 둔다(전체 선택에서 표·머리말 뒤 빈 줄부터 감싸지 않게).
+  const blank = (n: number) => isBlank(state.doc.line(n).text);
+  for (const k of blocks) {
+    let { a, b } = k;
+    while (a < b && blank(a)) a++;
+    while (b > a && blank(b)) b--;
+    if (!blank(a)) Object.assign(k, { a, b });
+  }
+  if (!blocks.length) return null;
   if (blocks.length === 1 && blocks[0].a === blocks[0].b && state.selection.ranges.length === 1) {
     const line = state.doc.line(blocks[0].a);
     if (isBlank(line.text)) {

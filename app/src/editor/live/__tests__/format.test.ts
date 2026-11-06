@@ -60,6 +60,12 @@ describe('format builders', () => {
     const s = EditorState.create({ doc: 'x ~~y~~', selection: EditorSelection.range(4, 5) });
     expect(s.update(toggleInline(s, '~~')!).state.doc.toString()).toBe('x y');
   });
+  it.each(['**', '`', '=='])('toggleInline %s again on an empty pair unwraps it', (mark) => {
+    expect(apply('a | b', (s) => toggleInline(s, mark as InlineMark))).toBe(`a ${mark}|${mark} b`);
+    expect(apply(`a ${mark}|${mark} b`, (s) => toggleInline(s, mark as InlineMark))).toBe('a | b');
+  });
+  it('toggleInline does not merge two adjacent runs at their seam', () =>
+    expect(docOf('**a**|**b**', (s) => toggleInline(s, '**'))).not.toBe('**ab**'));
   it('italic does not strip one star of bold', () => expect(apply('a **|b|** c', (s) => toggleInline(s, '*'))).toBe('a ***|b|*** c'));
 
   it('insertLink wraps the selection and puts the cursor inside ()', () => expect(apply('a |b| c', insertLink)).toBe('a [b](|) c'));
@@ -95,6 +101,58 @@ describe('format builders', () => {
     const s = EditorState.create({ doc: '  * [X] a' });
     expect(s.update(cycleTask(s)!).state.doc.toString()).toBe('  * [ ] a');
     expect(s.update(toggleLinePrefix(s, 'ordered')!).state.doc.toString()).toBe('  1. a');
+  });
+
+  describe('front matter and SP1 tables are left alone', () => {
+    const fm = '|---\ntitle: a\n---\nbody|';
+    it.each<[string, Builder, string]>([
+      ['setHeading', (s) => setHeading(s, 1), '---\ntitle: a\n---\n# body'],
+      ['bullet', (s) => toggleLinePrefix(s, 'bullet'), '---\ntitle: a\n---\n- body'],
+      ['quote', (s) => toggleLinePrefix(s, 'quote'), '---\ntitle: a\n---\n> body'],
+      ['cycleTask', cycleTask, '---\ntitle: a\n---\n- [ ] body'],
+      ['wrapCodeBlock', wrapCodeBlock, '---\ntitle: a\n---\n```\nbody\n```'],
+    ])('select-all %s skips the front matter', (_n, f, out) => expect(docOf(fm, f)).toBe(out));
+
+    /** 표의 `|` 가 선택 표시와 겹치므로 선택은 [from, to] 로 따로 준다(to 가 없으면 문서 끝). */
+    function onTable(doc: string, f: Builder, from = 0, to = doc.length): string {
+      const s = EditorState.create({ doc, selection: EditorSelection.range(from, to), extensions: [EditorState.lineSeparator.of('\n'), labnoteMarkdown()] });
+      const spec = f(s);
+      return spec ? s.update(spec).state.doc.toString() : doc;
+    }
+    const table = '| a | b |\n| - | - |\n| 1 | 2 |\n\ntext';
+    it.each<[string, Builder, string]>([
+      ['setHeading', (s) => setHeading(s, 1), '| a | b |\n| - | - |\n| 1 | 2 |\n\n# text'],
+      ['bullet', (s) => toggleLinePrefix(s, 'bullet'), '| a | b |\n| - | - |\n| 1 | 2 |\n\n- text'],
+      ['cycleTask', cycleTask, '| a | b |\n| - | - |\n| 1 | 2 |\n\n- [ ] text'],
+      ['wrapCodeBlock', wrapCodeBlock, '| a | b |\n| - | - |\n| 1 | 2 |\n\n```\ntext\n```'],
+    ])('select-all %s skips table rows', (_n, f, out) => expect(onTable(table, f)).toBe(out));
+
+    it('a builder touching only front matter or a table row changes nothing', () => {
+      expect(apply('---\nti|tle: a\n---\nbody', (s) => setHeading(s, 1))).toBe('---\nti|tle: a\n---\nbody');
+      const t = '| a | b |\n| - | - |\n| 1 | 2 |';
+      expect(onTable(t, wrapCodeBlock, 22, 22)).toBe(t);
+      expect(onTable(t, (s) => setHeading(s, 1), 22, 22)).toBe(t);
+    });
+    it('without a syntax tree a leading ---…--- block is still skipped', () => {
+      const s = EditorState.create({ doc: '---\nt: a\n---\nb', selection: EditorSelection.range(0, 14) });
+      expect(s.update(setHeading(s, 1)!).state.doc.toString()).toBe('---\nt: a\n---\n# b');
+    });
+  });
+
+  it('mixed quote+list prefixes do not stack', () => {
+    expect(docOf('> - a', (s) => toggleLinePrefix(s, 'bullet'))).toBe('> a');
+    expect(docOf('> - a', (s) => toggleLinePrefix(s, 'ordered'))).toBe('> 1. a');
+    expect(docOf('> - a', cycleTask)).toBe('> - [ ] a');
+    expect(docOf('> - a', (s) => toggleLinePrefix(s, 'quote'))).toBe('- a');
+    const s = EditorState.create({ doc: '> - a' });
+    expect(s.update(cycleTask(s)!).state.doc.toString()).toBe('> - [ ] a');
+    expect(s.update(toggleLinePrefix(s, 'bullet')!).state.doc.toString()).toBe('> a');
+  });
+
+  it('a new prefix goes after the leading indentation', () => {
+    expect(docOf('  b', (s) => toggleLinePrefix(s, 'bullet'))).toBe('  - b');
+    expect(docOf('  b', cycleTask)).toBe('  - [ ] b');
+    expect(docOf('  b', (s) => setHeading(s, 2))).toBe('  ## b');
   });
 
   it('wrapCodeBlock in a CRLF state uses \r\n breaks', () => {

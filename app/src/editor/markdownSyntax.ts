@@ -4,8 +4,8 @@ import { styleTags, tags } from '@lezer/highlight';
 // 타입만 가져온다(런타임에는 지워진다): @lezer/markdown 은 @codemirror/lang-markdown 이 이미 싣고 오는 그 파서다.
 import type { MarkdownConfig, MarkdownParser } from '@lezer/markdown';
 
-const OPEN = /^---[ \t\r]*$/;
-const CLOSE = /^(?:---|\.\.\.)[ \t\r]*$/;
+export const FRONTMATTER_OPEN = /^---[ \t\r]*$/;
+export const FRONTMATTER_CLOSE = /^(?:---|\.\.\.)[ \t\r]*$/;
 
 /**
  * 노트 맨 앞의 YAML 머리말. 문서 위치 0 의 `---` 줄에서 시작해 `---` 또는 `...` 줄까지를 `Frontmatter` 노드 하나로 낸다.
@@ -21,11 +21,11 @@ export const Frontmatter: MarkdownConfig = {
       name: 'Frontmatter',
       before: 'LinkReference',
       parse(cx, line) {
-        if (cx.lineStart !== 0 || line.pos !== 0 || cx.parentType().name !== 'Document' || !OPEN.test(line.text)) return false;
+        if (cx.lineStart !== 0 || line.pos !== 0 || cx.parentType().name !== 'Document' || !FRONTMATTER_OPEN.test(line.text)) return false;
         let end = line.text.length;
         while (cx.nextLine()) {
           end = cx.lineStart + line.text.length;
-          if (CLOSE.test(line.text)) {
+          if (FRONTMATTER_CLOSE.test(line.text)) {
             cx.nextLine();
             break;
           }
