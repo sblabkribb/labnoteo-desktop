@@ -114,6 +114,21 @@ export const editorThemeSpec = {
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
   },
+  // 라이브 미리보기(live/inline.ts): 제목 줄 크기, 인라인 코드와 하이라이트. 굵기·기울임·취소선은 구문 강조가 이미 그린다.
+  '.lno-h1': { fontSize: '1.6em', fontWeight: '700' },
+  '.lno-h2': { fontSize: '1.4em', fontWeight: '700' },
+  '.lno-h3': { fontSize: '1.25em', fontWeight: '700' },
+  '.lno-h4': { fontSize: '1.15em', fontWeight: '700' },
+  '.lno-h5': { fontSize: '1.05em', fontWeight: '700' },
+  '.lno-h6': { fontSize: '1em', fontWeight: '700' },
+  '.lno-code': {
+    background: 'var(--bg-elevated)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.93em',
+    borderRadius: 'var(--radius)',
+    padding: '0 2px',
+  },
+  '.lno-hl': { backgroundColor: 'var(--bg-selected)' },
   // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.

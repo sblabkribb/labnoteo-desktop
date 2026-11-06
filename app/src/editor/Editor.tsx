@@ -13,6 +13,7 @@ import { tableExtension } from './table/field';
 import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
+import { livePreview } from './live';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -344,7 +345,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     const shadow = host.current!.shadowRoot ?? host.current!.attachShadow({ mode: 'open' });
     // 표는 격자로 그리고 칸 안에서 고친다. 칸의 입력은 이 문서로 곧바로 들어오므로 저장·자동 저장·되돌리기는 그대로다.
     // 소스 보기에서는 표도 원문 그대로다(Obsidian 의 소스 모드처럼): 이상한 파일을 고치는 안전한 길이다.
-    liveExtensions.current = () => [tableExtension({ save: () => void api.current.save(), root: shadow })];
+    liveExtensions.current = () => [livePreview(), tableExtension({ save: () => void api.current.save(), root: shadow })];
     // 상태(확장 포함)는 노트를 채울 때마다 새로 만든다: 되돌리기 기록이 읽기 이전으로 거슬러 가지 못하게.
     extensions.current = (doc) => [
       // 줄 구분자는 파일에서 온 그대로: 섞인 파일에서도 손대지 않은 줄의 바이트가 바뀌지 않는다.
