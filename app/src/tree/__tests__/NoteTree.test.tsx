@@ -60,6 +60,23 @@ describe('노트 트리', () => {
     expect(rows[0].textContent).toBe('02.md');
   });
 
+  it('말줄임으로 잘리는 긴 이름은 title 로 전체 이름(경로가 아니라)을 보여 준다', () => {
+    const long = '2026-11-06 대장균 BL21 형질전환 효율 비교 실험 — 플라스미드 pET28a 농도별 3반복';
+    render(
+      <NoteTree
+        entries={[
+          { path: `실험/${long}`, name: long, isDir: true, depth: 0 },
+          { path: `실험/${long}/${long}.labnote.md`, name: `${long}.labnote.md`, isDir: false, depth: 1 },
+        ]}
+        onSelect={() => {}}
+      />,
+    );
+    const folder = screen.getByRole('button', { name: long });
+    const note = screen.getByRole('button', { name: `${long}.labnote.md` });
+    expect(folder.getAttribute('title')).toBe(long);
+    expect(note.getAttribute('title')).toBe(`${long}.labnote.md`);
+  });
+
   it('노트가 없으면 빈 상태 문구를 보여준다', () => {
     render(<NoteTree entries={[]} onSelect={() => {}} />);
     expect(screen.getByText('노트가 없습니다')).toBeTruthy();

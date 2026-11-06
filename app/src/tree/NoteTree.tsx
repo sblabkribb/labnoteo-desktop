@@ -55,12 +55,13 @@ export function NoteTree({ entries, selected, onSelect }: Props) {
           return (
             <li key={fold(e.path)} data-depth={Math.min(e.depth, MAX_DEPTH)}>
               {e.isDir ? (
-                <button type="button" aria-expanded={!collapsed.has(fold(e.path))} onClick={() => toggle(e.path)}>
+                <button type="button" title={e.name} aria-expanded={!collapsed.has(fold(e.path))} onClick={() => toggle(e.path)}>
                   {e.name}
                 </button>
               ) : (
                 <button
                   type="button"
+                  title={e.name}
                   aria-current={fold(e.path) === selectedKey ? 'true' : undefined}
                   onClick={() => onSelect(e.path)}
                 >
