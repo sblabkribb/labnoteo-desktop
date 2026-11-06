@@ -144,6 +144,17 @@ export const editorThemeSpec = {
   '.lno-li-d6': { paddingLeft: 'calc(var(--space-3) + 12ch)', textIndent: '-12ch' },
   '.lno-li-d7': { paddingLeft: 'calc(var(--space-3) + 14ch)', textIndent: '-14ch' },
   '.lno-li-d8': { paddingLeft: 'calc(var(--space-3) + 16ch)', textIndent: '-16ch' },
+  // 할 일 체크박스: 숨긴 `- [ ]` 자리에 선다. 체크 색은 강조색.
+  '.lno-task': {
+    width: '1em',
+    height: '1em',
+    margin: '0',
+    textIndent: '0',
+    verticalAlign: 'middle',
+    accentColor: 'var(--accent)',
+    cursor: 'pointer',
+  },
+  '.lno-task-done': { color: 'var(--text-muted)', textDecorationLine: 'line-through' },
   // 유닛 오퍼레이션·워크플로 제목의 코드 칩: .lno-chip 위에 고정폭 글꼴과 종류별 테두리색.
   '.lno-uo-code': { fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text)', verticalAlign: 'middle' },
   '.lno-uo-uhw': { borderColor: 'var(--accent)' },

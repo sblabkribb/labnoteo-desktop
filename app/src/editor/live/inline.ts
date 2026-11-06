@@ -1,11 +1,11 @@
-import type { Range } from '@codemirror/state';
+import type { Extension, Range } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { revealInline, revealLine, skipRanges, touchedLines } from './reveal';
 import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
-import { bulletWidget } from './widgets';
+import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
 
 /**
  * 라이브 미리보기의 인라인 플러그인(계획 D4). 보이는 범위(visibleRanges)만 훑어 다음을 단다:
@@ -17,6 +17,8 @@ import { bulletWidget } from './widgets';
  * - 링크(links.ts): 진짜 링크(isRealLink)는 `[` 와 `](주소)` 를 숨기고 글을 lno-link 로, 위키링크는 표시와
  *   (별칭이 있으면) 대상을 숨기고 보이는 글을 lno-wikilink 로. 유닛 오퍼레이션·워크플로 제목은 링크로 그리지 않고
  *   대괄호를 숨긴 뒤 코드를 칩(lno-chip lno-uo-code lno-uo-…)으로 단다.
+ * - 할 일: 줄이 드러나지 않았으면 `- ` 를 숨기고 `[ ]`·`[x]` 를 체크박스(CheckboxWidget)로 바꾼다. 끝난 항목 줄은
+ *   lno-task-done. 누름은 taskHandlers 가 받는다.
  *
  * 무엇을 원문으로 보일지는 reveal.ts 가 정한다. 표 구역과 머리말은 건너뛴다(skipRanges).
  * 한글 조합 중에는 다시 만들지 않고 바뀐 위치로 옮기기만 한다: 조합 중인 줄에 장식을 더하거나 빼면 IME 가 깨진다.
@@ -50,6 +52,8 @@ const MAX_LIST_DEPTH = 8;
 const listLine = Array.from({ length: MAX_LIST_DEPTH }, (_, i) => Decoration.line({ class: `lno-li lno-li-d${i + 1}` }));
 const olMark = Decoration.mark({ class: 'lno-ol-mark' });
 const bullet = Decoration.replace({ widget: bulletWidget });
+const checkbox = [false, true].map((checked) => Decoration.replace({ widget: new CheckboxWidget(checked) }));
+const taskDoneLine = Decoration.line({ class: 'lno-task-done' });
 
 const isBlank = (ch: string) => ch === ' ' || ch === '\t';
 
@@ -153,11 +157,22 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     decos.push(listLine[Math.min(Math.max(depth, 1), MAX_LIST_DEPTH) - 1].range(line.from));
     const mark = node.firstChild;
     if (!mark || mark.name !== 'ListMark' || mark.from >= mark.to) return;
+    const task = mark.nextSibling?.name === 'Task' ? mark.nextSibling.firstChild : null;
+    const taskMarker = task && task.name === 'TaskMarker' && sameLine(mark.from, task.to) ? task : null;
+    const done = !!taskMarker && /^\[[xX]\]$/.test(state.sliceDoc(taskMarker.from, taskMarker.to));
+    if (done) decos.push(taskDoneLine.range(line.from));
     if (node.parent?.name === 'OrderedList') {
       decos.push(olMark.range(mark.from, mark.to));
+      if (taskMarker && !revealLine(state, line.number, lines)) conceal(taskMarker.from, taskMarker.to, checkbox[done ? 1 : 0]);
       return;
     }
     if (revealLine(state, line.number, lines)) return;
+    if (taskMarker) {
+      // 할 일 항목은 점 대신 체크박스: `- ` 를 숨기고 `[ ]` 를 체크박스로 바꾼다(그 뒤 공백은 남긴다)
+      conceal(mark.from, taskMarker.from);
+      conceal(taskMarker.from, taskMarker.to, checkbox[done ? 1 : 0]);
+      return;
+    }
     // 기호 뒤의 공백 한 칸까지 점이 대신한다
     const end = mark.to < line.to && isBlank(line.text[mark.to - line.from]) ? mark.to + 1 : mark.to;
     conceal(mark.from, end, bullet);
@@ -238,3 +253,27 @@ class LivePlugin {
 export type { LivePlugin };
 
 export const livePlugin = ViewPlugin.fromClass(LivePlugin, { decorations: (p) => p.decorations });
+
+/** 누른 대상이 할 일 체크박스면 그 요소. */
+const taskBox = (e: Event): HTMLInputElement | null =>
+  e.target instanceof HTMLInputElement && e.target.classList.contains('lno-task') ? e.target : null;
+
+/**
+ * 할 일 체크박스의 누름(CodeMirror checkbox 예제의 방식). 플러그인 처리기는 CodeMirror 자신의 mousedown 보다 먼저
+ * 돌므로, 여기서 기본 동작을 막으면 선택이 그 줄로 옮겨 가지 않고(줄이 드러나 위젯이 사라지지 않고) 한 번만 바뀐다.
+ * click 도 막는다: 체크 상태는 문서가 정하므로(eq) 브라우저가 스스로 체크를 바꾸면 안 된다.
+ */
+export const taskHandlers: Extension = EditorView.domEventHandlers({
+  mousedown(e, view) {
+    const box = taskBox(e);
+    if (!box || e.button !== 0) return false;
+    e.preventDefault();
+    toggleTaskAt(view, view.posAtDOM(box));
+    return true;
+  },
+  click(e) {
+    if (!taskBox(e)) return false;
+    e.preventDefault();
+    return true;
+  },
+});
