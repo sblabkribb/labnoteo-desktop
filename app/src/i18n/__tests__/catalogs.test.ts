@@ -2,8 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { catalogs } from '../t';
 
-/** 템플릿이 쓰는 자리 표시의 집합: `{0}` 을 두 번 써도 하나다. */
-const placeholders = (s: string) => [...new Set(s.match(/\{\d+\}/g) ?? [])].sort();
+/** 템플릿이 쓰는 자리 표시 목록(정렬, 중복 포함): `{0}` 을 두 번 쓰는 문장에서 하나를 빠뜨리면 다르다. */
+const placeholders = (s: string) => (s.match(/\{\d+\}/g) ?? []).sort();
 
 describe('번역 목록', () => {
   const { ko, en } = catalogs;
@@ -15,13 +15,19 @@ describe('번역 목록', () => {
     expect(Object.keys(ko).length).toBeGreaterThan(60); // 목록을 실제로 읽었다
   });
 
-  it('키마다 두 언어의 자리 표시({0} {1} …) 집합이 같다', () => {
+  it('키마다 두 언어의 자리 표시({0} {1} …) 목록이 같다 (몇 번 쓰는지까지)', () => {
     const differ = Object.keys(ko)
       .filter((k) => Object.hasOwn(en, k))
       .filter((k) => placeholders(ko[k]).join() !== placeholders(en[k]).join())
       .map((k) => `${k}: ko ${placeholders(ko[k])} / en ${placeholders(en[k])}`);
     expect(differ).toEqual([]);
-    expect(placeholders(ko['search.truncated'])).toEqual(['{0}']); // 검사가 자리 표시를 실제로 읽었다
+    expect(placeholders(ko['search.truncated'])).toEqual(['{0}', '{0}']); // 검사가 자리 표시를 실제로, 중복까지 읽었다
+  });
+
+  it('영어 목록에는 한글이 한 글자도 없다', () => {
+    const hangul = Object.entries(en).filter(([, v]) => /[가-힣]/.test(v)).map(([k, v]) => `${k}: ${v}`);
+    expect(hangul).toEqual([]);
+    expect(Object.values(ko).some((v) => /[가-힣]/.test(v))).toBe(true); // 검사식이 한글을 실제로 잡는다
   });
 
   it('빈 번역이 없다', () => {
@@ -46,7 +52,8 @@ const literals = (code: string) => [...code.matchAll(QUOTED)].map((m) => m[1] ??
 /** `t(` 뒤 첫 인자(최상위 쉼표나 닫는 괄호까지)의 글자. `t(gone ? 'a' : 'b')` 처럼 삼항으로 고른 키도 잡는다. */
 export function firstArgsOfT(code: string): string[] {
   const out: string[] = [];
-  for (const m of code.matchAll(/(?<![\w.$])t\(/g)) {
+  // `function t(` 는 부르는 곳이 아니라 정의다
+  for (const m of code.matchAll(/(?<![\w.$]|function\s+)t\(/g)) {
     let depth = 0;
     let quote = '';
     let i = m.index! + m[0].length;
@@ -76,6 +83,35 @@ describe('소스가 부르는 번역 키', () => {
   const missing = (keys: Array<{ f: string; key: string }>) =>
     keys.filter(({ key }) => !Object.hasOwn(ko, key) || !Object.hasOwn(en, key)).map(({ f, key }) => `${f}: ${key}`);
 
+  // t 의 첫 인자는 글자('a.b'), 글자 둘 중 고르는 삼항(cond ? 'a.b' : 'c.d'), 또는 아래 목록에 적은 변수 식만 쓴다.
+  // 변수 식의 키는 다른 곳에 글자로 적혀 있어 아래 "번역 키 모양" 검사가 본다. 새 변수 식을 쓰려면 여기에 적어야 하므로
+  // 새 이름 공간의 키가 변수로만 흘러 검사를 비켜 가는 일이 리뷰에서 보인다. 템플릿 글자(`…`)는 검사할 수 없어 쓰지 않는다.
+  const IDENTIFIER_ARGS: Record<string, string[]> = {
+    'src/theme/ThemeToggle.tsx': ['key'], // OPTIONS 의 'theme.*' 글자
+    'src/tree/NewNote.tsx': ['error'], // createNote 가 주는 'newNote.error.*' 글자
+    'src/onboarding/FirstRun.tsx': ["error ?? 'vault.error.generic'"], // useVault 의 VaultErrorKey
+  };
+  const LIT = String.raw`(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")`;
+  const ALLOWED_ARG = new RegExp(String.raw`^\s*(?:${LIT}|!?[\w.]+\s*\?\s*${LIT}\s*:\s*${LIT})\s*$`);
+  /** 허용되지 않는 첫 인자: "파일: 인자". */
+  const badArgs = (f: string, code: string) => {
+    const allowed = IDENTIFIER_ARGS[f.split('\\').join('/')] ?? [];
+    return firstArgsOfT(code)
+      .filter((a) => !ALLOWED_ARG.test(a) && !allowed.includes(a.trim()))
+      .map((a) => `${f.split('\\').join('/')}: t(${a})`);
+  };
+
+  it('t 의 첫 인자는 글자, 글자 삼항, 또는 허용 목록의 변수 식이다 (템플릿 글자 금지)', () => {
+    expect(files.flatMap(({ f, code }) => badArgs(f, code))).toEqual([]);
+    // 검사 자체: 템플릿 글자와 목록에 없는 변수는 걸리고, 글자와 글자 삼항은 지나간다
+    expect(badArgs('src/x.tsx', "t(`a.${b}`) + t(k) + t(cond ? key : 'a.b') + t('a.b') + t(gone ? 'a.b' : \"c.d\")")).toEqual([
+      'src/x.tsx: t(`a.${b}`)',
+      'src/x.tsx: t(k)',
+      "src/x.tsx: t(cond ? key : 'a.b')",
+    ]);
+    expect(badArgs('src/theme/ThemeToggle.tsx', 't(key)')).toEqual([]);
+  });
+
   it("t('…') 에 글자 그대로 넘긴 키는 두 목록 모두에 있다", () => {
     const keys = files.flatMap(({ f, code }) => firstArgsOfT(code).flatMap(literals).map((key) => ({ f, key })));
     expect(new Set(keys.map((k) => k.key)).size).toBeGreaterThan(50); // 소스를 실제로 읽었다
@@ -93,7 +129,7 @@ describe('소스가 부르는 번역 키', () => {
   });
 
   it('첫 인자 추출기는 삼항·추가 인자·괄호를 견딘다', () => {
-    expect(firstArgsOfT(`t('a.b', x) + t(gone ? 'c.d' : "e.f") + format(t('g.h'), [1]) + it('no.key', f)`)).toEqual([
+    expect(firstArgsOfT(`function t(key: string) {} t('a.b', x) + t(gone ? 'c.d' : "e.f") + format(t('g.h'), [1]) + it('no.key', f)`)).toEqual([
       `'a.b'`,
       `gone ? 'c.d' : "e.f"`,
       `'g.h'`,
