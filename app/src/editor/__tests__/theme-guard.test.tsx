@@ -97,7 +97,13 @@ function audit(css: string, rootClasses: string[], dark: string): Finding[] {
   return out;
 }
 
-/** 소스(테스트 제외)가 CodeMirror 패키지에서 가져오는 이름들. */
+// 정규식은 String.raw 로 쓴다: escapes.test.ts 가 따옴표 안의 역슬래시를 문자열로 읽기 때문이다.
+const NAMED_IMPORT = new RegExp(String.raw`import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"](?:@codemirror/[\w-]+|codemirror)['"]`, 'g');
+/** `import * as cm from '@codemirror/view'` 처럼 무엇을 쓰는지 이름으로 알 수 없는 가져오기. */
+const OPAQUE_IMPORT = new RegExp(String.raw`import\s*(?:\*\s*as\s+\w+|\w+)\s*from\s*['"](?:@codemirror/[\w-]+|codemirror)['"]|import\(\s*['"](?:@codemirror/[\w-]+|codemirror)['"]`);
+const BARE_PACKAGE = new RegExp(String.raw`from\s*['"]codemirror['"]`);
+
+/** 소스(테스트 제외)가 CodeMirror 패키지에서 가져오는 이름들. 이름으로 알 수 없는 가져오기는 `*` 로 남긴다. */
 function codemirrorImports(dir = 'src'): Set<string> {
   const names = new Set<string>();
   for (const name of readdirSync(dir)) {
@@ -108,9 +114,10 @@ function codemirrorImports(dir = 'src'): Set<string> {
     }
     if (!/\.tsx?$/.test(name)) continue;
     const src = readFileSync(p, 'utf-8');
-    for (const m of src.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"](@codemirror\/[\w-]+|codemirror)['"]/g))
-      for (const n of m[1].split(',')) names.add(n.trim().split(/\s+as\s+/)[0].replace(/^type\s+/, ''));
-    if (/from\s*['"]codemirror['"]/.test(src)) names.add('codemirror');
+    for (const m of src.matchAll(NAMED_IMPORT))
+      for (const n of m[1].split(',')) if (n.trim()) names.add(n.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]);
+    if (OPAQUE_IMPORT.test(src)) names.add('*');
+    if (BARE_PACKAGE.test(src)) names.add('codemirror');
   }
   return names;
 }
@@ -165,6 +172,7 @@ describe('편집기 그림자 루트의 날것의 색', () => {
   it('잠든 규칙의 확장은 정말 설치돼 있지 않다: 소스가 가져오지 않고, 띄운 편집기에 그 요소도 없다', async () => {
     const imported = codemirrorImports();
     expect(imported.has('EditorView')).toBe(true); // 가져오기 목록을 실제로 읽었다
+    expect(imported.has('*'), 'CodeMirror 를 이름 없이(import * as, 기본 가져오기, import()) 가져오면 이 검사가 확장을 볼 수 없다').toBe(false);
     for (const name of [...new Set(Object.values(DORMANT).map((d) => d.extension)), ...BUNDLES, 'codemirror'])
       expect(imported.has(name), `${name} 을 설치하면 DORMANT 의 해당 항목을 지우고 theme.ts 에서 토큰으로 덮어야 한다`).toBe(false);
     const { shadow } = await mountShipped();
