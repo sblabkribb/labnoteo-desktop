@@ -519,6 +519,47 @@ describe('셀 편집기: 잠금', () => {
     expect(activeCellView(locked.view)).toBeNull();
     expect(focusCell(locked.view, 0, 1, 0)).toBe(false);
   });
+
+  const lockedExits: Array<{ name: string; r: number; c: number; run: (nv: EditorView) => void }> = [
+    { name: 'Escape', r: 1, c: 0, run: (nv) => key(nv, 'Escape') },
+    { name: '마지막 행의 ArrowDown', r: 1, c: 0, run: (nv) => key(nv, 'ArrowDown') },
+    { name: '마지막 칸 끝의 ArrowRight', r: 1, c: 1, run: (nv) => key(nv, 'ArrowRight') },
+    { name: 'Mod-Enter', r: 1, c: 0, run: (nv) => key(nv, 'Enter', { mod: true }) },
+  ];
+  // 표 바로 아래 줄의 글은 GFM 이 표의 행으로 읽는다(`문단` 이 마지막 행): 그 문서에서는 마지막 행 r=2 에서 나간다
+  const lockedDocs: Array<{ doc: string; head: number; r?: number; arrows: boolean }> = [
+    { doc: T, head: T.length, arrows: true }, // 문서 끝의 표: 표 바로 뒤
+    { doc: `${T}
+문단`, head: `${T}
+문단`.length, r: 2, arrows: false }, // 빈 줄이 없다: 표 바로 뒤
+    { doc: `${T}
+
+문단`, head: T.length + 1, arrows: true }, // 있는 빈 줄로
+    { doc: `${T}
+  
+문단`, head: T.length + 1, arrows: true }, // 공백뿐인 줄도 빈 줄이다
+    { doc: `${T}
+
+
+문단`, head: T.length + 2, arrows: true }, // 빈 줄 둘: 잠기지 않았을 때처럼 둘째 빈 줄로
+  ];
+  for (const k of lockedExits) {
+    for (const d of lockedDocs.filter((x) => x.arrows || !k.name.includes('Arrow'))) {
+      it(`칸에 포커스가 있는 채로 잠근 뒤 ${k.name}: 문서는 그대로, 셀 편집기는 걷힌다 (${JSON.stringify(d.doc.slice(T.length))})`, () => {
+        const lock = new Compartment();
+        const m = mount(d.doc, { lock });
+        focusCell(m.view, 0, d.r ?? k.r, k.c, 'end');
+        m.view.dispatch({ effects: lock.reconfigure(LOCKED) });
+        const before = m.changes;
+        k.run(nested(m.view));
+        expect(m.view.state.doc.toString()).toBe(d.doc);
+        expect(m.changes).toBe(before);
+        expect(liveCellEditors()).toBe(0);
+        expect(m.view.state.field(activeCell)).toBeNull();
+        expect(m.view.state.selection.main.head).toBe(d.head);
+      });
+    }
+  }
 });
 
 // ---------------------------------------------------------------- 편집기 전체

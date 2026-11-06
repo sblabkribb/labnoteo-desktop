@@ -53,6 +53,8 @@ export const setActiveCell = StateEffect.define<ActiveCell | null>();
 
 const LOCKED = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
 const isLocked = (state: EditorState) => state.readOnly || !state.facet(EditorView.editable);
+/** 빈 줄: 공백뿐인 줄도 빈 줄로 본다(GFM 도 그렇게 읽는다). */
+const isBlank = (text: string) => text.trim() === '';
 
 // ---------------------------------------------------------------- 표 찾기
 
@@ -478,6 +480,14 @@ class Session implements CellHandle {
     const doc = this.outer.state.doc;
     const br = this.outer.state.lineBreak;
     const end = at.span.to;
+    if (isLocked(this.outer.state)) {
+      // 잠긴 문서는 바꾸지 않는다: 표 뒤에 있는 빈 줄(둘이면 둘째)로, 없으면 표 바로 뒤로 커서만 옮긴다
+      let pos = end;
+      for (let n = doc.lineAt(end).number + 1; n <= doc.lines && n <= doc.lineAt(end).number + 2 && isBlank(doc.line(n).text); n++)
+        pos = doc.line(n).from;
+      this.leave(pos);
+      return true;
+    }
     const next = end < doc.length ? doc.lineAt(end + 1) : null;
     if (next && next.length === 0) {
       const after = next.number < doc.lines ? doc.line(next.number + 1) : null;
