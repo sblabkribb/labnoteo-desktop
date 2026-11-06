@@ -49,6 +49,47 @@ export function renameGuard(path: string, isDir: boolean, entries: readonly Tree
   return undefined;
 }
 
+/** 실험 폴더 이름(`###_…`). 파일(`001_x.md` 같은)은 빼고 본다. */
+const looksLikeExperiment = (name: string) => /^\d{3}_/.test(name) && !/\.md$/i.test(name);
+
+/**
+ * `dir` 아래(그 자신은 빼고)에 `labnote/###_*` 실험 폴더가 있는가. 트리 항목은 .md 노트로 이어지는 폴더만 실으므로
+ * 노트가 아직 없는 실험은 거기에 없다: 폴더를 직접 훑는다. 점으로 시작하는 폴더는 건너뛴다(트리가 숨긴다).
+ * 목록은 파일이면 비거나 거절된다: 둘 다 "안에 아무것도 없음"으로 본다.
+ */
+async function holdsExperiment(fs: CommandContext['host']['fs'], dir: string): Promise<boolean> {
+  const list = async (d: string) => {
+    try {
+      return await fs.list(d);
+    } catch {
+      return [];
+    }
+  };
+  const queue = [dir];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const name of await list(current)) {
+      if (name.startsWith('.')) continue;
+      const child = joinPath(current, name);
+      if (lower(name) === 'labnote' && (await list(child)).some(looksLikeExperiment)) return true;
+      queue.push(child);
+    }
+  }
+  return false;
+}
+
+/** renameGuard 에 더해, 폴더면 트리 항목에 없는(노트가 없는) 실험도 디스크에서 찾아 막는다. */
+async function renameGuardOnDisk(
+  fs: CommandContext['host']['fs'],
+  path: string,
+  isDir: boolean,
+  entries: readonly TreeEntry[],
+): Promise<RenameGuard> {
+  const guard = renameGuard(path, isDir, entries);
+  if (guard || !isDir) return guard;
+  return (await holdsExperiment(fs, path)) ? 'experimentParent' : undefined;
+}
+
 /** NewNote 와 같은 이름 규칙: 비었거나, 구분자가 있거나(하위 폴더가 생긴다), 점으로 시작하면(트리가 숨긴다) 안 된다. */
 function nameProblem(name: string): string | null {
   if (name === '') return t('fileOps.name.empty');
@@ -167,7 +208,7 @@ export async function renameEntry(
   entries: readonly TreeEntry[],
 ): Promise<string | undefined> {
   const { host } = ctx;
-  const guard = renameGuard(path, isDir, entries);
+  const guard = await renameGuardOnDisk(host.fs, path, isDir, entries);
   if (guard) {
     host.notify('warn', t(GUARD_MESSAGE[guard]));
     return undefined;

@@ -192,6 +192,26 @@ describe('renameGuard', () => {
     expect(cmds('vault_rename')).toHaveLength(0);
     expect(notes).toEqual([{ kind: 'warn', message: t('fileOps.renameGuarded.experimentFolder') }]);
   });
+
+  it('a folder holding an experiment with no notes (absent from the tree entries) is refused as experimentParent', async () => {
+    vault = installFakeVault({ 'projects/sub/labnote/001_A/images/gel.png': 'x', 'projects/a.labnote.md': 'a\n' });
+    render(<Harness />);
+    // 트리 항목은 .md 노트로 이어지는 폴더만 싣는다: 실험 폴더는 보이지 않는다
+    const out = await settle(renameEntry(C(), 'projects', true, entriesOf([['projects', true], ['projects/a.labnote.md', false]])));
+    expect(out).toBeUndefined();
+    expect(prompts).toHaveLength(0);
+    expect(cmds('vault_rename')).toHaveLength(0);
+    expect(notes).toEqual([{ kind: 'warn', message: t('fileOps.renameGuarded.experimentParent') }]);
+  });
+
+  it('a folder whose labnote folder has no ###_ experiment is not guarded', async () => {
+    vault = installFakeVault({ 'projects/labnote/notes.png': 'x', 'projects/a.labnote.md': 'a\n' });
+    render(<Harness />);
+    promptAnswers = [undefined];
+    await settle(renameEntry(C(), 'projects', true, entriesOf([['projects', true]])));
+    expect(prompts).toHaveLength(1);
+    expect(notes).toEqual([]);
+  });
 });
 
 describe('newFolder', () => {
