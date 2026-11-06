@@ -29,6 +29,8 @@ macro_rules! register_commands {
             $crate::vault::fs::vault_list,
             $crate::vault::fs::vault_remove,
             $crate::vault::fs::vault_rmdir,
+            $crate::vault::fs::vault_rename,
+            $crate::vault::fs::vault_trash,
             $crate::index::index_rebuild,
             $crate::index::index_upsert,
             $crate::index::index_remove,

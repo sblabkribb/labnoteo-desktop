@@ -8,6 +8,10 @@ export const ERROR_KINDS = {
   vaultNotFound: 'vaultNotFound',
   noVault: 'noVault',
   notFound: 'notFound',
+  /** Windows 가 경로를 너무 길다고 거부했다(오류 206). 없는 파일은 경로가 길어도 notFound 다. */
+  pathTooLong: 'pathTooLong',
+  /** rename 대상에 다른 파일·폴더가 이미 있다. */
+  exists: 'exists',
   io: 'io',
 } as const;
 

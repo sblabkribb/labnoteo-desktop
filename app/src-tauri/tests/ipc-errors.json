@@ -4,5 +4,7 @@
   "vaultNotFound": "vaultNotFound",
   "noVault": "noVault",
   "notFound": "notFound",
+  "pathTooLong": "pathTooLong",
+  "exists": "exists",
   "io": "io"
 }

@@ -12,6 +12,8 @@
   "vault_list": ["dir"],
   "vault_remove": ["path"],
   "vault_rmdir": ["path"],
+  "vault_rename": ["from", "to"],
+  "vault_trash": ["path"],
   "index_rebuild": [],
   "index_upsert": ["path"],
   "index_remove": ["path"],

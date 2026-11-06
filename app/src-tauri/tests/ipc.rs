@@ -133,6 +133,18 @@ title: 실험
     ok("index_remove", args("index_remove", vec![json!("notes/k.md")]));
     assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)])), json!({"hits": [], "truncated": false}));
     ok("vault_remove", args("vault_remove", vec![json!("notes/k.md")]));
+    // `from` and `to` reach `rename`; an existing target is refused with `exists`.
+    ok("vault_rename", args("vault_rename", vec![json!("notes/a.md"), json!("notes/b.md")]));
+    assert_eq!(ok("vault_list", args("vault_list", vec![json!("notes")])), json!(["b.md"]));
+    ok("vault_write", args("vault_write", vec![json!("notes/c.md"), json!("c")]));
+    assert_eq!(
+        call("vault_rename", args("vault_rename", vec![json!("notes/c.md"), json!("notes/b.md")])).unwrap_err()["kind"],
+        "exists"
+    );
+    ok("vault_remove", args("vault_remove", vec![json!("notes/c.md")]));
+    ok("vault_rename", args("vault_rename", vec![json!("notes/b.md"), json!("notes/a.md")]));
+    // Only on a path that does not exist: Ok without touching the Recycle Bin.
+    ok("vault_trash", args("vault_trash", vec![json!("notes/never-there.md")]));
     ok("vault_remove", args("vault_remove", vec![json!("notes/a.md")]));
     ok("vault_rmdir", args("vault_rmdir", vec![json!("notes")]));
     assert_eq!(std::fs::read_dir(dir.join("vault")).unwrap().count(), 0);
@@ -189,7 +201,12 @@ fn error_kinds_match_the_typescript_side() {
     // Exhaustive on purpose: a new variant stops compiling here until it is
     // given a kind in the fixture.
     let _: fn(&FsError) = |e| match e {
-        FsError::Forbidden | FsError::NoVault | FsError::Vault(_) | FsError::Io(_) => (),
+        FsError::Forbidden
+        | FsError::NoVault
+        | FsError::Vault(_)
+        | FsError::Io(_)
+        | FsError::PathTooLong(_)
+        | FsError::Exists => (),
     };
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(ERRORS).unwrap();
     let actual: std::collections::BTreeMap<String, String> = [
@@ -199,6 +216,8 @@ fn error_kinds_match_the_typescript_side() {
         ("vaultNotFound", kind(FsError::Vault(VaultError::NotFound))),
         ("notFound", kind(FsError::Io(Error::from(ErrorKind::NotFound)))),
         ("io", kind(FsError::Io(Error::from(ErrorKind::PermissionDenied)))),
+        ("pathTooLong", kind(FsError::PathTooLong(Error::from_raw_os_error(206)))),
+        ("exists", kind(FsError::Exists)),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -206,6 +225,9 @@ fn error_kinds_match_the_typescript_side() {
     assert_eq!(actual, fixture, "kinds the Rust side sends vs ipc-errors.json");
     // A missing file inside the vault layer is the same `notFound` as one at the top.
     assert_eq!(kind(FsError::Vault(VaultError::Io(Error::from(ErrorKind::NotFound)))), fixture["notFound"]);
+    // Error 206 is `pathTooLong` however it is wrapped, and `From` routes it there.
+    assert_eq!(kind(FsError::Vault(VaultError::Io(Error::from_raw_os_error(206)))), fixture["pathTooLong"]);
+    assert_eq!(kind(FsError::from(Error::from_raw_os_error(206))), fixture["pathTooLong"]);
     assert!(message(FsError::NoVault), "every error carries a display message");
 }
 

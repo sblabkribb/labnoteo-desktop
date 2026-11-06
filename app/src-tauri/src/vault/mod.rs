@@ -4,14 +4,14 @@ pub mod tree;
 pub mod watcher;
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Managed app state: the open vault's root (set by `vault_open`) and the
 /// per-path lock map shared by every file command.
 #[derive(Default)]
 pub struct VaultState {
     root: Mutex<Option<PathBuf>>,
-    pub(crate) locks: fs::PathLocks,
+    pub(crate) locks: Arc<fs::PathLocks>,
 }
 
 impl VaultState {

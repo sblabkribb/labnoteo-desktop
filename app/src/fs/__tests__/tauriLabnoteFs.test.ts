@@ -1,5 +1,6 @@
+import { isPathTooLongError } from '@labnoteo/core/lib/regexUtils';
 import { ERROR_KINDS_FIXTURE } from '../../__tests__/fixtures';
-import { TauriLabnoteFs, FsCommandError, ModifyConflictError } from '../tauriLabnoteFs';
+import { TauriLabnoteFs, FsCommandError, ModifyConflictError, normalizeVaultPath } from '../tauriLabnoteFs';
 
 type Reply = unknown | ((args: Record<string, unknown>) => unknown);
 
@@ -93,7 +94,8 @@ describe('TauriLabnoteFs.modify', () => {
 
   it('notFound 외의 읽기 오류는 그대로 올린다', async () => {
     const f = fake({ vault_read: { reject: { kind: 'escape', message: 'e' } } });
-    await expect(new TauriLabnoteFs(f.invoke).modify('../x', (d) => d)).rejects.toMatchObject({ kind: 'escape' });
+    // `CON.md` passes normalizeVaultPath; only Rust's confine refuses it.
+    await expect(new TauriLabnoteFs(f.invoke).modify('CON.md', (d) => d)).rejects.toMatchObject({ kind: 'escape' });
     expect(f.calls.map((c) => c[0])).toEqual(['vault_read']);
   });
 
@@ -136,5 +138,136 @@ describe('TauriLabnoteFs.modify', () => {
       }),
     ).rejects.toThrow('boom');
     expect(f.calls.map((c) => c[0])).toEqual(['vault_read']);
+  });
+});
+
+describe('normalizeVaultPath', () => {
+  it.each([
+    ['.', ''],
+    ['./', ''],
+    ['', ''],
+    ['./labnote', 'labnote'],
+    ['labnote/./001_A', 'labnote/001_A'],
+    ['a\\b', 'a/b'],
+    ['a/b/', 'a/b'],
+    ['labnote/001_A/README.labnote.md', 'labnote/001_A/README.labnote.md'],
+  ])('%j -> %j', (input, out) => {
+    expect(normalizeVaultPath(input)).toBe(out);
+  });
+
+  it.each(['../x', '..', 'a/../../x', 'a/..', '.\\..\\x', '/a', '\\\\server\\x'])('%j escapes the root and throws escape', (input) => {
+    let err: unknown;
+    try {
+      normalizeVaultPath(input);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(FsCommandError);
+    expect((err as FsCommandError).kind).toBe(ERROR_KINDS_FIXTURE.escape);
+  });
+});
+
+describe("TauriLabnoteFs 의 '.' 경로 (코어 로더는 루트로 '.' 를 넘긴다)", () => {
+  it("list('.') 는 vault_list 를 {dir: ''} 로 부른다", async () => {
+    const f = fake({ vault_list: [['labnote']] });
+    expect(await new TauriLabnoteFs(f.invoke).list('.')).toEqual(['labnote']);
+    expect(f.calls).toEqual([['vault_list', { dir: '' }]]);
+  });
+
+  it("exists('.') 는 invoke 없이 true", async () => {
+    const f = fake({});
+    expect(await new TauriLabnoteFs(f.invoke).exists('.')).toBe(true);
+    expect(f.calls).toEqual([]);
+  });
+
+  it("mkdir('.') 는 아무것도 부르지 않는다", async () => {
+    const f = fake({});
+    await new TauriLabnoteFs(f.invoke).mkdir('.');
+    await new TauriLabnoteFs(f.invoke).mkdir('./');
+    expect(f.calls).toEqual([]);
+  });
+
+  it("'./a/./b.md' 는 모든 커맨드에서 'a/b.md' 로 간다", async () => {
+    const f = fake({
+      vault_read: 'x',
+      vault_write: null,
+      vault_exists: true,
+      vault_mkdir: null,
+      vault_remove: null,
+      vault_rmdir: null,
+      vault_rename: null,
+      vault_trash: null,
+      vault_modify: { kind: 'ok' },
+    });
+    const fs = new TauriLabnoteFs(f.invoke);
+    await fs.read('./a/./b.md');
+    await fs.write('./a/b.md', 'c');
+    await fs.exists('a\\b.md');
+    await fs.mkdir('./a');
+    await fs.remove('./a/b.md');
+    await fs.rmdir('./a');
+    await fs.rename('./a/b.md', './a/./c.md');
+    await fs.trash('./a/c.md');
+    await fs.modify('./a/b.md', (d) => d);
+    expect(f.calls).toEqual([
+      ['vault_read', { path: 'a/b.md' }],
+      ['vault_write', { path: 'a/b.md', content: 'c' }],
+      ['vault_exists', { path: 'a/b.md' }],
+      ['vault_mkdir', { path: 'a' }],
+      ['vault_remove', { path: 'a/b.md' }],
+      ['vault_rmdir', { path: 'a' }],
+      ['vault_rename', { from: 'a/b.md', to: 'a/c.md' }],
+      ['vault_trash', { path: 'a/c.md' }],
+      ['vault_read', { path: 'a/b.md' }],
+      ['vault_modify', { path: 'a/b.md', content: 'x', expectedBefore: 'x' }],
+    ]);
+  });
+
+  it("'..' 로 루트를 벗어나는 경로는 invoke 없이 escape 로 거부한다", async () => {
+    const f = fake({});
+    await expect(new TauriLabnoteFs(f.invoke).read('../x')).rejects.toMatchObject({ kind: ERROR_KINDS_FIXTURE.escape });
+    expect(f.calls).toEqual([]);
+  });
+});
+
+describe('TauriLabnoteFs.rename / trash', () => {
+  it('rename 은 {from,to}, trash 는 {path} 로 부른다', async () => {
+    const f = fake({ vault_rename: null, vault_trash: null });
+    const fs = new TauriLabnoteFs(f.invoke);
+    await fs.rename('a.md', 'b/a.md');
+    await fs.trash('b');
+    expect(f.calls).toEqual([
+      ['vault_rename', { from: 'a.md', to: 'b/a.md' }],
+      ['vault_trash', { path: 'b' }],
+    ]);
+  });
+
+  it('exists 거부는 code EEXIST 를 단다', async () => {
+    const f = fake({ vault_rename: { reject: { kind: ERROR_KINDS_FIXTURE.exists, message: 'x' } } });
+    const err = await new TauriLabnoteFs(f.invoke).rename('a.md', 'b.md').catch((e) => e);
+    expect(err).toBeInstanceOf(FsCommandError);
+    expect(err.kind).toBe('exists');
+    expect(err.code).toBe('EEXIST');
+  });
+});
+
+describe('TauriLabnoteFs 경로 길이 오류', () => {
+  it('pathTooLong 은 code ENAMETOOLONG 이 되어 코어 isPathTooLongError 가 알아본다', async () => {
+    const f = fake({ vault_write: { reject: { kind: ERROR_KINDS_FIXTURE.pathTooLong, message: 'too long' } } });
+    const err = await new TauriLabnoteFs(f.invoke).write('a.md', 'x').catch((e) => e);
+    expect(err).toBeInstanceOf(FsCommandError);
+    expect(err.code).toBe('ENAMETOOLONG');
+    expect(isPathTooLongError(err)).toBe(true);
+  });
+
+  it('notFound 는 여전히 ENOENT 이고, 없는 파일의 modify 는 빈 문자열에서 쓴다', async () => {
+    const f = fake({ vault_read: notFound, vault_modify: { kind: 'ok' } });
+    const fs = new TauriLabnoteFs(f.invoke);
+    const err = await fs.read('x').catch((e) => e);
+    expect(err.code).toBe('ENOENT');
+    expect(isPathTooLongError(err)).toBe(false);
+    const seen: string[] = [];
+    await fs.modify('m.md', (d) => (seen.push(d), 'made'));
+    expect(seen).toEqual(['']);
   });
 });

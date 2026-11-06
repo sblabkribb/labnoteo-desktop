@@ -37,6 +37,8 @@ describe('IPC 인자 이름 계약', () => {
     await fs.list('d');
     await fs.remove('a.md');
     await fs.rmdir('d');
+    await fs.rename('a.md', 'b.md');
+    await fs.trash('a.md');
     await fetchTree(r.invoke);
     await restoreVault(r.invoke);
     await fetchAppVersion(r.invoke);

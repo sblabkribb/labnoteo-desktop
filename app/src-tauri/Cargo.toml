@@ -24,6 +24,8 @@ tauri-plugin-dialog = "2"
 # schema tests go red) if a libsqlite3-sys upgrade ever drops it.
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 notify = "8"
+# User-visible deletes go to the Windows Recycle Bin (`vault_trash`), never a permanent delete.
+trash = "5"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
