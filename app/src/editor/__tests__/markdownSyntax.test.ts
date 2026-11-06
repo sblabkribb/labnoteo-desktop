@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
 import { EditorState } from '@codemirror/state';
 import { ensureSyntaxTree } from '@codemirror/language';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { labnoteMarkdown, labnoteParser } from '../markdownSyntax';
+import { renderInline } from '../table/renderInline';
 
 type Tree = ReturnType<typeof labnoteParser.parse>;
 
@@ -117,5 +119,108 @@ describe('labnoteMarkdown(): 편집기 확장', () => {
     expect(all).toContain('Frontmatter');
     expect(all).toContain('Table');
     expect(all).not.toContain('SetextHeading2');
+  });
+});
+
+/** 첫 WikiLink · Embed · Highlight 노드를 `이름(자식,자식,…)` 으로 적는다. */
+function inlineShape(src: string): string {
+  let out = '';
+  labnoteParser.parse(src).iterate({
+    enter: (n) => {
+      if (out || !['WikiLink', 'Embed', 'Highlight'].includes(n.name)) return;
+      const kids: string[] = [];
+      for (let c = n.node.firstChild; c; c = c.nextSibling) kids.push(c.name);
+      out = `${n.name}(${kids.join(',')})`;
+      return false;
+    },
+  });
+  return out;
+}
+
+describe('labnoteParser: 위키링크 · 임베드 · 하이라이트', () => {
+  it.each([
+    ['[[a|b]]', 'WikiLink(WikiLinkMark,WikiTarget,WikiLinkMark,WikiAlias,WikiLinkMark)'],
+    ['![[img.png|200]]', 'Embed(WikiLinkMark,WikiTarget,WikiLinkMark,WikiAlias,WikiLinkMark)'],
+    ['==hi==', 'Highlight(HighlightMark,HighlightMark)'],
+    ['[[note]]', 'WikiLink(WikiLinkMark,WikiTarget,WikiLinkMark)'],
+    ['see ![[scan.jpg]] here', 'Embed(WikiLinkMark,WikiTarget,WikiLinkMark)'],
+  ])('%s parses', (src, shape) => expect(inlineShape(src)).toBe(shape));
+
+  it('an escaped \\| (the table-cell form) is the alias separator too', () => {
+    const doc = '[[a\\|b]]';
+    expect(find(doc, 'WikiTarget').map((m) => doc.slice(m.from, m.to))).toEqual(['a']);
+    expect(find(doc, 'WikiLinkMark').map((m) => doc.slice(m.from, m.to))).toEqual(['[[', '\\|', ']]']);
+    expect(find(doc, 'WikiAlias').map((m) => doc.slice(m.from, m.to))).toEqual(['b']);
+  });
+
+  it('marks and parts cover the right characters', () => {
+    const doc = 'x [[a|b]] y';
+    expect(find(doc, 'WikiTarget')).toEqual([{ name: 'WikiTarget', from: 4, to: 5 }]);
+    expect(find(doc, 'WikiAlias')).toEqual([{ name: 'WikiAlias', from: 6, to: 7 }]);
+    expect(find(doc, 'WikiLinkMark').map((m) => doc.slice(m.from, m.to))).toEqual(['[[', '|', ']]']);
+    const emb = '![[i.png]]';
+    expect(find(emb, 'WikiLinkMark').map((m) => emb.slice(m.from, m.to))).toEqual(['![[', ']]']);
+  });
+
+  it('unclosed [[ stays text and does not swallow the next line', () => expect(names('[[a\nb]]')).not.toContain('WikiLink'));
+
+  it('an unmatched ]] and an empty [[]] stay plain text', () => {
+    expect(names('a]] b')).not.toContain('WikiLink');
+    expect(names('[[]]')).not.toContain('WikiLink');
+  });
+
+  it('a wikilink inside inline code is code', () => {
+    const all = names('`[[a]]`');
+    expect(all).toContain('InlineCode');
+    expect(all).not.toContain('WikiLink');
+  });
+
+  it('### [UHW010 PCR] alias is still a heading with a Link (grammar unchanged)', () =>
+    expect(names('### [UHW010 PCR] alias')).toEqual(expect.arrayContaining(['ATXHeading3', 'Link'])));
+
+  it('a single = or spaced == is not a highlight', () => {
+    expect(names('a == b')).not.toContain('Highlight');
+    expect(names('=x=')).not.toContain('Highlight');
+  });
+
+  it('highlight is styled as special(content), its marks also as processingInstruction (like Strikethrough/...)', () => {
+    const doc = '==hi==';
+    const spans: Array<[number, number, string]> = [];
+    const hl = tagHighlighter([
+      { tag: tags.special(tags.content), class: 'hl' },
+      { tag: tags.processingInstruction, class: 'pi' },
+    ]);
+    highlightTree(labnoteParser.parse(doc), hl, (from, to, cls) => spans.push([from, to, cls]));
+    expect(spans).toEqual([
+      [0, 2, 'hl pi'],
+      [2, 4, 'hl'],
+      [4, 6, 'hl pi'],
+    ]);
+  });
+
+  it('the editor language parses them too', () => {
+    const state = EditorState.create({ doc: '[[a]] ==b== ![[c.png]]', extensions: [labnoteMarkdown()] });
+    const all = nodes(ensureSyntaxTree(state, state.doc.length, 5000)!).map((n) => n.name);
+    for (const n of ['WikiLink', 'Highlight', 'Embed']) expect(all).toContain(n);
+  });
+});
+
+describe('renderInline: 위키링크', () => {
+  const render = (text: string) => {
+    const el = document.createElement('div');
+    renderInline(text, el);
+    return el;
+  };
+
+  it('renderInline shows a wikilink alias as text', () => {
+    // 표 칸 글자에서 별칭 파이프는 백슬래시로 escape 되어 있다: 날 파이프는 칸을 나눈다
+    const el = render('[[a\\|b]]');
+    expect(el.textContent).toBe('b');
+    expect(el.querySelector('span.lno-table-link')!.textContent).toBe('b');
+  });
+
+  it('renderInline shows the target when there is no alias, and embeds the same way', () => {
+    expect(render('[[note]]').querySelector('span.lno-table-link')!.textContent).toBe('note');
+    expect(render('![[img.png]]').querySelector('span.lno-table-link')!.textContent).toBe('img.png');
   });
 });

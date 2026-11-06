@@ -37,10 +37,93 @@ export const Frontmatter: MarkdownConfig = {
   ],
 };
 
-/** 단위 테스트와 이후 작업(표 등)이 직접 쓰는 파서: GFM + 머리말. 편집기의 언어와 같은 설정이다. */
-export const labnoteParser: MarkdownParser = (markdownLanguage.parser as MarkdownParser).configure([Frontmatter]);
+/**
+ * `[[target]]`, `[[target|alias]]` 와 `![[…]]` 임베드 (Obsidian 문법). 한 줄을 넘지 않고, 안에 `[` `]` 줄바꿈이 없으며
+ * 대상이 비어 있지 않을 때만 노드가 된다. 그렇지 않으면 -1 을 돌려 Link 등 다음 파서가 그대로 읽는다(짝 없는 `]]` 는 글자다).
+ * 별칭 구분자는 첫 `|` 이다. 표 칸 글자에서는 그 파이프가 백슬래시로 escape 되어 있으므로, 앞의 백슬래시까지 구분 표시에 넣는다.
+ * 자식: WikiLinkMark(`[[` 또는 `![[`), WikiTarget, [WikiLinkMark(`|`), WikiAlias], WikiLinkMark(`]]`).
+ */
+const WIKI = /^!?\[\[([^[\]\n\r]+)\]\]/;
 
-/** 편집기의 마크다운 언어: GFM(표·할 일·취소선) 위에 머리말 파서를 얹는다. */
+export const WikiLinks: MarkdownConfig = {
+  defineNodes: [
+    { name: 'WikiLink', style: tags.link },
+    { name: 'Embed', style: tags.link },
+    { name: 'WikiLinkMark', style: tags.processingInstruction },
+    { name: 'WikiTarget' },
+    { name: 'WikiAlias' },
+  ],
+  parseInline: [
+    {
+      name: 'WikiLink',
+      before: 'Link',
+      parse(cx, next, pos) {
+        const embed = next === 33; /* ! */
+        if (!embed && next !== 91 /* [ */) return -1;
+        const m = WIKI.exec(cx.slice(pos, Math.min(cx.end, pos + 2048)));
+        if (!m) return -1;
+        const open = pos + (embed ? 3 : 2);
+        const end = pos + m[0].length;
+        const close = end - 2;
+        const inner = m[1];
+        const bar = inner.indexOf('|');
+        const children = [cx.elt('WikiLinkMark', pos, open)];
+        if (bar < 0) {
+          children.push(cx.elt('WikiTarget', open, close));
+        } else {
+          const escaped = bar > 0 && inner[bar - 1] === '\\';
+          const markFrom = open + bar - (escaped ? 1 : 0);
+          if (markFrom === open) return -1; // 대상이 비었다
+          children.push(cx.elt('WikiTarget', open, markFrom), cx.elt('WikiLinkMark', markFrom, open + bar + 1));
+          if (open + bar + 1 < close) children.push(cx.elt('WikiAlias', open + bar + 1, close));
+        }
+        children.push(cx.elt('WikiLinkMark', close, end));
+        return cx.addElement(cx.elt(embed ? 'Embed' : 'WikiLink', pos, end, children));
+      },
+    },
+  ],
+};
+
+/** lezer 의 강조 구분자와 같은 문장부호 판정 (Strikethrough 와 같은 좌우 flanking 규칙에 쓴다). */
+const PUNCT = /[\p{S}\p{P}]/u;
+const HighlightDelim = { resolve: 'Highlight', mark: 'HighlightMark' };
+
+/** `==하이라이트==` (Obsidian). GFM Strikethrough 와 똑같이 두 글자 구분자로 읽는다. `===` 는 아니다. */
+export const Highlight: MarkdownConfig = {
+  defineNodes: [
+    { name: 'Highlight', style: { 'Highlight/...': tags.special(tags.content) } },
+    { name: 'HighlightMark', style: tags.processingInstruction },
+  ],
+  parseInline: [
+    {
+      name: 'Highlight',
+      after: 'Emphasis',
+      parse(cx, next, pos) {
+        if (next !== 61 /* = */ || cx.char(pos + 1) !== 61 || cx.char(pos + 2) === 61) return -1;
+        const before = cx.slice(pos - 1, pos);
+        const after = cx.slice(pos + 2, pos + 3);
+        const sBefore = /\s|^$/.test(before);
+        const sAfter = /\s|^$/.test(after);
+        const pBefore = PUNCT.test(before);
+        const pAfter = PUNCT.test(after);
+        return cx.addDelimiter(
+          HighlightDelim,
+          pos,
+          pos + 2,
+          !sAfter && (!pAfter || sBefore || pBefore),
+          !sBefore && (!pBefore || sAfter || pAfter),
+        );
+      },
+    },
+  ],
+};
+
+const EXTENSIONS = [Frontmatter, WikiLinks, Highlight];
+
+/** 단위 테스트와 이후 작업(표 등)이 직접 쓰는 파서: GFM + 머리말 + 위키링크 + 하이라이트. 편집기의 언어와 같은 설정이다. */
+export const labnoteParser: MarkdownParser = (markdownLanguage.parser as MarkdownParser).configure(EXTENSIONS);
+
+/** 편집기의 마크다운 언어: GFM(표·할 일·취소선) 위에 머리말, 위키링크·임베드, 하이라이트 파서를 얹는다. */
 export function labnoteMarkdown(): Extension {
-  return markdown({ base: markdownLanguage, extensions: [Frontmatter] });
+  return markdown({ base: markdownLanguage, extensions: EXTENSIONS });
 }

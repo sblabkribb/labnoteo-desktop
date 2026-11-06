@@ -72,6 +72,16 @@ export function renderInline(text: string, parent: HTMLElement): void {
       // GFM: 표 안에서는 코드 스팬 안의 백슬래시+파이프도 파이프다
       add(el, src.slice(from, to).replace(/\\\|/g, '|'));
       into.appendChild(el);
+    } else if (name === 'WikiLink' || name === 'Embed') {
+      // 위키링크·임베드: 별칭이 있으면 별칭을, 없으면 대상을 링크 모양 글자로 보인다 (해석은 하지 않는다)
+      const target = node.getChild('WikiTarget');
+      const alias = node.getChild('WikiAlias');
+      const el = doc.createElement('span');
+      el.className = 'lno-table-link';
+      if (target) el.title = src.slice(target.from, target.to);
+      const shown = alias ?? target;
+      if (shown) add(el, src.slice(shown.from, shown.to));
+      into.appendChild(el);
     } else if (name === 'Link' || name === 'Image') {
       const el = doc.createElement('span');
       el.className = name === 'Link' ? 'lno-table-link' : 'lno-table-image';
