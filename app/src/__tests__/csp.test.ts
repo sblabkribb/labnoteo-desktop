@@ -53,6 +53,6 @@ describe('인라인 스타일', () => {
 
   it('트리 깊이마다 app.css 에 들여쓰기 규칙이 있다', () => {
     const css = readFileSync('src/app.css', 'utf-8');
-    for (let d = 1; d <= 24; d++) expect(css).toContain(`[data-depth="${d}"] { padding-left: ${d}rem; }`);
+    for (let d = 1; d <= 24; d++) expect(css).toContain(`[data-depth="${d}"] { padding-left: calc(var(--indent) * ${d}); }`);
   });
 });
