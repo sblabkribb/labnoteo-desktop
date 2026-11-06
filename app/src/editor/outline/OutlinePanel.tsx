@@ -18,7 +18,12 @@ export function OutlinePanel({ onReveal }: OutlinePanelProps) {
   const outline = useOutline();
   const items = useMemo(() => outline?.items ?? [], [outline?.items]);
   const nodes = useMemo(() => toTree(items), [items]);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // 접은 제목(줄 번호 id)은 그 노트에만 붙는다: 다른 노트가 열리면 버린다.
+  const [fold, setFold] = useState<{ path?: string; ids: ReadonlySet<string> }>({ ids: new Set() });
+  const collapsed = useMemo<ReadonlySet<string>>(
+    () => (fold.path === outline?.path ? fold.ids : new Set()),
+    [fold, outline?.path],
+  );
   const expanded = useMemo(() => {
     const open = new Set<string>();
     const walk = (list: readonly TreeNode[]) => {
@@ -41,12 +46,13 @@ export function OutlinePanel({ onReveal }: OutlinePanelProps) {
       label={t('outline.label')}
       expanded={expanded}
       toggleOnActivate={false}
+      scrollCurrent
       onToggle={(id, open) =>
-        setCollapsed((prev) => {
-          const next = new Set(prev);
+        setFold((prev) => {
+          const next = new Set(prev.path === path ? prev.ids : []);
           if (open) next.delete(id);
           else next.add(id);
-          return next;
+          return { path, ids: next };
         })
       }
       onActivate={(node) => onReveal(path, Number(node.id) - 1)}

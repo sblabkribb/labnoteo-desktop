@@ -28,6 +28,8 @@ export interface TreeViewProps {
   isCurrent?(node: TreeNode): boolean;
   /** false 면 클릭·Enter 가 묶음 노드를 접거나 펼치지 않는다(화살표만). 개요 패널은 제목으로 옮기기만 한다. 기본 true. */
   toggleOnActivate?: boolean;
+  /** true 면 현재 줄(isCurrent)이 바뀔 때 그 줄을 보이게 스크롤한다(block: 'nearest'). 초점은 옮기지 않는다. 개요 패널. */
+  scrollCurrent?: boolean;
   /** 목록(role=tree)의 클래스. 기본은 워크플로 패널의 'wf-tree', 노트 트리는 'plain-list note-tree'. */
   className?: string;
 }
@@ -52,7 +54,7 @@ function flatten(nodes: readonly TreeNode[], expanded: ReadonlySet<string>): Row
  * - 키보드는 vendor 의 treeKeyAction(WAI-ARIA 트리 패턴)을 따른다. 탭 정지는 한 줄(roving tabindex).
  * - 들여쓰기는 data-depth(app.css 의 NoteTree 와 같은 규칙), 아이콘은 TREE_ICON_CLASS, tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, className = 'wf-tree' }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree' }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -65,6 +67,13 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     moveFocus.current = false;
     refs.current.get(tabStop)?.focus();
   }, [tabStop, rows]);
+
+  const currentKey = isCurrent ? rows.find((r) => isCurrent(r.node))?.key : undefined;
+  useEffect(() => {
+    if (!scrollCurrent || currentKey === undefined) return;
+    // jsdom 에는 scrollIntoView 가 없다. focus() 는 부르지 않는다.
+    refs.current.get(currentKey)?.scrollIntoView?.({ block: 'nearest' });
+  }, [scrollCurrent, currentKey]);
 
   const activate = (row: Row) => {
     setFocusKey(row.key);

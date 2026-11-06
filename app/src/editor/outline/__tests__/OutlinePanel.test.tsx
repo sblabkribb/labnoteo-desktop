@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { t } from '../../../i18n/t';
+import type { OutlineItem } from '../extract';
 import { OutlinePanel } from '../OutlinePanel';
 import { clearOutline, publishCursor, publishOutline } from '../outlineStore';
 
@@ -51,5 +52,44 @@ describe('OutlinePanel', () => {
     expect(screen.getByRole('treeitem', { name: /A/ }).getAttribute('aria-current')).toBeNull();
     act(() => publishCursor('n.md', 3));
     expect(screen.getByRole('treeitem', { name: /A/ }).getAttribute('aria-current')).toBe('true');
+  });
+
+  it('scrolls the current heading into view (nearest) without taking focus', () => {
+    const spy = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy;
+    try {
+      render(<OutlinePanel onReveal={() => undefined} />);
+      act(() =>
+        publishOutline('n.md', [
+          { level: 2, text: 'A', kind: 'heading', line: 2 },
+          { level: 3, text: 'B', kind: 'heading', line: 5 },
+        ]),
+      );
+      const before = document.activeElement;
+      spy.mockClear();
+      act(() => publishCursor('n.md', 7));
+      const b = screen.getByRole('treeitem', { name: /B/ });
+      expect(spy).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(spy.mock.contexts.at(-1)).toBe(b);
+      expect(document.activeElement).toBe(before);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('collapsed headings reset when another note opens', () => {
+    render(<OutlinePanel onReveal={() => undefined} />);
+    const items: OutlineItem[] = [
+      { level: 2, text: 'A', kind: 'heading', line: 2 },
+      { level: 3, text: 'B', kind: 'heading', line: 5 },
+    ];
+    act(() => publishOutline('n.md', items));
+    const a = screen.getByRole('treeitem', { name: /A/ });
+    fireEvent.keyDown(a, { key: 'ArrowLeft' });
+    expect(screen.queryByRole('treeitem', { name: /B/ })).toBeNull();
+    act(() => publishOutline('m.md', items));
+    expect(screen.getByRole('treeitem', { name: /B/ })).toBeTruthy();
+    act(() => clearOutline('m.md'));
   });
 });

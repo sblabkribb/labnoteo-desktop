@@ -375,7 +375,15 @@ describe('편집기', () => {
       // 맨 위로 붙이는 scrollIntoView 효과로 옮긴다(단순한 scrollIntoView: true 가 아니다)
       const spec = dispatch.mock.calls[0][0] as { effects?: unknown; scrollIntoView?: boolean };
       expect(spec.scrollIntoView).toBeUndefined();
-      expect(spec.effects).toBeTruthy();
+      const ref = EditorView.scrollIntoView(view.state.doc.line(5).from, { y: 'start', yMargin: 8 });
+      const effect = spec.effects as typeof ref;
+      // 같은 종류(ScrollTarget)의 값이다
+      expect(effect.value).toBeInstanceOf((ref.value as object).constructor);
+      const target = effect.value as { range: { from: number; to: number }; y: string; yMargin: number };
+      const expected = ref.value as typeof target;
+      expect(target.y).toBe('start');
+      expect(target.yMargin).toBe(8);
+      expect({ from: target.range.from, to: target.range.to }).toEqual({ from: expected.range.from, to: expected.range.to });
     });
 
     it('publishes the outline on load, 300 ms after edits, and clears it on unmount', async () => {
