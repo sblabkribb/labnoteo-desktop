@@ -13,13 +13,13 @@ import { createWorkflow } from '../commands/workflow';
 import { coreLocale, coreT } from '../i18n';
 import { VAULT_ROOT } from '../paths';
 import { catalogDescription } from '../port/aliasHints';
-import { ensureVaultCatalogs } from '../port/catalogUpdate';
+import { CATALOG_DIR, ensureVaultCatalogs } from '../port/catalogUpdate';
 import { statusNames } from '../port/status';
 import { discussWords, keptExperiments, showMarkers, treeLabels } from '../port/workflowView';
 import { openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
 import { ExperimentEntryCache } from './experimentEntries';
 import { TreeView } from './TreeView';
-import { useVaultChanges } from './useVaultChanges';
+import { touchesDir, useVaultChanges } from './useVaultChanges';
 
 export interface WorkflowsPanelProps {
   ctx: CommandContext;
@@ -111,7 +111,8 @@ export function WorkflowsPanel({ ctx, activePath }: WorkflowsPanelProps) {
   useVaultChanges((paths) => {
     cache.invalidate(paths);
     reload();
-    if (paths === 'all') reloadCatalog();
+    // 카탈로그 파일이 밖에서 바뀌면(git pull, 다른 편집기) 카탈로그 트리도 다시 읽는다
+    if (paths === 'all' || touchesDir(paths, CATALOG_DIR)) reloadCatalog();
   });
 
   const all = entries ?? [];

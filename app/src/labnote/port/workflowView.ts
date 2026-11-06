@@ -2,7 +2,7 @@
 // Ported from app/vendor/labnoteo/src/views/workflowView.ts:358-404 sha256:0c49d5cc14e302c6
 // Ported from app/vendor/labnoteo/src/views/workflowView.ts:434-447 sha256:88ebcb824443ff15
 // labnoteO 0.138.0, Apache-2.0.
-// Changes: checklistProgress(file) -> checklistProgress(folder, items, isFile): the caller (panel/experimentEntries.ts) reads the README and lists the folder; no mtime cache, no background re-read, `getAbstractFileByPath(p) instanceof TFile` -> `isFile(p)`.
+// Changes: checklistProgress(file) -> checklistProgress(folder, items, isFile): the caller (panel/experimentEntries.ts) reads the README and lists the folder; no mtime cache, no background re-read, `getAbstractFileByPath(p) instanceof TFile` -> `isFile(p)`; the de-duplication compares `key(path)` (default: the path), so a case-insensitive vault passes a case fold and two links differing only in case count once.
 // Changes: render()'s label object -> treeLabels(host); its search words -> discussWords(host); its `kept` filter -> keptExperiments(all, found, kept). `this.plugin.t` -> `host.t`. Drawing, grouping state and the no-match text stay in WorkflowsPanel.tsx.
 // Changes: showMarkers(folder) method -> showMarkers(host, folder); `this.plugin.host` -> `host`, `this.plugin.t` -> `host.t`.
 
@@ -13,20 +13,22 @@ import { experimentMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerI
 /**
  * The README's "Related Workflows" progress. Only entries whose note is
  * there count: a note moved to another experiment leaves its entry behind
- * (#287). `isFile` says whether a vault path is a file.
+ * (#287). `isFile` says whether a vault path is a file; `key` names the
+ * note a path points to (a case fold where the vault ignores case).
  */
 export function checklistProgress(
   folder: string,
   items: readonly { done: boolean; fileName: string }[],
-  isFile: (path: string) => boolean
+  isFile: (path: string) => boolean,
+  key: (path: string) => string = p => p
 ): { done: number; total: number } {
   // A note listed twice counts once, by its first entry, as the checklist sync keeps it (#511).
   const counted = new Set<string>();
   const present = items.filter(item => {
     const link = item.fileName;
     const path = [posix.join(folder, link), link].find(p => isFile(p));
-    if (path === undefined || counted.has(path)) return false;
-    counted.add(path);
+    if (path === undefined || counted.has(key(path))) return false;
+    counted.add(key(path));
     return true;
   });
   return { done: present.filter(i => i.done).length, total: present.length };

@@ -62,7 +62,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     status: typeof fm.status === 'string' ? fm.status : undefined,
     discuss: isDiscussFlagged(fm),
     lastUpdated: typeof updated === 'string' && updated.trim() ? updated.trim() : undefined,
-    progress: checklistProgress(folder, items, (p) => present.has(fold(p))),
+    progress: checklistProgress(folder, items, (p) => present.has(fold(p)), fold),
     project: typeof fm.project === 'string' || typeof fm.project === 'number' ? String(fm.project) : undefined,
     authors: frontMatterNames(fm.author),
     workflowNames: names.filter((n) => NOTE.test(n) && n !== README).map((n) => n.replace(NOTE, '').replace(/_/g, ' ')),

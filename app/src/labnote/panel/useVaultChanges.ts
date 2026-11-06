@@ -30,3 +30,15 @@ export function useVaultChanges(onChanges: (paths: string[] | 'all') => void, li
     };
   }, [listen]);
 }
+
+/**
+ * 바뀐 경로 중 하나가 `dir`(vault-relative POSIX) 안이거나, `dir` 자체거나, 그 위 폴더인가. 대소문자는 가리지 않는다(Windows).
+ * Workflows 패널이 카탈로그 폴더가 밖에서 바뀌었을 때(git pull, 다른 편집기) 카탈로그를 다시 읽는 데 쓴다.
+ */
+export function touchesDir(paths: readonly string[], dir: string): boolean {
+  const d = dir.toLowerCase();
+  return paths.some((path) => {
+    const p = path.toLowerCase();
+    return p === d || p.startsWith(`${d}/`) || d.startsWith(`${p}/`);
+  });
+}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { MAX_SETTLE_MS, SETTLE_MS, type VaultChange } from '../../../vault/useVaultEvents';
-import { useVaultChanges } from '../useVaultChanges';
+import { touchesDir, useVaultChanges } from '../useVaultChanges';
 
 type Handler = (e: { payload: VaultChange }) => void;
 
@@ -57,5 +57,17 @@ describe('useVaultChanges', () => {
     expect(onChanges).toHaveBeenCalled();
     unmount();
     expect(f.handlers.size).toBe(0);
+  });
+});
+
+describe('touchesDir', () => {
+  it('is true for a path inside the directory, the directory itself or an ancestor, ignoring case', () => {
+    expect(touchesDir(['resources/workflows/workflows.json'], 'resources/workflows')).toBe(true);
+    expect(touchesDir(['Resources/Workflows/hw.json'], 'resources/workflows')).toBe(true);
+    expect(touchesDir(['resources/workflows'], 'resources/workflows')).toBe(true);
+    expect(touchesDir(['resources'], 'resources/workflows')).toBe(true);
+    expect(touchesDir(['labnote/001_A/README.labnote.md'], 'resources/workflows')).toBe(false);
+    expect(touchesDir(['resources/workflows-old/x.json'], 'resources/workflows')).toBe(false);
+    expect(touchesDir([], 'resources/workflows')).toBe(false);
   });
 });

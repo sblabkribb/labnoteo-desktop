@@ -88,4 +88,35 @@ describe('사이드바 탭', () => {
     });
     await waitFor(() => expect(tabs().getByRole('tab', { name: '워크플로' }).getAttribute('aria-selected')).toBe('true'));
   });
+  it('arrow keys, Home and End move the selection and focus between tabs', async () => {
+    const user = userEvent.setup();
+    installFakeVault({ 'labnote/001_GFP/README.labnote.md': README });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    const files = () => tabs().getByRole('tab', { name: '파일' });
+    const workflows = () => tabs().getByRole('tab', { name: '워크플로' });
+    await waitFor(() => expect(workflows().getAttribute('aria-selected')).toBe('true'));
+
+    workflows().focus();
+    await user.keyboard('{ArrowLeft}');
+    expect(files().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(files());
+    expect(await screen.findByRole('navigation', { name: '노트' })).toBeTruthy();
+
+    await user.keyboard('{ArrowLeft}');
+    expect(workflows().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(workflows());
+
+    await user.keyboard('{Home}');
+    expect(files().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(files());
+
+    await user.keyboard('{End}');
+    expect(workflows().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(workflows());
+
+    await user.keyboard('{ArrowRight}');
+    expect(files().getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(files());
+  });
 });

@@ -62,6 +62,20 @@ describe('readExperimentEntry', () => {
     expect(e.progress).toEqual({ done: 2, total: 2 });
   });
 
+  it('two checklist links that differ only in case are one note (Windows) and count once', async () => {
+    const vault = createFakeVault({
+      [`${A}/README.labnote.md`]: readme(
+        'A',
+        'in-progress',
+        '',
+        ['- [x] [Design](./001_WD010_Design.labnote.md)', '- [ ] [design](./001_wd010_design.labnote.md)', ''].join('\n'),
+      ),
+      [`${A}/001_WD010_Design.labnote.md`]: '# d\n',
+    });
+    const e = await readExperimentEntry(new TauriLabnoteFs(vault.invoke), A);
+    expect(e.progress).toEqual({ done: 1, total: 1 });
+  });
+
   it('a CRLF + BOM README parses', async () => {
     const text = `﻿${readme('윈도', 'completed', 'discuss: true\n', '- [x] [WD010 Design](./001_WD010_Design.labnote.md)\n')}`.replace(
       /\n/g,

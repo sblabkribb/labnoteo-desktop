@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { t } from './i18n/t';
 import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
@@ -80,6 +80,21 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   const showPanel = (next: SidebarTab) => {
     setChosenTab(next);
     storeTab(vault.root, next);
+  };
+  // WAI-ARIA 탭 패턴: 고른 탭만 Tab 순서에 있으니 화살표·Home·End 로 탭을 옮기고 초점도 함께 옮긴다.
+  const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const order: SidebarTab[] = ['files', 'workflows'];
+    const at = order.indexOf(tab);
+    const next =
+      e.key === 'ArrowRight' ? order[(at + 1) % order.length]
+      : e.key === 'ArrowLeft' ? order[(at - 1 + order.length) % order.length]
+      : e.key === 'Home' ? order[0]
+      : e.key === 'End' ? order[order.length - 1]
+      : undefined;
+    if (!next) return;
+    e.preventDefault();
+    showPanel(next);
+    document.getElementById(`sidebar-tab-${next}`)?.focus();
   };
   const openNote = (path: string) => openFile(path);
   // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
@@ -163,7 +178,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           {settingsImported && <p role="status">{t('settings.imported')}</p>}
         </div>
         <aside className="sidebar" aria-label={t('app.sidebar')}>
-          <div className="sidebar-tabs" role="tablist" aria-label={t('sidebar.tabs')}>
+          <div className="sidebar-tabs" role="tablist" aria-label={t('sidebar.tabs')} onKeyDown={onTabKeyDown}>
             <button
               type="button"
               role="tab"
