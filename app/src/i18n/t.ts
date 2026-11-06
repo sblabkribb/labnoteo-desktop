@@ -35,6 +35,9 @@ const ko: Record<string, string> = {
   'editor.gone.title': '노트가 사라졌습니다',
   'editor.gone.body': '이 노트가 디스크에서 삭제되었거나 이름이 바뀌었습니다. 편집한 내용은 편집기에 남아 있습니다.',
   'editor.gone.recreate': '이 위치에 다시 저장',
+  'editor.closeAsk.body': '저장하지 못해 창을 닫지 않았습니다. 지금 닫으면 저장하지 않은 내용이 사라집니다.',
+  'editor.closeAsk.discard': '저장하지 않고 닫기',
+  'editor.closeAsk.stay': '계속 편집',
   'editor.keep': '그대로 두기',
   'test.greeting': '{0} 에 노트 {1} 개',
 };

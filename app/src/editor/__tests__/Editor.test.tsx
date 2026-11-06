@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
-import { Editor, type EditorHandle, type WindowApi } from '../Editor';
+import { Editor, MAX_SAVE_ATTEMPTS, type EditorHandle, type WindowApi } from '../Editor';
 import type { VaultChange } from '../../vault/useVaultEvents';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
@@ -369,7 +369,8 @@ describe('편집기', () => {
       expect(m.writes()).toBe(0);
     });
 
-    it('충돌로 저장하지 못하면 닫지 않고 묻는다 — 바로 이어 다시 닫으면 닫힌다', async () => {
+    it('충돌로 저장하지 못하면 닫지 않는다 — 몇 번을 눌러도 닫히지 않고, 버릴지 명시적으로 묻는다', async () => {
+      const user = userEvent.setup();
       const w = fakeWindow();
       const m = mount({ [P]: 'mine\n' }, 60_000, { windowApi: w.api });
       await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
@@ -379,7 +380,78 @@ describe('편집기', () => {
       expect(w.destroy).not.toHaveBeenCalled();
       expect(m.files[P]).toBe('theirs\n');
       expect(await screen.findByRole('alertdialog')).toBeTruthy();
-      expect(await w.requestClose()).toBe(false); // 갇히지 않는다
+      expect(await screen.findByText(/저장하지 못해 창을 닫지 않았습니다/)).toBeTruthy();
+      // 두 번째 닫기 요청도 조용히 닫지 않는다.
+      expect(await w.requestClose()).toBe(true);
+      expect(w.destroy).not.toHaveBeenCalled();
+      // 버리겠다고 명시적으로 고르면 그때 닫는다.
+      await user.click(screen.getByRole('button', { name: '저장하지 않고 닫기' }));
+      expect(w.destroy).toHaveBeenCalledTimes(1);
     });
+
+    it('충돌을 해결하면 가드가 그대로 살아 있다: 이후의 편집도 저장한 뒤에 닫는다', async () => {
+      const user = userEvent.setup();
+      const w = fakeWindow();
+      const m = mount({ [P]: 'mine\n' }, 60_000, { windowApi: w.api });
+      await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+      await m.type('!');
+      m.files[P] = 'theirs\n';
+      expect(await w.requestClose()).toBe(true); // 한 번 거절당했다
+      await user.click(await screen.findByRole('button', { name: /덮어쓰기/ }));
+      await waitFor(() => expect(m.files[P]).toBe('mine\n!'));
+      expect(screen.queryByText(/저장하지 못해 창을 닫지 않았습니다/)).toBeNull(); // 저장되면 묻던 것도 사라진다
+
+      await m.type('?'); // 한참 뒤의 새 편집
+      expect(await w.requestClose()).toBe(true); // 이번에도 기본 닫기를 막고
+      expect(m.files[P]).toBe('mine\n!?'); // 저장하고
+      expect(w.destroy).toHaveBeenCalledTimes(1); // 닫는다
+    });
+
+    it('계속 편집을 고르면 질문이 닫히고 창은 그대로 있다', async () => {
+      const user = userEvent.setup();
+      const w = fakeWindow();
+      const m = mount({ [P]: 'mine\n' }, 60_000, { windowApi: w.api });
+      await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+      await m.type('!');
+      m.files[P] = 'theirs\n';
+      await w.requestClose();
+      await user.click(await screen.findByRole('button', { name: '계속 편집' }));
+      expect(screen.queryByText(/저장하지 못해 창을 닫지 않았습니다/)).toBeNull();
+      expect(w.destroy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('조용한 다시 읽기는 커서 위치를 그대로 두고, 새 본문이 짧아지면 끝으로 맞춘다', async () => {
+    const m = mount({ [P]: 'abcdefghij\n' });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('abcdefghij\n'));
+    await act(async () => m.view().dispatch({ selection: { anchor: 6 } }));
+    m.files[P] = 'ABCDEFGHIJKLMNOP\n';
+    await m.emit({ path: P, kind: 'modified' });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('ABCDEFGHIJKLMNOP\n'));
+    expect(m.view().state.selection.main.head).toBe(6); // 맨 앞(0)으로 튀지 않았다
+    m.files[P] = 'AB\n';
+    await m.emit({ path: P, kind: 'modified' });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('AB\n'));
+    expect(m.view().state.selection.main.head).toBe(3); // 길이 안으로 맞춘다
+  });
+
+  it('줄바꿈이 섞인 노트의 소수 쪽 줄 끝은 눈에 보이는 기호로 나온다', async () => {
+    const m = mount({ [P]: 'a\r\nb\nc\r\n' });
+    await waitFor(() => expect(m.view().state.sliceDoc()).toBe('a\r\nb\nc\r\n'));
+    expect(m.view().contentDOM.querySelectorAll('.cm-specialChar').length).toBe(1); // b 줄 끝의 단독 LF
+    const pure = mount({ [P]: 'a\nb\n' });
+    await waitFor(() => expect(pure.view().state.doc.toString()).toBe('a\nb\n'));
+    expect(pure.view().contentDOM.querySelectorAll('.cm-specialChar').length).toBe(0); // 평범한 노트에는 기호가 없다
+  });
+
+  it('저장이 계속 실패하면 간격을 늘려 몇 번만 다시 시도하고 멈춘다 (경고는 남는다)', async () => {
+    const m = mount({ [P]: 'a\n' }, 15, { failWrites: 1000 });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('a\n'));
+    await m.type('b');
+    await waitFor(() => expect(m.writes()).toBe(MAX_SAVE_ATTEMPTS), { timeout: 3000 }); // 15+30+60+120 ms 뒤
+    await new Promise((r) => setTimeout(r, 400)); // 더 기다려도
+    expect(m.writes()).toBe(MAX_SAVE_ATTEMPTS); // 더 시도하지 않는다
+    expect(screen.getByText(/저장하지 못했습니다/)).toBeTruthy();
+    expect(m.files[P]).toBe('a\n');
   });
 });

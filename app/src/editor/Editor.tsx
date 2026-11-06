@@ -3,7 +3,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
@@ -17,6 +17,8 @@ type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 export const AUTOSAVE_MS = 2000;
 /** 계속 치고 있어도 이 시간이 지나면 저장한다: 무입력 대기만으로는 쉬지 않고 쓰는 사람의 글이 저장되지 않는다. */
 export const MAX_AUTOSAVE_MS = 10_000;
+/** 저장이 연달아 이만큼 실패하면 더 다시 시도하지 않는다(경고는 계속 보인다). 다음 입력이 한 번 더 시도한다. */
+export const MAX_SAVE_ATTEMPTS = 5;
 
 export interface EditorHandle {
   /** 다른 노트로 넘어가기 전에 부른다. 잃을 편집이 없으면(저장됐거나 원래 깨끗하면) true. */
@@ -67,7 +69,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 마지막으로 저장했거나 읽은 에디터 본문. 이것과 같으면 깨끗하다 (되돌리기로 돌아와도). */
   const baseline = useRef('');
   const externalRef = useRef<External | null>(null);
-  const programmatic = useRef(false);
+  const saveFailures = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const maxTimer = useRef<ReturnType<typeof setTimeout>>();
   const clearTimers = () => {
@@ -88,6 +90,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const [external, setExternalState] = useState<External | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [closeAsk, setCloseAsk] = useState(false);
+  const win = useRef<WindowApi>();
 
   // 아래 함수들은 ref 와 setState 만 만지므로 렌더마다 새로 만들어도 같은 일을 한다. effect 는 api.current 를 거쳐 부른다.
   const api = useRef({} as ReturnType<typeof makeApi>);
@@ -104,7 +108,23 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       baseline.current = doc.text;
       // 새 상태를 통째로 올린다: 되돌리기 기록이 비어서 시작하므로, 불러오기 이전의 본문(빈 본문 포함)으로
       // 되돌릴 수 없다. 되돌리기가 그 본문을 디스크에 저장해 버리는 일이 없다.
-      viewRef.current?.setState(EditorState.create({ doc: doc.text, extensions: extensions.current(doc) }));
+      const view = viewRef.current;
+      if (view) {
+        // 조용한 다시 읽기는 보이지 않아야 한다: 커서와 스크롤 위치를 새 본문 길이 안에서 그대로 둔다.
+        const { anchor, head } = view.state.selection.main;
+        const top = view.scrollDOM.scrollTop;
+        const len = doc.text.length;
+        view.setState(
+          EditorState.create({
+            doc: doc.text,
+            selection: { anchor: Math.min(anchor, len), head: Math.min(head, len) },
+            extensions: extensions.current(doc),
+          }),
+        );
+        view.scrollDOM.scrollTop = top;
+        requestAnimationFrame(() => (view.scrollDOM.scrollTop = top));
+      }
+      setCloseAsk(false);
       setExternal(null);
       setDialogOpen(false);
       setSaveError(false);
@@ -139,7 +159,13 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         result = await saveDocument(doc, body, { force: !!force, against: force?.against, invoke: latest.current.invoke });
       } catch {
         setSaveError(true);
-        scheduleAutosave(); // 일시적인 실패(백신 잠금, 디스크 가득)면 다음 시도가 저장한다: 키를 다시 칠 때까지 기다리지 않는다
+        // 일시적인 실패(백신 잠금, 디스크 가득)면 키를 다시 칠 때까지 기다리지 않고 다시 시도한다 —
+        // 간격을 두 배씩 늘리고, MAX_SAVE_ATTEMPTS 번 연달아 실패하면 멈춘다(경고는 남는다).
+        saveFailures.current += 1;
+        if (saveFailures.current < MAX_SAVE_ATTEMPTS && !externalRef.current) {
+          const delay = latest.current.autosaveMs * 2 ** (saveFailures.current - 1);
+          timer.current = setTimeout(() => void run(() => doSave()), delay);
+        }
         return false;
       }
       if (!result.ok) {
@@ -147,11 +173,13 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         setDialogOpen(true);
         return false;
       }
+      saveFailures.current = 0;
       docRef.current = { ...doc, text: body, loadedText: toRaw(doc, body) };
       baseline.current = body;
       setExternal(null);
       setDialogOpen(false);
       setSaveError(false);
+      if (!isDirty()) setCloseAsk(false);
       // 저장하는 사이 더 쳤을 수 있다.
       const still = isDirty();
       setDirty(still);
@@ -248,6 +276,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown(),
       syntaxHighlighting(defaultHighlightStyle),
+      // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
+      highlightSpecialChars(),
       EditorView.lineWrapping,
       EditorView.theme({ '&': { minHeight: '50vh' } }),
       EditorView.contentAttributes.of({ 'aria-label': t('editor.label') }),
@@ -306,29 +336,26 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     };
   }, [path, listen]);
 
-  // 창을 닫을 때: 저장 안 된 편집이 있으면 저장한 뒤에 닫는다. 저장하지 못하면(충돌 등) 닫지 않고 대화상자를 보인다.
-  // 그래도 닫고 싶은 사용자가 갇히지 않게, 바로 이어서 한 번 더 닫으면 닫힌다.
+  // 창을 닫을 때: 저장 안 된 편집이 있으면 저장한 뒤에 닫는다. 이 가드는 항상 켜져 있다 — 닫기 요청마다 다시 검사한다.
+  // 저장하지 못하면(충돌 등) 닫지 않고, 저장하지 않고 닫을지 명시적으로 묻는다. 그 편집이 유일한 사본일 수 있다.
   useEffect(() => {
     let live = true;
     let unlisten: (() => void) | undefined;
-    let refused = false;
-    let win: WindowApi;
     try {
-      win = windowApi ?? (getCurrentWindow() as unknown as WindowApi);
+      win.current = windowApi ?? (getCurrentWindow() as unknown as WindowApi);
     } catch {
       return; // 창 API 가 없는 환경(테스트 등)
     }
-    win
-      .onCloseRequested(async (ev) => {
-        if (refused || !api.current.isDirty()) return; // 기본 동작: 닫힌다
-        ev.preventDefault();
-        if (await api.current.flush()) await win.destroy();
-        else refused = true;
-      })
-      .then(
-        (fn) => (live ? (unlisten = fn) : fn()),
-        () => undefined,
-      );
+    const w = win.current;
+    w.onCloseRequested(async (ev) => {
+      if (!api.current.isDirty()) return; // 잃을 것이 없다: 기본 동작대로 닫힌다
+      ev.preventDefault();
+      if (await api.current.flush()) await w.destroy();
+      else setCloseAsk(true);
+    }).then(
+      (fn) => (live ? (unlisten = fn) : fn()),
+      () => undefined,
+    );
     return () => {
       live = false;
       unlisten?.();
@@ -344,6 +371,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       {status === 'loading' && <p>{t('editor.loading')}</p>}
       {status === 'error' && <p role="alert">{t('editor.loadError')}</p>}
       {saveError && <p role="alert">{t('editor.saveError')}</p>}
+      {closeAsk && (
+        <p role="alert">
+          {t('editor.closeAsk.body')}{' '}
+          <button type="button" onClick={() => void win.current?.destroy()}>
+            {t('editor.closeAsk.discard')}
+          </button>{' '}
+          <button type="button" onClick={() => setCloseAsk(false)}>
+            {t('editor.closeAsk.stay')}
+          </button>
+        </p>
+      )}
       <div ref={host} hidden={status !== 'ready'} />
       {dialogOpen && external && (
         <div

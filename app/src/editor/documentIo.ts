@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-const BOM = '﻿';
+const BOM = '\uFEFF';
 
 /**
  * 읽은 노트. `text` 는 에디터에 주는 본문(BOM 없음, 줄바꿈은 LF)이고
