@@ -97,6 +97,13 @@ const ko: Record<string, string> = {
   'insertDate.metaDateFilled': '이 Start_date/End_date 에는 이미 값이 있습니다. 날짜를 선택해 덮어 쓰세요.',
   'insertDate.noNote': '노트를 열고 날짜를 넣을 곳에 커서를 둔 다음 다시 실행하세요.',
   'issueMarker.noNote': '노트를 열고 논의할 줄에 커서를 둔 다음 다시 실행하세요.',
+  'dialog.ok': '확인',
+  'dialog.cancel': '취소',
+  'dialog.close': '닫기',
+  'picker.empty': '맞는 항목이 없습니다.',
+  'picker.more': '{0}개가 더 있습니다. 검색어를 더 적어 좁히세요.',
+  'picker.label': '검색',
+  'prompt.label': '입력',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -196,6 +203,13 @@ const en: Record<string, string> = {
   'insertDate.metaDateFilled': 'This Start_date/End_date already has a value. Select the date and type over it.',
   'insertDate.noNote': 'Open a note and put the cursor where the date goes, then run this again.',
   'issueMarker.noNote': 'Open a note and put the cursor on the line to discuss, then run this again.',
+  'dialog.ok': 'OK',
+  'dialog.cancel': 'Cancel',
+  'dialog.close': 'Close',
+  'picker.empty': 'No matches.',
+  'picker.more': '{0} more. Type more to narrow the list.',
+  'picker.label': 'Search',
+  'prompt.label': 'Input',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

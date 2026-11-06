@@ -446,3 +446,56 @@ input, select, textarea {
   }
   .sidebar { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* 대화상자(고르기, 입력, 확인): .shell 밖의 층. 열려 있는 동안 .shell 은 inert 다 */
+.dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh var(--space-4) var(--space-4);
+}
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  opacity: 0.6;
+}
+.dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(36rem, 100%);
+  max-height: 76vh;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.dialog-head h2 { margin: 0; font-size: 1.05em; font-weight: 600; }
+.dialog-close { padding: 0 var(--space-2); background: transparent; border: 0; color: var(--text-muted); }
+.dialog-close::before { content: "×"; content: "×" / ""; }
+.dialog > input, .picker-body > input { width: 100%; box-sizing: border-box; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+button.danger { background: var(--danger); color: var(--bg); border-color: var(--danger); font-weight: 600; }
+button.danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.1); }
+
+.prompt-question { color: var(--text); }
+.prompt-hint { margin: 0; color: var(--text-muted); font-size: 0.93em; }
+.prompt-hint.warn { color: var(--danger); font-weight: 600; }
+.prompt-error { margin: 0; }
+.confirm-message p { margin: 0 0 var(--space-2); white-space: pre-line; }
+
+.picker-body { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.picker-list { margin: 0; padding: 0; list-style: none; overflow-y: auto; min-height: 0; }
+.picker-option { display: flex; flex-direction: column; padding: var(--space-1) var(--space-2); border-radius: var(--radius); cursor: pointer; }
+.picker-option[aria-selected="true"] { background: var(--bg-selected); }
+.picker-option label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); cursor: pointer; }
+.picker-option.dimmed .picker-label { color: var(--text-muted); }
+.picker-desc, .picker-detail { color: var(--text-muted); font-size: 0.9em; }
+.picker-note { margin: 0; color: var(--text-muted); font-size: 0.93em; }
