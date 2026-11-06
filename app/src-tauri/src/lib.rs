@@ -1,3 +1,5 @@
+pub mod vault;
+
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
