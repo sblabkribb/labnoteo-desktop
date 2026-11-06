@@ -105,6 +105,36 @@ describe('rewriteLinks', () => {
     const out = rewriteLinks('[h](../Home) [i](../Home.md)', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'Start.md'));
     expect(out.text).toBe('[h](../Start) [i](../Start.md)');
   });
+  it('a relative wikilink stays relative and keeps its target when the new path goes down a folder', () => {
+    const files = ['Home.md', 'notes/n.md', 'sub/Home.md'];
+    const out = rewriteLinks('[[../Home]] [[../Home.md|h]]', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'notes/sub/Home.md', false, files));
+    expect(out.text).toBe('[[./sub/Home]] [[./sub/Home.md|h]]');
+    expect(out).toMatchObject({ changed: 2, unsafe: 0 });
+  });
+  it('a path wikilink whose new text resolves elsewhere is left unchanged and counted unsafe (post-condition)', () => {
+    // The extensionless file 'sub/Start' shadows 'sub/Start.md' for every path form without '.md'.
+    const files = ['lab/Home.md', 'notes/n.md', 'sub/Start'];
+    const ctx = ctxFor('lab/Home.md', 'sub/Start.md', false, files);
+    for (const text of ['[[../lab/Home]]', '[[/lab/Home]]', '[[lab/Home]]']) {
+      expect(rewriteLinks(text, 'notes/n.md', 'notes/n.md', ctx)).toEqual({ text, changed: 0, unsafe: 1 });
+    }
+    // With '.md' kept, the same move is written.
+    expect(rewriteLinks('[[../lab/Home.md]]', 'notes/n.md', 'notes/n.md', ctx).text).toBe('[[../sub/Start.md]]');
+  });
+  it('a new text that would no longer parse as a link is left unchanged and counted unsafe', () => {
+    const files = ['Home.md', 'n.md'];
+    const text = 'a `x [[Home]] y';
+    expect(rewriteLinks(text, 'n.md', 'n.md', ctxFor('Home.md', 'Ho`me.md', false, files))).toEqual({ text, changed: 0, unsafe: 1 });
+    // Each edit is checked on its own once the broken ones are dropped: here both would sit in a code span.
+    const two = 'a `x [[Home]] y [[Home]] z';
+    expect(rewriteLinks(two, 'n.md', 'n.md', ctxFor('Home.md', 'Ho`me.md', false, files))).toEqual({ text: two, changed: 0, unsafe: 2 });
+    // A good edit next to a broken one is still written.
+    const mixed = '[[a]] `x [[Home]]';
+    const out = rewriteLinks(mixed, 'n.md', 'n.md', rewriteContext(['Home.md', 'a.md', 'n.md'], [{ from: 'Home.md', to: 'Ho`me.md' }, { from: 'a.md', to: 'b.md' }]));
+    expect(out).toEqual({ text: '[[b]] `x [[Home]]', changed: 1, unsafe: 1 });
+    const fm = '---\nup: [[Home]]\n---\n';
+    expect(rewriteLinks(fm, 'n.md', 'n.md', ctxFor('Home.md', 'x{y}.md', false, files))).toEqual({ text: fm, changed: 0, unsafe: 1 });
+  });
   it('keeps a trailing backslash before the alias pipe outside a table', () => {
     const out = rewriteLinks('[[Home\\|x]]', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'Start.md'));
     expect(out.text).toBe('[[Start\\|x]]');
@@ -124,5 +154,13 @@ describe('moves', () => {
     expect(after).toContain('docs/sub/PCR 조건.md');
     expect(after).not.toContain('notes/n.md');
     expect(applyMoves(after, invertMoves(moves))).toEqual(FILES);
+  });
+  it('movesFor a folder slices by segments, so a differently normalised folder name keeps the right tail', () => {
+    const nfd = '노트'.normalize('NFD');
+    const files = [`${nfd}/a.md`, `${nfd}/sub/b.md`];
+    expect(movesFor('노트', 'docs', true, files)).toEqual([
+      { from: `${nfd}/a.md`, to: 'docs/a.md' },
+      { from: `${nfd}/sub/b.md`, to: 'docs/sub/b.md' },
+    ]);
   });
 });

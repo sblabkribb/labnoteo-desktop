@@ -3,11 +3,11 @@
  * Raw text in, raw text out: the input goes through `parseRaw` and the result through `toRaw`, so a BOM and
  * the line endings survive byte for byte. Only the path part of each link is replaced; aliases, `#subpaths`,
  * the table pipe escape, `!`, angle brackets and every other byte stay as they were. Every replacement is checked to resolve
- * back to its intended target (the post-condition); a link that cannot be written safely is left unchanged
- * and counted in `unsafe`.
+ * back to its intended target (the post-condition) and to still parse as the same kind of link; a link that
+ * cannot be written safely is left unchanged and counted in `unsafe`.
  */
 import { parseRaw, toRaw } from '../editor/documentIo';
-import { extractLinks } from './extract';
+import { extractLinks, type LinkKind } from './extract';
 import { createResolver, hasUnlinkableChars, linkKey, splitLinktext, type Resolver } from './resolve';
 
 export interface Move {
@@ -49,9 +49,11 @@ export function invertMoves(moves: readonly Move[]): Move[] {
 export function movesFor(path: string, to: string, isDir: boolean, files: readonly string[]): Move[] {
   if (!isDir) return [{ from: path, to }];
   const prefix = `${linkKey(path)}/`;
+  const depth = path.split('/').length;
   return files
     .filter((f) => linkKey(f).startsWith(prefix))
-    .map((f) => ({ key: linkKey(f), move: { from: f, to: to + f.slice(path.length) } }))
+    // Slice by segments, not characters: `path` and `f` may differ in Unicode normalisation (NFD vs NFC).
+    .map((f) => ({ key: linkKey(f), move: { from: f, to: [to, ...f.split('/').slice(depth)].join('/') } }))
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .map((x) => x.move);
 }
@@ -115,7 +117,8 @@ function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: Rewri
     first = withMd(t);
   } else if (oldPath.startsWith('./') || oldPath.startsWith('../')) {
     let rel = relativePath(dirOf(sourceAfter), stripMd(want));
-    if (oldPath.startsWith('./') && !rel.startsWith('../')) rel = `./${rel}`;
+    // Stays relative: a path that goes down from the source folder gets './' (D2 4a), whichever prefix it had.
+    if (!rel.startsWith('../')) rel = `./${rel}`;
     first = withMd(rel);
   } else if (oldPath.startsWith('/')) {
     first = withMd(`/${stripMd(want)}`);
@@ -150,10 +153,11 @@ function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: str
 export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: string, ctx: RewriteContext): RewriteResult {
   const doc = parseRaw(sourceBefore, raw);
   const text = doc.text;
-  const edits: { from: number; to: number; insert: string }[] = [];
+  let edits: { from: number; to: number; insert: string; kind: LinkKind }[] = [];
   let unsafe = 0;
 
-  for (const link of extractLinks(text)) {
+  const links = extractLinks(text);
+  for (const link of links) {
     const isWiki = link.kind === 'wiki' || link.kind === 'embed';
     const linkpath = isWiki ? splitLinktext(link.target).path : link.target;
     // A same-note link ([[#heading]], [[#^block]]) names no file: it follows its note wherever it goes.
@@ -180,7 +184,7 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
       // Not directly quote-delimited: the link may sit inside a quoted or plain YAML scalar whose style is unknown
       // here. Never introduce a quote, a backslash or a comma (flow sequences) there.
       if (insert !== null && link.inFrontmatter && quote !== "'" && quote !== '"') {
-        const risky = [...insert].some((c) => `'"\\,`.includes(c) && !oldSlice.includes(c));
+        const risky = [...insert].some((c) => `'"\\,{}`.includes(c) && !oldSlice.includes(c));
         if (risky) insert = null;
       }
     } else {
@@ -190,11 +194,35 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
       unsafe++;
       continue;
     }
-    if (insert !== oldSlice) edits.push({ from: link.pathFrom, to: link.pathTo, insert });
+    if (insert !== oldSlice) edits.push({ from: link.pathFrom, to: link.pathTo, insert, kind: link.kind });
   }
 
-  if (edits.length === 0) return { text: raw, changed: 0, unsafe };
+  // Parse check: every edited range must still be a link of the same kind (a '`' can open a code span, for
+  // example). The first edit that fails is dropped and counted unsafe, since it may be what broke the later ones;
+  // then the rest is checked again.
+  edits.sort((x, y) => x.from - y.from);
+  for (;;) {
+    if (edits.length === 0) return { text: raw, changed: 0, unsafe };
+    const out = applyEdits(text, edits);
+    const found = new Set(extractLinks(out).map((l) => `${l.kind}:${l.pathFrom}:${l.pathTo}`));
+    let shift = 0;
+    const bad = edits.findIndex((e) => {
+      const from = e.from + shift;
+      shift += e.insert.length - (e.to - e.from);
+      return !found.has(`${e.kind}:${from}:${from + e.insert.length}`);
+    });
+    if (bad < 0) {
+      // Backstop: an edit must never make an untouched link disappear. If one did, write nothing.
+      if (found.size !== links.length) return { text: raw, changed: 0, unsafe: unsafe + edits.length };
+      return { text: toRaw(doc, out), changed: edits.length, unsafe };
+    }
+    unsafe++;
+    edits = edits.filter((_, i) => i !== bad);
+  }
+}
+
+function applyEdits(text: string, edits: readonly { from: number; to: number; insert: string }[]): string {
   let out = text;
   for (const e of [...edits].sort((a, b) => b.from - a.from)) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
-  return { text: toRaw(doc, out), changed: edits.length, unsafe };
+  return out;
 }
