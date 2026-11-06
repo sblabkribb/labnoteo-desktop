@@ -74,6 +74,7 @@ const ko: Record<string, string> = {
   'table.insertColumnRight': '오른쪽에 열 추가',
   'table.editAsMarkdown': '마크다운으로 편집',
   'table.overflow': '머리 행보다 많은 칸입니다. 내보내기에서 빠질 수 있습니다.',
+  'table.cellEditor': '표 칸 편집',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -150,6 +151,7 @@ const en: Record<string, string> = {
   'table.insertColumnRight': 'Add column to the right',
   'table.editAsMarkdown': 'Edit as Markdown',
   'table.overflow': 'Extra cell beyond the header row. Exports may leave it out.',
+  'table.cellEditor': 'Table cell',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

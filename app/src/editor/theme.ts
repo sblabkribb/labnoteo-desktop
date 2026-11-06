@@ -113,6 +113,12 @@ export const editorThemeSpec = {
     opacity: '0',
     transition: 'opacity 120ms',
   },
+  // 셀 편집기(table/cellEditor.ts): 칸 안에 뜨는 작은 CodeMirror. 바깥 편집기의 줄·본문 여백을 걷고, 포커스는 칸의 윤곽선으로 보인다
+  '.lno-table .lno-cell-active': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
+  '.lno-table .cm-editor.cm-focused': { outline: 'none' },
+  '.lno-table .cm-scroller': { lineHeight: 'inherit', fontFamily: 'inherit' },
+  '.lno-table .cm-content': { padding: '0', caretColor: 'var(--text)' },
+  '.lno-table .cm-line': { padding: '0' },
   '.lno-table-wrap:hover > .lno-table-toolbar, .lno-table-wrap:focus-within > .lno-table-toolbar': { opacity: '1' },
   '.lno-table-tool': {
     font: 'inherit',
@@ -147,7 +153,8 @@ export const highlightSpec = [
 ];
 
 /**
- * 모듈에서 한 번만 만든다: 만들 때마다 새 스타일 모듈이 생겨 편집기의 입양 스타일시트에 쌓이는데,
+ * 모듈에서 한 번만 만든다(표의 셀 편집기도 같은 강조를 쓴다): 만들 때마다 새 스타일 모듈이 생겨 편집기의 입양 스타일시트에 쌓이는데,
  * 노트를 열 때와 조용히 다시 읽을 때마다 상태를 새로 만들기 때문이다. 같은 확장은 같은 모듈을 쓴다.
  */
-export const editorTheme: Extension = [EditorView.theme(editorThemeSpec), syntaxHighlighting(HighlightStyle.define(highlightSpec))];
+export const markdownHighlighting: Extension = syntaxHighlighting(HighlightStyle.define(highlightSpec));
+export const editorTheme: Extension = [EditorView.theme(editorThemeSpec), markdownHighlighting];

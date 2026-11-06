@@ -9,6 +9,7 @@ import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { editorTheme } from './theme';
 import { labnoteMarkdown } from './markdownSyntax';
+import { tableExtension } from './table/field';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -284,6 +285,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       ),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
+      // 표는 격자로 그리고 칸 안에서 고친다. 칸의 입력은 이 문서로 곧바로 들어오므로 저장·자동 저장·되돌리기는 그대로다.
+      tableExtension({ save: () => void api.current.save(), root: shadow }),
       editorTheme,
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
       highlightSpecialChars(),

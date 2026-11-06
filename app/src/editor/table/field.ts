@@ -3,6 +3,7 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { parseTable } from './model';
 import { TableWidget, toggleRawTable } from './widget';
+import { cellEditorExtension } from './cellEditor';
 
 export { toggleRawTable };
 
@@ -16,9 +17,9 @@ export { toggleRawTable };
  */
 
 export interface TableOptions {
-  /** 셀 편집기가 Mod-s 로 부른다(Task 4). */
+  /** 셀 편집기가 Mod-s 로 부른다. */
   save: () => void;
-  /** 편집기가 들어 있는 루트(그림자 루트). 셀 편집기가 쓴다(Task 4). */
+  /** 편집기가 들어 있는 루트(그림자 루트). 셀 편집기가 쓴다. */
   root: ShadowRoot | Document;
 }
 
@@ -153,7 +154,7 @@ export const tableField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-/** 표 편집 확장. Task 4 가 셀 편집기를 여기에 더한다. */
+/** 표 편집 확장: 격자 위젯과 칸 안의 셀 편집기(cellEditor.ts). */
 export function tableExtension(opts: TableOptions): Extension {
-  return [tableOptions.of(opts), rawTables, tableField];
+  return [tableOptions.of(opts), rawTables, tableField, cellEditorExtension()];
 }

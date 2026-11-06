@@ -1,4 +1,4 @@
-import { StateEffect } from '@codemirror/state';
+import { Facet, StateEffect } from '@codemirror/state';
 import { EditorView, WidgetType } from '@codemirror/view';
 import { t } from '../../i18n/t';
 import { rows, type Align, type Cell, type TableModel } from './model';
@@ -25,6 +25,22 @@ const TOOLS: ReadonlyArray<{ action: string; label: () => string }> = [
   { action: 'editAsMarkdown', label: () => t('table.editAsMarkdown') },
 ];
 
+/**
+ * 셀 편집기(cellEditor.ts)와 이어지는 자리. 위젯은 셀 편집기를 모른다(순환 import 를 피한다):
+ * 칸을 누르면 이 facet 의 함수를 부르고, 셀 편집기가 든 칸은 `activeCells` 로 알아본다.
+ */
+export type CellActivator = (view: EditorView, tableFrom: number, r: number, c: number, event: MouseEvent) => void;
+export const cellActivator = Facet.define<CellActivator, CellActivator | null>({ combine: (v) => v[0] ?? null });
+
+/** 셀 편집기가 들어 있는 칸과 그 편집기의 손잡이. */
+export interface CellHandle {
+  /** 표 DOM 을 다시 그렸거나 행이 밀렸다: 셀 편집기를 지금 활성 칸의 요소로 옮긴다(못 찾으면 걷는다). */
+  relocate(table: HTMLTableElement): void;
+  /** 위젯 DOM 이 사라진다: 셀 편집기를 걷는다. */
+  release(): void;
+}
+export const activeCells = new WeakMap<HTMLElement, CellHandle>();
+
 /** 행 하나의 대략 높이(px). 스크롤 위치 추정용이다. */
 const ROW_PX = 32;
 const TOOLBAR_PX = 28;
@@ -44,7 +60,8 @@ function classify(el: HTMLElement, cell: Cell, align: Align): void {
 }
 
 function fillCell(el: HTMLElement, cell: Cell): void {
-  if (drawn.get(el) === cell.text) return;
+  // 셀 편집기가 든 칸은 건드리지 않는다: 그 칸의 DOM 과 편집기가 자기 입력에도 살아 있어야 한글 조합이 깨지지 않는다
+  if (activeCells.has(el) || drawn.get(el) === cell.text) return;
   el.replaceChildren();
   renderInline(cell.text, el);
   drawn.set(el, cell.text);
@@ -115,6 +132,31 @@ function makeToolbar(doc: Document, view: EditorView, wrap: HTMLElement): HTMLEl
   return bar;
 }
 
+/** 셀 편집기를 걷은 칸을 셀 글자로 다시 그린다. 다음 갱신 때는 모델 글자로 한 번 더 맞춘다. */
+export function paintCell(el: HTMLElement, text: string): void {
+  drawn.delete(el);
+  el.replaceChildren();
+  renderInline(text, el);
+}
+
+const activeIn = (root: Element) => {
+  const el = root.querySelector<HTMLElement>('.lno-cell-active');
+  return el ? activeCells.get(el) : undefined;
+};
+
+/** 칸을 누르면(잠기지 않았을 때) 셀 편집기를 띄운다. 셀 편집기가 이미 든 칸은 그 편집기가 다룬다. */
+function listenForCells(wrap: HTMLElement, view: EditorView): void {
+  wrap.addEventListener('mousedown', (e) => {
+    const el = (e.target as Element | null)?.closest?.('th, td') as HTMLTableCellElement | null;
+    if (!el || !wrap.contains(el) || activeCells.has(el)) return;
+    const activate = view.state.facet(cellActivator);
+    if (!activate || view.state.readOnly || !view.state.facet(EditorView.editable)) return;
+    const row = el.parentElement as HTMLTableRowElement;
+    e.preventDefault(); // 바깥 편집기가 포커스를 가져가지 않게
+    activate(view, view.posAtDOM(wrap), row.rowIndex, el.cellIndex, e);
+  });
+}
+
 const toolbarOf = (wrap: HTMLElement) => wrap.querySelector<HTMLElement>(':scope > .lno-table-toolbar');
 
 export class TableWidget extends WidgetType {
@@ -146,6 +188,7 @@ export class TableWidget extends WidgetType {
     };
     wrap.addEventListener('pointerenter', relabel);
     wrap.addEventListener('focusin', relabel);
+    listenForCells(wrap, view);
     this.sync(wrap, view);
     return wrap;
   }
@@ -164,12 +207,16 @@ export class TableWidget extends WidgetType {
 
     const m = this.model;
     const table = wrap.querySelector<HTMLTableElement>(':scope > table.lno-table');
+    const active = table ? activeIn(table) : undefined;
     if (!table || !sameShape(table, m)) {
       const fresh = makeTable(doc, m);
       if (table) table.replaceWith(fresh);
       else wrap.appendChild(fresh);
+      active?.relocate(fresh);
       return;
     }
+    // 위에 행이 들어오는 등으로 활성 칸이 옮겨 갔으면 편집기를 먼저 옮긴다: 비운 칸은 아래에서 다시 그린다
+    active?.relocate(table);
     rows(m).forEach((row, r) =>
       row.cells.forEach((cell, c) => {
         const el = table.rows[r].cells[c];
@@ -181,6 +228,10 @@ export class TableWidget extends WidgetType {
 
   get estimatedHeight(): number {
     return (this.model.body.length + 1) * ROW_PX + (this.canEdit ? TOOLBAR_PX : 0);
+  }
+
+  destroy(dom: HTMLElement): void {
+    activeIn(dom)?.release();
   }
 
   /** 위젯 안의 사건은 모두 위젯이 다룬다: CodeMirror 는 셀과 도구 막대의 클릭·키를 보지 않는다. */
