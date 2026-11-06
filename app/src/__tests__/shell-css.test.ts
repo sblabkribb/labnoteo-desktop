@@ -47,4 +47,22 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.sidebar')!.body).toMatch(/overflow-y:\s*auto/);
     expect(ruleFor('.content')!.body).toMatch(/overflow:\s*auto/);
   });
+
+  it('주된 동작 단추는 상단 바 hover 규칙에서 빠진다 (hover 에 --accent-text 글자가 --bg-hover 위에 놓이지 않게)', () => {
+    expect(ruleFor('.topbar button:hover:not(:disabled)')).toBeNull();
+    expect(ruleFor('.topbar button:not(.primary):hover:not(:disabled)')).not.toBeNull();
+  });
+
+  it('열린 줄의 색조는 :has() 없이도 걸리고, 열린 줄도 hover 에 반응한다', () => {
+    expect(ruleFor('.sidebar nav li > button[aria-current="true"]')!.body).toMatch(/background:\s*var\(--bg-selected\)/);
+    const hover = ruleFor('.sidebar nav li > button[aria-current="true"]:hover:not(:disabled)');
+    expect(hover!.body).toMatch(/background:\s*var\(--bg-selection\)/);
+    expect(hover!.selectors).toContain('.sidebar nav li:has(> button[aria-current="true"]):hover');
+  });
+
+  it('접기 표시는 대체 텍스트 문법을 못 읽어도 남는다 (content 선언이 둘)', () => {
+    const open = ruleFor('.sidebar nav li > button[aria-expanded]::before')!.body;
+    expect(open).toMatch(/content:\s*"▾";/);
+    expect(open).toMatch(/content:\s*"▾" \/ "";/);
+  });
 });

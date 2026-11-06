@@ -52,6 +52,14 @@ describe('노트 트리', () => {
     expect(screen.getByText('top.md').closest('[aria-current]')).toBeNull();
   });
 
+  it('열린 노트의 줄은 app.css 의 강조 막대 선택자와 맞는다: 열린 줄 하나만 걸린다', () => {
+    // app.css 는 li:has(> button[aria-current="true"]) 에 막대를 그린다. 마크업이 바뀌어 이 선택자가 빗나가면 단서가 조용히 사라진다.
+    const { container } = render(<NoteTree entries={entries} selected="labnote/001/02.md" onSelect={() => {}} />);
+    const rows = container.querySelectorAll('li:has(> button[aria-current="true"])');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toBe('02.md');
+  });
+
   it('노트가 없으면 빈 상태 문구를 보여준다', () => {
     render(<NoteTree entries={[]} onSelect={() => {}} />);
     expect(screen.getByText('노트가 없습니다')).toBeTruthy();

@@ -25,7 +25,8 @@ function apply(theme: Theme) {
 
 export function useTheme(): { theme: Theme; setTheme: (theme: Theme) => void } {
   const [theme, set] = useState<Theme>(load);
-  // 첫 그림 전에 적용해 라이트가 번쩍이지 않게 한다.
+  // 첫 그림 전에 적용한다. 그래도 수동 선택은 React 가 뜬 뒤에야 적용되므로 시스템 테마가 한 프레임 보일 수 있다:
+  // CSP(script-src 'self')가 index.html 의 인라인 스크립트를 막아 흔한 해법을 쓸 수 없다. 감수한 비용이다.
   useLayoutEffect(() => apply(theme), [theme]);
   const setTheme = (next: Theme) => {
     set(next);

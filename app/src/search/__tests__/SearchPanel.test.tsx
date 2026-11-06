@@ -49,11 +49,6 @@ describe('검색 패널', () => {
     expect(calls.every((c) => String(c?.query).trim() !== '')).toBe(true);
   });
 
-  it('색인을 만드는 중이면 그렇다고 알려 준다', () => {
-    render(<SearchPanel invoke={fake([]).invoke} onOpen={() => {}} indexing />);
-    expect(screen.getByText('색인을 만드는 중입니다')).toBeTruthy();
-  });
-
   it('검색이 실패하면 오류 문구를 보인다', async () => {
     const user = userEvent.setup();
     const invoke = (async () => {
@@ -77,12 +72,5 @@ describe('검색 패널', () => {
     await user.type(screen.getByRole('searchbox'), '실험');
     await screen.findByRole('button', { name: /형질전환 실험/ });
     expect(screen.queryByText(/개 이상 일치/)).toBeNull();
-  });
-
-  it('색인하지 못한 노트가 있으면 그 수를 알린다', () => {
-    const { rerender } = render(<SearchPanel invoke={fake([]).invoke} onOpen={() => {}} skipped={2} />);
-    expect(screen.getByRole('status').textContent).toContain('2개');
-    rerender(<SearchPanel invoke={fake([]).invoke} onOpen={() => {}} skipped={0} />);
-    expect(screen.queryByRole('status')).toBeNull();
   });
 });

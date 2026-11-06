@@ -95,4 +95,40 @@ describe('앱', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 1, name: 'labnoteO' })).toBeTruthy();
   });
+  it('색인하는 동안 상태줄이 알리고, 끝난 뒤 건너뛴 노트 수를 role=status 로 알린다', async () => {
+    let finish!: (v: { indexed: number; skipped: number }) => void;
+    const pending = new Promise<{ indexed: number; skipped: number }>((r) => (finish = r));
+    tauri.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'vault_current') return vaults.first;
+      if (cmd === 'vault_tree') return [];
+      if (cmd === 'index_rebuild') return pending;
+      if (cmd === 'app_version') return '0.0.0';
+      throw new Error(`unexpected ${cmd}`);
+    });
+    render(<App />);
+    await screen.findByText('보관함: wrong');
+    const bar = screen.getByRole('contentinfo');
+    expect(within(bar).getByText('색인을 만드는 중입니다')).toBeTruthy();
+    expect(within(bar).queryByRole('status')).toBeNull();
+
+    finish({ indexed: 3, skipped: 2 });
+    await waitFor(() => expect(within(bar).queryByText('색인을 만드는 중입니다')).toBeNull());
+    expect(within(bar).getByRole('status').textContent).toContain('2개');
+  });
+  it('색인에서 건너뛴 노트가 없으면 상태줄에 status 가 없다', async () => {
+    render(<App />); // 기본 모의: skipped 0
+    await screen.findByText('보관함: wrong');
+    await waitFor(() => expect(screen.queryByText('색인을 만드는 중입니다')).toBeNull());
+    expect(within(screen.getByRole('contentinfo')).queryByRole('status')).toBeNull();
+  });
+  it('보관함을 고르는 첫 화면에서도 테마를 바꿀 수 있다', async () => {
+    tauri.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'vault_current') return null;
+      if (cmd === 'app_version') return '0.0.0';
+      throw new Error(`unexpected ${cmd}`);
+    });
+    render(<App />);
+    await screen.findByText('노트를 둘 곳을 정하세요');
+    expect(within(screen.getByRole('main')).getByRole('combobox', { name: '테마' })).toBeTruthy();
+  });
 });

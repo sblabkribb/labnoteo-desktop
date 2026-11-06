@@ -103,7 +103,10 @@ export function App() {
   }
   return (
     <main className="standalone">
-      <h1>{t('app.title')}</h1>
+      <div className="standalone-head">
+        <h1>{t('app.title')}</h1>
+        <ThemeToggle theme={theme} onChange={setTheme} />
+      </div>
       {state.status === 'loading' && <p>{t('vault.loading')}</p>}
       {state.status === 'picker' && <FirstRun error={state.error} onOpen={open} onCreate={create} />}
     </main>

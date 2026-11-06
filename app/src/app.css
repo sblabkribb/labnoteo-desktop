@@ -210,7 +210,7 @@ input, select, textarea {
 .topbar h1 { margin: 0; font-size: 1rem; }
 .topbar p { margin: 0; }
 .topbar button, .topbar select { background: var(--bg); }
-.topbar button:hover:not(:disabled) { background: var(--bg-hover); }
+.topbar button:not(.primary):hover:not(:disabled) { background: var(--bg-hover); }
 .topbar button.primary { background: var(--accent); }
 .vault-name {
   flex: 1 1 8rem;
@@ -296,12 +296,16 @@ input, select, textarea {
 
 /* 접기 표시: 장식이라 접근 가능한 이름에는 들어가지 않는다 ("/ ''" 대체 텍스트) */
 .sidebar nav li > button[aria-expanded]::before {
+  content: "▾";
   content: "▾" / "";
   display: inline-block;
   width: 1.1em;
   color: var(--text-muted);
 }
-.sidebar nav li > button[aria-expanded="false"]::before { content: "▸" / ""; }
+.sidebar nav li > button[aria-expanded="false"]::before {
+  content: "▸";
+  content: "▸" / "";
+}
 
 /* 깊은 트리는 8단계까지만 들여쓴다. 그보다 깊은 줄은 같은 들여쓰기로 이어지고, 이름이 들여쓰기에 밀려 안 보이지 않는다.
    (data-depth 규칙 자체는 24단계까지 두고, 사이드바 안에서만 상한을 둔다.) */
@@ -325,11 +329,16 @@ input, select, textarea {
 }
 
 /* 지금 열린 노트: 색이 아니라 모양으로 알린다 — 왼쪽 끝 3px 강조 막대.
-   배경 색조(--bg-selected)는 배경과 1.56:1 이라 상태 표시로는 모자라고, 막대가 3:1 을 채운다. */
+   배경 색조(--bg-selected)는 배경과 1.56:1 이라 상태 표시로는 모자라고, 막대가 3:1 을 채운다.
+   색조는 :has() 에 기대지 않는 규칙에도 둔다: :has() 를 못 읽는 환경에서도 색조는 남는다. */
+.sidebar nav li > button[aria-current="true"] { background: var(--bg-selected); }
 .sidebar nav li:has(> button[aria-current="true"]) {
   background: var(--bg-selected);
   box-shadow: inset 3px 0 0 var(--accent);
 }
+/* 열린 줄도 커서에 반응한다. 일반 줄의 hover 보다 구체적이어야 이긴다. */
+.sidebar nav li:has(> button[aria-current="true"]):hover,
+.sidebar nav li > button[aria-current="true"]:hover:not(:disabled) { background: var(--bg-selection); }
 
 .content {
   grid-area: main;
@@ -365,6 +374,8 @@ input, select, textarea {
 .status-version { margin-left: auto; }
 
 /* 보관함 선택·불러오는 중 화면 */
+.standalone-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
+.standalone-head h1 { margin: 0; }
 .standalone { max-width: 48rem; margin: 0 auto; padding: var(--space-6) var(--space-5); }
 
 /* 좁은 창: 사이드바를 본문 위로 쌓는다 */

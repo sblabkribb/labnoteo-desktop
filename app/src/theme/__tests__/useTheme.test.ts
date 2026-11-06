@@ -28,6 +28,10 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('useTheme', () => {
+  it('저장 키는 바뀌지 않는다: 바꾸면 모든 사용자의 저장된 선택이 버려진다', () => {
+    expect(THEME_KEY).toBe('labnoteo.theme');
+  });
+
   it('선택한 테마를 html data-theme 에 반영한다', () => {
     const { result } = renderHook(() => useTheme());
     act(() => result.current.setTheme('dark'));
