@@ -18,7 +18,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }));
  * - 상속은 보지 않는다: 요소 자신에게 선언돼 이겨야 하는 속성을 묻는 용도다. 맞는 규칙이 없으면 undefined.
  * - @media 등 @-규칙 안의 규칙이 이 요소에 맞고 묻는 속성을 선언하면 던진다: 조건부 값을 무조건 값으로 셈하지 않고, 답할 수 없다고 말한다.
  *   (@-규칙 안 규칙이 맞더라도 다른 속성만 선언하면 상관없다.)
- * - 맞는 선언에 !important 가 있으면 던진다: 이 계단식은 중요도 단계를 모른다.
+ * - 맞는 규칙의 그 속성 선언 중 하나라도 !important 면 던진다(순서와 상관없이): 이 계단식은 중요도 단계를 모른다.
  * - :hover 같은 상태는 jsdom 에서 맞지 않고, jsdom 이 못 읽는 선택자(:has 등)는 맞지 않은 것으로 친다.
  * - 한 규칙 안에 같은 속성이 두 번이면 뒤의 것이 이긴다. 단축 속성과 하위 속성(background 와 background-color)은 서로 다른 속성으로 본다.
  */
@@ -39,7 +39,7 @@ function winning(el: Element, prop: string, rules: Rule[] = APP_RULES): string |
       }
       if (!hit) continue;
       if (r.atRule) throw new Error(`${r.atRule} 안의 규칙이 맞는다: ${sel} { ${prop} } — 이 계단식은 조건부 값을 답하지 않는다`);
-      if (decl.important) throw new Error(`!important 선언이 맞는다: ${sel} { ${prop} } — 이 계단식은 중요도를 모른다`);
+      if (decls.some((d) => d.important)) throw new Error(`!important 선언이 맞는다: ${sel} { ${prop} } — 이 계단식은 중요도를 모른다`);
       const spec = specificity(sel);
       if (!best || compareSpecificity(spec, best.spec) >= 0) best = { spec, value: decl.value };
     }
@@ -89,9 +89,19 @@ describe('계단식 자기 점검', () => {
     expect(winning(p, 'color', parseRules('p { color: var(--a); } @media (max-width: 640px) { .shell { color: var(--b); } }'))).toBe('var(--a)');
   });
 
+  it('중첩된 CSS(규칙 안의 규칙)는 조용히 잘못 읽지 않고 던진다', () => {
+    expect(() => parseRules('.a { color: var(--x); .b { color: var(--y); } }')).toThrow(/중첩/);
+    expect(() => parseRules('.a { &:hover { color: var(--y); } }')).toThrow(/중첩/);
+    // @-규칙 안의 규칙과 @keyframes 의 단계는 중첩이 아니다
+    expect(parseRules('@media (x) { .a { color: var(--x); } } @keyframes k { 50% { opacity: 0; } }').map((r) => r.atRule)).toEqual(['@media (x)', '@keyframes k']);
+  });
+
   it('!important 선언이 맞으면 던진다', () => {
     document.body.innerHTML = '<p>x</p>';
     expect(() => winning(document.querySelector('p')!, 'color', parseRules('p { color: var(--a) !important; }'))).toThrow(/important/);
+    // 같은 규칙 안에서 !important 선언 뒤에 보통 선언이 와도(뒤의 것만 보면 놓친다) 던진다: 실제로는 !important 쪽이 이긴다
+    expect(() => winning(document.querySelector('p')!, 'color', parseRules('p { color: var(--a) !important; color: var(--b); }'))).toThrow(/important/);
+    expect(() => winning(document.querySelector('p')!, 'color', parseRules('p { color: var(--b); color: var(--a) !important; }'))).toThrow(/important/);
   });
 
   it('app.css 의 @media 안 규칙을 @-규칙 안의 것으로 읽는다 (예전 정규식은 머리를 못 잡아 무조건 규칙으로 셌다)', () => {

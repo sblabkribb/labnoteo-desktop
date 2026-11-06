@@ -1,7 +1,8 @@
 /**
  * 테스트가 함께 쓰는 작은 CSS 도구: 규칙 나누기, 선언 나누기, 특이도, 날것의 색 찾기.
- * 브라우저의 CSS 파서가 아니다. app.css 와 CodeMirror 가 그림자 루트에 넣는 스타일 정도를 읽으려고 만들었고,
- * 모르는 모양을 만나면 조용히 넘기지 않고 던진다.
+ * 브라우저의 CSS 파서가 아니다. app.css 와 CodeMirror 가 그림자 루트에 넣는 스타일 정도를 읽으려고 만들었다.
+ * 던지는 경우는 이것뿐이다: 중괄호 짝이 안 맞을 때, 스타일 규칙 안에 블록이 또 있을 때(CSS 중첩 — 읽을 줄 모른다),
+ * 콜론 없는 선언. 그 밖의 낯선 모양(이상한 선택자, 모르는 @-규칙)은 그대로 문자열로 돌려줄 뿐 검사하지 않는다.
  */
 
 /** CSS Color 4 의 이름 있는 색 전부와 시스템 색. `transparent`·`currentColor` 는 일부러 뺐다(토큰을 따르는 값). */
@@ -90,6 +91,9 @@ export function parseRules(source: string): Rule[] {
     }
     if (ch === '"' || ch === "'") quote = ch;
     else if (ch === '{') {
+      const parent = stack[stack.length - 1];
+      if (parent !== undefined && !parent.startsWith('@'))
+        throw new Error(`중첩된 규칙은 읽지 못한다: ${parent} { ${css.slice(start, i).trim()} { … } }`);
       stack.push(css.slice(start, i).trim());
       start = i + 1;
     } else if (ch === '}') {
