@@ -244,7 +244,7 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// The temp lives in the same directory so the rename never crosses volumes.
 /// Its name ends in `.labnote-tmp`, never `.labnote.md`, so a leftover after a
 /// crash can not be mistaken for a note.
-fn write_atomic(abs: &Path, content: &str) -> Result<(), FsError> {
+pub(crate) fn write_atomic(abs: &Path, content: &str) -> Result<(), FsError> {
     let parent = abs.parent().ok_or(VaultError::Escape)?;
     std::fs::create_dir_all(parent)?;
     let name = abs.file_name().ok_or(VaultError::Escape)?.to_string_lossy();

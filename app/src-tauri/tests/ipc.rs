@@ -20,7 +20,7 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INV
 use tauri::webview::InvokeRequest;
 use tauri::WebviewWindowBuilder;
 use labnoteo_app_lib::index::IndexState;
-use labnoteo_app_lib::vault::{SettingsFile, VaultState};
+use labnoteo_app_lib::vault::{LinkJournalDir, SettingsFile, VaultState};
 
 const ARGS: &str = include_str!("ipc-args.json");
 const ERRORS: &str = include_str!("ipc-errors.json");
@@ -37,6 +37,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(VaultState::default())
         .manage(SettingsFile(dir.join("config").join("settings.json")))
         .manage(IndexState::new(dir.join("data").join("index")))
+        .manage(LinkJournalDir(dir.join("data").join("link-journal")))
         .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -76,6 +77,7 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(call("vault_exists", args("vault_exists", vec![json!("a.md")])).unwrap_err()["kind"], "noVault");
     assert_eq!(call("vault_tree", args("vault_tree", vec![])).unwrap_err()["kind"], "noVault");
     assert_eq!(ok("vault_current", args("vault_current", vec![])), Value::Null);
+    assert_eq!(call("link_journal_read", args("link_journal_read", vec![])).unwrap_err()["kind"], "noVault");
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -98,6 +100,20 @@ fn ipc_argument_names_match_the_typescript_side() {
         "io"
     );
     assert!(dir.join("config").join("vaults").is_dir());
+
+    // The link journal: kept in the app data dir, never in the vault.
+    assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);
+    ok("link_journal_write_header", args("link_journal_write_header", vec![json!("H")]));
+    ok("link_journal_write_note", args("link_journal_write_note", vec![json!(1), json!("B")]));
+    ok("link_journal_write_note", args("link_journal_write_note", vec![json!(0), json!("A")]));
+    assert_eq!(
+        ok("link_journal_read", args("link_journal_read", vec![])),
+        json!({"header": "H", "notes": ["A", "B"]})
+    );
+    assert!(dir.join("data").join("link-journal").is_dir());
+    assert_eq!(std::fs::read_dir(dir.join("vault")).unwrap().count(), 0, "nothing lands in the vault");
+    ok("link_journal_clear", args("link_journal_clear", vec![]));
+    assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);
 
     // A new vault: one folder is made next to the first one, opened and remembered.
     let fresh = dir.join("fresh").to_string_lossy().into_owned();

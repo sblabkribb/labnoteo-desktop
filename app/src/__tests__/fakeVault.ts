@@ -46,6 +46,8 @@ export interface FakeVault {
   settings: string | null;
   /** `settings_import_plugin` 이 돌려줄 data.json. */
   pluginData: string | null;
+  /** 링크 고침 기록(`link_journal_*`). 보관함 밖에 있으므로 `files()` 에는 나오지 않는다. */
+  journal: { header: string | null; notes: Map<number, string> };
 }
 
 const fail = (kind: string, message: string) => ({ kind, message });
@@ -105,6 +107,7 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
     recycleBin,
     settings: null,
     pluginData: null,
+    journal: { header: null, notes: new Map() },
     failNext(cmd, kind) {
       failures.set(cmd, [...(failures.get(cmd) ?? []), kind]);
     },
@@ -260,6 +263,22 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
           return undefined;
         case 'settings_import_plugin':
           return fake.pluginData;
+        case 'link_journal_read': {
+          // Rust 처럼 header.json 이 없으면 null, 기록은 n 오름차순.
+          const j = fake.journal;
+          if (j.header === null) return null;
+          return { header: j.header, notes: [...j.notes.entries()].sort(([x], [y]) => x - y).map(([, c]) => c) };
+        }
+        case 'link_journal_write_header':
+          fake.journal.header = args.content as string;
+          return undefined;
+        case 'link_journal_write_note':
+          fake.journal.notes.set(Number(args.n), args.content as string);
+          return undefined;
+        case 'link_journal_clear':
+          fake.journal.header = null;
+          fake.journal.notes.clear();
+          return undefined;
         default:
           throw new Error(`fakeVault: unexpected command ${cmd}`);
       }

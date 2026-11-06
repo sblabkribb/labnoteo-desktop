@@ -42,6 +42,10 @@ macro_rules! register_commands {
             $crate::index::index_remove,
             $crate::index::search,
             $crate::index::index_bodies,
+            $crate::vault::journal::link_journal_read,
+            $crate::vault::journal::link_journal_write_header,
+            $crate::vault::journal::link_journal_write_note,
+            $crate::vault::journal::link_journal_clear,
         ])
     };
 }
@@ -80,6 +84,8 @@ pub fn run() {
                 .app_local_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("kr.sblab.labnoteo"));
             app.manage(index::IndexState::new(data.join("index")));
+            // The link-update journal (rename recovery and undo), also outside every vault.
+            app.manage(vault::LinkJournalDir(data.join("link-journal")));
             // Watches the open vault for changes made outside the app; started
             // by `vault_open` / `vault_current`, moved when the vault changes.
             app.manage(vault::watcher::WatcherState::new(vault::watcher::app_starter(app.handle().clone())));

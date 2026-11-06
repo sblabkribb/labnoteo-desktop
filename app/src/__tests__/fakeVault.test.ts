@@ -78,4 +78,15 @@ describe('fakeVault', () => {
     expect(await v.invoke('index_bodies', { after: 'b.md', limit: 2 })).toEqual({ items: [{ path: 'c/d.md', body: '[[x]]' }], next: null });
     expect(await v.invoke('vault_list_images', {})).toEqual(['img/p.png']);
   });
+  it('keeps a link journal outside the files', async () => {
+    const v = createFakeVault({ 'a.md': '' });
+    await v.invoke('link_journal_write_header', { content: 'H' });
+    await v.invoke('link_journal_write_note', { n: 1, content: 'B' });
+    await v.invoke('link_journal_write_note', { n: 0, content: 'A' });
+    expect(await v.invoke('link_journal_read', {})).toEqual({ header: 'H', notes: ['A', 'B'] });
+    expect(Object.keys(v.files())).toEqual(['a.md']);
+    await v.invoke('link_journal_clear', {});
+    expect(await v.invoke('link_journal_read', {})).toBeNull();
+    expect(v.journal.header).toBeNull();
+  });
 });

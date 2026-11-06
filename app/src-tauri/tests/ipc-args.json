@@ -24,5 +24,9 @@
   "index_upsert": ["path"],
   "index_remove": ["path"],
   "search": ["query", "limit"],
-  "index_bodies": ["after", "limit"]
+  "index_bodies": ["after", "limit"],
+  "link_journal_read": [],
+  "link_journal_write_header": ["content"],
+  "link_journal_write_note": ["n", "content"],
+  "link_journal_clear": []
 }

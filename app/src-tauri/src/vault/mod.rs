@@ -1,4 +1,5 @@
 pub mod fs;
+pub mod journal;
 pub mod path;
 pub mod settings;
 pub mod tree;
@@ -43,6 +44,10 @@ pub struct VaultInfo {
 /// (`%APPDATA%\kr.sblab.labnoteo`), resolved once at startup and managed so
 /// tests can point it elsewhere.
 pub struct SettingsFile(pub PathBuf);
+
+/// The folder that holds every vault's link-update journal
+/// (`app_local_data_dir/link-journal`), managed so tests can point it elsewhere.
+pub struct LinkJournalDir(pub PathBuf);
 
 fn info_for(root: &Path) -> VaultInfo {
     let shown = path::strip_verbatim(root);
