@@ -123,7 +123,7 @@ describe('영어 화면', () => {
     const side = screen.getByRole('complementary', { name: 'Sidebar' });
     expect(within(side).getByRole('searchbox', { name: 'Search notes' })).toBeTruthy();
     expect(await within(side).findByRole('navigation', { name: 'Notes' })).toBeTruthy();
-    expect(within(screen.getByRole('main')).getByText('Select a note on the left to edit it here.')).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText("Pick a note on the left, or start with 'New experiment' in the Workflows tab or Ctrl+P.")).toBeTruthy();
     expect(within(screen.getByRole('contentinfo')).getByText('Version 0.0.0')).toBeTruthy();
     // 한국어가 한 글자도 남지 않았다: 글자와 이름(placeholder, aria-label, title, alt) 모두.
     // 언어 이름 선택지(한국어)만은 일부러 자기 언어로 적는다.

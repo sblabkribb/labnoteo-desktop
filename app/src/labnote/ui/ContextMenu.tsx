@@ -103,7 +103,17 @@ export function ContextMenu() {
   };
 
   return (
-    <div ref={ref} role="menu" aria-label={t('menu.label')} tabIndex={-1} className="context-menu" onKeyDown={onKeyDown} onBlur={onBlur}>
+    <div
+      ref={ref}
+      role="menu"
+      aria-label={t('menu.label')}
+      tabIndex={-1}
+      className="context-menu"
+      onKeyDown={onKeyDown}
+      onBlur={onBlur}
+      // 키보드로 연 뒤 메뉴 키를 뗄 때 메뉴 위에 오는 사건: 브라우저 기본 메뉴를 띄우지 않는다
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {menu.items.map((item, i) => (
         <button
           key={i}

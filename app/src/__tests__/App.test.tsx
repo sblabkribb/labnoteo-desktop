@@ -63,13 +63,13 @@ describe('앱', () => {
     });
     render(<App />);
     await screen.findByText('보관함: wrong');
-    expect(screen.getByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeTruthy();
+    expect(screen.getByText("왼쪽에서 노트를 고르거나, 워크플로 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '새 노트' }));
     await user.type(screen.getByRole('textbox', { name: '노트 이름' }), 'Day 1{Enter}');
 
     await waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('vault_read', { path: 'Day 1.labnote.md' }));
-    expect(screen.queryByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeNull();
+    expect(screen.queryByText("왼쪽에서 노트를 고르거나, 워크플로 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeNull();
     expect(screen.queryByRole('textbox', { name: '노트 이름' })).toBeNull();
   });
   it('레이아웃 영역이 역할로 드러난다: 상단 바, 사이드바, 본문, 상태줄', async () => {
@@ -84,7 +84,10 @@ describe('앱', () => {
     expect(within(side).getByRole('searchbox', { name: '노트 검색' })).toBeTruthy();
     expect(within(side).getByText('노트가 없습니다')).toBeTruthy();
     expect(screen.getAllByRole('main')).toHaveLength(1); // main 안에 main 을 중첩하지 않는다
-    expect(within(screen.getByRole('main')).getByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText("왼쪽에서 노트를 고르거나, 워크플로 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
+    // the empty state mentions Ctrl+P; 새 노트 단추는 일반 노트를 만든다고 알리고 실험은 '새 실험'으로 안내한다
+    expect(within(screen.getByRole('main')).getByText(/Ctrl\+P/)).toBeTruthy();
+    expect(within(banner).getByRole('button', { name: '새 노트' }).getAttribute('title')).toMatch(/일반 노트.*새 실험/);
     expect(within(screen.getByRole('contentinfo')).getByText(/0\.0\.0/)).toBeTruthy();
   });
   it('보관함을 고르는 화면에도 main 이 하나 있다', async () => {

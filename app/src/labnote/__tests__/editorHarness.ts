@@ -1,4 +1,4 @@
-import { createElement, createRef } from 'react';
+import { createElement, createRef, type ReactNode } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { Editor, type EditorHandle } from '../../editor/Editor';
@@ -16,7 +16,12 @@ document.execCommand ??= () => false;
 export function mountEditor(
   vault: FakeVault,
   path: string,
-  extra: { initialReveal?: { line: number; ch?: number }; autosaveMs?: number } = {},
+  extra: {
+    initialReveal?: { line: number; ch?: number };
+    autosaveMs?: number;
+    onContextMenu?: (e: MouseEvent, view: EditorView) => void;
+    headerActions?: (busy: boolean) => ReactNode;
+  } = {},
 ) {
   const ref = createRef<EditorHandle>();
   const utils = render(
@@ -29,6 +34,8 @@ export function mountEditor(
       maxAutosaveMs: 600_000,
       windowApi: vault.window,
       initialReveal: extra.initialReveal,
+      onContextMenu: extra.onContextMenu,
+      headerActions: extra.headerActions,
     }),
   );
   const view = () => {

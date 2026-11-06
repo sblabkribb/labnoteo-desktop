@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -51,6 +51,14 @@ interface Props {
   windowApi?: WindowApi;
   /** 처음 읽은 뒤 한 번 커서를 둘 곳(0부터 센 줄). */
   initialReveal?: { line: number; ch?: number };
+  /**
+   * 본문의 오른쪽 클릭(키보드의 메뉴 키 포함). 표 칸 안의 사건은 오지 않는다(표가 자기 메뉴를 띄운다).
+   * 부르기 전에 누른 자리로 커서를 옮긴다. 다만 선택 안을 눌렀으면 선택을 그대로 둔다.
+   * 메뉴를 띄우면 `e.preventDefault()` 로 기본 메뉴를 막는다.
+   */
+  onContextMenu?: (e: MouseEvent, view: EditorView) => void;
+  /** 머리의 "표 넣기" 옆에 그릴 단추들. 인자는 편집기가 바쁜지(읽는 중, 대화상자, 풀리지 않은 바깥 변경). */
+  headerActions?: (busy: boolean) => ReactNode;
 }
 
 export interface WindowApi {
@@ -78,6 +86,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     maxAutosaveMs = MAX_AUTOSAVE_MS,
     windowApi,
     initialReveal,
+    onContextMenu,
+    headerActions,
   },
   ref,
 ) {
@@ -104,8 +114,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -340,6 +350,22 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       highlightSpecialChars(),
       EditorView.lineWrapping,
       label.current.of(labelAttrs()),
+      // 본문의 오른쪽 클릭 → 앱 메뉴. 표 위젯은 ignoreEvent 가 true 라 여기로 오지 않는다. 그래도 표 틀 안의 사건은
+      // 한 번 더 걸러 낸다(표 메뉴만 뜨게).
+      EditorView.domEventHandlers({
+        contextmenu: (e, view) => {
+          const handler = latest.current.onContextMenu;
+          if (!handler) return false;
+          if (e.composedPath().some((n) => n instanceof Element && n.classList.contains('lno-table-wrap'))) return false;
+          // 키보드로 연 메뉴는 좌표가 (0, 0) 이다: 커서를 그대로 둔다
+          const fromKeyboard = e.clientX === 0 && e.clientY === 0;
+          const at = fromKeyboard ? null : view.posAtCoords({ x: e.clientX, y: e.clientY });
+          const sel = view.state.selection.main;
+          if (at !== null && (sel.empty || at < sel.from || at > sel.to)) view.dispatch({ selection: { anchor: at } });
+          handler(e, view);
+          return e.defaultPrevented;
+        },
+      }),
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
@@ -446,6 +472,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const gone = external?.kind === 'gone';
   // 편집기가 잠긴 동안(읽기 전, 대화상자가 열린 동안)에는 표 넣기 단추도 꺼진다
   const editLocked = status !== 'ready' || dialogOpen;
+  // 명령 단추는 바깥 변경이 풀리지 않은 동안에도 쉰다("그대로 두기" 뒤 포함): 명령은 그 노트를 고치지 않는다(NoteBusyError)
+  const commandsBusy = editLocked || external !== null;
   return (
     <section aria-label={t('editor.label')}>
       <p>
@@ -461,6 +489,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         >
           {t('table.insert')}
         </button>
+        {headerActions?.(commandsBusy)}
       </p>
       {status === 'loading' && <p>{t('editor.loading')}</p>}
       {status === 'error' && <p role="alert">{t('editor.loadError')}</p>}

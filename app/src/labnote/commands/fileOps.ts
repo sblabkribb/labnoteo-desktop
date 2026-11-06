@@ -11,6 +11,7 @@ import { removeWorkflowFromReadme } from '@labnoteo/core/lib/workflowDelete';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { ERROR_KINDS, hasErrorKind } from '../../fs/errorKinds';
 import { t } from '../../i18n/t';
+import { NOTE_EXT } from '../../tree/createNote';
 import type { TreeEntry } from '../../tree/useTree';
 import { processNote } from '../openNotes';
 import { README } from '../paths';
@@ -71,6 +72,56 @@ function stemOf(input: string, ext: string): string {
 
 /** Rust confine 의 거절(Windows 금지 이름, 이탈, .obsidian)인가. */
 const refusedName = (e: unknown) => hasErrorKind(e, ERROR_KINDS.escape) || hasErrorKind(e, ERROR_KINDS.forbidden);
+
+/** 사용자가 쓴 노트 이름의 몸통(앞뒤 공백과 `.labnote.md`/`.md` 를 뗀 것). 새 노트는 늘 NOTE_EXT 다. */
+const noteStem = (input: string) => input.trim().replace(/\.labnote\.md$/i, '').replace(/\.md$/i, '');
+
+/** 쓰는 순간 그 경로에 이미 내용이 있었다(확인과 쓰기 사이에 생겼다). */
+class NoteExistsError extends Error {}
+
+/**
+ * 파일 트리 메뉴의 "여기에 새 노트": `dir` 안에 빈 `.labnote.md` 를 만들고 연다. 만든 경로를 돌려준다.
+ * NewNote 와 같은 규칙이다. 같은 이름은 먼저 확인하고, 쓰기는 빈 내용을 기대값으로 하는 modify 라서
+ * 그사이 내용이 있는 노트가 생겨도 덮어쓰지 않는다.
+ */
+export async function newNoteIn(ctx: CommandContext, dir: string): Promise<string | undefined> {
+  const { host } = ctx;
+  const input = await host.prompt({
+    title: t('menu.newNoteHere'),
+    prompt: t('newNote.label'),
+    validate: (v) => nameProblem(noteStem(v)),
+  });
+  if (input === undefined) return undefined;
+  const stem = noteStem(input);
+  const problem = nameProblem(stem);
+  if (problem) {
+    host.notify('warn', problem);
+    return undefined;
+  }
+  const path = joinPath(dir, stem + NOTE_EXT);
+  if (await host.fs.exists(path)) {
+    host.notify('warn', t('fileOps.exists'));
+    return undefined;
+  }
+  try {
+    await host.fs.modify(path, (current) => {
+      if (current !== '') throw new NoteExistsError();
+      return '';
+    });
+  } catch (e) {
+    if (e instanceof NoteExistsError) {
+      host.notify('warn', t('fileOps.exists'));
+      return undefined;
+    }
+    if (!refusedName(e)) throw e;
+    host.notify('warn', t('fileOps.name.invalid'));
+    return undefined;
+  }
+  ctx.refresh();
+  warnIfWindowsPathTooLong(host, ctx.vaultRoot, path);
+  await ctx.openFile(path);
+  return path;
+}
 
 /** `parentDir` 안에 새 폴더를 만든다. 만든 경로를 돌려준다(취소하거나 거절하면 undefined). */
 export async function newFolder(ctx: CommandContext, parentDir: string): Promise<string | undefined> {

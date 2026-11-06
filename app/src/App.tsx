@@ -10,6 +10,7 @@ import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { Editor, type EditorHandle } from './editor/Editor';
+import type { EditorView } from '@codemirror/view';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { ThemeToggle } from './theme/ThemeToggle';
@@ -30,7 +31,9 @@ import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
 import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
-import { closeMenu } from './labnote/ui/menuStore';
+import { closeMenu, openMenu } from './labnote/ui/menuStore';
+import { EditorActions } from './labnote/ui/EditorActions';
+import { editorMenu, noteTreeMenu } from './labnote/menus';
 import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
 
 type SidebarTab = 'files' | 'workflows';
@@ -156,6 +159,21 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     };
   }, [vault.root]);
   const flush = async () => !editor.current || (await editor.current.flush());
+  // 맥락 메뉴: 항목은 여는 순간 만든다. 명령 맥락이 아직 없으면(설정을 읽는 중) 기본 동작 그대로다.
+  const onTreeMenu = ctx
+    ? (entry: (typeof entries)[number], anchor: { x: number; y: number } | { element: Element }) =>
+        openMenu(ctx, anchor, noteTreeMenu(ctx, entry, entries))
+    : undefined;
+  const onEditorMenu = (e: MouseEvent, view: EditorView) => {
+    const path = notes.activePath();
+    if (!ctx || !path) return;
+    const items = editorMenu(ctx, path);
+    if (items.length === 0) return;
+    e.preventDefault();
+    // 키보드로 연 메뉴(좌표 0, 0)는 커서 자리에 연다
+    const caret = e.clientX === 0 && e.clientY === 0 ? view.coordsAtPos(view.state.selection.main.head) : null;
+    openMenu(ctx, caret ? { x: caret.left, y: caret.bottom } : { x: e.clientX, y: e.clientY }, items);
+  };
   return (
     <>
       <div className="shell" ref={shell}>
@@ -208,7 +226,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
             <SearchPanel onOpen={openNote} />
             {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
-            {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
+            {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} onContextMenu={onTreeMenu} />}
           </div>
           {tab === 'workflows' && (
             <div role="tabpanel" id="sidebar-panel-workflows" className="sidebar-panel" aria-labelledby="sidebar-tab-workflows">
@@ -218,7 +236,14 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
         </aside>
         <main className="content">
           {selected ? (
-            <Editor key={selected} ref={editor} path={selected} initialReveal={notes.reveal} />
+            <Editor
+              key={selected}
+              ref={editor}
+              path={selected}
+              initialReveal={notes.reveal}
+              onContextMenu={onEditorMenu}
+              headerActions={ctx ? (busy) => <EditorActions ctx={ctx} path={selected} disabled={busy} /> : undefined}
+            />
           ) : (
             <p className="empty-state">{t('editor.empty')}</p>
           )}

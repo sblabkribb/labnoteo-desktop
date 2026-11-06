@@ -173,6 +173,11 @@ export async function registerWorkflowInReadme(
 export async function createWorkflow(ctx: CommandContext, chosen?: WorkflowItem): Promise<void> {
   const labnoteDir = resolveLabnoteDir(ctx.host, ctx.activePath());
   if (!labnoteDir) return;
+  await createWorkflowIn(ctx, labnoteDir, chosen);
+}
+
+/** 그 실험 폴더에 카탈로그 워크플로를 만들고 연다(파일 트리 메뉴: 열린 노트가 아니라 누른 폴더의 실험). */
+export async function createWorkflowIn(ctx: CommandContext, labnoteDir: string, chosen?: WorkflowItem): Promise<void> {
   const item = chosen ?? (await pickWorkflow(ctx));
   if (!item) return;
   const created = await createWorkflowFile(ctx, labnoteDir, item);

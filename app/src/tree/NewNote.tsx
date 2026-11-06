@@ -60,7 +60,7 @@ export function NewNote({ flush, onCreated, invoke = tauriInvoke }: Props) {
 
   if (!open) {
     return (
-      <button type="button" className="primary" onClick={() => setOpen(true)}>
+      <button type="button" className="primary" title={t('newNote.hint')} onClick={() => setOpen(true)}>
         {t('newNote.open')}
       </button>
     );
