@@ -68,7 +68,7 @@ jobs:
           projectPath: app
           tagName: ${{ github.ref_name }}
           releaseName: labnoteO ${{ github.ref_name }}
-          releaseBody: Windows installer (unsigned: SmartScreen will warn on first install).
+          releaseBody: "Windows installer (unsigned: SmartScreen will warn on first install)."
           releaseDraft: false
           includeUpdaterJson: true
           # Updater artifacts need the private key, so only the release build asks for them.
