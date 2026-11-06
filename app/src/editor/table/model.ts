@@ -320,11 +320,17 @@ function endsWithOpenEscape(s: string): boolean {
 }
 
 /**
+ * 줄 머리에 오면 Markdown 블록을 여는 글자: 목록(`- x`, `1. x`), 인용(`>`), ATX 제목(`# x`),
+ * 코드 펜스, HTML. 공백이 뒤따라야 하는 것(`-5`, `#x` 는 아님)은 CommonMark 대로 본다.
+ */
+const BLOCK_START = /^(?:(?:[-+*]|\d{1,9}[.)]|#{1,6})(?:[ \t]|$)|>|```|~~~|<)/;
+
+/**
  * 한 셀의 내용을 바꾼다. 비어 있던 셀은 `| x |` 모양이 되도록 공백을 보탠다.
  * 내용이 홀수 개 백슬래시로 끝나면(`dir\`) 공백 하나를 덧붙여, 바로 뒤의 파이프가 escape 되어
  * 다음 셀과 합쳐지지 않게 한다. 그 공백도 escape 되어 셀 글자 끝에 남는다.
  * 바깥 파이프가 없는 줄에서 첫 셀이나 마지막 셀을 비우면 그 셀이 사라지므로(`a | ` 는 셀 하나),
- * 파이프를 보태 빈 셀로 남긴다.
+ * 파이프를 보태 빈 셀로 남긴다. 같은 줄의 첫 셀에 블록을 여는 글자를 쓰면 앞에 `| ` 를 붙인다.
  */
 function contentChange(row: Row, cell: Cell, text: string, appending: boolean): Change {
   let insert = endsWithOpenEscape(text) ? text + ' ' : text;
@@ -332,9 +338,11 @@ function contentChange(row: Row, cell: Cell, text: string, appending: boolean): 
     if (cell.contentFrom === cell.from) insert = ' ' + insert;
     if (cell.contentTo === cell.to) insert += ' ';
   }
+  const real = realCells(row);
+  const openStart = cell === real[0] && !hasLeadingPipe(row);
+  // 바깥 파이프가 없는 줄은 첫 셀 글자로 시작하므로, 블록을 여는 글자(`> 5`, `- x`)면 Lezer 가 표를 끝낸다.
+  if (openStart && BLOCK_START.test(text)) insert = '| ' + insert;
   if (text === '' && cell.contentFrom !== cell.contentTo) {
-    const real = realCells(row);
-    const openStart = cell === real[0] && !hasLeadingPipe(row);
     const openEnd = cell.to === row.to && !appending; // 덧붙이는 셀이 행을 닫아 준다
     if (openStart && openEnd) insert = '|  |';
     else if (openStart) insert = '| ';

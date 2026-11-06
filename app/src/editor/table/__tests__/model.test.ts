@@ -296,6 +296,10 @@ describe('setCell', () => {
     const out = run(compact, (m) => setCell(m, 1, 0, 'C:\\'));
     expect(out).toBe('|a|b|\n|---|---|\n|C:\\ |y|');
     expect(realTexts(parseTable(out, 0, out.length)!)).toEqual([['a', 'b'], ['C:\\ ', 'y']]);
+    // 덧붙인 공백은 escape 된 공백이라 Lezer 도 셀 글자로 본다. 다시 읽으면 끝에 그 공백이 붙어 있으므로
+    // 셀을 보여 주고 고치는 쪽(Task 3/4)이 escape 된 끝 공백 하나를 떼어야 한다.
+    expect(lezerTable(out)?.cells).toEqual([['a', 'b'], ['C:\\ ', 'y']]);
+    expect(run(out, (m) => setCell(m, 1, 1, 'z'))).toBe('|a|b|\n|---|---|\n|C:\\ |z|');
     // 백슬래시가 짝수 개면 파이프를 escape 하지 않으므로 그대로 쓴다
     expect(run(compact, (m) => setCell(m, 1, 0, 'a\\\\'))).toBe('|a|b|\n|---|---|\n|a\\\\|y|');
   });
@@ -317,6 +321,37 @@ describe('setCell', () => {
     expect(run(doc, (m) => setCell(m, 2, 0, ''))).toBe('a | b\n--- | ---\n1 | 2\n|  |');
     expect(shape(parseTable('a | b\n--- | ---\n1 | |', 0, 21)!)).toEqual([['a', 'b'], ['1', '']]);
   });
+
+  it('opens a pipe-less row before a first cell that would start a block', () => {
+    const doc = 'a | b\n--- | ---\n1 | 2\n3 | 4';
+    const keepsTable = (out: string, want: string[][]) => {
+      expect(lezerTable(out)?.cells, out).toEqual(want);
+      expect(realTexts(parseTable(out, 0, out.length)!)).toEqual(want);
+    };
+    let out = run(doc, (m) => setCell(m, 1, 0, '> 5'));
+    expect(out).toBe('a | b\n--- | ---\n| > 5 | 2\n3 | 4');
+    keepsTable(out, [['a', 'b'], ['> 5', '2'], ['3', '4']]);
+    out = run(doc, (m) => setCell(m, 0, 0, '# x'));
+    expect(out).toBe('| # x | b\n--- | ---\n1 | 2\n3 | 4');
+    keepsTable(out, [['# x', 'b'], ['1', '2'], ['3', '4']]);
+    for (const v of ['- x', '+ y', '* z', '1. x', '2) y', '```', '~~~', '<div>', '-', '#']) {
+      out = run(doc, (m) => setCell(m, 2, 0, v));
+      expect(out, v).toBe(`a | b\n--- | ---\n1 | 2\n| ${v} | 4`);
+      keepsTable(out, [['a', 'b'], ['1', '2'], [v, '4']]);
+    }
+    // 블록을 시작하지 않는 글자는 원문 모양 그대로 둔다
+    expect(run(doc, (m) => setCell(m, 1, 0, '-5'))).toBe('a | b\n--- | ---\n-5 | 2\n3 | 4');
+    expect(run(doc, (m) => setCell(m, 1, 0, '#x'))).toBe('a | b\n--- | ---\n#x | 2\n3 | 4');
+  });
+
+  it('opens a pipe-less row when moving or pasting a block start into the first cell', () => {
+    const out = run('a | - x\n--- | ---\n1 | > 5', (m) => moveColumn(m, 1, -1));
+    expect(out).toBe('| - x | a\n--- | ---\n| > 5 | 1');
+    expect(lezerTable(out)?.cells).toEqual([['- x', 'a'], ['> 5', '1']]);
+    const pasted = run('a | b\n--- | ---\n1 | 2', (m) => pasteRect(m, 1, 0, [['> 9']], '\n'));
+    expect(pasted).toBe('a | b\n--- | ---\n| > 9 | 2');
+    expect(lezerTable(pasted)?.cells).toEqual([['a', 'b'], ['> 9', '2']]);
+  });
 });
 
 describe('row operations', () => {
@@ -325,6 +360,9 @@ describe('row operations', () => {
     expect(run(BASIC, (m) => insertRow(m, 1, '\n'))).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n| 3 | 4 |');
     expect(run(BASIC, (m) => insertRow(m, 2, '\n'))).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n|  |  |');
     expect(run('| a |\r\n| --- |', (m) => insertRow(m, 0, '\r\n'))).toBe('| a |\r\n| --- |\r\n|  |');
+    const crlf = '| a |\r\n| --- |\r\n| 1 |\r\n| 2 |';
+    expect(run(crlf, (m) => insertRow(m, 0, '\r\n'))).toBe('| a |\r\n| --- |\r\n|  |\r\n| 1 |\r\n| 2 |');
+    expect(run(crlf, (m) => insertRow(m, 1, '\r\n'))).toBe('| a |\r\n| --- |\r\n| 1 |\r\n|  |\r\n| 2 |');
     expect(run(BASIC, (m) => insertRow(m, 3, '\n'))).toBe(BASIC); // 범위 밖
   });
 
@@ -568,6 +606,9 @@ function step(e: Entry, doc: string, ref: Ref, op: Op): { doc: string; ref: Ref 
   if (e.lezer) {
     const lz = lezerTable(next);
     expect(lz && [lz.from, lz.to], ctx).toEqual([m2.from, m2.to]);
+    // 셀마다 Lezer 의 TableCell 과도 같아야 한다(빈 셀은 Lezer 가 노드를 만들지 않는다)
+    const ours = rows(m2).map((r) => r.cells.filter((c) => !c.virtual && c.text !== '').map((c) => c.text));
+    expect(lz?.cells, ctx).toEqual(ours);
   }
   return { doc: next, ref: want };
 }
@@ -610,11 +651,12 @@ describe('round-trip over the corpus', () => {
       for (const ch of setCell(m, r, 0, 'zz')) {
         expect(ch.from >= target.from && ch.to <= target.to, e.name).toBe(true);
       }
-      const lines = (d: string) => d.split(/\r?\n/);
+      const lines = (d: string) => d.split('\n');
       const before = lines(doc);
       const after = lines(apply(doc, insertRow(m, 0, e.br)));
       expect(after.length, e.name).toBe(before.length + 1);
-      const at = before.indexOf(doc.slice(m.delimiter.from, m.delimiter.to)) + 1;
+      const delim = doc.slice(m.delimiter.from, m.delimiter.to);
+      const at = before.findIndex((l) => l.replace(/\r$/, '') === delim) + 1;
       expect([...after.slice(0, at), ...after.slice(at + 1)], e.name).toEqual(before);
     }
   });
@@ -632,7 +674,7 @@ describe('property: random operation sequences never lose cell text', () => {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
-  const POOL = ['x', '시료 A', 'a|b', '', '1 mM', '`c|d`', 'l1\nl2', '007', 'a\\|b', '**굵게**', 'C:\\'];
+  const POOL = ['x', '시료 A', 'a|b', '', '1 mM', '`c|d`', 'l1\nl2', '007', 'a\\|b', '**굵게**', 'C:\\', '- x', '> 5', '# h', '1. x', '<div>'];
   const ALIGNS: Align[] = ['left', 'center', 'right', null];
 
   it('holds for 200 seeded sequences', () => {
