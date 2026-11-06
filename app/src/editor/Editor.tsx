@@ -42,6 +42,8 @@ export const MAX_AUTOSAVE_MS = 10_000;
 export const MAX_SAVE_ATTEMPTS = 5;
 /** 마지막 편집 뒤 이만큼 지나 개요(제목 목록)를 다시 낸다. 읽을 때는 곧바로 낸다. */
 export const OUTLINE_MS = 300;
+/** 마지막 편집 뒤 이만큼 지나 버퍼의 링크를 링크 색인에 낸다(저장 안 된 링크도 백링크에 보이게). 읽을 때는 곧바로 낸다. */
+export const LINKS_MS = 300;
 
 export interface EditorHandle {
   /** 다른 노트로 넘어가기 전에 부른다. 잃을 편집이 없으면(저장됐거나 원래 깨끗하면) true. */
@@ -56,6 +58,8 @@ export interface EditorHandle {
   rawText(): string | undefined;
   /** 커서를 그 줄(0부터)과 글자 위치로 옮기고 보이게 한 뒤 초점을 준다. 범위를 넘으면 끝으로 붙인다. */
   reveal(at: { line: number; ch?: number }): void;
+  /** 버퍼를 링크 색인의 덧씌움으로 지금 낸다(LINKS_MS 를 기다리지 않는다). 한글 조합 중에는 하지 않고, 조합이 끝난 뒤의 갱신에서 낸다. */
+  publishLinks(): void;
 }
 
 interface Props {
@@ -151,6 +155,21 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const extensions = useRef<(doc: LoadedDocument | undefined) => Extension[]>(() => []);
   const outlineTimer = useRef<ReturnType<typeof setTimeout>>();
   const cursorFrame = useRef<number>();
+  const linksTimer = useRef<ReturnType<typeof setTimeout>>();
+  /** 조합 중이라 내지 못한 덧씌움이 남았다: 조합이 끝난 첫 갱신에서 낸다. */
+  const linksPending = useRef(false);
+  /** 링크 색인(linkIndex)에 이 버퍼를 덧씌움으로 낸다. 조합 중에는 색인을 건드리지 않는다(IME 를 깨지 않게). */
+  const publishLinks = () => {
+    clearTimeout(linksTimer.current);
+    const view = viewRef.current;
+    if (!view || !alive.current) return;
+    if (view.composing) {
+      linksPending.current = true;
+      return;
+    }
+    linksPending.current = false;
+    linkIndex.setOverlay(path, view.state.sliceDoc());
+  };
   /** 개요 패널(outlineStore)에 이 노트의 제목 목록을 낸다. */
   const publishItems = () => {
     clearTimeout(outlineTimer.current);
@@ -238,6 +257,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         publishItems();
         publishCursor(path, next.doc.lineAt(next.selection.main.head).number);
       }
+      // 읽은(또는 다시 읽은) 본문의 링크를 곧바로 낸다. 조용한 다시 읽기도 낸다: 덧씌움이 디스크와 같아진다.
+      if (view) publishLinks();
       // 뷰가 새 본문을 보여 준 뒤에만 기준을 옮긴다: 뷰와 기준이 어긋나면 낡은 버퍼가 저장될 수 있다.
       docRef.current = doc;
       baseline.current = doc.text;
@@ -376,6 +397,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       const view = viewRef.current;
       return doc && view ? toRaw(doc, view.state.sliceDoc()) : undefined;
     },
+    publishLinks: () => publishLinks(),
     reveal: ({ line, ch = 0 }) => {
       const view = viewRef.current;
       if (!view) return;
@@ -496,9 +518,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       EditorView.updateListener.of((u) => {
         // 선택 없이 위쪽 줄이 바뀌어도 커서의 줄 번호는 움직인다(한 프레임에 한 번)
         if (u.selectionSet || u.docChanged) publishCursorLine();
-        if (!u.docChanged) return;
+        if (!u.docChanged) {
+          // 조합 중이라 미뤄 둔 링크 덧씌움: 조합이 끝난 첫 갱신에서 낸다
+          if (linksPending.current && !u.view.composing) publishLinks();
+          return;
+        }
         clearTimeout(outlineTimer.current);
         outlineTimer.current = setTimeout(publishItems, OUTLINE_MS);
+        clearTimeout(linksTimer.current);
+        linksTimer.current = setTimeout(publishLinks, LINKS_MS);
         const dirty = api.current.isDirty();
         setDirty(dirty);
         if (!dirty) setCloseAsk(false); // 되돌려서 깨끗해졌다: 저장 안 된 편집 때문에 던진 질문은 거둔다
@@ -537,6 +565,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       unsubscribeMode();
       clearTimers();
       clearTimeout(outlineTimer.current);
+      clearTimeout(linksTimer.current);
+      linksPending.current = false;
+      linkIndex.setOverlay(path, null); // 닫힌 노트는 디스크 본문(setNote)으로 돌아간다
       if (cursorFrame.current !== undefined) cancelAnimationFrame(cursorFrame.current);
       cursorFrame.current = undefined;
       clearOutline(path);

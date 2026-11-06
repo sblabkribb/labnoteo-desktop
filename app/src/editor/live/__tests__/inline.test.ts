@@ -6,6 +6,7 @@ import { codeFolding, foldEffect } from '@codemirror/language';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../../table/field';
 import { livePlugin, livePreview } from '../index';
+import { setComposing } from '../../__tests__/composing';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -52,10 +53,6 @@ function rangesOf(sets: readonly RangeSet<RangeValue>[]): { from: number; to: nu
   return out.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 const decoCount = (v: EditorView) => rangesOf([v.plugin(livePlugin)!.decorations]).length;
-/** 한글 조합 중인 것처럼 꾸민다: view.composing / compositionStarted 는 inputState.composing 을 읽는다. */
-const setComposing = (v: EditorView, on: boolean) => {
-  (v as unknown as { inputState: { composing: number } }).inputState.composing = on ? 1 : -1;
-};
 
 describe('라이브 미리보기: 인라인 플러그인', () => {
   it('off-line heading hides "# " and gets lno-h2; the cursor line shows source', () => {
