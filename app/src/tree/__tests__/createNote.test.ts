@@ -86,6 +86,21 @@ describe('노트 만들기', () => {
     ]);
   });
 
+  it('dir 를 주면 그 폴더 안에 만든다: 구분자 규칙은 이름에만 적용된다', async () => {
+    const f = fake({ vault_exists: false, vault_modify: { kind: 'ok' } });
+    expect(await createNote('Day 2', f.invoke, 'notes/sub')).toEqual({ ok: true, path: 'notes/sub/Day 2.labnote.md' });
+    expect(f.calls).toEqual([
+      { cmd: 'vault_exists', args: { path: 'notes/sub/Day 2.labnote.md' } },
+      { cmd: 'vault_modify', args: { path: 'notes/sub/Day 2.labnote.md', content: '', expectedBefore: '' } },
+    ]);
+    const g = fake({});
+    expect(await createNote('a/b', g.invoke, 'notes')).toEqual({ ok: false, reason: 'separator' });
+    expect(g.calls).toEqual([]);
+    // 빈 dir 은 보관함 맨 위
+    const h = fake({ vault_exists: false, vault_modify: { kind: 'ok' } });
+    expect(await createNote('x', h.invoke, '')).toEqual({ ok: true, path: 'x.labnote.md' });
+  });
+
   it('그 밖의 오류는 일반 실패로 알린다', async () => {
     const f = fake({ vault_exists: false, vault_modify: rejected('io') });
     expect(await createNote('a', f.invoke)).toEqual({ ok: false, reason: 'failed' });

@@ -133,6 +133,30 @@ const ko: Record<string, string> = {
   'syncChecklist.partial': '목록에서 빼거나 고칠 항목도 있습니다. 그 정리는 이름 바꾸기 기능과 함께 추가됩니다.',
   'workflow.readmeNotUpdated':
     'README.labnote.md 를 지금 바꿀 수 없어 워크플로를 체크리스트에 넣지 못했을 수 있습니다. 편집기의 README 를 정리한 뒤 "{0}"을(를) 실행하세요.',
+  'fileOps.newFolder': '새 폴더',
+  'fileOps.newFolder.prompt': '폴더 이름',
+  'fileOps.rename': '이름 바꾸기',
+  'fileOps.rename.prompt': '새 이름',
+  'fileOps.delete': '삭제',
+  'fileOps.delete.confirm': "'{0}' 을(를) 휴지통으로 옮길까요?",
+  'fileOps.delete.confirmLabel': '휴지통으로 옮기기',
+  'fileOps.deleted': "'{0}' 을(를) 휴지통으로 옮겼습니다.",
+  'fileOps.exists': '같은 이름의 파일이나 폴더가 이미 있습니다.',
+  'fileOps.name.empty': '이름을 적어 주세요.',
+  'fileOps.name.separator': '이름에는 / 나 \\ 를 쓸 수 없습니다.',
+  'fileOps.name.invalid':
+    '이 이름은 쓸 수 없습니다. 점(.)으로 시작할 수 없고, : ? * < > | " 문자와 CON, NUL 같은 Windows 예약 이름도 쓸 수 없습니다.',
+  'fileOps.unsaved': '열린 노트를 저장하지 못해 아무것도 바꾸지 않았습니다. 편집기의 안내를 따르세요.',
+  'fileOps.renamed.linksNotUpdated': '이름을 바꿨습니다. 다른 노트에 있는 링크는 새 이름으로 바뀌지 않았습니다.',
+  'fileOps.readmeCleanup.confirm': "README.labnote.md 의 워크플로 체크리스트에서 '{0}' 항목도 뺄까요?",
+  'fileOps.renameGuarded.experimentFolder':
+    '실험 폴더와 그 안의 폴더는 아직 이름을 바꿀 수 없습니다. README 체크리스트와 다른 노트의 링크가 끊어집니다. 링크까지 고치는 이름 바꾸기는 나중에 추가됩니다.',
+  'fileOps.renameGuarded.experimentParent':
+    '이 폴더 안에 실험 폴더가 있어 아직 이름을 바꿀 수 없습니다. README 체크리스트와 다른 노트의 링크가 끊어집니다. 링크까지 고치는 이름 바꾸기는 나중에 추가됩니다.',
+  'fileOps.renameGuarded.labnoteRoot': 'labnote 폴더는 실험이 들어 있는 곳이라 이름을 바꿀 수 없습니다.',
+  'fileOps.renameGuarded.workflowNote':
+    '워크플로 노트는 아직 이름을 바꿀 수 없습니다. README 체크리스트의 링크가 끊어집니다. 링크까지 고치는 이름 바꾸기는 나중에 추가됩니다.',
+  'fileOps.renameGuarded.readme': 'README.labnote.md 는 실험을 알아보는 파일이라 이름을 바꿀 수 없습니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -268,6 +292,30 @@ const en: Record<string, string> = {
   'syncChecklist.partial': 'Some entries also need removing or fixing; that cleanup arrives with the rename feature.',
   'workflow.readmeNotUpdated':
     'README.labnote.md could not be updated right now, so the workflow may be missing from its checklist. Once the README in the editor is settled, run "{0}".',
+  'fileOps.newFolder': 'New folder',
+  'fileOps.newFolder.prompt': 'Folder name',
+  'fileOps.rename': 'Rename',
+  'fileOps.rename.prompt': 'New name',
+  'fileOps.delete': 'Delete',
+  'fileOps.delete.confirm': "Move '{0}' to the Recycle Bin?",
+  'fileOps.delete.confirmLabel': 'Move to Recycle Bin',
+  'fileOps.deleted': "Moved '{0}' to the Recycle Bin.",
+  'fileOps.exists': 'A file or folder with this name already exists.',
+  'fileOps.name.empty': 'Enter a name.',
+  'fileOps.name.separator': "Names can't contain / or \\.",
+  'fileOps.name.invalid':
+    'This name can\'t be used. It can\'t start with a dot (.), contain : ? * < > | ", or be a reserved Windows name such as CON or NUL.',
+  'fileOps.unsaved': "The open note couldn't be saved, so nothing was changed. Follow the editor's notice.",
+  'fileOps.renamed.linksNotUpdated': 'Renamed. Links to it in other notes were not updated.',
+  'fileOps.readmeCleanup.confirm': "Also remove '{0}' from the workflow checklist in README.labnote.md?",
+  'fileOps.renameGuarded.experimentFolder':
+    "Experiment folders and the folders inside them can't be renamed yet: the README checklist and links in other notes would break. Renaming that also fixes links comes later.",
+  'fileOps.renameGuarded.experimentParent':
+    "This folder contains experiment folders, so it can't be renamed yet: the README checklist and links in other notes would break. Renaming that also fixes links comes later.",
+  'fileOps.renameGuarded.labnoteRoot': "The labnote folder holds your experiments and can't be renamed.",
+  'fileOps.renameGuarded.workflowNote':
+    "Workflow notes can't be renamed yet: their README checklist links would break. Renaming that also fixes links comes later.",
+  'fileOps.renameGuarded.readme': "README.labnote.md identifies the experiment and can't be renamed.",
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
