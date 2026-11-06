@@ -30,7 +30,12 @@ export function paletteName(key: string): string {
  * 앱에 없는 기능을 말하는 플러그인 문장 대신 보일 앱 문장의 키(계획의 "App overrides" 표).
  * 옮겨 온 코드는 그 자리에서 플러그인 키로 host 번역을 부르는 대신 앱 키로 overrideOr 를 부르고, 플러그인 키는 주석으로 남긴다.
  */
-export type OverrideKey = 'insertDate.metaDateFilled' | 'insertDate.noNote' | 'issueMarker.noNote';
+export type OverrideKey =
+  | 'insertDate.metaDateFilled'
+  | 'insertDate.noNote'
+  | 'issueMarker.noNote'
+  // 자동화가 없을 때 논의 표시: 플러그인 문장의 "Setup research automation" 안내를 뺀 것(그 명령은 뒤의 하위 프로젝트)
+  | 'discussFlag.flagged';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {
