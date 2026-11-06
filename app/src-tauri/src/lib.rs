@@ -18,6 +18,7 @@ macro_rules! register_commands {
         $builder.invoke_handler(tauri::generate_handler![
             $crate::app::app_version,
             $crate::vault::vault_open,
+            $crate::vault::vault_create,
             $crate::vault::vault_current,
             $crate::vault::tree::vault_tree,
             $crate::vault::fs::vault_read,
@@ -40,6 +41,8 @@ macro_rules! register_commands {
 pub fn run() {
     register_commands!(tauri::Builder::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(vault::VaultState::default())
         .setup(|app| {
             // Never abort startup over where the last vault is remembered: fall

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { TauriLabnoteFs } from '../tauriLabnoteFs';
-import { openVault, restoreVault } from '../../vault/useVault';
+import { createVault, openVault, restoreVault } from '../../vault/useVault';
 import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
@@ -19,7 +19,7 @@ function recorder() {
     if (cmd === 'vault_read') return 'old';
     if (cmd === 'vault_list' || cmd === 'search') return [];
     if (cmd === 'vault_exists') return true;
-    if (cmd === 'vault_open' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
+    if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
   };
   return { sent, invoke: invoke as never };
@@ -45,6 +45,7 @@ describe('IPC 인자 이름 계약', () => {
     await removeNote('a.md', r.invoke);
     await searchNotes('q', 10, r.invoke);
     await openVault(r.invoke, 'D:\\lab');
+    await createVault(r.invoke, 'D:\\lab');
 
     const expected = Object.fromEntries(Object.entries(fixture).map(([k, v]) => [k, [...v].sort()]));
     expect(Object.fromEntries(r.sent)).toEqual(expected);

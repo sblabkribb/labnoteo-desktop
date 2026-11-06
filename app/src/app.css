@@ -30,3 +30,10 @@
 [data-depth="22"] { padding-left: 22rem; }
 [data-depth="23"] { padding-left: 23rem; }
 [data-depth="24"] { padding-left: 24rem; }
+
+/* 첫 실행 화면: 선택지 둘을 나란히 */
+.first-run-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}

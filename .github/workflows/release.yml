@@ -1,0 +1,71 @@
+# Pushing a tag like v0.2.0 builds the NSIS installer and uploads it, its
+# signature and latest.json to the GitHub Release. The installed app reads
+# latest.json from the latest release (see plugins.updater in tauri.conf.json).
+#
+# One-time setup: repository secret TAURI_SIGNING_PRIVATE_KEY (the updater's
+# private key; the matching public key is in tauri.conf.json) and, only if the
+# key has a password, TAURI_SIGNING_PRIVATE_KEY_PASSWORD. See docs/RELEASING.md.
+# The installer itself is not code-signed: Windows SmartScreen warns on first install.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Tag must match the app version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for f in app/package.json app/src-tauri/tauri.conf.json; do
+            v=$(node -p "require('./$f').version")
+            [ "$v" = "$tag" ] || { echo "$f is $v, tag is $tag"; exit 1; }
+          done
+          v=$(grep -m1 '^version' app/src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          [ "$v" = "$tag" ] || { echo "Cargo.toml is $v, tag is $tag"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Test
+        working-directory: app
+        run: npm test
+
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: labnoteO ${{ github.ref_name }}
+          releaseBody: Windows installer (unsigned: SmartScreen will warn on first install).
+          releaseDraft: false
+          includeUpdaterJson: true
+          # Updater artifacts need the private key, so only the release build asks for them.
+          args: --bundles nsis --config src-tauri/tauri.release.conf.json

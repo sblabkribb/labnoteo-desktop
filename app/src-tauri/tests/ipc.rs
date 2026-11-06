@@ -74,6 +74,14 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(info["hasObsidianConfig"], false);
     assert_eq!(ok("vault_current", args("vault_current", vec![]))["name"], "vault");
 
+    // A new vault: one folder is made next to the first one, opened and remembered.
+    let fresh = dir.join("fresh").to_string_lossy().into_owned();
+    let created = ok("vault_create", args("vault_create", vec![json!(fresh)]));
+    assert_eq!(created["name"], "fresh");
+    assert!(dir.join("fresh").is_dir());
+    assert!(call("vault_create", json!({"folder": "x"})).is_err());
+    ok("vault_open", args("vault_open", vec![json!(vault)]));
+
     ok("vault_mkdir", args("vault_mkdir", vec![json!("notes")]));
     ok("vault_write", args("vault_write", vec![json!("notes/a.md"), json!("one")]));
     assert_eq!(ok("vault_read", args("vault_read", vec![json!("notes/a.md")])), "one");

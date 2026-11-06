@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { t } from './i18n/t';
-import { VaultPicker } from './vault/VaultPicker';
+import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
 import { useVaultEvents } from './vault/useVaultEvents';
 import { NoteTree } from './tree/NoteTree';
@@ -9,6 +9,7 @@ import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { Editor, type EditorHandle } from './editor/Editor';
 import { fetchAppVersion } from './appVersion';
+import { UpdateBanner } from './update/UpdateBanner';
 
 function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
   const { entries, failed, reload } = useTree(vault.root);
@@ -39,6 +40,7 @@ function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
   }, [vault.root]);
   return (
     <>
+      <UpdateBanner beforeInstall={async () => !editor.current || (await editor.current.flush())} />
       <p>{t('vault.open', vault.name)}</p>
       {vault.hasObsidianConfig && <p>{t('vault.obsidian')}</p>}
       <SearchPanel onOpen={openNote} indexing={indexing} skipped={skipped} />
@@ -55,7 +57,7 @@ function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
 
 export function App() {
   const [version, setVersion] = useState('');
-  const { state, open } = useVault();
+  const { state, open, create } = useVault();
   useEffect(() => {
     fetchAppVersion().then(setVersion);
   }, []);
@@ -63,7 +65,7 @@ export function App() {
     <main>
       <h1>{t('app.title')}</h1>
       {state.status === 'loading' && <p>{t('vault.loading')}</p>}
-      {state.status === 'picker' && <VaultPicker error={state.error} onPick={open} />}
+      {state.status === 'picker' && <FirstRun error={state.error} onOpen={open} onCreate={create} />}
       {state.status === 'ready' && <VaultView key={state.vault.root} vault={state.vault} version={version} />}
     </main>
   );

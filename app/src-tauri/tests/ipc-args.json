@@ -1,6 +1,7 @@
 {
   "app_version": [],
   "vault_open": ["path"],
+  "vault_create": ["path"],
   "vault_current": [],
   "vault_tree": [],
   "vault_read": ["path"],

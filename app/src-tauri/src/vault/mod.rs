@@ -104,6 +104,29 @@ pub fn open_at(state: &VaultState, settings: &Path, path: &str) -> Result<VaultI
     Ok(info_for(&root))
 }
 
+/// Create a new, empty vault folder at `path` and open it. The parent must
+/// already exist (the save dialog picked it), so one folder is made, never a
+/// chain. A folder that is already there is simply opened: nothing in it is
+/// touched. A path inside `.obsidian/` is refused: that folder is never written.
+pub fn create_at(state: &VaultState, settings: &Path, path: &str) -> Result<VaultInfo, fs::FsError> {
+    let target = Path::new(path);
+    if path.is_empty() || !target.is_absolute() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "vault path must be absolute").into());
+    }
+    let in_obsidian = target
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case(".obsidian"));
+    if in_obsidian {
+        return Err(fs::FsError::Forbidden);
+    }
+    match std::fs::create_dir(target) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {}
+        Err(e) => return Err(e.into()),
+    }
+    open_at(state, settings, path)
+}
+
 /// The open vault, else the remembered one if it still opens, else `None`
 /// (the frontend then shows the picker). Never fails: a deleted, renamed,
 /// unplugged or now-a-file folder and a damaged settings file all mean `None`.
@@ -124,6 +147,18 @@ pub fn vault_open(
 ) -> Result<VaultInfo, fs::FsError> {
     let info = open_at(&state, &settings.0, &path)?;
     // The watched vault follows the open one (the same vault again keeps its watcher).
+    watcher.follow(&state.root()?);
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn vault_create(
+    state: tauri::State<'_, VaultState>,
+    settings: tauri::State<'_, SettingsFile>,
+    watcher: tauri::State<'_, watcher::WatcherState>,
+    path: String,
+) -> Result<VaultInfo, fs::FsError> {
+    let info = create_at(&state, &settings.0, &path)?;
     watcher.follow(&state.root()?);
     Ok(info)
 }
@@ -189,6 +224,61 @@ mod tests {
         // A refused open leaves the app without a vault and remembers nothing.
         assert!(matches!(state.root(), Err(fs::FsError::NoVault)));
         assert!(!s.settings().exists());
+    }
+
+    #[test]
+    fn create_makes_one_folder_and_opens_it() {
+        let s = Scratch::new();
+        let state = VaultState::default();
+        let target = s.vault().join("new-lab");
+        let info = create_at(&state, &s.settings(), &target.to_string_lossy()).unwrap();
+        assert!(target.is_dir());
+        assert_eq!(info.name, "new-lab");
+        assert!(!info.has_obsidian_config);
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0, "a new vault starts empty");
+        assert_eq!(
+            remembered(&s.settings()).unwrap(),
+            PathBuf::from(path::strip_verbatim(&std::fs::canonicalize(&target).unwrap()))
+        );
+    }
+
+    #[test]
+    fn create_refuses_a_missing_parent_and_a_relative_path() {
+        let s = Scratch::new();
+        let state = VaultState::default();
+        let deep = s.vault().join("no").join("such").join("lab");
+        assert!(create_at(&state, &s.settings(), &deep.to_string_lossy()).is_err());
+        assert!(!s.vault().join("no").exists(), "no parent chain is created");
+        assert!(create_at(&state, &s.settings(), "lab").is_err());
+        assert!(create_at(&state, &s.settings(), "").is_err());
+        assert!(matches!(state.root(), Err(fs::FsError::NoVault)));
+    }
+
+    #[test]
+    fn create_over_an_existing_obsidian_vault_opens_it_untouched() {
+        let s = Scratch::new();
+        let state = VaultState::default();
+        std::fs::create_dir(s.vault().join(".obsidian")).unwrap();
+        std::fs::write(s.vault().join(".obsidian").join("app.json"), "{}").unwrap();
+        std::fs::write(s.vault().join("a.md"), "keep").unwrap();
+        let info = create_at(&state, &s.settings(), &s.vault().to_string_lossy()).unwrap();
+        assert!(info.has_obsidian_config);
+        assert_eq!(std::fs::read_to_string(s.vault().join(".obsidian/app.json")).unwrap(), "{}");
+        assert_eq!(std::fs::read_to_string(s.vault().join("a.md")).unwrap(), "keep");
+    }
+
+    #[test]
+    fn create_never_writes_inside_obsidian() {
+        let s = Scratch::new();
+        let state = VaultState::default();
+        std::fs::create_dir(s.vault().join(".obsidian")).unwrap();
+        for p in [s.vault().join(".obsidian").join("sub"), s.vault().join(".OBSIDIAN").join("sub")] {
+            assert!(matches!(
+                create_at(&state, &s.settings(), &p.to_string_lossy()),
+                Err(fs::FsError::Forbidden)
+            ));
+        }
+        assert_eq!(std::fs::read_dir(s.vault().join(".obsidian")).unwrap().count(), 0);
     }
 
     #[test]

@@ -30,16 +30,25 @@ export async function restoreVault(invoke: InvokeFn = tauriInvoke): Promise<Vaul
   }
 }
 
-/** 고른 폴더를 연다. 거부되면 선택 화면에 남고 사용자에게 보일 문구를 준다. */
-export async function openVault(invoke: InvokeFn, path: string): Promise<VaultStatus> {
+/** 고른 폴더를 열거나(`vault_open`) 새로 만들어 연다(`vault_create`). 거부되면 선택 화면에 남고 사용자에게 보일 문구를 준다. */
+async function enter(invoke: InvokeFn, cmd: 'vault_open' | 'vault_create', path: string): Promise<VaultStatus> {
   try {
-    const vault = await invoke<VaultInfo>('vault_open', { path });
+    const vault = await invoke<VaultInfo>(cmd, { path });
     return { status: 'ready', vault };
   } catch (e) {
     const kind = e && typeof e === 'object' && 'kind' in e ? (e as { kind: unknown }).kind : undefined;
     const missing = kind === 'vaultNotFound' || kind === 'notFound';
     return { status: 'picker', error: t(missing ? 'vault.error.missing' : 'vault.error.generic') };
   }
+}
+
+export function openVault(invoke: InvokeFn, path: string): Promise<VaultStatus> {
+  return enter(invoke, 'vault_open', path);
+}
+
+/** 저장 대화상자가 고른 경로에 폴더 하나를 만들고 연다. 상위 폴더는 이미 있어야 한다. */
+export function createVault(invoke: InvokeFn, path: string): Promise<VaultStatus> {
+  return enter(invoke, 'vault_create', path);
 }
 
 export function useVault(invoke: InvokeFn = tauriInvoke) {
@@ -62,5 +71,12 @@ export function useVault(invoke: InvokeFn = tauriInvoke) {
     [invoke],
   );
 
-  return { state, open };
+  const create = useCallback(
+    async (path: string) => {
+      setState(await createVault(invoke, path));
+    },
+    [invoke],
+  );
+
+  return { state, open, create };
 }
