@@ -33,7 +33,11 @@ import type { Extension } from '@codemirror/state';
  * - theme-guard.test.tsx 가 이것을 지킨다: 편집기가 처음 뜰 때 그림자 루트에 들어간 박힌 색마다, 같은 선택자·같은 속성을 같거나
  *   높은 특이도로 덮는 토큰 규칙이 있는지 보고, 위의 "요소가 없는" 규칙은 확장 이름과 함께 목록에 둔다. 처음 뜰 때 실리는 확장이
  *   덮이지 않은 박힌 색을 가져오거나 목록의 확장을 가져오면 그 테스트가 빨개진다(나중에 Compartment 로 넣는 확장은 보지 못한다).
- * - 다크 플래그를 Compartment 로 바꿀지(그러면 `&dark` 규칙이 살아나고 대신 그것을 덮어야 한다)는 편집기 하위 프로젝트가 정한다.
+ * - 결정(D1, SP3): 늘 라이트로 둔다. Always-light: `EditorView.darkTheme` stays false; colours come from tokens;
+ *   revisit only for an extension that styles via `&dark`. 다크 플래그를 Compartment 로 바꾸면 `&dark` 규칙이 살아나고 그것을
+ *   덮어야 하므로, `&dark` 로 모양을 내는 확장(자동 완성, 검색, lint, drawSelection 등)을 들일 때만 다시 본다.
+ * - 위젯 기본 클래스: 편집기 안의 위젯은 `.lno-widget`(틀), `.lno-btn`(단추: hover·disabled·focus-visible),
+ *   `.lno-popover`(뜨는 메뉴·창, z-index 는 --z-popover), `.lno-chip`(작은 꼬리표)을 달고, 위젯 고유의 규칙은 그 뒤에 덧쓴다.
  */
 const panel = { backgroundColor: 'var(--bg-elevated)', color: 'var(--text)' };
 const arrow = (side: 'Top' | 'Bottom', fill: 'var(--border-strong)' | 'var(--bg-elevated)') => ({ [`border${side}`]: `7px solid ${fill}` });
@@ -77,6 +81,38 @@ export const editorThemeSpec = {
       '&:before': arrow('Bottom', 'var(--border-strong)'),
       '&:after': arrow('Bottom', 'var(--bg-elevated)'),
     },
+  },
+  // 위젯 기본 클래스. 위젯 고유의 규칙(.lno-table-tool 등)은 같은 특이도로 이 뒤에 오므로 여기 값을 덧쓴다.
+  '.lno-widget': { fontFamily: 'var(--font-ui)', color: 'var(--text)' },
+  '.lno-btn': {
+    font: 'inherit',
+    color: 'var(--text)',
+    backgroundColor: 'var(--bg-elevated)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 'var(--radius)',
+    padding: '0 var(--space-2)',
+    cursor: 'pointer',
+    '&:hover:not(:disabled)': { backgroundColor: 'var(--bg-hover)' },
+    '&:disabled': { color: 'var(--text-muted)', cursor: 'default' },
+    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
+  },
+  '.lno-popover': {
+    position: 'absolute',
+    zIndex: 'var(--z-popover)',
+    padding: 'var(--space-1)',
+    backgroundColor: 'var(--bg-elevated)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 'var(--radius)',
+  },
+  '.lno-chip': {
+    display: 'inline-block',
+    padding: '0 var(--space-1)',
+    fontSize: '0.85em',
+    lineHeight: '1.4',
+    color: 'var(--text-muted)',
+    backgroundColor: 'var(--bg-hover)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
   },
   // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
@@ -138,25 +174,14 @@ export const editorThemeSpec = {
   '.lno-table .cm-content': { padding: '0', caretColor: 'var(--text)' },
   '.lno-table .cm-line': { padding: '0' },
   '.lno-table-wrap:hover > .lno-table-toolbar, .lno-table-wrap:focus-within > .lno-table-toolbar': { opacity: '1', pointerEvents: 'auto' },
-  '.lno-table-tool': {
-    font: 'inherit',
-    fontSize: '0.85em',
-    color: 'var(--text)',
-    backgroundColor: 'var(--bg-elevated)',
-    border: '1px solid var(--border-strong)',
-    borderRadius: 'var(--radius)',
-    padding: '0 var(--space-2)',
-    cursor: 'pointer',
-    '&:hover:not(:disabled)': { backgroundColor: 'var(--bg-hover)' },
-    '&:disabled': { color: 'var(--text-muted)', cursor: 'default' },
-    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
-  },
+  // 표 단추는 .lno-btn 을 함께 단다: 색·테두리·상태는 거기서 오고, 여기는 크기만 덧쓴다
+  '.lno-table-tool': { fontSize: '0.85em' },
   // 한 번 누른 "표 지우기": 한 번 더 누르면 지운다는 것을 위험색으로 알린다
   '.lno-table-tool[data-armed="true"]': { color: 'var(--danger)', borderColor: 'var(--danger)' },
   // 표 메뉴: 연 자리(누른 점, 단추, 칸)에 뜬다. left/top(과 길 때 max-height)은 열 때 widget.ts 가 CSSOM 으로 적는다
   // (style 속성은 CSP 가 막는다). 편집기보다 길면 메뉴 안에서 스크롤한다.
+  // .lno-popover 를 함께 단다(틀의 색·테두리·여백). 표 메뉴는 표 위젯의 층(--z-widget-menu)에 머문다.
   '.lno-table-menu': {
-    position: 'absolute',
     top: '0',
     left: '0',
     zIndex: 'var(--z-widget-menu)',
@@ -165,10 +190,6 @@ export const editorThemeSpec = {
     display: 'flex',
     flexDirection: 'column',
     gap: '1px',
-    padding: 'var(--space-1)',
-    backgroundColor: 'var(--bg-elevated)',
-    border: '1px solid var(--border-strong)',
-    borderRadius: 'var(--radius)',
   },
   '.lno-table-menu .lno-table-tool': { textAlign: 'left', border: 'none' },
   // 고대비(forced-colors): 운영체제가 색을 정하는 모드에서도 지금 고치는 칸이 보이게 시스템 색으로 윤곽선을 그린다.

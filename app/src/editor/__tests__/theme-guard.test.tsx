@@ -56,8 +56,9 @@ function shadowCss(root: ShadowRoot): string {
 const covers = (over: string, literal: string, literalValue: string) =>
   over === literal ||
   literal.startsWith(`${over}-`) ||
-  // `-color` 하위 속성은 색 층만 덮는다: 그라디언트나 url 그림 층 안의 색은 그대로 남는다(background: radial-gradient(#aaa …))
-  (over === `${literal}-color` && !/gradient\(|url\(/i.test(literalValue));
+  // `-color` 하위 속성은 색 층만 덮는다: 그림 층(그라디언트, url, image-set, element, cross-fade) 안의 색은 그대로 남는다
+  // (background: radial-gradient(#aaa …)). 그림 층이 있는 단축 속성은 색 층이 함께 있어도 덮인 것으로 치지 않는다(보수적이다).
+  (over === `${literal}-color` && !/gradient\(|url\(|image-set\(|element\(|cross-fade\(/i.test(literalValue));
 
 const SYSTEM = new Set(SYSTEM_COLOURS);
 
@@ -151,7 +152,9 @@ function codemirrorImports(dir = 'src'): Set<string> {
 // 끝 공백, 탭, 섞인 줄바꿈: 공백 강조나 끝 공백 확장이 설치돼 있다면 그 요소가 그려질 본문
 const SAMPLE = '# 제목  \n\t- [링크](https://x) 본문 \r\n';
 
-async function mountShipped(text = SAMPLE) {
+/** mode 는 받아 두기만 한다: 편집기 모드(live/source)가 생기면(Task 9) 그 모드로 띄운다. */
+async function mountShipped(text = SAMPLE, mode?: 'live' | 'source') {
+  void mode;
   const invoke = (async () => text) as never;
   const listen = (async () => () => {}) as never;
   const windowApi = { onCloseRequested: async () => () => {}, destroy: async () => {} };
@@ -268,5 +271,17 @@ describe('편집기 그림자 루트의 날것의 색', () => {
     expect(status('.ͼo .cm-x {outline: 2px solid Highlight;}')).toEqual(['& .cm-x|outline|LEAK']);
     // 토큰과 투명은 색으로 세지 않는다
     expect(status('.ͼ1 .cm-y {color: var(--text); background: transparent; border-color: currentColor;}')).toEqual([]);
+  });
+
+  it('image-set / element backgrounds are not covered by background-color', () => {
+    const status = (css: string) => audit(css, ['ͼ1', 'ͼ2', 'ͼo'], 'ͼ3').map((f) => `${f.target}|${f.prop}|${f.status}`);
+    expect(status('.ͼ1 .cm-y{background:image-set("a.png" 1x) #aaa} .ͼo .cm-y{background-color:var(--x)}')).toEqual(['& .cm-y|background|LEAK']);
+    expect(status('.ͼ1 .cm-y{background:element(#a) #aaa} .ͼo .cm-y{background-color:var(--x)}')).toEqual(['& .cm-y|background|LEAK']);
+    expect(status('.ͼ1 .cm-y{background:cross-fade(#aaa, #bbb)} .ͼo .cm-y{background-color:var(--x)}')).toEqual(['& .cm-y|background|LEAK']);
+  });
+
+  it('table toolbar buttons use the widget base', async () => {
+    const { shadow } = await mountShipped('| a | b |\n| - | - |\n| 1 | 2 |\n');
+    expect(shadow.querySelector('.lno-table-tool')!.classList.contains('lno-btn')).toBe(true);
   });
 });

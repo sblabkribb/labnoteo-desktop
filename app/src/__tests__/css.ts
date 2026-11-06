@@ -83,7 +83,8 @@ export function splitTop(text: string, sep: string): string[] {
 /**
  * 주석을 지우고 중괄호 깊이를 세어 스타일 규칙을 꺼낸다. @-규칙 안의 규칙은 `atRule` 에 그 머리를 달아 돌려준다
  * (버리지 않는다: 버릴지 말지는 묻는 쪽이 정한다). @keyframes 안의 단계(0%, 50%)도 그 머리를 단 규칙으로 나온다.
- * 중괄호가 짝이 맞지 않으면 던진다.
+ * 중괄호가 짝이 맞지 않을 때와, 스타일 규칙 안에 또 다른 블록이 있을 때(CSS 중첩) 던진다.
+ * Throws on unbalanced braces and when a style rule contains another block (CSS nesting).
  */
 export function parseRules(source: string): Rule[] {
   const css = source.replace(/\/\*[\s\S]*?\*\//g, '');

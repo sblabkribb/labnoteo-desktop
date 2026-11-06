@@ -253,7 +253,7 @@ function runButton(view: EditorView, wrap: HTMLElement, b: HTMLElement): boolean
 function makeButton(doc: Document, action: TableAction): HTMLButtonElement {
   const b = doc.createElement('button');
   b.type = 'button';
-  b.className = 'lno-table-tool';
+  b.className = 'lno-btn lno-table-tool';
   b.dataset.action = action;
   setLabel(b);
   return b;
@@ -263,7 +263,7 @@ function makeButton(doc: Document, action: TableAction): HTMLButtonElement {
 function makeStripButton(doc: Document, tool: (typeof STRIP)[number]): HTMLButtonElement {
   const b = doc.createElement('button');
   b.type = 'button';
-  b.className = 'lno-table-tool lno-table-strip-tool';
+  b.className = 'lno-btn lno-table-tool lno-table-strip-tool';
   b.dataset.action = tool.action;
   b.dataset.glyph = '';
   if (tool.action === 'more') {
@@ -276,7 +276,7 @@ function makeStripButton(doc: Document, tool: (typeof STRIP)[number]): HTMLButto
 
 function makeToolbar(doc: Document, view: EditorView, wrap: HTMLElement): HTMLElement {
   const bar = doc.createElement('div');
-  bar.className = 'lno-table-toolbar';
+  bar.className = 'lno-widget lno-table-toolbar';
   bar.setAttribute('role', 'toolbar');
   for (const tool of STRIP) bar.appendChild(makeStripButton(doc, tool));
   labelToolbar(bar);
@@ -387,7 +387,7 @@ function openMenu(
   const doc = wrap.ownerDocument;
   const m = current.get(wrap)?.model;
   const menu = doc.createElement('div');
-  menu.className = 'lno-table-menu';
+  menu.className = 'lno-widget lno-popover lno-table-menu';
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', t('table.menu'));
   for (const tool of TOOLS) {
