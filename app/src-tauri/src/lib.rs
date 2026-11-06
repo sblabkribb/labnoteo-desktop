@@ -18,6 +18,7 @@ macro_rules! register_commands {
             $crate::app::app_version,
             $crate::vault::vault_open,
             $crate::vault::vault_current,
+            $crate::vault::tree::vault_tree,
             $crate::vault::fs::vault_read,
             $crate::vault::fs::vault_write,
             $crate::vault::fs::vault_modify,

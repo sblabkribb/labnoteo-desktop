@@ -61,6 +61,7 @@ fn ipc_argument_names_match_the_typescript_side() {
     // Before vault_open every file command refuses with noVault, and the
     // error reaches JS as {kind, message}.
     assert_eq!(call("vault_exists", args("vault_exists", vec![json!("a.md")])).unwrap_err()["kind"], "noVault");
+    assert_eq!(call("vault_tree", args("vault_tree", vec![])).unwrap_err()["kind"], "noVault");
     assert_eq!(ok("vault_current", args("vault_current", vec![])), Value::Null);
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
@@ -74,6 +75,14 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("vault_exists", args("vault_exists", vec![json!("notes/a.md")])), true);
     assert_eq!(ok("vault_list", args("vault_list", vec![json!("notes")])), json!(["a.md"]));
     assert_eq!(ok("vault_list", args("vault_list", vec![json!("")])), json!(["notes"]));
+    // camelCase on the wire: `isDir`, not `is_dir`.
+    assert_eq!(
+        ok("vault_tree", args("vault_tree", vec![])),
+        json!([
+            {"path": "notes", "name": "notes", "isDir": true, "depth": 0},
+            {"path": "notes/a.md", "name": "a.md", "isDir": false, "depth": 1},
+        ])
+    );
     // `expectedBefore` (camelCase on the wire) must reach `expected_before`.
     assert_eq!(
         ok("vault_modify", args("vault_modify", vec![json!("notes/a.md"), json!("two"), json!("one")])),

@@ -26,7 +26,7 @@ const RESERVED: [&str; 24] = [
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
-fn is_safe_component(name: &str) -> bool {
+pub(crate) fn is_safe_component(name: &str) -> bool {
     // Backslash and ':' also rule out UNC, `\\?\`, drive prefixes (`C:`, `C:foo`)
     // and alternate data streams (`file:stream`).
     if name

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { TauriLabnoteFs } from '../tauriLabnoteFs';
 import { openVault, restoreVault } from '../../vault/useVault';
+import { fetchTree } from '../../tree/useTree';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -34,6 +35,7 @@ describe('IPC 인자 이름 계약', () => {
     await fs.list('d');
     await fs.remove('a.md');
     await fs.rmdir('d');
+    await fetchTree(r.invoke);
     await restoreVault(r.invoke);
     await openVault(r.invoke, 'D:\\lab');
 

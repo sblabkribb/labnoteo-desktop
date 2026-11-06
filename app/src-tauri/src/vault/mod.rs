@@ -1,5 +1,6 @@
 pub mod fs;
 pub mod path;
+pub mod tree;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

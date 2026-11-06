@@ -1,6 +1,7 @@
 {
   "vault_open": ["path"],
   "vault_current": [],
+  "vault_tree": [],
   "vault_read": ["path"],
   "vault_write": ["path", "content"],
   "vault_modify": ["path", "content", "expectedBefore"],

@@ -11,6 +11,9 @@ const ko: Record<string, string> = {
   'vault.obsidian': 'Obsidian 설정이 있는 폴더입니다. .obsidian 은 건드리지 않습니다.',
   'vault.error.missing': '폴더를 찾을 수 없습니다. 다시 선택해 주세요.',
   'vault.error.generic': '이 폴더를 열 수 없습니다. 폴더가 맞는지 확인해 주세요.',
+  'tree.label': '노트',
+  'tree.empty': '노트가 없습니다',
+  'tree.error': '노트 목록을 불러올 수 없습니다.',
   'test.greeting': '{0} 에 노트 {1} 개',
 };
 
