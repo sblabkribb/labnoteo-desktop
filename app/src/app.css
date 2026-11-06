@@ -180,3 +180,201 @@ input, select, textarea {
   flex-wrap: wrap;
   gap: var(--space-5);
 }
+
+/* ───────── 앱 셸 ─────────
+   상단 바 / (알림) / 사이드바 + 본문 / 상태줄. 창 전체를 쓰고 페이지는 스크롤하지 않는다:
+   사이드바와 본문이 각자 스크롤한다. */
+.shell {
+  --sidebar-w: clamp(14rem, 26vw, 20rem);
+  height: 100vh;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top top"
+    "notices notices"
+    "side main"
+    "status status";
+}
+
+.topbar {
+  grid-area: top;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.topbar h1 { margin: 0; font-size: 1rem; }
+.topbar p { margin: 0; }
+.topbar button, .topbar select { background: var(--bg); }
+.topbar button:hover:not(:disabled) { background: var(--bg-hover); }
+.topbar button.primary { background: var(--accent); }
+.vault-name {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* "새 노트" 이름 입력은 상단 바 안에서 열린다: 입력 줄 뒤에 안내문이 한 줄을 다 쓴다 */
+.topbar form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.topbar form p { flex-basis: 100%; color: var(--text-muted); }
+
+/* 업데이트 배너와 노트 목록 오류: 상단 바 아래 전체 폭. 둘 다 떠도 줄이 쌓일 뿐 서로 가리지 않는다. */
+.notices { grid-area: notices; max-height: 30vh; overflow-y: auto; }
+.notices:empty { display: none; }
+.notices > *, .notices > aside > * { margin: 0; }
+.notices > p,
+.notices > aside {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.notices > aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  background: var(--bg-elevated);
+}
+
+.sidebar {
+  grid-area: side;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--space-3) 0;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
+}
+.sidebar > section { padding: 0 var(--space-3) var(--space-3); }
+.sidebar > section input { width: 100%; }
+.sidebar > section > p { margin: var(--space-2) 0 0; color: var(--text-muted); }
+.sidebar > section > p[role="alert"] { color: var(--danger); }
+.sidebar > p { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
+
+/* 검색 결과: 한 건이 사이드바 폭 안에서 줄바꿈된다 */
+.sidebar section li { margin-top: var(--space-1); }
+.sidebar section li button {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+}
+
+/* 노트 트리 */
+.sidebar nav li { min-width: 0; }
+.sidebar nav li > button {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  /* 긴 이름은 사이드바를 밀지 않고 한 줄에서 말줄임 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 줄 전체(들여쓰기 포함)가 하나의 대상이다: 안쪽 단추의 포커스 링이 잘리지 않게 안으로 그린다 */
+.sidebar nav li > button:focus-visible { outline-offset: -2px; }
+.sidebar nav li:hover { background: var(--bg-hover); }
+.sidebar nav li > button:hover:not(:disabled) { background: transparent; }
+
+/* 접기 표시: 장식이라 접근 가능한 이름에는 들어가지 않는다 ("/ ''" 대체 텍스트) */
+.sidebar nav li > button[aria-expanded]::before {
+  content: "▾" / "";
+  display: inline-block;
+  width: 1.1em;
+  color: var(--text-muted);
+}
+.sidebar nav li > button[aria-expanded="false"]::before { content: "▸" / ""; }
+
+/* 깊은 트리는 8단계까지만 들여쓴다. 그보다 깊은 줄은 같은 들여쓰기로 이어지고, 이름이 들여쓰기에 밀려 안 보이지 않는다.
+   (data-depth 규칙 자체는 24단계까지 두고, 사이드바 안에서만 상한을 둔다.) */
+.sidebar nav li[data-depth="9"],
+.sidebar nav li[data-depth="10"],
+.sidebar nav li[data-depth="11"],
+.sidebar nav li[data-depth="12"],
+.sidebar nav li[data-depth="13"],
+.sidebar nav li[data-depth="14"],
+.sidebar nav li[data-depth="15"],
+.sidebar nav li[data-depth="16"],
+.sidebar nav li[data-depth="17"],
+.sidebar nav li[data-depth="18"],
+.sidebar nav li[data-depth="19"],
+.sidebar nav li[data-depth="20"],
+.sidebar nav li[data-depth="21"],
+.sidebar nav li[data-depth="22"],
+.sidebar nav li[data-depth="23"],
+.sidebar nav li[data-depth="24"] {
+  padding-left: calc(var(--indent) * 8);
+}
+
+/* 지금 열린 노트: 색이 아니라 모양으로 알린다 — 왼쪽 끝 3px 강조 막대.
+   배경 색조(--bg-selected)는 배경과 1.56:1 이라 상태 표시로는 모자라고, 막대가 3:1 을 채운다. */
+.sidebar nav li:has(> button[aria-current="true"]) {
+  background: var(--bg-selected);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.content {
+  grid-area: main;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-4) var(--space-5);
+}
+.empty-state { color: var(--text-muted); }
+
+/* 편집기가 띄우는 확인 창: 본문 안의 눈에 띄는 패널 */
+.content [role="alertdialog"] {
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-3) 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.statusbar {
+  grid-area: status;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-1) var(--space-4);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.93em;
+}
+.status-notes { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); min-width: 0; }
+.status-version { margin-left: auto; }
+
+/* 보관함 선택·불러오는 중 화면 */
+.standalone { max-width: 48rem; margin: 0 auto; padding: var(--space-6) var(--space-5); }
+
+/* 좁은 창: 사이드바를 본문 위로 쌓는다 */
+@media (max-width: 640px) {
+  .shell {
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas: "top" "notices" "side" "main" "status";
+  }
+  .sidebar { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--border); }
+}

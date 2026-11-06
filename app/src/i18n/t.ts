@@ -2,6 +2,11 @@
 const ko: Record<string, string> = {
   'app.title': 'labnoteO',
   'app.ready': '보관함 셸이 준비되었습니다',
+  'app.sidebar': '사이드바',
+  'theme.label': '테마',
+  'theme.system': '시스템 설정 따르기',
+  'theme.dark': '어둡게',
+  'theme.light': '밝게',
   'firstRun.title': '노트를 둘 곳을 정하세요',
   'firstRun.hint': '노트는 이 컴퓨터의 폴더에 .labnote.md 파일로 저장됩니다. 한 번 정하면 다음부터 바로 열립니다.',
   'firstRun.create': '새 보관함 만들기',

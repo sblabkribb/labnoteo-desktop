@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App';
 
@@ -68,5 +68,31 @@ describe('앱', () => {
     await waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('vault_read', { path: 'Day 1.labnote.md' }));
     expect(screen.queryByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeNull();
     expect(screen.queryByRole('textbox', { name: '노트 이름' })).toBeNull();
+  });
+  it('레이아웃 영역이 역할로 드러난다: 상단 바, 사이드바, 본문, 상태줄', async () => {
+    render(<App />);
+    await screen.findByText('보관함: wrong');
+    const banner = screen.getByRole('banner');
+    expect(within(banner).getByRole('heading', { level: 1, name: 'labnoteO' })).toBeTruthy();
+    expect(within(banner).getByRole('button', { name: '보관함 바꾸기' })).toBeTruthy();
+    expect(within(banner).getByRole('button', { name: '새 노트' })).toBeTruthy();
+    expect(within(banner).getByRole('combobox', { name: '테마' })).toBeTruthy();
+    const side = screen.getByRole('complementary', { name: '사이드바' });
+    expect(within(side).getByRole('searchbox', { name: '노트 검색' })).toBeTruthy();
+    expect(within(side).getByText('노트가 없습니다')).toBeTruthy();
+    expect(screen.getAllByRole('main')).toHaveLength(1); // main 안에 main 을 중첩하지 않는다
+    expect(within(screen.getByRole('main')).getByText('왼쪽에서 노트를 고르면 여기서 편집합니다.')).toBeTruthy();
+    expect(within(screen.getByRole('contentinfo')).getByText(/0\.0\.0/)).toBeTruthy();
+  });
+  it('보관함을 고르는 화면에도 main 이 하나 있다', async () => {
+    tauri.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'vault_current') return null;
+      if (cmd === 'app_version') return '0.0.0';
+      throw new Error(`unexpected ${cmd}`);
+    });
+    render(<App />);
+    await screen.findByText('노트를 둘 곳을 정하세요');
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1, name: 'labnoteO' })).toBeTruthy();
   });
 });

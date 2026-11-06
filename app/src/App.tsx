@@ -12,8 +12,18 @@ import { rebuildIndex } from './search/indexApi';
 import { Editor, type EditorHandle } from './editor/Editor';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
+import { ThemeToggle } from './theme/ThemeToggle';
+import { useTheme, type Theme } from './theme/useTheme';
 
-function VaultView({ vault, version, onChangeVault }: { vault: VaultInfo; version: string; onChangeVault: () => void }) {
+interface ViewProps {
+  vault: VaultInfo;
+  version: string;
+  onChangeVault: () => void;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+}
+
+function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps) {
   const { entries, failed, reload } = useTree(vault.root);
   // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
   useVaultEvents(reload);
@@ -40,22 +50,43 @@ function VaultView({ vault, version, onChangeVault }: { vault: VaultInfo; versio
       live = false;
     };
   }, [vault.root]);
+  const flush = async () => !editor.current || (await editor.current.flush());
   return (
-    <>
-      <UpdateBanner beforeInstall={async () => !editor.current || (await editor.current.flush())} />
-      <p>{t('vault.open', vault.name)}</p>
-      <ChangeVault flush={async () => !editor.current || (await editor.current.flush())} onChange={onChangeVault} />
-      {vault.hasObsidianConfig && <p>{t('vault.obsidian')}</p>}
-      <NewNote flush={async () => !editor.current || (await editor.current.flush())} onCreated={openNote} />
-      <SearchPanel onOpen={openNote} indexing={indexing} skipped={skipped} />
-      {failed && <p role="alert">{t('tree.error')}</p>}
-      {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
-      {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
-      {selected ? <Editor key={selected} ref={editor} path={selected} /> : <p>{t('editor.empty')}</p>}
-      <p>
-        {t('app.ready')} {version}
-      </p>
-    </>
+    <div className="shell">
+      <header className="topbar">
+        <h1>{t('app.title')}</h1>
+        <p className="vault-name" title={vault.name}>
+          {t('vault.open', vault.name)}
+        </p>
+        <div className="topbar-actions">
+          <NewNote flush={flush} onCreated={openNote} />
+          <ChangeVault flush={flush} onChange={onChangeVault} />
+          <ThemeToggle theme={theme} onChange={setTheme} />
+        </div>
+      </header>
+      <div className="notices">
+        <UpdateBanner beforeInstall={flush} />
+        {failed && <p role="alert">{t('tree.error')}</p>}
+      </div>
+      <aside className="sidebar" aria-label={t('app.sidebar')}>
+        <SearchPanel onOpen={openNote} />
+        {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
+        {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
+      </aside>
+      <main className="content">
+        {selected ? <Editor key={selected} ref={editor} path={selected} /> : <p className="empty-state">{t('editor.empty')}</p>}
+      </main>
+      <footer className="statusbar">
+        <div className="status-notes">
+          {indexing && <span>{t('search.indexing')}</span>}
+          {skipped > 0 && <span role="status">{t('search.skipped', skipped)}</span>}
+          {vault.hasObsidianConfig && <span>{t('vault.obsidian')}</span>}
+        </div>
+        <span className="status-version">
+          {t('app.ready')} {version}
+        </span>
+      </footer>
+    </div>
   );
 }
 
@@ -65,12 +96,16 @@ export function App() {
   useEffect(() => {
     fetchAppVersion().then(setVersion);
   }, []);
+  const { theme, setTheme } = useTheme();
+  // 보관함이 열린 화면은 VaultView 가 자기 main 을 가진다. 그 밖의 화면(불러오는 중, 선택)은 여기서 감싼다.
+  if (state.status === 'ready') {
+    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} theme={theme} setTheme={setTheme} />;
+  }
   return (
-    <main>
+    <main className="standalone">
       <h1>{t('app.title')}</h1>
       {state.status === 'loading' && <p>{t('vault.loading')}</p>}
       {state.status === 'picker' && <FirstRun error={state.error} onOpen={open} onCreate={create} />}
-      {state.status === 'ready' && <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} />}
     </main>
   );
 }
