@@ -24,6 +24,7 @@ import { tableOpRunner, toggleRawTable, type TableAction } from './widget';
 // field.ts 와 cellEditor.ts 도 이 파일을 (간접적으로) 가져온다. 순환이므로 그 값은 함수 안에서만 쓴다.
 import { findTables, type TableSpan } from './field';
 import { focusCell } from './cellEditor';
+import { tableAwareInsertPos } from './target';
 
 export type { TableAction };
 
@@ -225,12 +226,13 @@ export function placeBlock(state: EditorState, from: number, to: number, block: 
 
 /**
  * 커서가 있는 줄 다음에 빈 표(머리 행 포함 `rows` 행, `cols` 열)를 따로 선 블록으로 넣고 첫 머리 칸에 포커스를 준다.
- * 커서가 빈 줄에 있으면 그 줄에 넣는다. 되돌리기 한 번. 잠겨 있으면 false.
+ * 커서가 빈 줄에 있으면 그 줄에 넣는다. 커서가 표 안이면 표 아래에 넣는다(`tableAwareInsertPos`). 되돌리기 한 번. 잠겨 있으면 false.
  */
 export function insertTable(view: EditorView, rowCount = 3, cols = 3): boolean {
   const state = view.state;
   if (isLocked(state)) return false;
-  const line = state.doc.lineAt(state.selection.main.head);
+  // 칸에 포커스가 있으면(바깥 커서가 표 안이면) 표를 가르지 않고 표 아래에 넣는다
+  const line = state.doc.lineAt(tableAwareInsertPos(state, state.selection.main.head));
   const table = newTable(Math.max(0, rowCount - 1), cols, state.lineBreak);
   const { change, start } = placeBlock(state, line.to, line.to, table);
   view.dispatch({
