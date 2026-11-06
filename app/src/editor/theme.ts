@@ -100,6 +100,9 @@ export const editorThemeSpec = {
     minWidth: '3em',
   },
   '.lno-table th': { backgroundColor: 'var(--bg-elevated)', fontWeight: '700' },
+  // 빈 칸도 글자 한 줄 높이(줄 높이 + 위아래 여백)를 갖게 보이지 않는 글자 하나를 둔다: 새 표의 빈 행이 얇아 누르기 어렵지 않게.
+  // 셀 편집기가 든 칸은 비어 있지 않으므로(편집기 DOM) 걸리지 않는다.
+  '.lno-table td:empty::before, .lno-table th:empty::before': { content: '"\\200b"' },
   '.lno-table .lno-al-left': { textAlign: 'left' },
   '.lno-table .lno-al-center': { textAlign: 'center' },
   '.lno-table .lno-al-right': { textAlign: 'right' },
@@ -107,15 +110,25 @@ export const editorThemeSpec = {
   '.lno-table code': { fontFamily: 'var(--font-mono)', fontSize: '0.93em', backgroundColor: 'var(--bg-hover)', borderRadius: 'var(--radius)' },
   '.lno-table-link': { color: 'var(--accent)', textDecoration: 'underline' },
   '.lno-table-image': { color: 'var(--text-muted)', fontStyle: 'italic' },
-  // 도구 막대는 표 위에 떠 있다가 가리키거나 포커스가 들어올 때만 보인다(키보드로도 닿는다)
+  // 도구 막대: 작은 단추 넷이 표 위 오른쪽에 겹쳐 뜬다. 자리를 차지하지 않아(position: absolute) 숨었을 때 표 위에 빈 틈이 없다.
+  // 아래 끝이 표의 위 선에 닿고, 표 틀의 위 여백과 앞 줄의 오른쪽 끝에 걸친다: 칸의 글자를 가리지 않는다.
+  // 가리키거나 포커스가 들어올 때만 보이고(키보드로도 닿는다), 숨었을 때는 앞 줄을 누르는 것을 가로채지 않는다.
   '.lno-table-toolbar': {
+    position: 'absolute',
+    bottom: 'calc(100% - var(--space-2))',
+    right: 'var(--space-3)',
+    zIndex: '5',
     display: 'flex',
-    flexWrap: 'wrap',
-    gap: 'var(--space-1)',
-    justifyContent: 'flex-end',
-    marginBottom: 'var(--space-1)',
+    gap: '2px',
     opacity: '0',
+    pointerEvents: 'none',
     transition: 'opacity 120ms',
+  },
+  '.lno-table-toolbar .lno-table-strip-tool': {
+    minWidth: '1.75em',
+    lineHeight: '1.4',
+    padding: '0 var(--space-1)',
+    textAlign: 'center',
   },
   // 셀 편집기(table/cellEditor.ts): 칸 안에 뜨는 작은 CodeMirror. 바깥 편집기의 줄·본문 여백을 걷고, 포커스는 칸의 윤곽선으로 보인다
   '.lno-table .lno-cell-active': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
@@ -123,7 +136,7 @@ export const editorThemeSpec = {
   '.lno-table .cm-scroller': { lineHeight: 'inherit', fontFamily: 'inherit' },
   '.lno-table .cm-content': { padding: '0', caretColor: 'var(--text)' },
   '.lno-table .cm-line': { padding: '0' },
-  '.lno-table-wrap:hover > .lno-table-toolbar, .lno-table-wrap:focus-within > .lno-table-toolbar': { opacity: '1' },
+  '.lno-table-wrap:hover > .lno-table-toolbar, .lno-table-wrap:focus-within > .lno-table-toolbar': { opacity: '1', pointerEvents: 'auto' },
   '.lno-table-tool': {
     font: 'inherit',
     fontSize: '0.85em',
@@ -139,12 +152,15 @@ export const editorThemeSpec = {
   },
   // 한 번 누른 "표 지우기": 한 번 더 누르면 지운다는 것을 위험색으로 알린다
   '.lno-table-tool[data-armed="true"]': { color: 'var(--danger)', borderColor: 'var(--danger)' },
-  // 칸의 오른쪽 클릭 메뉴: 표 틀의 오른쪽 위에 뜬다(위치를 style 로 박지 않는다)
+  // 표 메뉴: 연 자리(누른 점, 단추, 칸)에 뜬다. left/top(과 길 때 max-height)은 열 때 widget.ts 가 CSSOM 으로 적는다
+  // (style 속성은 CSP 가 막는다). 편집기보다 길면 메뉴 안에서 스크롤한다.
   '.lno-table-menu': {
     position: 'absolute',
-    top: 'var(--space-2)',
-    right: 'var(--space-3)',
+    top: '0',
+    left: '0',
     zIndex: '10',
+    overflowY: 'auto',
+    whiteSpace: 'nowrap',
     display: 'flex',
     flexDirection: 'column',
     gap: '1px',

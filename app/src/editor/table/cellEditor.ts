@@ -20,7 +20,7 @@ import { markdownHighlighting } from '../theme';
 import { labnoteMarkdown } from '../markdownSyntax';
 import { cellAt, escapeCellText, insertRow, parseTable, rows, setCell, type Change, type TableModel } from './model';
 import { displayText } from './renderInline';
-import { activeCells, cellActivator, paintCell, tableOf, type CellHandle } from './widget';
+import { activeCells, cellActivator, openTableMenu, paintCell, tableOf, type CellHandle } from './widget';
 // field.ts 도 이 파일을 가져온다(tableExtension). 순환이므로 이 파일의 맨 위 코드는 field 의 값을 쓰지 않는다: 함수 안에서만 쓴다.
 import { findTables, tableField, tableOptions, type TableSpan } from './field';
 
@@ -214,7 +214,18 @@ const escapeFilter = EditorState.transactionFilter.of((tr) => {
 /** 잠긴 셀 편집기에는 바깥에서 보낸 것 말고는 아무 변경도 들어가지 않는다. */
 const lockFilter = EditorState.changeFilter.of((tr) => !!tr.annotation(fromOuter) || !tr.startState.readOnly);
 
-type Place = 'start' | 'end' | number;
+/**
+ * 셀 편집기를 띄울 때의 선택. 'all' 은 칸 글자 전체를 고른다: Tab·Shift-Tab·Enter 와 바깥에서 키보드로 들어올 때
+ * (스프레드시트처럼 이어 친 글자가 내용을 바꾼다). 칸 경계의 화살표는 'start'·'end', 마우스는 누른 자리(숫자)다.
+ */
+type Place = 'start' | 'end' | 'all' | number;
+
+/** 칸 글자 `text` 에서 `place` 의 선택(anchor, head). */
+function placeRange(place: Place, text: string): { anchor: number; head: number } {
+  if (place === 'all') return { anchor: 0, head: text.length };
+  const head = place === 'start' ? 0 : place === 'end' ? text.length : Math.max(0, Math.min(place, text.length));
+  return { anchor: head, head };
+}
 
 class Session implements CellHandle {
   dead = false;
@@ -228,7 +239,6 @@ class Session implements CellHandle {
     place: Place,
   ) {
     const opts = outer.state.facet(tableOptions);
-    const head = place === 'start' ? 0 : place === 'end' ? text.length : Math.max(0, Math.min(place, text.length));
     td.replaceChildren();
     td.classList.add('lno-cell-active');
     activeCells.set(td, this);
@@ -239,7 +249,7 @@ class Session implements CellHandle {
       root: opts?.root,
       state: EditorState.create({
         doc: text,
-        selection: { anchor: head },
+        selection: placeRange(place, text),
         extensions: [
           labnoteMarkdown(),
           markdownHighlighting,
@@ -443,7 +453,7 @@ class Session implements CellHandle {
     if (!at || isLocked(this.outer.state)) return true;
     const changes = shift(insertRow(at.m, at.m.body.length, this.outer.state.lineBreak), at.span.from);
     this.outer.dispatch({ changes, annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input')] });
-    focusCell(this.outer, at.span.from, at.m.body.length + 1, c, 'start');
+    focusCell(this.outer, at.span.from, at.m.body.length + 1, c, 'all');
     return true;
   }
 
@@ -451,8 +461,8 @@ class Session implements CellHandle {
     const at = this.located();
     if (!at) return false;
     const { r, c } = at.ac;
-    if (c + 1 < at.m.width) return this.go(r, c + 1, 'start');
-    if (r < at.m.body.length) return this.go(r + 1, 0, 'start');
+    if (c + 1 < at.m.width) return this.go(r, c + 1, 'all');
+    if (r < at.m.body.length) return this.go(r + 1, 0, 'all');
     return this.addRow(0);
   }
 
@@ -460,8 +470,8 @@ class Session implements CellHandle {
     const at = this.located();
     if (!at) return false;
     const { r, c } = at.ac;
-    if (c > 0) return this.go(r, c - 1, 'end');
-    if (r > 0) return this.go(r - 1, at.m.width - 1, 'end');
+    if (c > 0) return this.go(r, c - 1, 'all');
+    if (r > 0) return this.go(r - 1, at.m.width - 1, 'all');
     return true;
   }
 
@@ -469,7 +479,7 @@ class Session implements CellHandle {
     const at = this.located();
     if (!at) return false;
     const { r, c } = at.ac;
-    return r < at.m.body.length ? this.go(r + 1, c, 'end') : this.addRow(c);
+    return r < at.m.body.length ? this.go(r + 1, c, 'all') : this.addRow(c);
   }
 
   /**
@@ -547,9 +557,20 @@ class Session implements CellHandle {
     }
   }
 
+  /** 이 칸에 붙여 표 메뉴를 연다(ContextMenu 키, Shift-F10). Escape 로 닫으면 이 칸으로 돌아온다. */
+  private menu(): boolean {
+    const ac = this.cell;
+    if (!ac) return false;
+    const outer = this.outer;
+    const { tableFrom, r, c } = ac;
+    return openTableMenu(outer, this.td, () => void focusCell(outer, tableFrom, r, c, 'end'));
+  }
+
   private keys(): KeyBinding[] {
     const outer = this.outer;
     return [
+      { key: 'ContextMenu', run: () => this.menu(), preventDefault: true },
+      { key: 'Shift-F10', run: () => this.menu(), preventDefault: true },
       { key: 'Tab', run: () => this.next(), shift: () => this.prev() },
       { key: 'Enter', run: () => this.down() },
       {
@@ -612,10 +633,10 @@ export function focusCell(view: EditorView, tableFrom: number, r: number, c: num
   const td = cellElement(view, tableFrom, r, c);
   if (!td) return false;
   const text = displayText(cell.text);
-  const head = place === 'start' ? 0 : place === 'end' ? text.length : Math.max(0, Math.min(place, text.length));
+  const { head } = placeRange(place, text);
   const current = sessions.get(view);
   if (current && current.td === td && !current.dead) {
-    current.nested.dispatch({ selection: { anchor: Math.min(head, current.nested.state.doc.length) }, annotations: fromOuter.of(true) });
+    current.nested.dispatch({ selection: placeRange(place, current.nested.state.doc.toString()), annotations: fromOuter.of(true) });
     current.nested.focus();
     return true;
   }
@@ -625,7 +646,7 @@ export function focusCell(view: EditorView, tableFrom: number, r: number, c: num
     effects: setActiveCell.of({ tableFrom, r, c }),
     selection: { anchor: found.span.from + cell.contentFrom + Math.min(head, cell.contentTo - cell.contentFrom) },
   });
-  const session = new Session(view, td, text, head);
+  const session = new Session(view, td, text, place);
   session.nested.focus();
   view.requestMeasure();
   return true;
@@ -644,7 +665,7 @@ function enterFromOuter(view: EditorView, dir: 1 | -1): boolean {
   const found = span && locate(view.state, span);
   if (!found) return false;
   const r = dir > 0 ? 0 : found.m.body.length;
-  return focusCell(view, found.span.from, r, columnAt(view, found.span.from, head), 'end');
+  return focusCell(view, found.span.from, r, columnAt(view, found.span.from, head), 'all');
 }
 
 /** 커서의 가로 위치가 든 머리 행 칸의 열. 알 수 없으면 0. */

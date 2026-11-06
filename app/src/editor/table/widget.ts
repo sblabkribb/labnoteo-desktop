@@ -13,6 +13,10 @@ import { renderInline } from './renderInline';
  *   (Task 4 에서 셀 편집기가 든 칸을 살려 두는 데 쓴다).
  * - 모델의 위치는 표 시작(`source` 의 0) 기준이다.
  * - 도구 막대와 오른쪽 클릭 메뉴의 단추는 `tableOpRunner`(commands.ts)를 부른다. 이름표는 열 때마다 지금 언어로 단다.
+ * - 도구 막대는 작은 단추 넷(아래에 행, 오른쪽에 열, 정렬 돌리기, 더 보기)이고 표 위 오른쪽에 겹쳐 뜬다: 자리를 차지하지 않는다.
+ *   모든 연산은 메뉴(오른쪽 클릭, "더 보기", 칸에서 ContextMenu 키·Shift-F10)에 있다.
+ * - 메뉴는 연 자리(누른 점, 또는 단추나 칸)에 뜨고, 편집기 스크롤 틀 안에 다 보이도록 뒤집거나 민다. 자리는 CSSOM 으로 적는다
+ *   (`style` 속성은 CSP 가 막는다).
  */
 
 /** 이 위치에서 시작하는 표를 원문으로 보이거나(없으면 넣고) 다시 격자로 돌린다(있으면 뺀다). 값은 표의 첫 줄 시작 위치. */
@@ -60,6 +64,17 @@ const TOOLS: ReadonlyArray<{ action: TableAction; label: () => string }> = [
   { action: 'deleteTable', label: () => t('table.deleteTable') },
 ];
 
+/** 도구 막대의 단추: 표 연산 둘과, 위젯이 직접 다루는 정렬 돌리기·더 보기. */
+type StripAction = 'insertRowBelow' | 'insertColumnRight' | 'cycleAlign' | 'more';
+
+/** 도구 막대의 작은 단추. 보이는 글자는 기호이고, 이름(aria-label 과 title)은 번역 카탈로그에서 읽는다. */
+const STRIP: ReadonlyArray<{ action: StripAction; glyph: string; label: () => string }> = [
+  { action: 'insertRowBelow', glyph: '+\u2193', label: () => t('table.insertRowBelow') },
+  { action: 'insertColumnRight', glyph: '+\u2192', label: () => t('table.insertColumnRight') },
+  { action: 'cycleAlign', glyph: '\u2261', label: () => t('table.alignCycle') },
+  { action: 'more', glyph: '\u22ef', label: () => t('table.more') },
+];
+
 /**
  * 표 연산을 하는 쪽(commands.ts). 위젯은 commands 를 모른다(순환 import 를 피한다): 단추를 누르면 이 facet 의 함수를 부른다.
  * (r, c) 는 연산의 기준 칸이다. 해냈으면 true.
@@ -85,7 +100,8 @@ export const activeCells = new WeakMap<HTMLElement, CellHandle>();
 
 /** 행 하나의 대략 높이(px). 스크롤 위치 추정용이다. */
 const ROW_PX = 32;
-const TOOLBAR_PX = 28;
+/** 표 틀의 위아래 여백(px, theme.ts 의 `.lno-table-wrap` padding). 도구 막대는 겹쳐 뜨므로 높이에 넣지 않는다. */
+const WRAP_PX = 16;
 
 const ALIGN_CLASSES = ['lno-al-left', 'lno-al-center', 'lno-al-right'];
 
@@ -145,6 +161,14 @@ function sameShape(table: HTMLTableElement, m: TableModel): boolean {
 const isArmed = (b: HTMLElement) => b.dataset.armed === 'true';
 
 function setLabel(b: HTMLElement): void {
+  const strip = b.dataset.glyph !== undefined ? STRIP.find((x) => x.action === b.dataset.action) : undefined;
+  if (strip) {
+    const name = strip.label();
+    b.setAttribute('aria-label', name);
+    b.title = name;
+    b.textContent = strip.glyph;
+    return;
+  }
   const text =
     b.dataset.action === 'deleteTable' && isArmed(b) ? t('table.deleteTableConfirm') : TOOLS.find((x) => x.action === b.dataset.action)?.label();
   if (text === undefined) return;
@@ -197,8 +221,23 @@ const isLocked = (view: EditorView) => view.state.readOnly || !view.state.facet(
  * (확인 창 없이). 연산을 불렀으면 true, 지우기를 준비만 했으면 false.
  */
 function runButton(view: EditorView, wrap: HTMLElement, b: HTMLElement): boolean {
-  const action = b.dataset.action as TableAction | undefined;
+  let action = b.dataset.action as TableAction | StripAction | undefined;
   if (!action) return false;
+  if (action === 'more') {
+    disarm(wrap);
+    if (b.dataset.closing) {
+      delete b.dataset.closing;
+      return false;
+    }
+    openMenu(view, wrap, targetCell(wrap), b, () => b.focus());
+    return false;
+  }
+  if (action === 'cycleAlign') {
+    // 왼쪽(정렬 없음 포함) → 가운데 → 오른쪽 → 왼쪽
+    const at = targetCell(wrap);
+    const align = current.get(wrap)?.model.align[at.c] ?? null;
+    action = align === 'center' ? 'alignRight' : align === 'right' ? 'alignLeft' : 'alignCenter';
+  }
   if (action === 'deleteTable' && !isArmed(b)) {
     b.dataset.armed = 'true';
     setLabel(b);
@@ -220,15 +259,34 @@ function makeButton(doc: Document, action: TableAction): HTMLButtonElement {
   return b;
 }
 
+/** 도구 막대의 작은 단추(기호 글자, 이름은 aria-label 과 title). */
+function makeStripButton(doc: Document, tool: (typeof STRIP)[number]): HTMLButtonElement {
+  const b = doc.createElement('button');
+  b.type = 'button';
+  b.className = 'lno-table-tool lno-table-strip-tool';
+  b.dataset.action = tool.action;
+  b.dataset.glyph = '';
+  if (tool.action === 'more') {
+    b.setAttribute('aria-haspopup', 'menu');
+    b.setAttribute('aria-expanded', 'false');
+  }
+  setLabel(b);
+  return b;
+}
+
 function makeToolbar(doc: Document, view: EditorView, wrap: HTMLElement): HTMLElement {
   const bar = doc.createElement('div');
   bar.className = 'lno-table-toolbar';
   bar.setAttribute('role', 'toolbar');
-  for (const tool of TOOLS) bar.appendChild(makeButton(doc, tool.action));
+  for (const tool of STRIP) bar.appendChild(makeStripButton(doc, tool));
   labelToolbar(bar);
   // 셀 편집기의 포커스를 뺏지 않는다: 누르는 동안에도 셀 편집기가 든 칸이 연산의 기준으로 남는다
   bar.addEventListener('mousedown', (e) => {
-    if ((e.target as Element | null)?.closest('button')) e.preventDefault();
+    const b = (e.target as Element | null)?.closest<HTMLElement>('button');
+    if (!b) return;
+    e.preventDefault();
+    // 메뉴가 열린 채 "더 보기" 를 누르면(표 틀의 mousedown 이 곧 메뉴를 닫는다) 이어지는 click 은 다시 열지 않는다: 여닫기
+    if (b.dataset.action === 'more' && menuOf(wrap)) b.dataset.closing = 'true';
   });
   bar.addEventListener('click', (e) => {
     const b = (e.target as Element | null)?.closest('button');
@@ -243,7 +301,56 @@ function makeToolbar(doc: Document, view: EditorView, wrap: HTMLElement): HTMLEl
 // ---------------------------------------------------------------- 오른쪽 클릭 메뉴
 
 const menuOf = (wrap: HTMLElement) => wrap.querySelector<HTMLElement>(':scope > .lno-table-menu');
-const closeMenu = (wrap: HTMLElement) => menuOf(wrap)?.remove();
+function closeMenu(wrap: HTMLElement): void {
+  menuOf(wrap)?.remove();
+  wrap.querySelector('.lno-table-toolbar button[aria-expanded="true"]')?.setAttribute('aria-expanded', 'false');
+}
+
+/** 메뉴를 붙일 자리: 누른 점(화면 좌표), 또는 그 아래에 붙일 요소(단추나 칸). */
+type MenuAnchor = { x: number; y: number } | Element;
+
+/** [start, start+size) 가 hi 를 넘으면 alt 의 반대쪽(alt-size)으로 뒤집고, 그래도 넘치면 [lo, hi) 안으로 민다(lo 쪽이 우선). */
+function fit(start: number, alt: number, size: number, lo: number, hi: number): number {
+  const p = start + size > hi ? alt - size : start;
+  return Math.max(lo, Math.min(p, hi - size));
+}
+
+/**
+ * 메뉴를 붙일 자리에 둔다. 편집기 스크롤 틀(창과 겹치는 부분)이 보이는 영역이다: 오른쪽이 모자라면 왼쪽으로, 아래가 모자라면
+ * 위로 뒤집고, 그래도 넘치면 안으로 민다. 영역보다 길면 높이를 줄여 메뉴 안에서 스크롤한다.
+ * 자리는 표 틀(position: relative) 기준 left/top 이고 CSSOM 으로 적는다: CSP 가 style 속성을 막는다.
+ */
+function placeMenu(view: EditorView, wrap: HTMLElement, menu: HTMLElement, anchor: MenuAnchor): void {
+  const win = wrap.ownerDocument.defaultView;
+  const area = view.scrollDOM.getBoundingClientRect();
+  const lo = { x: Math.max(area.left, 0), y: Math.max(area.top, 0) };
+  const hi = {
+    x: win?.innerWidth ? Math.min(area.right, win.innerWidth) : area.right,
+    y: win?.innerHeight ? Math.min(area.bottom, win.innerHeight) : area.bottom,
+  };
+  menu.style.removeProperty('max-height');
+  const size = menu.getBoundingClientRect();
+  let h = size.height;
+  const room = hi.y - lo.y;
+  if (room > 0 && h > room) {
+    menu.style.setProperty('max-height', `${room}px`);
+    h = room;
+  }
+  let left: number;
+  let top: number;
+  if (anchor instanceof Element) {
+    // 요소 아래 왼쪽에 붙인다. 모자라면 요소의 오른쪽 끝·위쪽 끝에 맞춰 뒤집는다
+    const a = anchor.getBoundingClientRect();
+    left = fit(a.left, a.right, size.width, lo.x, hi.x);
+    top = fit(a.bottom, a.top, h, lo.y, hi.y);
+  } else {
+    left = fit(anchor.x, anchor.x, size.width, lo.x, hi.x);
+    top = fit(anchor.y, anchor.y, h, lo.y, hi.y);
+  }
+  const box = wrap.getBoundingClientRect();
+  menu.style.setProperty('left', `${Math.round(left - box.left)}px`);
+  menu.style.setProperty('top', `${Math.round(top - box.top)}px`);
+}
 
 /** 그 칸에서 할 수 없는 연산(머리 행 지우기, 첫 행을 위로 등)은 메뉴에서 끈다. */
 function applicable(action: TableAction, m: TableModel, r: number, c: number): boolean {
@@ -265,8 +372,17 @@ function applicable(action: TableAction, m: TableModel, r: number, c: number): b
   }
 }
 
-/** 칸의 오른쪽 클릭 메뉴. 열 때마다 새로 만들어 지금 언어의 이름표를 단다. */
-function openMenu(view: EditorView, wrap: HTMLElement, at: { r: number; c: number }): void {
+/**
+ * 표 메뉴. 열 때마다 새로 만들어 지금 언어의 이름표를 단다. `anchor` 자리에 뜨고, Escape 로 닫으면 `restore` 가 포커스를 돌려준다
+ * (단추로 열었으면 그 단추, 칸에서 키로 열었으면 그 칸, 오른쪽 클릭이면 바깥 편집기).
+ */
+function openMenu(
+  view: EditorView,
+  wrap: HTMLElement,
+  at: { r: number; c: number },
+  anchor: MenuAnchor,
+  restore: () => void = () => view.focus(),
+): void {
   closeMenu(wrap);
   const doc = wrap.ownerDocument;
   const m = current.get(wrap)?.model;
@@ -293,7 +409,7 @@ function openMenu(view: EditorView, wrap: HTMLElement, at: { r: number; c: numbe
     if (e.key === 'Escape') {
       e.preventDefault();
       closeMenu(wrap);
-      view.focus();
+      restore();
       return;
     }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -307,7 +423,23 @@ function openMenu(view: EditorView, wrap: HTMLElement, at: { r: number; c: numbe
     if (to && !menu.contains(to)) closeMenu(wrap);
   });
   wrap.appendChild(menu);
+  placeMenu(view, wrap, menu, anchor);
+  if (anchor instanceof Element && anchor.getAttribute('aria-haspopup') === 'menu') anchor.setAttribute('aria-expanded', 'true');
   items()[0]?.focus();
+}
+
+/**
+ * 칸(셀 편집기가 든 칸 등)에 붙여 표 메뉴를 연다: 칸에서 ContextMenu 키나 Shift-F10 을 눌렀을 때(cellEditor.ts).
+ * 잠겼거나 연산할 쪽이 없으면 열지 않고 false. `restore` 는 Escape 로 닫을 때 포커스를 그 칸으로 돌려준다.
+ */
+export function openTableMenu(view: EditorView, cell: HTMLElement, restore: () => void): boolean {
+  const wrap = cell.closest<HTMLElement>('.lno-table-wrap');
+  const el = wrap && cellOf(wrap, cell);
+  if (!wrap || !el || isLocked(view) || !view.state.facet(tableOpRunner)) return false;
+  const at = indexOf(el);
+  lastCell.set(wrap, at);
+  openMenu(view, wrap, at, el, restore);
+  return true;
 }
 
 // ---------------------------------------------------------------- 칸
@@ -345,12 +477,15 @@ function listenForCells(wrap: HTMLElement, view: EditorView): void {
     if (el) lastCell.set(wrap, indexOf(el));
   });
   wrap.addEventListener('contextmenu', (e) => {
+    // 메뉴 안(키보드로 연 뒤 ContextMenu 키를 뗄 때 오는 사건 포함): 기본 메뉴를 띄우지 않고 열린 메뉴를 그대로 둔다
+    const menu = menuOf(wrap);
+    if (menu && menu.contains(e.target as Node | null)) return e.preventDefault();
     const el = cellOf(wrap, e.target);
     if (!el || isLocked(view) || !view.state.facet(tableOpRunner)) return;
     e.preventDefault();
     const at = indexOf(el);
     lastCell.set(wrap, at);
-    openMenu(view, wrap, at);
+    openMenu(view, wrap, at, { x: e.clientX, y: e.clientY });
   });
   wrap.addEventListener('pointerleave', () => disarm(wrap));
 }
@@ -445,7 +580,7 @@ export class TableWidget extends WidgetType {
   }
 
   get estimatedHeight(): number {
-    return (this.model.body.length + 1) * ROW_PX + (this.canEdit ? TOOLBAR_PX : 0);
+    return (this.model.body.length + 1) * ROW_PX + WRAP_PX;
   }
 
   destroy(dom: HTMLElement): void {

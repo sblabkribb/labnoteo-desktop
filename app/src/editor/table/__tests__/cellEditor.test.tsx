@@ -11,6 +11,7 @@ import { ERROR_KINDS_FIXTURE } from '../../../__tests__/fixtures';
 import type { VaultChange } from '../../../vault/useVaultEvents';
 import { tableExtension } from '../field';
 import { activeCell, activeCellView, cellEdit, focusCell, liveCellEditors } from '../cellEditor';
+import { runTableOp } from '../commands';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -288,6 +289,61 @@ describe('셀 편집기: 키보드 이동', () => {
     expect(liveCellEditors()).toBe(1);
   });
 
+  it('Tab / Shift-Tab / Enter 로 들어간 칸은 글자 전체가 선택되어, 이어 친 글자가 내용을 바꾼다 (스프레드시트처럼)', () => {
+    const doc = '| a | b |\n| --- | --- |\n| 132 | 7 |\n| 0 | 9 |\n';
+    const m = mount(doc);
+    focusCell(m.view, 0, 0, 1);
+    key(nested(m.view), 'Tab');
+    expect(m.view.state.field(activeCell)).toMatchObject({ r: 1, c: 0 });
+    let sel = nested(m.view).state.selection.main;
+    expect([sel.from, sel.to]).toEqual([0, 3]);
+    type(nested(m.view), '140');
+    expect(m.view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| 140 | 7 |\n| 0 | 9 |\n');
+    key(nested(m.view), 'Tab');
+    type(nested(m.view), '8');
+    expect(m.view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| 140 | 8 |\n| 0 | 9 |\n');
+    key(nested(m.view), 'Tab', { shift: true });
+    sel = nested(m.view).state.selection.main;
+    expect([sel.from, sel.to]).toEqual([0, 3]);
+    type(nested(m.view), '1');
+    expect(m.view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| 1 | 8 |\n| 0 | 9 |\n');
+    key(nested(m.view), 'Enter');
+    expect(m.view.state.field(activeCell)).toMatchObject({ r: 2, c: 0 });
+    type(nested(m.view), '5');
+    expect(m.view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| 1 | 8 |\n| 5 | 9 |\n');
+  });
+
+  it('바깥 편집기에서 키보드로 들어간 칸도 글자 전체가 선택된다', () => {
+    const m = mount('앞\n\n| ab | b |\n| --- | --- |\n| 1 | 2 |\n');
+    m.view.dispatch({ selection: { anchor: 2 } });
+    expect(runScopeHandlers(m.view, new KeyboardEvent('keydown', { key: 'ArrowDown' }), 'editor')).toBe(true);
+    const sel = nested(m.view).state.selection.main;
+    expect([sel.from, sel.to]).toEqual([0, 2]);
+  });
+
+  it('마우스로 누른 칸은 누른 자리에 커서를 두어, 친 글자가 그 자리에 들어간다', () => {
+    const m = mount('| a |\n| --- |\n| 132 |\n');
+    const spy = vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue(1);
+    try {
+      click(cellEl(m.view, 1, 0));
+    } finally {
+      spy.mockRestore();
+    }
+    const sel = nested(m.view).state.selection.main;
+    expect([sel.from, sel.to]).toEqual([1, 1]);
+    type(nested(m.view), '4');
+    expect(m.view.state.doc.toString()).toBe('| a |\n| --- |\n| 1432 |\n');
+  });
+
+  it('칸 경계의 화살표로 옮긴 칸은 가장자리에 커서를 둔다 (전체 선택이 아니다)', () => {
+    const m = mount(T + '\n');
+    focusCell(m.view, 0, 1, 0, 'end');
+    key(nested(m.view), 'ArrowRight');
+    expect(m.view.state.field(activeCell)).toMatchObject({ r: 1, c: 1 });
+    const sel = nested(m.view).state.selection.main;
+    expect([sel.from, sel.to]).toEqual([0, 0]);
+  });
+
   it('마지막 칸의 Tab 은 행을 하나 더하고 그리로 간다: 되돌리기 한 번에 행이 빠진다', () => {
     const doc = `${T}\n\n뒤\n`;
     const m = mount(doc);
@@ -501,7 +557,8 @@ describe('셀 편집기: 밖의 변경', () => {
   it('위젯이 사라지면(마크다운으로 편집) 셀 편집기도 걷힌다', () => {
     const m = mount(`${T}\n`);
     focusCell(m.view, 0, 1, 0);
-    (wrapOf(m.view).querySelector(`button[data-action="editAsMarkdown"]`) as HTMLButtonElement).click();
+    expect(liveCellEditors()).toBe(1);
+    expect(runTableOp(m.view, 0, { action: 'editAsMarkdown', r: 1, c: 0 })).toBe(true);
     expect(liveCellEditors()).toBe(0);
   });
 });

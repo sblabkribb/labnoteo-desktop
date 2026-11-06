@@ -56,6 +56,11 @@ const cellEl = (v: EditorView, r: number, c: number) =>
 const tool = (v: EditorView, action: string) =>
   wrapOf(v).querySelector<HTMLButtonElement>(`.lno-table-toolbar button[data-action="${action}"]`)!;
 const menuOf = (v: EditorView) => wrapOf(v)?.querySelector<HTMLElement>('.lno-table-menu') ?? null;
+/** 메뉴의 단추. 메뉴가 닫혀 있으면 도구 막대의 "더 보기" 로 연다. */
+const menuItem = (v: EditorView, action: string) => {
+  if (!menuOf(v)) tool(v, 'more').click();
+  return menuOf(v)!.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`)!;
+};
 const pressMouse = (el: Element) => el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
 /** 진짜 누르기처럼: mousedown 다음 click. */
 const press = (el: HTMLElement) => {
@@ -226,9 +231,21 @@ describe('도구 막대와 오른쪽 클릭 메뉴', () => {
     expect(v.state.doc.toString().split('\n')[0]).toBe('| a | b | c |  |');
   });
 
-  it('도구 막대의 단추는 모든 연산을 담고 이름표는 t() 를 거친다', () => {
+  it('도구 막대는 작은 단추 넷(아래에 행, 오른쪽에 열, 정렬, 더 보기)이고, 모든 연산은 "더 보기" 메뉴에 있다', () => {
     const v = mount(`${T3}\n`);
-    const labels = Array.from(wrapOf(v).querySelectorAll('.lno-table-toolbar button')).map((b) => b.getAttribute('aria-label'));
+    const bar = wrapOf(v).querySelector('.lno-table-toolbar')!;
+    const strip = Array.from(bar.querySelectorAll('button'));
+    expect(strip.map((b) => b.dataset.action)).toEqual(['insertRowBelow', 'insertColumnRight', 'cycleAlign', 'more']);
+    expect(strip.map((b) => b.getAttribute('aria-label'))).toEqual(
+      ['table.insertRowBelow', 'table.insertColumnRight', 'table.alignCycle', 'table.more'].map((k) => catalogs.ko[k]),
+    );
+    for (const b of strip) {
+      expect(b.type).toBe('button');
+      expect(b.title).toBe(b.getAttribute('aria-label'));
+    }
+    expect(tool(v, 'more').getAttribute('aria-haspopup')).toBe('menu');
+    tool(v, 'more').click();
+    const labels = Array.from(menuOf(v)!.querySelectorAll('button')).map((b) => b.getAttribute('aria-label'));
     for (const key of [
       'table.insertRowAbove',
       'table.insertRowBelow',
@@ -248,6 +265,27 @@ describe('도구 막대와 오른쪽 클릭 메뉴', () => {
       'table.deleteTable',
     ])
       expect(labels).toContain(catalogs.ko[key]);
+    // 언어를 바꾸면 막대를 다시 열 때 이름표가 바뀐다
+    setLang('en');
+    wrapOf(v).dispatchEvent(new Event('pointerenter'));
+    expect(tool(v, 'more').getAttribute('aria-label')).toBe(catalogs.en['table.more']);
+    expect(tool(v, 'cycleAlign').title).toBe(catalogs.en['table.alignCycle']);
+  });
+
+  it('정렬 단추는 그 칸의 열을 왼쪽 → 가운데 → 오른쪽 → 왼쪽으로 돌린다 (누를 때마다 되돌리기 한 번)', () => {
+    const v = mount(`${T3}\n`);
+    const delim = () => v.state.doc.line(2).text;
+    focusCell(v, 0, 1, 1);
+    press(tool(v, 'cycleAlign'));
+    expect(delim()).toBe('| --- | :---: | --- |');
+    press(tool(v, 'cycleAlign'));
+    expect(delim()).toBe('| --- | ---: | --- |');
+    press(tool(v, 'cycleAlign'));
+    expect(delim()).toBe('| --- | :--- | --- |');
+    press(tool(v, 'cycleAlign'));
+    expect(delim()).toBe('| --- | :---: | --- |');
+    expect(undoDepth(v.state)).toBe(4);
+    expect(v.state.field(activeCell)).toMatchObject({ r: 1, c: 1 });
   });
 
   it('오른쪽 클릭 메뉴: 그 칸 기준으로 연산하고, 이름표는 열 때의 언어를 따른다', () => {
@@ -286,7 +324,7 @@ describe('도구 막대와 오른쪽 클릭 메뉴', () => {
 
   it('표 지우기는 두 번 눌러야 한다: 첫 번째는 "다시 누르면 지웁니다" 로 바뀐다', () => {
     const v = mount(`앞\n\n${T3}\n`);
-    const b = tool(v, 'deleteTable');
+    const b = menuItem(v, 'deleteTable');
     expect(b.textContent).toBe(catalogs.ko['table.deleteTable']);
     press(b);
     expect(v.state.doc.toString()).toBe(`앞\n\n${T3}\n`);
@@ -298,7 +336,7 @@ describe('도구 막대와 오른쪽 클릭 메뉴', () => {
 
   it('표 지우기 준비는 포인터가 표를 떠나면 풀린다', () => {
     const v = mount(`${T3}\n`);
-    const b = tool(v, 'deleteTable');
+    const b = menuItem(v, 'deleteTable');
     press(b);
     wrapOf(v).dispatchEvent(new Event('pointerleave'));
     expect(b.textContent).toBe(catalogs.ko['table.deleteTable']);
@@ -313,9 +351,112 @@ describe('도구 막대와 오른쪽 클릭 메뉴', () => {
       value: { writeText: async (s: string) => void writes.push(s) },
     });
     const v = mount('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
-    tool(v, 'copyTSV').click();
+    menuItem(v, 'copyTSV').click();
     await waitFor(() => expect(writes).toEqual(['a\tb\r\n1\t2']));
     expect(v.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
+  });
+});
+
+describe('메뉴의 자리와 키보드로 열기', () => {
+  /** 레이아웃이 없는 jsdom 에서 편집기 스크롤 틀·표 틀·메뉴·단추·칸의 화면 위치를 정한다. */
+  function layout(rects: { menu?: [number, number]; cell?: DOMRect } = {}) {
+    const [mw, mh] = rects.menu ?? [150, 300];
+    return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains('cm-scroller')) return new DOMRect(0, 0, 800, 600);
+      if (this.classList.contains('lno-table-wrap')) return new DOMRect(50, 100, 700, 200);
+      if (this.classList.contains('lno-table-menu')) return new DOMRect(0, 0, mw, mh);
+      if ((this as HTMLElement).dataset?.action === 'more') return new DOMRect(600, 80, 24, 20);
+      if (this.matches('td, th')) return rects.cell ?? new DOMRect(200, 150, 80, 30);
+      return new DOMRect();
+    });
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  const rightClickAt = (el: Element, x: number, y: number) =>
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  const pos = (menu: HTMLElement) => [menu.style.getPropertyValue('left'), menu.style.getPropertyValue('top')];
+  const keyIn = (nv: EditorView, k: string, shift = false) =>
+    runScopeHandlers(nv, new KeyboardEvent('keydown', { key: k, shiftKey: shift, bubbles: true, cancelable: true }), 'editor');
+
+  it('오른쪽 클릭 메뉴는 누른 자리에 뜬다 (표 틀 기준 left/top, style 속성이 아니라 CSSOM)', () => {
+    layout();
+    const v = mount(`${T3}\n`);
+    rightClickAt(cellEl(v, 1, 0), 300, 200);
+    const menu = menuOf(v)!;
+    expect(pos(menu)).toEqual(['250px', '100px']);
+  });
+
+  it('오른쪽·아래가 모자라면 누른 자리의 왼쪽·위로 뒤집어 편집기 안에 다 보인다', () => {
+    layout();
+    const v = mount(`${T3}\n`);
+    rightClickAt(cellEl(v, 2, 2), 760, 500);
+    // 760+150 > 800 이면 왼쪽으로(610), 500+300 > 600 이면 위로(200): 표 틀 (50, 100) 기준
+    expect(pos(menuOf(v)!)).toEqual(['560px', '100px']);
+  });
+
+  it('뒤집어도 모자라면 편집기 안으로 밀고, 편집기보다 길면 높이를 줄여 스크롤한다', () => {
+    layout({ menu: [150, 700] });
+    const v = mount(`${T3}\n`);
+    rightClickAt(cellEl(v, 1, 0), 100, 50);
+    const menu = menuOf(v)!;
+    expect(pos(menu)).toEqual(['50px', '-100px']);
+    expect(menu.style.getPropertyValue('max-height')).toBe('600px');
+  });
+
+  it('"더 보기" 단추는 메뉴를 단추 아래에 열고 첫 항목에 포커스를 준다; Escape 는 닫고 단추로 포커스를 돌려준다', () => {
+    layout();
+    const v = mount(`${T3}\n`);
+    const more = tool(v, 'more');
+    more.focus();
+    more.click();
+    const menu = menuOf(v)!;
+    expect(menu).not.toBeNull();
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    // 단추 (600, 80, 24×20) 의 아래 왼쪽 → 표 틀 기준 (550, 0)
+    expect(pos(menu)).toEqual(['550px', '0px']);
+    expect(document.activeElement).toBe(menu.querySelector('button:not(:disabled)'));
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(menuOf(v)).toBeNull();
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(more);
+    // 마우스로 누르면 여닫는다: 열린 채 다시 누르면 닫힌다
+    press(more);
+    expect(menuOf(v)).not.toBeNull();
+    press(more);
+    expect(menuOf(v)).toBeNull();
+    press(more);
+    expect(menuOf(v)).not.toBeNull();
+  });
+
+  for (const k of [
+    { name: 'Shift-F10', key: 'F10', shift: true },
+    { name: 'ContextMenu 키', key: 'ContextMenu', shift: false },
+  ]) {
+    it(`칸에서 ${k.name} 은 그 칸에 붙여 메뉴를 열고, Escape 는 그 칸으로 돌아간다`, () => {
+      layout();
+      const v = mount(`${T3}\n`);
+      focusCell(v, 0, 2, 1);
+      expect(keyIn(activeCellView(v)!, k.key, k.shift)).toBe(true);
+      const menu = menuOf(v)!;
+      expect(menu).not.toBeNull();
+      // 칸 (200, 150, 80×30) 의 아래 왼쪽 → 표 틀 기준 (150, 80)
+      expect(pos(menu)).toEqual(['150px', '80px']);
+      // 그 칸 기준이다: 마지막 행이라 아래로 옮길 수 없다
+      expect(menu.querySelector<HTMLButtonElement>('[data-action="moveRowDown"]')!.disabled).toBe(true);
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(menuOf(v)).toBeNull();
+      expect(v.state.field(activeCell)).toEqual({ tableFrom: 0, r: 2, c: 1 });
+      expect(liveCellEditors()).toBe(1);
+    });
+  }
+
+  it('메뉴 안의 오른쪽 클릭은 기본 메뉴를 띄우지 않는다', () => {
+    const v = mount(`${T3}\n`);
+    rightClickAt(cellEl(v, 1, 0), 10, 10);
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    menuOf(v)!.querySelector('button')!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(menuOf(v)).not.toBeNull();
   });
 });
 

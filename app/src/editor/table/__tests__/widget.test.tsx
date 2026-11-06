@@ -248,6 +248,11 @@ describe('표 위젯: 갱신', () => {
 describe('표 위젯: 도구 막대와 원문 편집', () => {
   const button = (w: Element, key: string) =>
     Array.from(w.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === catalogs.ko[key]) as HTMLButtonElement | undefined;
+  /** "더 보기" 메뉴를 열어 그 안의 단추를 찾는다. */
+  const menuButton = (w: Element, key: string) => {
+    button(w, 'table.more')!.click();
+    return w.querySelector('.lno-table-menu') ? button(w.querySelector('.lno-table-menu')!, key) : undefined;
+  };
 
   it('도구 막대는 진짜 <button> 이고 이름표는 t() 를 거친다 (ko 와 en)', () => {
     const v = mount(`${T1}\n`);
@@ -263,7 +268,8 @@ describe('표 위젯: 도구 막대와 원문 편집', () => {
       const label = b.getAttribute('aria-label')!;
       expect(Object.values(catalogs.ko)).toContain(label);
     }
-    expect(button(w, 'table.editAsMarkdown')).toBeDefined();
+    expect(button(w, 'table.more')).toBeDefined();
+    expect(menuButton(w, 'table.editAsMarkdown')).toBeDefined();
     // 언어를 바꾸면 다음에 막대를 열 때(포인터가 들어오거나 포커스가 들어올 때) 이름표가 바뀐다
     setLang('en');
     w.dispatchEvent(new Event('pointerenter'));
@@ -288,7 +294,7 @@ describe('표 위젯: 도구 막대와 원문 편집', () => {
     const doc = `앞\n\n${T1}\n\n${T2}\n\n뒤`;
     const v = mount(doc);
     const from = doc.indexOf('| a');
-    button(wraps(v)[0], 'table.editAsMarkdown')!.click();
+    menuButton(wraps(v)[0], 'table.editAsMarkdown')!.click();
     expect(v.state.field(rawTables).size).toBe(1);
     expect(wraps(v)).toHaveLength(1); // 두 번째 표만 격자
     expect(v.contentDOM.textContent).toContain('| a | b |');
@@ -374,6 +380,37 @@ describe('테마', () => {
     const keys = Object.keys(editorThemeSpec);
     for (const k of ['.lno-table-wrap', '.lno-table', '.lno-table-toolbar', '.lno-al-center', '.lno-al-right', '.lno-cell-overflow'])
       expect(keys.some((key) => key.includes(k)), k).toBe(true);
+  });
+
+  it('도구 막대는 표 위에 겹쳐 떠서 자리를 차지하지 않고, 숨었을 때는 누를 수도 없다', () => {
+    const spec = editorThemeSpec as Record<string, Record<string, unknown>>;
+    const bar = spec['.lno-table-toolbar'];
+    expect(bar.position).toBe('absolute');
+    expect(bar.right).toBeDefined();
+    for (const k of ['margin', 'marginBottom', 'marginTop']) expect(bar[k], k).toBeUndefined();
+    expect(bar.opacity).toBe('0');
+    expect(bar.pointerEvents).toBe('none');
+    const shown = spec['.lno-table-wrap:hover > .lno-table-toolbar, .lno-table-wrap:focus-within > .lno-table-toolbar'];
+    expect(shown).toMatchObject({ opacity: '1', pointerEvents: 'auto' });
+    // 메뉴의 자리는 열 때 CSSOM 으로 정한다: 테마는 오른쪽 위에 박지 않는다
+    expect(spec['.lno-table-menu'].right).toBeUndefined();
+  });
+
+  it('빈 칸도 한 줄 높이를 갖는다 (빈 칸에 보이지 않는 글자 하나)', () => {
+    const spec = editorThemeSpec as Record<string, Record<string, unknown>>;
+    const empty = Object.entries(spec).find(([k]) => k.includes(':empty::before'));
+    expect(empty).toBeDefined();
+    expect(empty![0]).toContain('td:empty');
+    expect(empty![0]).toContain('th:empty');
+    expect(empty![1].content).toBe('"\\200b"');
+  });
+
+  it('estimatedHeight 는 행 수만 본다: 도구 막대는 자리를 차지하지 않는다', () => {
+    const m = parseTable(T2, 0, T2.length)!;
+    const edit = new TableWidget(T2, m, true);
+    const locked = new TableWidget(T2, m, false);
+    expect(edit.estimatedHeight).toBe(locked.estimatedHeight);
+    expect(edit.estimatedHeight).toBeGreaterThan(0);
   });
 
   it('가로 스크롤은 표만 감싼 안쪽 틀이 맡는다: 바깥 틀은 넘침을 자르지 않아 메뉴가 표 밖으로 펼쳐진다', () => {
