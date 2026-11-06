@@ -33,7 +33,7 @@ function apply(theme: Theme) {
  * 제목 표시줄(네이티브 창)도 같은 테마로 맞춘다: 그러지 않으면 라이트 OS 에서 다크를 고른 사람이 다크 앱 위에 라이트 제목 표시줄을 본다.
  * 실패해도 앱 안의 테마는 이미 바뀌었으므로 조용히 넘어간다(권한이 없거나, Tauri 창이 없는 테스트 환경).
  * 아직 고치지 않은 것: 차갑게 시작할 때 제목 표시줄은 React 가 뜨고 이 IPC 가 돌아올 때까지 첫 몇 프레임 동안 OS 테마로 보인다.
- * 본문의 첫 프레임은 theme-boot.js 가 맞추지만, 그 스크립트는 창 테마를 바꾸지 않는다(창이 만들어질 때 Rust 쪽에서 정해야 한다).
+ * 본문의 첫 프레임은 theme-boot.js 가 맞추지만, 그 스크립트는 창 테마를 바꾸지 않는다.
  */
 function applyToWindow(theme: Theme, win: ThemeWindowApi | undefined) {
   try {
