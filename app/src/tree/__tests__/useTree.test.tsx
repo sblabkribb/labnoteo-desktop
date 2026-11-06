@@ -43,7 +43,7 @@ describe('트리 훅', () => {
     await waitFor(() => expect(result.current.entries.map((e) => e.path)).toEqual(['a.md', 'b.md']));
   });
 
-  it('reload() 가 실패하면 실패 표시를 하고 다음 reload() 가 성공하면 걷는다', async () => {
+  it('reload() 가 실패하면 줄은 두고 실패 표시를 하며, 다음 reload() 가 성공하면 걷는다', async () => {
     let fail = false;
     const invoke = (async () => {
       if (fail) throw new Error('x');
@@ -54,6 +54,8 @@ describe('트리 훅', () => {
     fail = true;
     act(() => result.current.reload());
     await waitFor(() => expect(result.current.failed).toBe(true));
+    // 다시 읽기가 실패해도 이미 보이던 줄은 그대로다 (같은 보관함의 줄은 아직 유효하다).
+    expect(result.current.entries.map((e) => e.path)).toEqual(['a.md']);
     fail = false;
     act(() => result.current.reload());
     await waitFor(() => expect(result.current.failed).toBe(false));

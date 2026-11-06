@@ -30,6 +30,14 @@ const QUIET: Duration = Duration::from_millis(200);
 /// busy the folder stays (an endless stream of writes must not hold back the
 /// tree and the index forever).
 const MAX_WAIT: Duration = Duration::from_millis(1000);
+/// A flush naming more paths than this is reported as one `Rescan` instead of
+/// one change per path. A git pull or a sync of thousands of files would
+/// otherwise cost a `stat`, a note read, an emit and a window refresh each,
+/// with every search waiting behind them; one rebuild (chunked, so searches
+/// still get in) does the same job. 500 is well above what a person produces by
+/// hand (a handful) and above what an editor, Obsidian or a plugin touches in
+/// one go, and low enough that the batched path below it stays under a second.
+pub const RESCAN_ABOVE: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -75,8 +83,8 @@ impl Drop for Watcher {
 
 impl Watcher {
     /// Watch `root` (a canonical vault root) recursively; `sink` is called on
-    /// the worker thread, once per settled change.
-    pub fn start(root: &Path, sink: impl FnMut(Delta) + Send + 'static) -> notify::Result<Watcher> {
+    /// the worker thread, once per settled burst, with everything it changed.
+    pub fn start(root: &Path, sink: impl FnMut(Vec<Delta>) + Send + 'static) -> notify::Result<Watcher> {
         let (tx, rx) = channel();
         let mut os = notify::recommended_watcher(move |ev| {
             let _ = tx.send(ev);
@@ -138,7 +146,7 @@ fn run_with(
     rx: Receiver<notify::Result<Event>>,
     root: &Path,
     stopped: &AtomicBool,
-    sink: &mut dyn FnMut(Delta),
+    sink: &mut dyn FnMut(Vec<Delta>),
     quiet: Duration,
     max_wait: Duration,
 ) {
@@ -175,19 +183,21 @@ fn is_link(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
 }
 
-fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnMut(Delta)) {
-    if pending.rescan {
-        sink(Delta::Rescan);
+fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnMut(Vec<Delta>)) {
+    if pending.rescan || pending.paths.len() > RESCAN_ABOVE {
+        sink(vec![Delta::Rescan]);
         return;
     }
     let mut links = HashMap::new();
+    let mut out = Vec::new();
     for (abs, appeared) in pending.paths {
         if stopped.load(Ordering::SeqCst) {
             return;
         }
-        if let Some(change) = classify(root, &abs, appeared, &mut links) {
-            sink(Delta::Change(change));
-        }
+        out.extend(classify(root, &abs, appeared, &mut links).map(Delta::Change));
+    }
+    if !out.is_empty() {
+        sink(out);
     }
 }
 
@@ -260,14 +270,22 @@ impl WatcherState {
     }
 }
 
-/// Apply one settled change to the search index. The files are the truth:
-/// `upsert` re-reads the note (and drops its row if it is gone), a removal
-/// drops the note or every note under a removed folder, and a rescan rebuilds.
-fn apply_to_index(ix: &crate::index::Index, root: &Path, delta: &Delta) {
-    let r = match delta {
-        Delta::Change(Change { path, kind: Kind::Removed }) => ix.remove(path),
-        Delta::Change(Change { path, .. }) => ix.upsert(root, path),
-        Delta::Rescan => ix.rebuild(root).map(|_| ()),
+/// Apply one settled burst to the search index. The files are the truth: a
+/// rescan rebuilds; otherwise every change goes in one transaction, where a
+/// created or modified note is re-read (its row dropped if it is gone) and a
+/// removal drops the note or every note under a removed folder.
+fn apply_to_index(ix: &crate::index::Index, root: &Path, deltas: &[Delta]) {
+    let r = if deltas.contains(&Delta::Rescan) {
+        ix.rebuild(root).map(|_| ())
+    } else {
+        let changes: Vec<(String, bool)> = deltas
+            .iter()
+            .filter_map(|d| match d {
+                Delta::Change(c) => Some((c.path.clone(), c.kind == Kind::Removed)),
+                Delta::Rescan => None,
+            })
+            .collect();
+        ix.apply(root, &changes)
     };
     if let Err(e) = r {
         eprintln!("labnoteO: index update after a file change failed: {e}");
@@ -288,13 +306,15 @@ pub fn app_starter<R: tauri::Runtime>(
             }
         };
         let (app, root_owned) = (app.clone(), root.to_path_buf());
-        let sink = move |delta: Delta| {
-            apply_to_index(&ix, &root_owned, &delta);
-            let payload = match delta {
-                Delta::Change(c) => c,
-                Delta::Rescan => Change { path: String::new(), kind: Kind::Modified },
-            };
-            let _ = app.emit(EVENT, payload);
+        let sink = move |deltas: Vec<Delta>| {
+            apply_to_index(&ix, &root_owned, &deltas);
+            for delta in deltas {
+                let payload = match delta {
+                    Delta::Change(c) => c,
+                    Delta::Rescan => Change { path: String::new(), kind: Kind::Modified },
+                };
+                let _ = app.emit(EVENT, payload);
+            }
         };
         match Watcher::start(root, sink) {
             Ok(w) => Some(w),
@@ -343,7 +363,8 @@ mod tests {
 
     fn watch(root: &Path) -> (Watcher, Receiver<Delta>) {
         let (tx, rx) = channel();
-        (Watcher::start(root, move |d| drop(tx.send(d))).unwrap(), rx)
+        let w = Watcher::start(root, move |ds| ds.into_iter().for_each(|d| drop(tx.send(d)))).unwrap();
+        (w, rx)
     }
 
     /// Everything delivered until the folder has been silent for `quiet`.
@@ -481,8 +502,10 @@ mod tests {
             classify(&s.0, &s.0.join("in.md"), false, &mut links),
             Some(Change { path: "in.md".into(), kind: Kind::Modified })
         );
-        // And with the real watcher: a change outside the vault is never reported,
-        // and a note inside is (so silence is not a dead watcher).
+        // Liveness only, NOT link coverage: ReadDirectoryChangesW does not cross
+        // a reparse point, so no event for the write outside is expected whether or
+        // not the link check exists. The six `classify` calls above are the coverage;
+        // this half only shows the watcher still reports a note inside the vault.
         let (_w, rx) = watch(&s.0);
         std::thread::sleep(Duration::from_millis(100));
         outside.write("secret.md", "changed");
@@ -526,13 +549,13 @@ mod tests {
             })
         };
         let (at, d) = out_rx.recv_timeout(Duration::from_secs(2)).expect("flushed while the burst was still going");
-        assert_eq!(d, change("busy.md", Kind::Modified));
+        assert_eq!(d, [change("busy.md", Kind::Modified)]);
         assert!(at - start < Duration::from_millis(1500), "{:?}", at - start);
         feeder.join().unwrap();
     }
 
     #[test]
-    fn an_os_error_asks_for_a_rescan_instead_of_guessing() {
+    fn a_watcher_error_asks_for_a_rescan_instead_of_guessing() {
         let s = Scratch::new();
         let (tx, rx) = channel();
         let (out_tx, out_rx) = channel();
@@ -549,11 +572,62 @@ mod tests {
             )
         });
         tx.send(Err(notify::Error::generic("buffer overflow"))).unwrap();
-        assert_eq!(out_rx.recv_timeout(Duration::from_secs(2)).unwrap(), Delta::Rescan);
+        assert_eq!(out_rx.recv_timeout(Duration::from_secs(2)).unwrap(), [Delta::Rescan]);
+    }
+
+    /// Run `events` through a worker and return what each flush delivered.
+    fn flushes(root: &Path, events: Vec<notify::Result<Event>>) -> Vec<Vec<Delta>> {
+        let (tx, rx) = channel();
+        let (out_tx, out_rx) = channel();
+        let root = root.to_path_buf();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let worker = std::thread::spawn(move || {
+            run_with(rx, &root, &stopped, &mut |d| drop(out_tx.send(d)), Duration::from_millis(30), Duration::from_millis(500))
+        });
+        for e in events {
+            tx.send(e).unwrap();
+        }
+        drop(tx); // the sender going away ends the worker after its last flush
+        worker.join().unwrap();
+        out_rx.try_iter().collect()
+    }
+
+    #[test]
+    fn an_event_the_os_flags_as_needing_a_rescan_asks_for_one() {
+        let s = Scratch::new();
+        // A *successful* event carrying the rescan flag (what the OS gives when it
+        // drops events): the `need_rescan` path, not the error path.
+        let flagged = Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        assert!(flagged.need_rescan());
+        assert_eq!(flushes(&s.0, vec![Ok(flagged)]), [[Delta::Rescan]]);
+    }
+
+    #[test]
+    fn a_big_burst_becomes_one_rescan_and_a_small_one_stays_one_batch() {
+        let s = Scratch::new();
+        for i in 0..3 {
+            s.write(&format!("n{i}.md"), "x");
+        }
+        let small: Vec<_> = (0..3).map(|i| file_event(&s.0.join(format!("n{i}.md")))).collect();
+        let got = flushes(&s.0, small);
+        assert_eq!(got.len(), 1, "one flush, one sink call: {got:?}");
+        assert_eq!(got[0].len(), 3);
+        // RESCAN_ABOVE paths is still a batch; one more is a rescan.
+        let at = |n: usize| (0..n).map(|i| file_event(&s.0.join(format!("m{i}.md")))).collect::<Vec<_>>();
+        let got = flushes(&s.0, at(RESCAN_ABOVE));
+        assert_eq!(got.iter().map(Vec::len).collect::<Vec<_>>(), [RESCAN_ABOVE]);
+        assert_eq!(flushes(&s.0, at(RESCAN_ABOVE + 1)), [[Delta::Rescan]]);
+    }
+
+    #[test]
+    fn the_event_name_is_the_one_the_typescript_side_listens_for() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/ipc-events.json")).unwrap();
+        assert_eq!(fixture["vaultChanged"], EVENT);
+        assert_eq!(EVENT, "vault://changed");
     }
 
     /// A sink holding a token: a worker that is gone has released it.
-    fn probe() -> (Arc<()>, impl FnMut(Delta) + Send + 'static) {
+    fn probe() -> (Arc<()>, impl FnMut(Vec<Delta>) + Send + 'static) {
         let alive = Arc::new(());
         let held = alive.clone();
         (alive, move |_| {

@@ -35,7 +35,9 @@ export function useTree(vaultKey: string, invoke: InvokeFn = tauriInvoke) {
     }
     fetchTree(invoke).then(
       (e) => live && (setEntries(e), setFailed(false)),
-      () => live && (setEntries([]), setFailed(true)),
+      // 줄을 비우지 않는다: 같은 보관함이면 보이는 줄이 아직 유효하다(목록을 다시 못 읽었을 뿐).
+      // 다른 보관함이면 위에서 이미 비웠다.
+      () => live && setFailed(true),
     );
     return () => {
       live = false;

@@ -34,7 +34,9 @@ function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
       <p>{t('vault.open', vault.name)}</p>
       {vault.hasObsidianConfig && <p>{t('vault.obsidian')}</p>}
       <SearchPanel onOpen={setSelected} indexing={indexing} skipped={skipped} />
-      {failed ? <p role="alert">{t('tree.error')}</p> : <NoteTree entries={entries} selected={selected} onSelect={setSelected} />}
+      {failed && <p role="alert">{t('tree.error')}</p>}
+      {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
+      {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={setSelected} />}
       <p>
         {t('app.ready')} {version}
       </p>

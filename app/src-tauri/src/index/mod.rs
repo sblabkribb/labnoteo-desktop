@@ -28,6 +28,11 @@ pub struct IndexStats {
 pub struct Index {
     conn: Mutex<rusqlite::Connection>,
     rebuilding: Mutex<()>,
+    /// Keys written or removed by `upsert` / `remove` / `apply` since the current
+    /// rebuild chunk began reading. A chunk's rows for these keys are older than
+    /// what is stored and are not committed. Always locked while `conn` is held
+    /// (in that order), so marking and writing are one step to a rebuild.
+    touched: Mutex<std::collections::HashSet<String>>,
 }
 
 fn db_err(e: rusqlite::Error) -> FsError {
@@ -89,11 +94,15 @@ struct Row {
     path: String,
     title: String,
     body: String,
-    /// Modified time and size as they were just before the file was read.
-    stamp: Stamp,
 }
 
-type Stamp = (Option<std::time::SystemTime>, u64);
+/// What `prepare` decided about one path: store this row, drop the path (and
+/// everything under it), or leave the index alone.
+enum Prepared {
+    Put(Row),
+    Drop,
+    Ignore,
+}
 
 /// Read one listed note. `None` when it cannot be read as a plain file (gone,
 /// locked, a link swapped in since the walk, too big).
@@ -103,12 +112,11 @@ fn read_row(root: &Path, rel: &str) -> Option<Row> {
     if !meta.is_file() || meta.len() > MAX_NOTE_BYTES {
         return None;
     }
-    let stamp = (meta.modified().ok(), meta.len());
     let bytes = std::fs::read(&abs).ok()?;
     // TODO(NFD): Hangul pasted from macOS can be decomposed; fold to NFC here and in the query
     // so it matches. Needs a normalisation crate; not done yet.
     let body = String::from_utf8_lossy(&bytes).into_owned();
-    Some(Row { key: schema::fold(rel), path: rel.to_string(), title: title_of(rel, &body), body, stamp })
+    Some(Row { key: schema::fold(rel), path: rel.to_string(), title: title_of(rel, &body), body })
 }
 
 fn put(conn: &rusqlite::Connection, row: &Row) -> rusqlite::Result<()> {
@@ -124,10 +132,39 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Whether `key`, or a folder above it, was touched since the chunk began.
+fn overtaken(touched: &std::collections::HashSet<String>, key: &str) -> bool {
+    let mut k = key;
+    loop {
+        if touched.contains(k) {
+            return true;
+        }
+        match k.rfind('/') {
+            Some(i) => k = &k[..i],
+            None => return false,
+        }
+    }
+}
+
+/// Delete a note, or every note under a folder, by vault-relative path.
+fn delete_tree(conn: &rusqlite::Connection, rel: &str) -> rusqlite::Result<()> {
+    let key = schema::fold(rel);
+    let mut like = String::new();
+    for c in key.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            like.push('\\');
+        }
+        like.push(c);
+    }
+    like.push_str("/%");
+    conn.execute("DELETE FROM notes WHERE key = ?1 OR key LIKE ?2 ESCAPE '\\'", (&key, &like))?;
+    Ok(())
+}
+
 impl Index {
     pub fn open(db: &Path) -> Result<Index, FsError> {
         let conn = schema::open(db).map_err(db_err)?;
-        Ok(Index { conn: Mutex::new(conn), rebuilding: Mutex::new(()) })
+        Ok(Index { conn: Mutex::new(conn), rebuilding: Mutex::new(()), touched: Mutex::default() })
     }
 
     /// Bring the index in line with the vault from scratch: every listed note is
@@ -154,7 +191,9 @@ impl Index {
         // previous row instead of vanishing from search.
         let seen: std::collections::HashSet<String> = files.iter().map(|f| schema::fold(f)).collect();
         let mut skipped = 0;
+        let mut overtaken: Vec<String> = Vec::new();
         for chunk in files.chunks(BATCH) {
+            self.begin_chunk();
             let rows: Vec<Row> = chunk
                 .iter()
                 .filter_map(|rel| {
@@ -165,8 +204,9 @@ impl Index {
                     row
                 })
                 .collect();
-            self.commit_chunk(&root, &rows)?;
+            overtaken.extend(self.commit_chunk(&rows)?);
         }
+        self.retry_overtaken(&root, &overtaken)?;
         let conn = lock(&self.conn);
         let tx = conn.unchecked_transaction().map_err(db_err)?;
         let stale: Vec<String> = {
@@ -181,73 +221,133 @@ impl Index {
         Ok(IndexStats { indexed: seen.len() - skipped, skipped })
     }
 
-    /// Write one chunk of rows read by `rebuild`, in one transaction.
+    /// Start a chunk: from here on, every `upsert` / `remove` is remembered
+    /// until the chunk is committed.
+    fn begin_chunk(&self) {
+        lock(&self.touched).clear();
+    }
+
+    /// Write one chunk of rows read by `rebuild` (after `begin_chunk`), in one
+    /// transaction, and return the paths it did not write.
     ///
-    /// The chunk was read with no lock held, so a note may have changed since,
-    /// and the watcher's `upsert` may already have stored its newer text. Under
-    /// the connection, each note is stat-ed again and a row whose time or size
-    /// moved since its read is skipped: either `upsert` already wrote the newer
-    /// text, or the change's own event is still on its way and will. (The
-    /// alternative, holding the connection while reading, would make every
-    /// search wait for file reads.) If the stamp is unchanged here, the bytes
-    /// are current, and a later `upsert` needs the connection we hold, so it
-    /// writes after us.
-    fn commit_chunk(&self, root: &Path, rows: &[Row]) -> Result<(), FsError> {
+    /// The chunk was read with no lock held (holding the connection while
+    /// reading would make every search wait for file reads), so a note may have
+    /// changed since and `upsert` / `remove` may already have stored the newer
+    /// state. A row whose key (or a folder above it) was touched since
+    /// `begin_chunk` is older than what is stored and is skipped. This is a
+    /// counter-free ordering argument, not a timestamp one: the touch is
+    /// recorded under the same connection lock as the write, so either the
+    /// write came first (we see the mark and skip) or it comes after our commit
+    /// (it overwrites us).
+    fn commit_chunk(&self, rows: &[Row]) -> Result<Vec<String>, FsError> {
         let conn = lock(&self.conn);
+        let touched = lock(&self.touched);
         let tx = conn.unchecked_transaction().map_err(db_err)?;
+        let mut skipped = Vec::new();
         for row in rows {
-            let now = std::fs::symlink_metadata(root.join(&row.path)).ok().map(|m| (m.modified().ok(), m.len()));
-            if now == Some(row.stamp) {
+            if overtaken(&touched, &row.key) {
+                skipped.push(row.path.clone());
+            } else {
                 put(&tx, row).map_err(db_err)?;
+            }
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(skipped)
+    }
+
+    /// One bounded extra pass over the notes `commit_chunk` skipped: whatever
+    /// touched them may not have left a row (a removal, an upsert that found the
+    /// note unreadable, an event for a note that was not there yet), so read
+    /// them again and write what is still unmarked. Not repeated: a note that is
+    /// touched again meanwhile is being handled by whoever touched it.
+    fn retry_overtaken(&self, root: &Path, paths: &[String]) -> Result<(), FsError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        self.begin_chunk();
+        let rows: Vec<Row> = paths.iter().filter_map(|p| read_row(root, p)).collect();
+        self.commit_chunk(&rows).map(|_| ())
+    }
+
+    /// Decide what one path means for the index (no lock held). What is not
+    /// part of the vault (`is_listed_path`, or reached through a link) is
+    /// ignored, so the index and the tree agree on what exists; a note that is
+    /// gone is dropped; a path that escapes the vault is refused like in every
+    /// file command. `root` must be canonical.
+    fn prepare(root: &Path, rel: &str) -> Result<Prepared, FsError> {
+        use crate::vault::path::{confine, to_rel};
+        let abs = confine(root, rel)?;
+        if !crate::vault::tree::is_listed_path(rel, false) {
+            return Ok(Prepared::Ignore);
+        }
+        let meta = match std::fs::symlink_metadata(&abs) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Prepared::Drop),
+            Err(e) => return Err(e.into()),
+        };
+        // `confine` resolves links; the tree does not follow them. A path that
+        // resolves somewhere else than it was spelled goes through a link.
+        let on_disk = to_rel(root, &abs)?;
+        if !meta.is_file() || schema::fold(&on_disk) != schema::fold(rel) {
+            return Ok(Prepared::Ignore);
+        }
+        Ok(read_row(root, &on_disk).map_or(Prepared::Ignore, Prepared::Put))
+    }
+
+    /// Store the outcome of `prepare` for each path in one transaction, marking
+    /// each written key for a rebuild in progress.
+    fn store(&self, items: Vec<(String, Prepared)>) -> Result<(), FsError> {
+        let conn = lock(&self.conn);
+        let mut touched = lock(&self.touched);
+        let tx = conn.unchecked_transaction().map_err(db_err)?;
+        for (rel, p) in &items {
+            match p {
+                Prepared::Put(row) => {
+                    put(&tx, row).map_err(db_err)?;
+                    touched.insert(row.key.clone());
+                }
+                Prepared::Drop => {
+                    delete_tree(&tx, rel).map_err(db_err)?;
+                    touched.insert(schema::fold(rel));
+                }
+                Prepared::Ignore => {}
             }
         }
         tx.commit().map_err(db_err)
     }
 
-    /// Re-read one note and replace its row. What is not part of the vault
-    /// (`is_listed_path`, or reached through a link) is ignored, so the index
-    /// and the tree agree on what exists; a note that is gone loses its row; a
-    /// path that escapes the vault is refused like in every file command.
+    /// Re-read one note and replace its row (see `prepare` for what is ignored).
     pub fn upsert(&self, root: &Path, rel: &str) -> Result<(), FsError> {
-        use crate::vault::path::{confine, to_rel};
         let root = std::fs::canonicalize(root).map_err(FsError::Io)?;
-        let abs = confine(&root, rel)?;
-        if !crate::vault::tree::is_listed_path(rel, false) {
-            return Ok(());
+        let p = Self::prepare(&root, rel)?;
+        self.store(vec![(rel.to_string(), p)])
+    }
+
+    /// Apply many changes as one transaction: `(path, removed)`. The root is
+    /// resolved once and the connection taken once, however many paths. A path
+    /// that cannot be applied (escapes the vault, unreadable) does not stop the
+    /// others; the first such error is returned after the rest are stored.
+    pub fn apply(&self, root: &Path, changes: &[(String, bool)]) -> Result<(), FsError> {
+        let root = std::fs::canonicalize(root).map_err(FsError::Io)?;
+        let mut first_err = None;
+        let mut items = Vec::with_capacity(changes.len());
+        for (rel, removed) in changes {
+            let p = if *removed { Ok(Prepared::Drop) } else { Self::prepare(&root, rel) };
+            match p {
+                Ok(p) => items.push((rel.clone(), p)),
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
         }
-        let meta = match std::fs::symlink_metadata(&abs) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return self.remove(rel),
-            Err(e) => return Err(e.into()),
-        };
-        // `confine` resolves links; the tree does not follow them. A path that
-        // resolves somewhere else than it was spelled goes through a link.
-        let on_disk = to_rel(&root, &abs)?;
-        if !meta.is_file() || schema::fold(&on_disk) != schema::fold(rel) {
-            return Ok(());
-        }
-        let Some(row) = read_row(&root, &on_disk) else {
-            return Ok(());
-        };
-        put(&lock(&self.conn), &row).map_err(db_err)
+        self.store(items)?;
+        first_err.map_or(Ok(()), Err)
     }
 
     /// Drop a note, or every note under a folder, by vault-relative path. No
     /// file is touched, so no path check is needed.
     pub fn remove(&self, rel: &str) -> Result<(), FsError> {
-        let key = schema::fold(rel);
-        let mut like = String::new();
-        for c in key.chars() {
-            if matches!(c, '%' | '_' | '\\') {
-                like.push('\\');
-            }
-            like.push(c);
-        }
-        like.push_str("/%");
-        lock(&self.conn)
-            .execute("DELETE FROM notes WHERE key = ?1 OR key LIKE ?2 ESCAPE '\\'", (&key, &like))
-            .map_err(db_err)?;
-        Ok(())
+        self.store(vec![(rel.to_string(), Prepared::Drop)])
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<SearchResults, FsError> {
@@ -410,24 +510,76 @@ mod tests {
         let ix = s.index();
         let root = s.vault();
         // What a rebuild read of the note before it commits its chunk...
+        ix.begin_chunk();
         let stale = vec![read_row(&root, "a.md").unwrap()];
-        // ...then the note changes (same length: only the time tells) and the
-        // watcher's upsert lands before the rebuild gets the connection.
+        // ...then the note changes (same length, written back to back: no timestamp
+        // can tell the two apart) and the watcher's upsert lands first.
         s.note("a.md", "new text");
-        let f = std::fs::OpenOptions::new().write(true).open(root.join("a.md")).unwrap();
-        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5)).unwrap();
-        drop(f);
         ix.upsert(&root, "a.md").unwrap();
-        ix.commit_chunk(&root, &stale).unwrap();
+        let skipped = ix.commit_chunk(&stale).unwrap();
+        assert_eq!(skipped, ["a.md"]);
         assert_eq!(found(&ix, "new"), ["a.md"], "the older bytes must not win");
         assert!(found(&ix, "old").is_empty());
-        // A chunk read of a note that did not move is written as usual.
-        let fresh = vec![read_row(&root, "a.md").unwrap()];
+        // A folder removed meanwhile overtakes the notes under it too.
+        s.note("d/x.md", "inside");
+        ix.begin_chunk();
+        let rows = vec![read_row(&root, "d/x.md").unwrap()];
+        ix.remove("d").unwrap();
+        assert_eq!(ix.commit_chunk(&rows).unwrap(), ["d/x.md"]);
+        assert!(found(&ix, "inside").is_empty());
+        // A chunk read of a note nobody touched is written as usual.
+        ix.begin_chunk();
         s.note("b.md", "other");
-        let mut rows = fresh;
-        rows.push(read_row(&root, "b.md").unwrap());
-        ix.commit_chunk(&root, &rows).unwrap();
+        assert!(ix.commit_chunk(&[read_row(&root, "b.md").unwrap()]).unwrap().is_empty());
         assert_eq!(found(&ix, "other"), ["b.md"]);
+    }
+
+    #[test]
+    fn a_skipped_note_that_has_no_row_is_read_again_at_the_end_of_the_rebuild() {
+        let s = Scratch::new();
+        s.note("b.md", "created during the walk");
+        let ix = s.index();
+        let root = s.vault();
+        ix.begin_chunk();
+        let rows = vec![read_row(&root, "b.md").unwrap()];
+        // Something touched the key without leaving a row (here a removal that
+        // raced the note's creation): the chunk skips it and nothing is stored.
+        ix.remove("b.md").unwrap();
+        let skipped = ix.commit_chunk(&rows).unwrap();
+        assert_eq!(skipped, ["b.md"]);
+        assert!(found(&ix, "walk").is_empty());
+        ix.retry_overtaken(&root, &skipped).unwrap();
+        assert_eq!(found(&ix, "walk"), ["b.md"]);
+    }
+
+    #[test]
+    fn apply_stores_many_changes_in_one_go() {
+        let s = Scratch::new();
+        s.note("keep.md", "kept");
+        s.note("gone.md", "going");
+        s.note("dir/in.md", "inside");
+        let ix = s.index();
+        ix.rebuild(&s.vault()).unwrap();
+        std::fs::remove_file(s.0.join("vault/gone.md")).unwrap();
+        s.note("new.md", "fresh");
+        s.note("keep.md", "changed");
+        let changes: Vec<(String, bool)> = vec![
+            ("gone.md".into(), true),
+            ("dir".into(), true),
+            ("new.md".into(), false),
+            ("keep.md".into(), false),
+            (".obsidian/x.md".into(), false),
+        ];
+        ix.apply(&s.vault(), &changes).unwrap();
+        let mut paths = ix.paths().unwrap();
+        paths.sort();
+        assert_eq!(paths, ["keep.md", "new.md"]);
+        assert_eq!(found(&ix, "changed"), ["keep.md"]);
+        // One bad path (escapes the vault) is reported but does not stop the rest.
+        s.note("late.md", "late");
+        let r = ix.apply(&s.vault(), &[("../x.md".into(), false), ("late.md".into(), false)]);
+        assert!(r.is_err());
+        assert_eq!(found(&ix, "late"), ["late.md"]);
     }
 
     #[test]
