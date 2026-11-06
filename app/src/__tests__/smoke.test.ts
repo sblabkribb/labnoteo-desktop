@@ -1,5 +1,6 @@
-import { LabnoteFs } from '@labnoteo/core';
-it('core 타입을 import 할 수 있다', () => {
-  const fs: LabnoteFs | undefined = undefined;
-  expect(fs).toBeUndefined();
+import { MemFileSystem } from '@labnoteo/core';
+it('core 의 런타임 export 를 쓸 수 있다', async () => {
+  const fs = new MemFileSystem();
+  await fs.write('a.md', 'hello');
+  expect(await fs.read('a.md')).toBe('hello');
 });
