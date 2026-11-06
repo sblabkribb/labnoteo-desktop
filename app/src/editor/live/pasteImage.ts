@@ -22,6 +22,8 @@ import { imageLoader } from './imageWidget';
 
 /** Rust `vault_write_image` 와 같은 크기 상한(20 MiB). 넘는 파일은 읽기 전에 거른다. */
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** 한 번의 붙여 넣기·끌어 놓기가 쓰는 이미지의 최대 수. 나머지는 쓰지 않고 몇 개인지 알린다(수백 장이 묻지도 않고 쓰이지 않게). */
+export const MAX_IMAGES_PER_GESTURE = 50;
 
 /** 붙여 넣을 수 있는 MIME → 확장자. SVG 는 받지 않는다(Rust 도 쓰지 않는다). */
 export const PASTE_MIME: Readonly<Record<string, string>> = {
@@ -275,8 +277,8 @@ export function pasteImages(deps: PasteImageDeps): Extension {
   function take(view: EditorView, event: Event, dt: DataTransfer | null, pos: number, named: boolean): boolean {
     const state = view.state;
     if (inert(view, state)) return false;
-    const files = imageFilesOf(dt);
-    if (!files.length) return false;
+    const all = imageFilesOf(dt);
+    if (!all.length) return false;
     const at = Math.min(pos, state.doc.length);
     event.preventDefault();
     // 머리말·코드 안에는 임베드를 넣지 않는다. 사건은 삼킨다: 그대로 두면 CodeMirror 의 끌어 놓기가 파일을 글로 읽어 넣는다.
@@ -284,6 +286,8 @@ export function pasteImages(deps: PasteImageDeps): Extension {
       notice(t('live.image.rawText'));
       return true;
     }
+    const files = all.slice(0, MAX_IMAGES_PER_GESTURE);
+    if (all.length > files.length) notice(t('live.image.tooMany', MAX_IMAGES_PER_GESTURE, all.length - files.length));
     const now = new Date();
     const names = files.map((f) => (named ? dropName(f) : pastedImageName(now, PASTE_MIME[f.type])));
     const id = nextPasteId++;
@@ -303,7 +307,8 @@ export function pasteImages(deps: PasteImageDeps): Extension {
 
   return [
     pendingPaste,
-    // 표 붙여 넣기와 pasteURLAsLink 보다 먼저 본다: 이미지 파일이 함께 실린 클립보드는 이미지로 받는다.
+    // 표 붙여 넣기(SP1)와 pasteURLAsLink 보다 먼저 본다: 이미지만 실린 클립보드는 여기서 받고, 글이 함께 실린 클립보드는
+    // 글 붙여 넣기 쪽으로 넘긴다(carriesText).
     Prec.high(
       EditorView.domEventHandlers({
         paste(e, view) {

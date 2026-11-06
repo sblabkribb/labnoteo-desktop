@@ -12,6 +12,9 @@ import type { VaultChange } from '../../vault/useVaultEvents';
 import { ERROR_KINDS_FIXTURE, EVENTS_FIXTURE } from '../../__tests__/fixtures';
 import { SYSTEM_COLOURS } from '../../__tests__/css';
 import { getOutline } from '../outline/outlineStore';
+import { installFileDropGuard } from '../../ui/fileDropGuard';
+import { createImageCache } from '../live/imageCache';
+import type { VaultImages } from '../live/vaultImages';
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
 Range.prototype.getClientRects ??= emptyRects;
@@ -771,5 +774,51 @@ describe('편집기 테마', () => {
     expect(markEl).not.toBeNull();
     expect(colourOf(textEl)).not.toBe('var(--accent)');
     expect(colourOf(markEl)).toBe('var(--text-muted)');
+  });
+});
+
+describe('편집기: 창의 파일 끌어 놓기 막이와 함께', () => {
+  it('an image dropped into the real editor (inside its shadow root) is written and embedded', async () => {
+    const dispose = installFileDropGuard(window);
+    try {
+      const s = setup({ [P]: 'a' });
+      const writes: Array<{ dir: string; name: string }> = [];
+      const invoke = (async (cmd: string, args: unknown, options?: { headers?: Record<string, string> }) => {
+        if (cmd === 'vault_write_image') {
+          const dir = decodeURIComponent(options!.headers!['x-lno-dir']);
+          const name = decodeURIComponent(options!.headers!['x-lno-name']);
+          writes.push({ dir, name });
+          return `${dir}/${name}`;
+        }
+        return (s.invoke as unknown as (c: string, a: unknown) => Promise<unknown>)(cmd, args);
+      }) as never;
+      const images: VaultImages = {
+        cache: createImageCache(async () => new ArrayBuffer(0)),
+        index: { find: async () => null, isUnique: async () => true, invalidate: () => {} },
+        onChanged: () => {},
+        clear: () => {},
+      };
+      const { container } = render(<Editor path={P} invoke={invoke} listen={s.listen} autosaveMs={60_000} images={images} />);
+      const root = (container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
+      await waitFor(() => expect(EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString()).toBe('a'));
+      const view = EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
+      view.posAtCoords = (() => 1) as typeof view.posAtCoords;
+      const file = new File([new Uint8Array([1])], 'gel.png', { type: 'image/png' });
+      const drop = new MouseEvent('drop', { bubbles: true, cancelable: true, composed: true, clientX: 0, clientY: 0 });
+      Object.defineProperty(drop, 'dataTransfer', {
+        value: {
+          files: Object.assign([file], { item: (i: number) => (i === 0 ? file : null) }),
+          items: [{ kind: 'file', type: file.type, getAsFile: () => file }],
+          types: ['Files'],
+          getData: () => '',
+        },
+      });
+      view.contentDOM.dispatchEvent(drop);
+      expect(drop.defaultPrevented).toBe(true);
+      await waitFor(() => expect(writes).toEqual([{ dir: 'lab/images', name: 'gel.png' }]));
+      await waitFor(() => expect(view.state.doc.toString()).toBe('a![[gel.png]]'));
+    } finally {
+      dispose();
+    }
   });
 });

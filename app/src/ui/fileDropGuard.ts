@@ -14,7 +14,12 @@ function carriesFiles(e: Event): boolean {
   return !!types && Array.from(types).includes('Files');
 }
 
-const outsideEditor = (e: Event) => !(e.target instanceof Element && e.target.closest('.cm-editor'));
+/**
+ * 편집기 밖에서 일어난 사건인가. 편집기는 그림자 루트 안에 있다(Editor.tsx): 창의 수신기에서 `e.target` 은 그림자 호스트로
+ * 바뀌어 있으므로 `closest` 로는 편집기를 찾지 못한다. 그림자 경계를 넘는 `composedPath()` 로 본다.
+ */
+const outsideEditor = (e: Event) =>
+  !e.composedPath().some((n) => n instanceof Element && n.classList.contains('cm-editor'));
 
 /** 막이를 단다. 돌려준 함수로 뗀다. */
 export function installFileDropGuard(target: Window = window): () => void {

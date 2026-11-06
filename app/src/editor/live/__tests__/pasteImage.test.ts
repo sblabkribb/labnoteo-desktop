@@ -11,6 +11,7 @@ import { imageLoader } from '../imageWidget';
 import type { VaultImages } from '../vaultImages';
 import { createImageCache } from '../imageCache';
 import {
+  MAX_IMAGES_PER_GESTURE,
   PASTE_MIME,
   dropName,
   embedText,
@@ -183,6 +184,17 @@ describe('라이브 미리보기: 이미지 붙여 넣기와 끌어 놓기', () 
     expect(v.state.doc.toString()).toBe(`![[${NAME}]]\n![[Pasted image 20261107153012.jpg]]`);
     undo(v);
     expect(v.state.doc.toString()).toBe('');
+  });
+
+  it('one gesture writes at most MAX_IMAGES_PER_GESTURE files and names how many were left out', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('', 0, { write });
+    const files = Array.from({ length: MAX_IMAGES_PER_GESTURE + 3 }, (_, i) => png(`p${i}.png`));
+    v.contentDOM.dispatchEvent(dropEvent(files));
+    await vi.waitFor(() => expect(v.state.field(pendingPaste)).toEqual([]), { timeout: 5000 });
+    expect(write).toHaveBeenCalledTimes(MAX_IMAGES_PER_GESTURE);
+    expect(notice).toHaveBeenCalledWith(t('live.image.tooMany', MAX_IMAGES_PER_GESTURE, 3));
+    expect(v.state.doc.toString().split('\n')).toHaveLength(MAX_IMAGES_PER_GESTURE);
   });
 
   it('a text paste is not handled', () => {
