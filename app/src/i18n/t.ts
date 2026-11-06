@@ -4,7 +4,7 @@ import { getLang, type Lang } from './lang';
 // 두 목록은 같은 키와, 키마다 같은 자리 표시({0} …)를 가진다: src/i18n/__tests__/catalogs.test.ts 가 지킨다.
 const ko: Record<string, string> = {
   'app.title': 'labnoteO',
-  'app.ready': '보관함 셸이 준비되었습니다',
+  'app.ready': '버전',
   'app.sidebar': '사이드바',
   'theme.label': '테마',
   'theme.system': '시스템 설정 따르기',
@@ -74,7 +74,7 @@ const ko: Record<string, string> = {
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
 const en: Record<string, string> = {
   'app.title': 'labnoteO',
-  'app.ready': 'Ready',
+  'app.ready': 'Version',
   'app.sidebar': 'Sidebar',
   'theme.label': 'Theme',
   'theme.system': 'Match system',
@@ -82,12 +82,12 @@ const en: Record<string, string> = {
   'theme.light': 'Light',
   'lang.label': 'Language',
   'firstRun.title': 'Choose where to keep your notes',
-  'firstRun.hint': 'Notes are saved as .labnote.md files in a folder on this computer. You only choose once; next time it opens straight away.',
+  'firstRun.hint': 'Notes are saved as .labnote.md files in a folder on this computer. You only do this once. Next time, your vault opens automatically.',
   'firstRun.create': 'Create new vault',
   'firstRun.createHint': 'In the save dialog, pick a location and type a name for the new folder.',
   'firstRun.createDialogTitle': 'Create a new vault folder',
   'firstRun.open': 'Open folder',
-  'firstRun.openHint': 'Opens a folder of notes or an Obsidian vault as it is. The .obsidian folder is never touched.',
+  'firstRun.openHint': 'Opens an existing notes folder or Obsidian vault as is. The .obsidian folder is never touched.',
   'firstRun.openDialogTitle': 'Choose a vault folder',
   'update.available': 'Version {0} is available.',
   'update.install': 'Update now',
@@ -107,10 +107,11 @@ const en: Record<string, string> = {
   'newNote.label': 'Note name',
   'newNote.create': 'Create',
   'newNote.cancel': 'Cancel',
-  'newNote.hint': 'The note is created as an empty .labnote.md file at the top of the vault.',
+  'newNote.hint': "The note is created as an empty .labnote.md file in the vault's root folder.",
   'newNote.error.empty': 'Enter a note name.',
-  'newNote.error.separator': "Names can't contain / or \\. Notes are created at the top of the vault.",
-  'newNote.error.invalid': 'This name isn\'t allowed. Names can\'t start with a dot (.), contain : ? * < > | ", or be a Windows reserved name such as CON or NUL.',
+  'newNote.error.separator': "Names can't contain / or \\. Notes are created in the vault's root folder.",
+  'newNote.error.invalid':
+    'This name isn\'t allowed. Names can\'t start with a dot (.) or contain any of these characters: : ? * < > | ". CON, NUL and other Windows reserved names aren\'t allowed either.',
   'newNote.error.exists': 'A note with this name already exists.',
   'newNote.error.failed': "Couldn't create the note. Check that the vault folder is writable.",
   'newNote.error.unsaved': "You have unsaved edits, so the new note wasn't created.",
@@ -119,14 +120,14 @@ const en: Record<string, string> = {
   'search.none': 'No results',
   'search.error': "Couldn't search.",
   'search.truncated': '{0} or more matches. Showing the first {0}. Try a more specific search.',
-  'search.skipped': 'Notes left out of search because they could not be read: {0}',
+  'search.skipped': "Couldn't read {0} note(s), so they may be missing from search.",
   'search.indexing': 'Building search index',
   'editor.label': 'Note editor',
   'editor.empty': 'Select a note on the left to edit it here.',
   'editor.loading': 'Opening note',
   'editor.loadError': "Couldn't open this note.",
   'editor.dirty': 'Unsaved',
-  'editor.saveError': "Couldn't save. Your text is still in the editor.",
+  'editor.saveError': "Couldn't save. Your edits are still in the editor.",
   'editor.conflicted': 'Not saved: the note on disk is different',
   'editor.changed.title': 'Note changed outside the app',
   'editor.changed.body': 'This note was changed somewhere else while you were editing. Overwriting it with your version discards those changes.',
@@ -138,7 +139,7 @@ const en: Record<string, string> = {
   'editor.closeAsk.body': "Couldn't save, so the window stayed open. If you close it now, your unsaved edits are lost.",
   'editor.closeAsk.discard': 'Close without saving',
   'editor.closeAsk.stay': 'Keep editing',
-  'editor.keep': 'Leave as is',
+  'editor.keep': 'Decide later',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
