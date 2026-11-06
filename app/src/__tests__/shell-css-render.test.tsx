@@ -156,7 +156,7 @@ describe('열린 노트의 강조 막대', () => {
   });
 
   it('열린 줄의 hover 규칙은 막대(box-shadow)를 건드리지 않는다', () => {
-    const hover = APP_RULES.filter((r) => r.selectors.includes('.sidebar nav li > button[aria-current="true"]:hover:not(:disabled)'));
+    const hover = APP_RULES.filter((r) => r.selectors.includes('.note-tree li > button[aria-current="true"]:hover:not(:disabled)'));
     expect(hover.length).toBe(1);
     expect(hover[0].body).not.toMatch(/box-shadow/);
   });

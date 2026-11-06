@@ -59,7 +59,7 @@ function mount(files: Record<string, string>, autosaveMs = 60_000, extra: { fail
   );
   // 편집기는 그림자 루트 안에 있다(CSP 때문에): 테스트 라이브러리의 질의는 거기까지 들어가지 못하므로 뷰로 직접 간다.
   const view = () => {
-    const root = (utils.container.querySelector('section > div') as HTMLElement).shadowRoot!;
+    const root = (utils.container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
     return EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
   };
   const ctrlS = () => fireEvent.keyDown(view().contentDOM, { key: 's', ctrlKey: true });
@@ -87,7 +87,7 @@ describe('편집기', () => {
         <Editor path={P} invoke={s.invoke} listen={s.listen} />
       </StrictMode>,
     );
-    const root = (container.querySelector('section > div') as HTMLElement).shadowRoot!;
+    const root = (container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
     await waitFor(() => expect(root.querySelector('.cm-content')?.textContent).toBe('a'));
     expect(root.querySelectorAll('.cm-editor')).toHaveLength(1); // 첫 번째 뷰는 치워졌다
   });

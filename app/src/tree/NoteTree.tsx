@@ -72,7 +72,7 @@ export function NoteTree({ entries, selected, onSelect, onContextMenu }: Props) 
   const selectedKey = selected === undefined ? undefined : fold(selected);
   return (
     <nav aria-label={t('tree.label')}>
-      <ul className="plain-list">
+      <ul className="plain-list note-tree">
         {visible.map((e) => {
           return (
             <li key={fold(e.path)} data-depth={Math.min(e.depth, MAX_DEPTH)}>

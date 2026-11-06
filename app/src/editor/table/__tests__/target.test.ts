@@ -181,7 +181,7 @@ function vault(files: Record<string, string>) {
 }
 
 const shadowView = (container: HTMLElement) => {
-  const root = (container.querySelector('section > div') as HTMLElement).shadowRoot!;
+  const root = (container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
   return EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
 };
 const cellIn = (v: EditorView, table: number, r: number, c: number) =>

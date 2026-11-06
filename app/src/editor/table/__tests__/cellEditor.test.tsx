@@ -699,7 +699,7 @@ function mountEditor(files: Record<string, string>) {
   const ref = createRef<EditorHandle>();
   const utils = render(<Editor ref={ref} path={P} invoke={invoke} listen={listen} autosaveMs={60_000} />);
   const view = () => {
-    const root = (utils.container.querySelector('section > div') as HTMLElement).shadowRoot!;
+    const root = (utils.container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
     return EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
   };
   const emit = (payload: VaultChange) => act(async () => handlers.forEach((h) => h({ payload })));

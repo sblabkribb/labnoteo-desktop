@@ -149,7 +149,7 @@ async function mountShipped(text = SAMPLE) {
   const listen = (async () => () => {}) as never;
   const windowApi = { onCloseRequested: async () => () => {}, destroy: async () => {} };
   const { container } = render(<Editor path="a.labnote.md" invoke={invoke} listen={listen} windowApi={windowApi} />);
-  const shadow = (container.querySelector('section > div') as HTMLElement).shadowRoot!;
+  const shadow = (container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
   // 불러오기가 끝나 편집할 수 있게 됐을 때까지 기다린다(빈 노트도 같은 상태가 된다)
   await waitFor(() => expect(shadow.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('true'));
   const view = EditorView.findFromDOM(shadow.querySelector('.cm-editor') as HTMLElement)!;

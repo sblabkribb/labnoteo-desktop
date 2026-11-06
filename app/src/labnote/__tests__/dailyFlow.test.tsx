@@ -80,7 +80,7 @@ function addedLines(before: string, after: string): string[] | undefined {
 
 /** 지금 편집기에 열린 노트의 CodeMirror 뷰(그림자 루트 안). */
 function currentView(): EditorView {
-  const host = document.querySelector('main.content section > div') as HTMLElement | null;
+  const host = document.querySelector('main.content .editor-frame') as HTMLElement | null;
   const cm = host?.shadowRoot?.querySelector('.cm-editor') as HTMLElement | null;
   if (!cm) throw new Error('no editor');
   return EditorView.findFromDOM(cm)!;

@@ -476,7 +476,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const commandsBusy = editLocked || external !== null;
   return (
     <section aria-label={t('editor.label')}>
-      <p>
+      <p className="editor-path">
         {path} {(external || dirty) && <span role="status">{external ? t('editor.conflicted') : t('editor.dirty')}</span>}{' '}
         <button
           type="button"
@@ -505,9 +505,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           </button>
         </p>
       )}
-      <div ref={host} hidden={status !== 'ready'} />
+      <div ref={host} className="editor-frame" hidden={status !== 'ready'} />
       {dialogOpen && external && (
         <div
+          className="dialog"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="editor-ext-title"
@@ -516,20 +517,22 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         >
           <h2 id="editor-ext-title">{t(gone ? 'editor.gone.title' : 'editor.changed.title')}</h2>
           <p id="editor-ext-body">{t(gone ? 'editor.gone.body' : 'editor.changed.body')}</p>
-          {!gone && (
-            <button type="button" onClick={() => void api.current.reload()}>
-              {t('editor.changed.reload')}
+          <div className="dialog-actions">
+            {!gone && (
+              <button type="button" onClick={() => void api.current.reload()}>
+                {t('editor.changed.reload')}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void api.current.save({ against: external.kind === 'changed' ? external.current : '' })}
+            >
+              {t(gone ? 'editor.gone.recreate' : 'editor.changed.overwrite')}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void api.current.save({ against: external.kind === 'changed' ? external.current : '' })}
-          >
-            {t(gone ? 'editor.gone.recreate' : 'editor.changed.overwrite')}
-          </button>
-          <button type="button" className="primary" autoFocus onClick={() => setDialogOpen(false)}>
-            {t('editor.keep')}
-          </button>
+            <button type="button" className="primary" autoFocus onClick={() => setDialogOpen(false)}>
+              {t('editor.keep')}
+            </button>
+          </div>
         </div>
       )}
     </section>

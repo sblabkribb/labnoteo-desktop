@@ -39,7 +39,7 @@ export function mountEditor(
     }),
   );
   const view = () => {
-    const root = (utils.container.querySelector('section > div') as HTMLElement).shadowRoot!;
+    const root = (utils.container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
     return EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
   };
   /** 사용자가 `at`(기본: 끝)에 친 것과 같다. */
