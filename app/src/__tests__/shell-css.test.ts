@@ -52,9 +52,12 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.content')!.body).toMatch(/overflow:\s*auto/);
   });
 
-  it('주된 동작 단추는 상단 바 hover 규칙에서 빠진다 (hover 에 --accent-text 글자가 --bg-hover 위에 놓이지 않게)', () => {
+  it('주된 동작 단추는 상단 바 hover 에서도 강조색이다 (hover 에 --accent-text 글자가 --bg-hover 위에 놓이지 않게)', () => {
+    // 영역별 hover 규칙은 없다: 전역 button:hover 와, 그보다 특이도가 높은 button.primary:hover 가 정한다
     expect(ruleFor('.topbar button:hover:not(:disabled)')).toBeNull();
-    expect(ruleFor('.topbar button:not(.primary):hover:not(:disabled)')).not.toBeNull();
+    expect(ruleFor('.topbar button:not(.primary):hover:not(:disabled)')).toBeNull();
+    expect(ruleFor('button:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--bg-hover\)/);
+    expect(ruleFor('button.primary:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--accent\)/);
   });
 
   it('열린 줄의 색조는 :has() 없이도 걸리고, 열린 줄도 hover 에 반응한다', () => {

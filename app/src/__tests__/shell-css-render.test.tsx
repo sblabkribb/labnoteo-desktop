@@ -161,3 +161,43 @@ describe('열린 노트의 강조 막대', () => {
     expect(hover[0].body).not.toMatch(/box-shadow/);
   });
 });
+
+describe('단추 배경은 --button-bg 하나로 정한다', () => {
+  /** 컨테이너 선택자를 실제 마크업으로 세운다. 그 안에 보통 단추와 주된 단추를 하나씩 둔다. */
+  const MARKUP: Record<string, string> = {
+    '.topbar': '<header class="topbar"><button>a</button><button class="primary">b</button></header>',
+    '.first-run': '<div class="first-run"><button>a</button><button class="primary">b</button></div>',
+    '.notices > aside': '<div class="notices"><aside><button>a</button><button class="primary">b</button></aside></div>',
+  };
+
+  it.each(['.topbar', '.first-run', '.notices > aside'])('%s: plain button uses --button-bg, primary keeps accent', (c) => {
+    document.body.innerHTML = MARKUP[c];
+    expect(winning(document.querySelector(c)!, '--button-bg')).toBe('var(--bg)');
+    expect(winning(document.querySelector(`${c} button:not(.primary)`)!, 'background')).toBe('var(--button-bg, var(--bg-elevated))');
+    expect(winning(document.querySelector(`${c} button.primary`)!, 'background')).toBe('var(--accent)');
+  });
+
+  it('검색 결과 단추도 컨테이너의 --button-bg 를 쓴다', () => {
+    document.body.innerHTML = '<ul class="plain-list search-results"><li><button>x</button></li></ul>';
+    expect(winning(document.querySelector('.search-results')!, '--button-bg')).toBe('var(--bg)');
+    expect(winning(document.querySelector('button')!, 'background')).toBe('var(--button-bg, var(--bg-elevated))');
+  });
+
+  it('alert inside .sidebar-panel > section stays danger', () => {
+    document.body.innerHTML = '<div class="sidebar-panel"><section><p>hint</p><p role="alert">err</p></section></div>';
+    expect(winning(document.querySelector('.sidebar-panel > section > p[role="alert"]')!, 'color')).toBe('var(--danger)');
+    expect(winning(document.querySelector('.sidebar-panel > section > p:not([role])')!, 'color')).toBe('var(--text-muted)');
+  });
+
+  it('컨테이너 글자 기본값은 :where() 로 특이도 0 이라 경고 규칙을 :not([role]) 없이도 이기지 못한다', () => {
+    const sels = APP_RULES.flatMap((r) => r.selectors);
+    for (const s of ['.first-run > p:not([role])', '.topbar form p:not([role])', '.sidebar-panel > section > p[role="alert"]']) {
+      expect(sels, s).not.toContain(s);
+    }
+    expect(sels).toContain(':where(.first-run) p');
+    expect(sels).toContain(':where(.topbar form) p');
+    expect(sels).toContain(':where(.sidebar-panel > section) p');
+    // 컨테이너마다 따로 두던 주된 단추 배경 되돌리기는 없다
+    expect(sels.filter((s) => /\S+ button\.primary$/.test(s))).toEqual([]);
+  });
+});

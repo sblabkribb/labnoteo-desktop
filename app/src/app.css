@@ -108,9 +108,11 @@ code, pre, kbd { font-family: var(--font-mono); font-size: 0.93em; }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 
+/* 단추 바탕은 둘러싼 영역이 --button-bg 로 정한다(없으면 --bg-elevated). 주된 단추(.primary)는 이 변수를 쓰지 않아
+   영역마다 강조색을 되돌려 놓을 필요가 없다. */
 button {
   padding: var(--space-1) var(--space-3);
-  background: var(--bg-elevated);
+  background: var(--button-bg, var(--bg-elevated));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   cursor: pointer;
@@ -183,6 +185,7 @@ input, select, textarea {
 
 /* 첫 실행 화면: 가운데 정렬 카드, 선택지 둘을 나란히 */
 .first-run {
+  --button-bg: var(--bg);
   max-width: 36rem;
   margin: var(--space-6) auto;
   padding: var(--space-5);
@@ -190,8 +193,8 @@ input, select, textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-/* :not([role]) — 경고(role="alert")는 이 규칙에 묻히지 않고 위험색을 지킨다 */
-.first-run > p:not([role]) { color: var(--text-muted); }
+/* :where() 로 특이도를 0 으로 둔다: 경고([role="alert"])가 :not([role]) 없이도 위험색을 지킨다 */
+:where(.first-run) p { color: var(--text-muted); }
 .first-run-choices {
   display: flex;
   flex-wrap: wrap;
@@ -200,9 +203,6 @@ input, select, textarea {
 }
 .first-run-choices > div { flex: 1 1 12rem; min-width: 0; }
 .first-run-choices p { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 0.93em; }
-.first-run button { background: var(--bg); }
-.first-run button.primary { background: var(--accent); }
-.first-run button:not(.primary):hover:not(:disabled) { background: var(--bg-hover); }
 .first-run > [role="alert"] { margin: var(--space-4) 0 0; }
 
 /* ───────── 앱 셸 ─────────
@@ -222,6 +222,7 @@ input, select, textarea {
 }
 
 .topbar {
+  --button-bg: var(--bg);
   grid-area: top;
   display: flex;
   flex-wrap: wrap;
@@ -233,9 +234,7 @@ input, select, textarea {
 }
 .topbar h1 { margin: 0; font-size: 1rem; }
 .topbar p { margin: 0; }
-.topbar button, .topbar select { background: var(--bg); }
-.topbar button:not(.primary):hover:not(:disabled) { background: var(--bg-hover); }
-.topbar button.primary { background: var(--accent); }
+.topbar select { background: var(--bg); }
 .vault-name {
   flex: 1 1 8rem;
   min-width: 0;
@@ -253,7 +252,7 @@ input, select, textarea {
 /* "새 노트" 이름 입력은 상단 바 안에서 열린다: 입력 줄 뒤에 안내문이 한 줄을 다 쓴다 */
 .topbar form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .topbar form p { flex-basis: 100%; }
-.topbar form p:not([role]) { color: var(--text-muted); }
+:where(.topbar form) p { color: var(--text-muted); }
 
 /* 업데이트 배너와 노트 목록 오류: 상단 바 아래 전체 폭. 둘 다 떠도 줄이 쌓일 뿐 서로 가리지 않는다. */
 .notices { grid-area: notices; max-height: 30vh; overflow-y: auto; }
@@ -265,6 +264,7 @@ input, select, textarea {
   border-bottom: 1px solid var(--border);
 }
 .notices > aside {
+  --button-bg: var(--bg);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -272,8 +272,6 @@ input, select, textarea {
   background: var(--bg-elevated);
   box-shadow: inset 3px 0 0 var(--accent);
 }
-.notices > aside button:not(.primary) { background: var(--bg); }
-.notices > aside button.primary { background: var(--accent); }
 
 .sidebar {
   grid-area: side;
@@ -287,11 +285,12 @@ input, select, textarea {
 /* 탭 패널(.sidebar-panel) 안: 파일 탭의 찾기 칸과 트리, Workflows 패널 */
 .sidebar-panel > section { padding: 0 var(--space-3) var(--space-3); }
 .sidebar-panel > section input { width: 100%; }
-.sidebar-panel > section > p { margin: var(--space-2) 0 0; color: var(--text-muted); }
-.sidebar-panel > section > p[role="alert"] { color: var(--danger); }
+.sidebar-panel > section > p { margin: var(--space-2) 0 0; }
+:where(.sidebar-panel > section) p { color: var(--text-muted); }
 .sidebar-panel > p { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
 
 /* 검색 결과: 한 건이 사이드바 폭 안에서 줄바꿈된다 */
+.search-results { --button-bg: var(--bg); }
 .search-results li { margin-top: var(--space-1); }
 .search-results li > button {
   display: block;
@@ -299,7 +298,6 @@ input, select, textarea {
   min-width: 0;
   text-align: left;
   overflow-wrap: anywhere;
-  background: var(--bg);
 }
 /* 한 건 = 제목 · 경로 · 스니펫 세 줄. 마크업의 <br> 은 줄 구분이 이미 있으니 감춘다. */
 .search-results li > button > strong,
