@@ -20,6 +20,7 @@ import {
   pendingPaste,
 } from '../pasteImage';
 import { setLang } from '../../../i18n/lang';
+import { t } from '../../../i18n/t';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -85,9 +86,15 @@ function dataTransfer(files: File[], text = ''): DataTransfer {
     getData: (type: string) => (type === 'text/plain' ? text : ''),
   } as unknown as DataTransfer;
 }
-function pasteEvent(files: File[], text = ''): Event {
+function pasteEvent(files: File[], text = '', html = ''): Event {
   const ev = new Event('paste', { bubbles: true, cancelable: true });
-  Object.defineProperty(ev, 'clipboardData', { value: dataTransfer(files, text) });
+  const dt = dataTransfer(files, text);
+  if (html) {
+    (dt as unknown as { types: string[] }).types.push('text/html');
+    (dt as unknown as { getData: (type: string) => string }).getData = (type) =>
+      type === 'text/plain' ? text : type === 'text/html' ? html : '';
+  }
+  Object.defineProperty(ev, 'clipboardData', { value: dt });
   return ev;
 }
 const textPasteEvent = (text: string) => pasteEvent([], text);
@@ -157,9 +164,9 @@ describe('라이브 미리보기: 이미지 붙여 넣기와 끌어 놓기', () 
     const v = view('a', 1, { write });
     v.contentDOM.dispatchEvent(pasteEvent([png()]));
     await flush();
-    expect(v.state.field(pendingPaste)).toEqual([1]);
+    expect(v.state.field(pendingPaste).map((p) => p.pos)).toEqual([1]);
     v.dispatch({ changes: { from: 0, insert: 'b' } });
-    expect(v.state.field(pendingPaste)).toEqual([2]);
+    expect(v.state.field(pendingPaste).map((p) => p.pos)).toEqual([2]);
     resolve(`exp/images/${NAME}`);
     await flush();
     expect(v.state.doc.toString()).toBe(`ba![[${NAME}]]`);
@@ -250,5 +257,99 @@ describe('라이브 미리보기: 이미지 붙여 넣기와 끌어 놓기', () 
     expect(imageFilesOf(dataTransfer(files)).map((f) => f.name)).toEqual(['image.png']);
     expect(imageFilesOf(null)).toEqual([]);
     expect(pastedImageName(new Date(2026, 0, 2, 3, 4, 5), 'gif')).toBe('Pasted image 20260102030405.gif');
+  });
+  it('a pending paste from a replaced state never lands in the new note, and the new paste keeps its own slot', async () => {
+    const resolvers: Array<(p: string) => void> = [];
+    const write = vi.fn<Write>(() => new Promise<string>((r) => resolvers.push(r)));
+    const v = view('noteA', 0, { notePath: 'exp/a.labnote.md', write });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(write).toHaveBeenCalledTimes(1);
+    // 편집기는 노트를 바꿀 때 setState 로 상태를 통째로 갈아 끼운다(같은 확장, 다른 노트)
+    v.setState(
+      EditorState.create({
+        doc: 'noteB',
+        selection: { anchor: 5 },
+        extensions: [
+          EditorState.lineSeparator.of('\n'),
+          history(),
+          labnoteMarkdown(),
+          livePreview(),
+          tableExtension({ save: () => {}, root: document }),
+          imageLoader.of({ notePath: 'exp/b.labnote.md', images: fakeImages() }),
+          pasteImages({ write, toast }),
+        ],
+      }),
+    );
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(write).toHaveBeenCalledTimes(2);
+    resolvers[0]('exp/images/fromA.png');
+    await flush();
+    expect(v.state.doc.toString()).toBe('noteB');
+    resolvers[1]('exp/images/fromB.png');
+    await flush();
+    expect(v.state.doc.toString()).toBe('noteB![[fromB.png]]');
+    expect(v.state.field(pendingPaste)).toEqual([]);
+  });
+
+  it('a clipboard with TSV text and a bitmap (Excel) makes a table and writes nothing', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('', 0, { write });
+    const ev = pasteEvent([png()], 'a\tb\r\n1\t2', '<table><tr><td>a</td><td>b</td></tr></table>');
+    v.contentDOM.dispatchEvent(ev);
+    await flush();
+    expect(write).not.toHaveBeenCalled();
+    expect(v.state.doc.toString()).toContain('| a | b |');
+    expect(v.state.doc.toString()).not.toContain('![[');
+  });
+
+  it('a clipboard whose HTML is a single <img> (copy image) is still taken as an image', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('', 0, { write });
+    v.contentDOM.dispatchEvent(
+      pasteEvent([png()], '', '<html><body><!--StartFragment--><meta charset="utf-8"><img src="https://x/y.png"/><!--EndFragment--></body></html>'),
+    );
+    await flush();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(v.state.doc.toString()).toBe(`![[${NAME}]]`);
+  });
+
+  it('a paste or drop inside front matter or a fenced code block inserts no embed', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const fm = '---\ntitle: x\n---\nbody';
+    const inFm = view(fm, 8, { write });
+    inFm.contentDOM.dispatchEvent(pasteEvent([png()]));
+    const code = '```\ncode\n```\n';
+    const inCode = view(code, 6, { write });
+    inCode.contentDOM.dispatchEvent(pasteEvent([png()]));
+    const dropCode = view(code, 6, { write });
+    // jsdom 에는 레이아웃이 없다: 놓은 자리를 코드 줄 안으로 정한다
+    dropCode.posAtCoords = (() => 6) as typeof dropCode.posAtCoords;
+    const drop = dropEvent([png()]);
+    dropCode.contentDOM.dispatchEvent(drop);
+    // 파일을 글로 읽어 넣는 CodeMirror 의 기본 끌어 놓기도 막는다
+    expect(drop.defaultPrevented).toBe(true);
+    await flush();
+    expect(write).not.toHaveBeenCalled();
+    expect(inFm.state.doc.toString()).toBe(fm);
+    expect(inCode.state.doc.toString()).toBe(code);
+    expect(dropCode.state.doc.toString()).toBe(code);
+  });
+
+  it('a known FsError kind is shown as a translated reason, an unknown one as its message', async () => {
+    setLang('ko');
+    const write = vi.fn<Write>(async () => Promise.reject({ kind: 'tooLarge', message: 'image too large' }));
+    const v = view('a', 1, { write });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(toast).toHaveBeenCalledWith(t('live.image.saveFailed', t('live.image.err.tooLarge')));
+    expect(toast.mock.calls[0][0]).not.toMatch(/tooLarge|too large/);
+    toast.mockClear();
+    const io = vi.fn<Write>(async () => Promise.reject({ kind: 'io', message: 'disk full' }));
+    const w = view('a', 1, { write: io });
+    w.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(toast).toHaveBeenCalledWith(t('live.image.saveFailed', 'disk full'));
   });
 });

@@ -4,6 +4,8 @@ import { isolateHistory } from '@codemirror/commands';
 import { t } from '../../i18n/t';
 import { notify } from '../../labnote/host/toastStore';
 import { activeCell, activeCellView } from '../table/cellEditor';
+import { inRawText } from '../table/paste';
+import { ERROR_KINDS } from '../../fs/errorKinds';
 import { imageLoader } from './imageWidget';
 
 /**
@@ -81,24 +83,36 @@ export function embedText(path: string, unique: boolean): string {
   return unique ? `![[${path.slice(path.lastIndexOf('/') + 1)}]]` : `![[${path}]]`;
 }
 
-/** 붙여 넣기 하나를 시작한다(자리). 값의 순번이 그 붙여 넣기의 번호다. */
-const addPending = StateEffect.define<number>();
-/** 붙여 넣기 `n` 번이 끝났다(넣었거나 실패했다). */
+/** 쓰는 중인 붙여 넣기 하나: 고유 번호와 넣을 자리. */
+export interface PendingPaste {
+  readonly id: number;
+  readonly pos: number;
+}
+
+/** 붙여 넣기 하나를 시작한다(번호와 자리). */
+const addPending = StateEffect.define<PendingPaste>();
+/** 붙여 넣기 `id` 가 끝났다(넣었거나 실패했다). */
 const donePending = StateEffect.define<number>();
 
 /**
- * 쓰는 중인 붙여 넣기의 넣을 자리(번호 순). 끝난 것은 -1 로 남겨 번호가 밀리지 않게 하고, 모두 끝나면 비운다.
- * 자리는 뒤의 변경을 따라 옮긴다(그 자리에 친 글은 임베드 뒤로 간다: 붙여 넣기가 먼저였다).
+ * 붙여 넣기의 고유 번호. 모듈 전체에서 늘기만 한다: 상태가 통째로 바뀌어도(노트 전환·다시 불러오기, `setState`)
+ * 새 붙여 넣기가 옛 붙여 넣기의 번호를 다시 받지 않는다. 그래서 옛 쓰기가 끝나도 새 노트에서 넣을 자리를 찾지 못한다.
  */
-export const pendingPaste = StateField.define<readonly number[]>({
+let nextPasteId = 0;
+
+/**
+ * 쓰는 중인 붙여 넣기의 넣을 자리. 자리는 뒤의 변경을 따라 옮긴다(그 자리에 친 글은 임베드 앞으로 간다: 붙여 넣기가 먼저다).
+ * 끝난 것은 뺀다. 새 상태(`setState`)는 빈 목록으로 시작한다.
+ */
+export const pendingPaste = StateField.define<readonly PendingPaste[]>({
   create: () => [],
   update(value, tr) {
-    let next = tr.docChanged ? value.map((p) => (p < 0 ? p : tr.changes.mapPos(p, -1))) : value;
+    let next = tr.docChanged ? value.map((p) => ({ id: p.id, pos: tr.changes.mapPos(p.pos, -1) })) : value;
     for (const e of tr.effects) {
       if (e.is(addPending)) next = [...next, e.value];
-      else if (e.is(donePending) && e.value < next.length) next = next.map((p, i) => (i === e.value ? -1 : p));
+      else if (e.is(donePending)) next = next.filter((p) => p.id !== e.value);
     }
-    return next.length && next.every((p) => p < 0) ? [] : next;
+    return next;
   },
 });
 
@@ -119,14 +133,52 @@ function bytesOf(file: File): Promise<Uint8Array> {
   });
 }
 
-/** 거부된 IPC 의 알림 글: FsError 의 message, 없으면 kind, 아니면 글로 바꾼 것. */
+/** 쓰기(`vault_write_image`)가 낼 수 있는 FsError `kind` 의 번역한 이유. 모르는 kind 는 null. */
+function reasonOf(kind: string): string | null {
+  switch (kind) {
+    case ERROR_KINDS.tooLarge:
+      return t('live.image.err.tooLarge');
+    case ERROR_KINDS.notImage:
+      return t('live.image.err.notImage');
+    case ERROR_KINDS.exists:
+      return t('live.image.err.exists');
+    case ERROR_KINDS.forbidden:
+    case ERROR_KINDS.escape:
+      return t('live.image.err.forbidden');
+    case ERROR_KINDS.pathTooLong:
+      return t('live.image.err.pathTooLong');
+    case ERROR_KINDS.noVault:
+      return t('live.image.err.noVault');
+    default:
+      return null;
+  }
+}
+
+/** 거부된 IPC 의 알림 글: 아는 `kind` 는 번역한 이유, 모르면 FsError 의 message, 없으면 kind, 아니면 글로 바꾼 것. */
 function errorText(e: unknown): string {
   if (e && typeof e === 'object') {
     const { message, kind } = e as { message?: unknown; kind?: unknown };
+    const reason = typeof kind === 'string' ? reasonOf(kind) : null;
+    if (reason) return reason;
     if (typeof message === 'string' && message) return message;
     if (typeof kind === 'string' && kind) return kind;
   }
   return String(e);
+}
+
+/**
+ * 클립보드에 글이 함께 있는가. Excel·Word 는 TSV·HTML 옆에 그림(비트맵)도 올린다: 그때는 글이 먼저다(Obsidian 과 같다).
+ * HTML 이 `<img>` 하나뿐이면(브라우저의 "이미지 복사") 글이 아니다. DOMParser 의 문서는 스크립트도 이미지 읽기도 하지 않는다.
+ */
+function carriesText(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  if (dt.getData('text/plain').trim() !== '') return true;
+  const html = dt.getData('text/html');
+  if (!html.trim()) return false;
+  const body = new DOMParser().parseFromString(html, 'text/html').body;
+  // Chromium 은 조각 앞에 `<meta charset>` 를 붙인다: 내용이 아니다
+  const elements = Array.from(body.querySelectorAll('*')).filter((el) => el.tagName !== 'META');
+  return !(elements.length === 1 && elements[0].tagName === 'IMG' && (body.textContent ?? '').trim() === '');
 }
 
 export interface PasteImageDeps {
@@ -151,7 +203,7 @@ function inert(view: EditorView, state: EditorState): boolean {
 export function pasteImages(deps: PasteImageDeps): Extension {
   const toast = deps.toast ?? ((message: string) => notify('error', message));
 
-  async function run(view: EditorView, files: File[], names: string[], slot: number): Promise<void> {
+  async function run(view: EditorView, files: File[], names: string[], id: number, notePath: string): Promise<void> {
     const config = view.state.facet(imageLoader)!;
     const dir = imagesDirOf(config.notePath);
     const written: string[] = [];
@@ -170,22 +222,25 @@ export function pasteImages(deps: PasteImageDeps): Extension {
         written.map(async (p) => embedText(p, await config.images.index.isUnique(p.slice(p.lastIndexOf('/') + 1)).catch(() => false))),
       );
     }
-    finish(view, slot, embeds);
+    finish(view, id, notePath, embeds);
   }
 
-  /** 붙여 넣기 `slot` 을 끝낸다: 임베드가 있으면 따라 옮긴 자리에 넣는다(한 트랜잭션). 뷰가 부서졌거나 상태가 바뀌었으면 넣지 않는다. */
-  function finish(view: EditorView, slot: number, embeds: string[]): void {
+  /**
+   * 붙여 넣기 `id` 를 끝낸다. 임베드가 있으면 따라 옮긴 자리에 넣는다(한 트랜잭션).
+   * 뷰가 부서졌거나, 상태가 바뀌어 그 번호가 없거나, 다른 노트가 열려 있으면 아무것도 넣지 않는다.
+   */
+  function finish(view: EditorView, id: number, notePath: string, embeds: string[]): void {
     if (!view.dom.isConnected) return;
     const state = view.state;
-    const pos = state.field(pendingPaste, false)?.[slot];
-    if (pos === undefined || pos < 0) return;
-    if (!embeds.length) return view.dispatch({ effects: donePending.of(slot) });
+    const pos = state.field(pendingPaste, false)?.find((p) => p.id === id)?.pos;
+    if (pos === undefined) return;
+    if (!embeds.length || state.facet(imageLoader)?.notePath !== notePath) return view.dispatch({ effects: donePending.of(id) });
     const at = Math.min(pos, state.doc.length);
     const insert = embeds.join(state.lineBreak);
     const sel = state.selection.main;
     view.dispatch({
       changes: { from: at, insert },
-      effects: donePending.of(slot),
+      effects: donePending.of(id),
       // 커서가 넣을 자리에 그대로 있었으면 임베드 뒤로 옮긴다(붙여 넣기처럼). 그사이 다른 곳으로 갔으면 그대로 둔다.
       ...(sel.empty && sel.head === at ? { selection: { anchor: at + insert.length } } : {}),
       annotations: [Transaction.userEvent.of('input.paste'), isolateHistory.of('full')],
@@ -197,12 +252,16 @@ export function pasteImages(deps: PasteImageDeps): Extension {
     if (inert(view, state)) return false;
     const files = imageFilesOf(dt);
     if (!files.length) return false;
+    const at = Math.min(pos, state.doc.length);
     event.preventDefault();
+    // 머리말·코드 안에는 임베드를 넣지 않는다. 사건은 삼킨다: 그대로 두면 CodeMirror 의 끌어 놓기가 파일을 글로 읽어 넣는다.
+    if (inRawText(state, at)) return true;
     const now = new Date();
     const names = files.map((f) => (named ? dropName(f) : pastedImageName(now, PASTE_MIME[f.type])));
-    const slot = state.field(pendingPaste).length;
-    view.dispatch({ effects: addPending.of(Math.min(pos, state.doc.length)) });
-    void run(view, files, names, slot).catch(() => finish(view, slot, []));
+    const id = nextPasteId++;
+    const notePath = state.facet(imageLoader)!.notePath;
+    view.dispatch({ effects: addPending.of({ id, pos: at }) });
+    void run(view, files, names, id, notePath).catch(() => finish(view, id, notePath, []));
     return true;
   }
 
@@ -212,6 +271,8 @@ export function pasteImages(deps: PasteImageDeps): Extension {
     Prec.high(
       EditorView.domEventHandlers({
         paste(e, view) {
+          // 글이 함께 있으면(Excel 표, Word 글) 글 붙여 넣기(SP1 표, pasteURLAsLink, 기본)에 맡긴다
+          if (carriesText(e.clipboardData)) return false;
           return take(view, e, e.clipboardData, view.state.selection.main.head, false);
         },
         drop(e, view) {

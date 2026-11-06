@@ -64,7 +64,7 @@ function touchesTable(state: EditorState): boolean {
 const RAW_NODES: Record<string, boolean> = { FencedCode: false, CodeBlock: true, InlineCode: false, Frontmatter: false };
 
 /** 위치가 코드나 머리말 안인가. 구문 트리를 그 위치까지 (잠깐) 읽는다. */
-function inRawText(state: EditorState, pos: number): boolean {
+export function inRawText(state: EditorState, pos: number): boolean {
   const tree = ensureSyntaxTree(state, pos, 50) ?? syntaxTree(state);
   for (const side of [-1, 1] as const) {
     for (let n: SyntaxNode | null = tree.resolveInner(pos, side); n; n = n.parent) {
