@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { t } from '../i18n/t';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 
 /** Rust 의 `VaultInfo` 직렬화 모양(camelCase). `root` 는 표시용이다. */
@@ -10,9 +9,15 @@ export interface VaultInfo {
   hasObsidianConfig: boolean;
 }
 
+/**
+ * 선택 화면에 보일 오류. 번역한 문장이 아니라 번역 키를 들고 있다: 화면이 그릴 때 번역하므로,
+ * 오류가 떠 있는 동안 언어를 바꿔도 문장이 새 언어로 바뀐다.
+ */
+export type VaultErrorKey = 'vault.error.missing' | 'vault.error.generic';
+
 export type VaultStatus =
   | { status: 'loading' }
-  | { status: 'picker'; error?: string }
+  | { status: 'picker'; error?: VaultErrorKey }
   | { status: 'ready'; vault: VaultInfo };
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -31,14 +36,14 @@ export async function restoreVault(invoke: InvokeFn = tauriInvoke): Promise<Vaul
   }
 }
 
-/** 고른 폴더를 열거나(`vault_open`) 새로 만들어 연다(`vault_create`). 거부되면 선택 화면에 남고 사용자에게 보일 문구를 준다. */
+/** 고른 폴더를 열거나(`vault_open`) 새로 만들어 연다(`vault_create`). 거부되면 선택 화면에 남고 사용자에게 보일 문구의 키를 준다. */
 async function enter(invoke: InvokeFn, cmd: 'vault_open' | 'vault_create', path: string): Promise<VaultStatus> {
   try {
     const vault = await invoke<VaultInfo>(cmd, { path });
     return { status: 'ready', vault };
   } catch (e) {
     const missing = hasErrorKind(e, ERROR_KINDS.vaultNotFound) || hasErrorKind(e, ERROR_KINDS.notFound);
-    return { status: 'picker', error: t(missing ? 'vault.error.missing' : 'vault.error.generic') };
+    return { status: 'picker', error: missing ? 'vault.error.missing' : 'vault.error.generic' };
   }
 }
 

@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { open as pickFolder, save as pickNewFolder } from '@tauri-apps/plugin-dialog';
 import { t } from '../i18n/t';
+import type { VaultErrorKey } from '../vault/useVault';
 
 interface Props {
-  error?: string;
+  /** 번역 키. 그릴 때 번역한다: 오류가 떠 있는 동안 언어를 바꿔도 따라 바뀐다. */
+  error?: VaultErrorKey;
   /** 새 보관함 폴더를 만들 경로(아직 없는 폴더). */
   onCreate: (path: string) => void;
   /** 이미 있는 폴더(노트 폴더나 Obsidian 보관함). */
@@ -51,7 +53,7 @@ export function FirstRun({ error, onCreate, onOpen }: Props) {
           <p>{t('firstRun.openHint')}</p>
         </div>
       </div>
-      {(error || failed) && <p role="alert">{error ?? t('vault.error.generic')}</p>}
+      {(error || failed) && <p role="alert">{t(error ?? 'vault.error.generic')}</p>}
     </section>
   );
 }

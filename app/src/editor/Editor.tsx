@@ -7,6 +7,7 @@ import { EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { t } from '../i18n/t';
+import { useLang } from '../i18n/useLang';
 import { editorTheme } from './theme';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
@@ -51,6 +52,7 @@ export interface WindowApi {
 type External = { kind: 'changed'; current: string } | { kind: 'gone' };
 
 const LOCKED = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+const labelAttrs = () => EditorView.contentAttributes.of({ 'aria-label': t('editor.label') });
 
 export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   {
@@ -66,6 +68,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView>();
   const lock = useRef(new Compartment());
+  /** 편집 영역의 이름표(aria-label). 언어를 바꾸면 이 칸만 갈아 끼운다: 뷰와 본문, 되돌리기 기록은 그대로다. */
+  const label = useRef(new Compartment());
+  const lang = useLang();
   const docRef = useRef<LoadedDocument>();
   /** 마지막으로 저장했거나 읽은 에디터 본문. 이것과 같으면 깨끗하다 (되돌리기로 돌아와도). */
   const baseline = useRef('');
@@ -283,7 +288,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
       highlightSpecialChars(),
       EditorView.lineWrapping,
-      EditorView.contentAttributes.of({ 'aria-label': t('editor.label') }),
+      label.current.of(labelAttrs()),
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
@@ -317,6 +322,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     // 노트마다 새로 마운트한다(key): path 가 바뀌는 경우는 없다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 언어가 바뀌면 편집 영역의 이름표만 다시 건다. 본문을 바꾸지 않으므로 저장 안 됨 표시도, 자동 저장도 움직이지 않는다.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: label.current.reconfigure(labelAttrs()) });
+  }, [lang]);
 
   // 대화상자가 열려 있는 동안, 그리고 읽기가 끝나기 전에는 편집을 막는다: 사용자가 결정하는 내용이 바뀌지 않게.
   useEffect(() => {

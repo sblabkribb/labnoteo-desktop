@@ -117,7 +117,7 @@ describe('경고 글자색은 둘러싼 규칙에 지지 않는다', () => {
   it('첫 실행 화면의 오류는 위험색이다', () => {
     render(
       <main className="standalone">
-        <FirstRun error="열 수 없습니다" onOpen={() => {}} onCreate={() => {}} />
+        <FirstRun error="vault.error.generic" onOpen={() => {}} onCreate={() => {}} />
       </main>,
     );
     expect(winning(screen.getByRole('alert'), 'color')).toBe('var(--danger)');

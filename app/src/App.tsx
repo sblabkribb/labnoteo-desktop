@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { t } from './i18n/t';
 import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
@@ -14,6 +14,9 @@ import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { ThemeToggle } from './theme/ThemeToggle';
 import { useTheme, type Theme } from './theme/useTheme';
+import { LanguageToggle } from './i18n/LanguageToggle';
+import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
+import { useLang } from './i18n/useLang';
 
 interface ViewProps {
   vault: VaultInfo;
@@ -21,9 +24,10 @@ interface ViewProps {
   onChangeVault: () => void;
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  lang: Lang;
 }
 
-function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps) {
+function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: ViewProps) {
   const { entries, failed, reload } = useTree(vault.root);
   // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
   useVaultEvents(reload);
@@ -62,6 +66,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           <NewNote flush={flush} onCreated={openNote} />
           <ChangeVault flush={flush} onChange={onChangeVault} />
           <ThemeToggle theme={theme} onChange={setTheme} />
+          <LanguageToggle lang={lang} onChange={setLang} />
         </div>
       </header>
       <div className="notices">
@@ -97,15 +102,22 @@ export function App() {
     fetchAppVersion().then(setVersion);
   }, []);
   const { theme, setTheme } = useTheme();
+  // 언어를 바꾸면 여기서부터 아래가 같은 자리에서 다시 그려진다: 아무것도 다시 마운트하지 않는다(편집기의 저장 안 된 편집이 남는다).
+  // 루트의 key 를 바꿔 다시 그리게 하지 않는다. 그러면 편집기가 새로 뜨며 편집을 잃는다.
+  const lang = useLang();
+  useLayoutEffect(() => applyHtmlLang(lang), [lang]);
   // 보관함이 열린 화면은 VaultView 가 자기 main 을 가진다. 그 밖의 화면(불러오는 중, 선택)은 여기서 감싼다.
   if (state.status === 'ready') {
-    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} theme={theme} setTheme={setTheme} />;
+    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} theme={theme} setTheme={setTheme} lang={lang} />;
   }
   return (
     <main className="standalone">
       <div className="standalone-head">
         <h1>{t('app.title')}</h1>
-        <ThemeToggle theme={theme} onChange={setTheme} />
+        <div className="standalone-actions">
+          <ThemeToggle theme={theme} onChange={setTheme} />
+          <LanguageToggle lang={lang} onChange={setLang} />
+        </div>
       </div>
       {state.status === 'loading' && <p>{t('vault.loading')}</p>}
       {state.status === 'picker' && <FirstRun error={state.error} onOpen={open} onCreate={create} />}

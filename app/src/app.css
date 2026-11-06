@@ -430,6 +430,7 @@ input, select, textarea {
 /* 보관함 선택·불러오는 중 화면 */
 .standalone-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
 .standalone-head h1 { margin: 0; }
+.standalone-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .standalone { max-width: 48rem; margin: 0 auto; padding: var(--space-6) var(--space-5); }
 
 /* 좁은 창: 사이드바를 본문 위로 쌓는다 */
