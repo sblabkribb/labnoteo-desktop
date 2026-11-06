@@ -10,6 +10,7 @@ import { NewNote } from './tree/NewNote';
 import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
+import { useLinkIndex } from './links/useLinkIndex';
 import { Editor, type EditorHandle } from './editor/Editor';
 import type { EditorView } from '@codemirror/view';
 import { resolveGithubAnchor } from '@labnoteo/core';
@@ -167,18 +168,25 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     return () => vaultImages.clear();
   }, [vault.root]);
   // 색인은 캐시다: 보관함을 열 때마다 파일에서 다시 채운다. 실패해도 노트 사용은 막지 않는다.
+  // 그 약속은 상태로 남겨 링크 색인이 기다린다(성공이든 실패든 끝난 뒤에 본문을 읽는다).
+  const [rebuild, setRebuild] = useState<{ root: string; done: Promise<unknown> }>();
   useEffect(() => {
     let live = true;
     setIndexing(true);
     setSkipped(0);
-    rebuildIndex()
-      .then((stats) => live && setSkipped(stats.skipped))
-      .catch(() => undefined)
-      .then(() => live && setIndexing(false));
+    setRebuild({
+      root: vault.root,
+      done: rebuildIndex()
+        .then((stats) => live && setSkipped(stats.skipped))
+        .catch(() => undefined)
+        .then(() => live && setIndexing(false)),
+    });
     return () => {
       live = false;
     };
   }, [vault.root]);
+  // 링크 색인: 보관함이 바뀌면 비우고, 위 재구성이 끝나면 싣고, 보관함 변경을 따라간다.
+  useLinkIndex(vault.root, rebuild?.root === vault.root ? rebuild.done : undefined);
   const flush = async () => !editor.current || (await editor.current.flush());
   // 맥락 메뉴: 항목은 여는 순간 만든다. 명령 맥락이 아직 없으면(설정을 읽는 중) 기본 동작 그대로다.
   const onTreeMenu = ctx

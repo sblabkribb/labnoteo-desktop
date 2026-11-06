@@ -20,6 +20,7 @@ import { imageLoader } from './live/imageWidget';
 import { vaultImages, type VaultImages } from './live/vaultImages';
 import { pasteImages } from './live/pasteImage';
 import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
+import { linkIndex } from '../links/linkIndex';
 import { LIST_KEYS } from './live/listKeys';
 import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
 import { notify } from '../labnote/host/toastStore';
@@ -455,7 +456,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 이미지 붙여 넣기·끌어 놓기 → 노트 폴더의 images/ 에 새 파일 + `![[이름]]`. 두 모드 모두에서 되도록 모드 칸 밖에 둔다.
       // 쓴 뒤에는 pasteImages 가 이름 색인을 버리고(isUnique 가 새 파일을 보게) 이름만 넣을지 경로를 넣을지 정한다.
       pasteImages({
-        write: (dir, name, bytes) => writeVaultImage(dir, name, bytes, latest.current.invoke as unknown as RawInvoke),
+        // 감시자는 새 이미지를 알리지 않는다(D1): 쓴 경로를 링크 색인에 바로 넣어 `![[이름]]` 이 풀리게 한다.
+        write: async (dir, name, bytes) => {
+          const written = await writeVaultImage(dir, name, bytes, latest.current.invoke as unknown as RawInvoke);
+          linkIndex.addFiles([written]);
+          return written;
+        },
       }),
       editorTheme,
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.

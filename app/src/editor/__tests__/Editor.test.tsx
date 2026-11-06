@@ -15,6 +15,7 @@ import { getOutline } from '../outline/outlineStore';
 import { installFileDropGuard } from '../../ui/fileDropGuard';
 import { createImageCache } from '../live/imageCache';
 import type { VaultImages } from '../live/vaultImages';
+import { linkIndex } from '../../links/linkIndex';
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
 Range.prototype.getClientRects ??= emptyRects;
@@ -849,7 +850,10 @@ describe('편집기: 창의 파일 끌어 놓기 막이와 함께', () => {
       expect(drop.defaultPrevented).toBe(true);
       await waitFor(() => expect(writes).toEqual([{ dir: 'lab/images', name: 'gel.png' }]));
       await waitFor(() => expect(view.state.doc.toString()).toBe('a![[gel.png]]'));
+      // The watcher never reports a new image (D1): the link index learns it from the write.
+      expect(linkIndex.files()).toContain('lab/images/gel.png');
     } finally {
+      linkIndex.clear();
       dispose();
     }
   });
