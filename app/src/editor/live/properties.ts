@@ -18,6 +18,7 @@ import {
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { frontMatterNames, parseFrontMatterYaml } from '@labnoteo/core';
 import { frontMatterText } from '../../labnote/frontMatterText';
+import { toDocBreaks } from '../../labnote/editTarget';
 import { t } from '../../i18n/t';
 import { addKey, APP_KEYS, editValue, isWikilinkValue, keyOfLine, READ_ONLY_KEYS, removeKey, renameKey } from './frontEdit';
 import { tableOptions } from '../table/field';
@@ -35,6 +36,8 @@ import { toggleMode } from './mode';
  *   격자 자신의 편집(input.properties), userEvent 없는 프로그램 편집은 그대로 지나간다.
  * - 칸은 입력이다(frontEdit 의 최소 편집). Enter·blur 로 적고 Escape 로 되돌리며, 한글 조합 중에는 적지 않는다.
  *   last_updated_date 는 읽기 전용, 중첩 값은 "YAML로 편집"으로, status 는 칩을 눌러 앱의 상태 명령으로 고친다.
+ * - 키보드(Task 26): Ctrl+; 는 속성 추가(머리말이 없으면 빈 블록을 넣고 새 속성 칸으로), 본문 첫 줄의 ↑ 와 본문 첫 자리의 ←
+ *   는 격자의 마지막 입력으로, 격자 입력의 Escape 는 본문 첫 자리로 돌아간다.
  */
 
 /** 격자 칸의 종류. readOnly 는 앱이 적는 키(last_updated_date). */
@@ -165,11 +168,6 @@ export const rawFront = StateField.define<boolean>({
   },
 });
 
-function showRaw(view: EditorView): void {
-  view.dispatch({ effects: editYaml.of(true), selection: { anchor: Math.min(4, view.state.doc.length) }, userEvent: 'select' });
-  view.focus();
-}
-
 function editYamlButton(view: EditorView): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
@@ -178,7 +176,7 @@ function editYamlButton(view: EditorView): HTMLButtonElement {
   b.setAttribute('aria-label', t('props.editYaml'));
   b.addEventListener('click', (e) => {
     e.preventDefault();
-    showRaw(view);
+    editYamlCommand(view);
   });
   return b;
 }
@@ -297,7 +295,9 @@ function gridInput(view: EditorView, o: InputOpts): HTMLInputElement {
       commit();
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      // 먼저 되돌린다: 본문으로 초점을 옮기며 생기는 blur 가 적을 것이 없게
       input.value = input.dataset[ORIG] ?? '';
+      returnToBody(view);
     }
   });
   input.addEventListener('blur', () => {
@@ -306,6 +306,13 @@ function gridInput(view: EditorView, o: InputOpts): HTMLInputElement {
     commit();
   });
   return input;
+}
+
+/** 격자에서 본문 첫 자리(to + 1)로 돌아간다. 격자가 없으면 초점만 돌려준다. */
+function returnToBody(view: EditorView): void {
+  const to = gridEnd(view.state);
+  if (to !== null) view.dispatch({ selection: { anchor: Math.min(to + 1, view.state.doc.length) }, userEvent: 'select' });
+  view.focus();
 }
 
 /** 다시 그린 격자에서 그 입력에 초점을 준다. */
@@ -502,6 +509,7 @@ function addRow(view: EditorView): HTMLElement {
         key.value = '';
         value.value = '';
         key.removeAttribute('aria-invalid');
+        returnToBody(view);
       }
     });
   }
@@ -608,9 +616,110 @@ const guardFilter = EditorState.transactionFilter.of((tr) => {
   };
 });
 
+/** 속성 추가의 단축키(Editor.tsx 의 Prec.highest keymap, 표 칸의 cellOuterKeys, 팔레트의 보이는 키). */
+export const PROPS_ADD_KEY = 'Mod-;';
+
+/** 보이는 격자의 새 속성 이름 칸에 초점을 준다. 격자가 없거나 잠겨 있으면 false. */
+function focusAddRow(view: EditorView): boolean {
+  const input = view.dom.querySelector<HTMLInputElement>('.lno-props .lno-props-add input.lno-props-key');
+  if (!input || input.readOnly) return false;
+  input.focus();
+  return true;
+}
+
+/**
+ * 속성 추가(Ctrl+;, 팔레트). 머리말이 없으면 문서 맨 앞에 빈 블록 `---\n---\n` 을 넣고(input.properties, 한 번의 되돌리기),
+ * 격자가 보이면 새 속성 이름 칸에 초점을 준다. 격자가 없으면(소스 보기, "YAML로 편집", 격자로 못 보이는 머리말) 닫는 `---`
+ * 앞에 빈 줄을 열고 커서를 둔다. 잠긴 편집기에서는 아무것도 하지 않는다(false).
+ */
+export function addPropertyCommand(view: EditorView): boolean {
+  const state = view.state;
+  if (locked(state)) return false;
+  const live = state.field(propertiesField, false) !== undefined && !state.field(rawFront, false);
+  const node = frontNode(state);
+  if (!node) {
+    // 소스 보기에서는 빈 줄을 품은 블록을 넣는다: 커서가 그 빈 줄에 서서 바로 `키: 값` 을 적는다
+    view.dispatch({
+      changes: { from: 0, insert: toDocBreaks(live ? '---\n---\n' : '---\n\n---\n', state) },
+      selection: { anchor: 4 },
+      scrollIntoView: true,
+      userEvent: 'input.properties',
+      annotations: isolateHistory.of('full'),
+    });
+    if (focusAddRow(view)) return true;
+    view.focus();
+    return true;
+  }
+  if (gridEnd(state) !== null) {
+    view.dispatch({ effects: EditorView.scrollIntoView(0, { y: 'start' }) });
+    if (focusAddRow(view)) return true;
+  }
+  // 원문으로 보이는 머리말: 닫는 `---` 줄 앞에 빈 줄을 열고 그 줄에 커서를 둔다
+  const close = state.doc.lineAt(node.to).from;
+  view.dispatch({
+    changes: { from: close, insert: state.lineBreak },
+    selection: { anchor: close },
+    scrollIntoView: true,
+    userEvent: 'input.properties',
+    annotations: isolateHistory.of('full'),
+  });
+  view.focus();
+  return true;
+}
+
+/** 속성을 YAML로 편집(팔레트): 머리말을 원문으로 보이고 커서를 그 안(4)에 둔다. 머리말이 없으면 false. */
+export function editYamlCommand(view: EditorView): boolean {
+  if (!frontNode(view.state)) return false;
+  view.dispatch({
+    effects: editYaml.of(true),
+    selection: { anchor: Math.min(4, view.state.doc.length) },
+    scrollIntoView: true,
+    userEvent: 'select',
+  });
+  view.focus();
+  return true;
+}
+
+/** 보이는 격자의 마지막 입력에 초점을 준다(키보드로 격자에 들어가기). 격자가 없거나 입력이 없으면 false. */
+export function focusGridLast(view: EditorView): boolean {
+  if (gridEnd(view.state) === null) return false;
+  const inputs = view.dom.querySelectorAll<HTMLInputElement>('.lno-props input');
+  const last = inputs[inputs.length - 1];
+  if (!last) return false;
+  last.focus();
+  return true;
+}
+
+/** 빈 커서 하나뿐이면 그 위치. */
+function soleCursor(state: EditorState): number | null {
+  const sel = state.selection;
+  return sel.ranges.length === 1 && sel.main.empty ? sel.main.head : null;
+}
+
+/** ↑: 커서가 본문 첫 줄(줄바꿈으로 접힌 줄이면 그 첫 화면 줄)에 있으면 격자로. */
+function arrowUpIntoGrid(view: EditorView): boolean {
+  const to = gridEnd(view.state);
+  const head = soleCursor(view.state);
+  if (to === null || head === null || head <= to) return false;
+  if (view.state.doc.lineAt(head).from !== to + 1) return false;
+  // 접힌 첫 줄의 둘째 화면 줄이면 위로 움직여도 그 줄 안이다: 편집기에 맡긴다
+  const up = view.moveVertically(view.state.selection.main, false);
+  if (up.head > to && up.head < head) return false;
+  return focusGridLast(view);
+}
+
+/** ←: 커서가 본문 첫 자리(to + 1)면 격자로. */
+function arrowLeftIntoGrid(view: EditorView): boolean {
+  const to = gridEnd(view.state);
+  return to !== null && soleCursor(view.state) === to + 1 && focusGridLast(view);
+}
+
 /** Ctrl+Home: 격자가 보이면 본문 첫 자리로(격자 앞 0 이 아니라). */
 const guardKeys = Prec.high(
   keymap.of([
+    { key: PROPS_ADD_KEY, preventDefault: true, run: addPropertyCommand },
+    { key: 'ArrowUp', run: arrowUpIntoGrid },
+    { key: 'ArrowLeft', run: arrowLeftIntoGrid },
     {
       key: 'Mod-Home',
       run: (view) => {

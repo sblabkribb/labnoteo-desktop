@@ -1,6 +1,10 @@
 import type { CommandContext } from '../../labnote/commands/context';
 import { commands } from '../../labnote/commands/registry';
+import type { EditorView } from '@codemirror/view';
+import { t } from '../../i18n/t';
+import { openNote } from '../../labnote/openNotes';
 import { TOGGLE_MODE_KEY, toggleMode } from '../live/mode';
+import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/properties';
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
 
 /**
@@ -58,8 +62,38 @@ const formatCommands: AppCommand[] = FORMAT_KEYS.map((f) => ({
   run: (ctx) => runFormatCommand(ctx, f),
 }));
 
+/**
+ * 열린 노트의 뷰에 run. 노트가 없으면 noNote 알림, 노트가 열려 있는데 뷰가 없으면(읽는 중, 풀리지 않은 바깥 변경) noteBusy
+ * 알림(runFormatCommand 와 같다). 돌렸는지를 돌려준다.
+ */
+function runOnNote(ctx: CommandContext, run: (view: EditorView) => boolean): boolean {
+  const path = ctx.activePath();
+  const view = path ? ctx.activeView() : undefined;
+  if (!view) {
+    if (path && openNote(path)) ctx.host.notify('warn', t('command.noteBusy'));
+    else ctx.host.notify('info', t('cmd.props.noNote'));
+    return false;
+  }
+  return run(view);
+}
+
+/** 속성 추가(Ctrl+;). 머리말이 없으면 빈 블록을 넣고 격자의 새 속성 칸으로 간다. */
+const propsAdd: AppCommand = {
+  id: 'props-add',
+  nameKey: 'cmd.props.add',
+  key: PROPS_ADD_KEY,
+  run: (ctx) => runOnNote(ctx, addPropertyCommand),
+};
+
+/** 속성을 YAML로 편집: 머리말을 원문으로 보인다. */
+const propsEditYaml: AppCommand = {
+  id: 'props-edit-yaml',
+  nameKey: 'cmd.props.editYaml',
+  run: (ctx) => runOnNote(ctx, editYamlCommand),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, ...formatCommands];
+  return [toggleSource, outlineShow, ...formatCommands, propsAdd, propsEditYaml];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

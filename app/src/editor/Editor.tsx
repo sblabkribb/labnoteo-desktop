@@ -14,7 +14,7 @@ import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview } from './live';
-import { propertiesActions } from './live/properties';
+import { addPropertyCommand, propertiesActions, PROPS_ADD_KEY } from './live/properties';
 import { linkClickHandler } from './live/links';
 import { imageLoader } from './live/imageWidget';
 import { vaultImages, type VaultImages } from './live/vaultImages';
@@ -418,12 +418,16 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           { key: INSERT_TABLE_KEY, preventDefault: true, run: (v) => insertTable(v) },
           // 라이브 미리보기 ↔ 소스 보기. 저장소를 바꾸면 띄워 둔 편집기마다(이 편집기 포함) 아래 구독이 모드 칸을 갈아 끼운다.
           { key: TOGGLE_MODE_KEY, preventDefault: true, run: () => (toggleMode(), true) },
+          // 속성 추가(Task 26). 두 모드 모두에서 듣는다(소스 보기에서는 닫는 `---` 앞에 빈 줄을 연다).
+          { key: PROPS_ADD_KEY, preventDefault: true, run: (v) => addPropertyCommand(v) },
           // 서식(D10). 두 모드 모두에서 듣는다. 표 칸에서는 아래 cellOuterKeys 로 같은 키가 칸의 셀 편집기에 쓴다.
           ...FORMAT_KEYS.map((f) => ({ key: f.key, preventDefault: true, run: (v: EditorView) => runFormat(v, f) })),
         ]),
       ),
       // 서식 키를 칸 안에서도 듣는다. runFormat 은 바깥 편집기를 받아 그 칸의 셀 편집기에 쓴다(블록 서식은 칸에서 먹기만 한다).
       FORMAT_KEYS.map((f) => cellOuterKeys.of({ key: f.key, run: (outer) => runFormat(outer, f) })),
+      // 표 칸 안의 Ctrl+; 는 먹기만 한다: 칸에서 머리말로 뛰지 않고, 브라우저 기본 동작으로도 새지 않는다.
+      cellOuterKeys.of({ key: PROPS_ADD_KEY, run: () => true }),
       // 조합 중의 서식 키(compositionend 뒤로 미룬다)와 Ctrl+Alt+C / Ctrl+Alt+T 의 물리 키 대체. 셀 편집기에도 실린다.
       formatExtensions(),
       // 칸에 포커스가 있어도 듣는다. 모드를 바꾸면 표 확장이 빠지면서 셀 편집기가 부서지므로, 셀 편집기의 keydown 처리

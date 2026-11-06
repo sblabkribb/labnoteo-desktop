@@ -6,7 +6,22 @@ import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../../table/field';
 import { livePreview } from '../index';
 import { getMode, setMode } from '../mode';
-import { editYaml, frontBlock, PropertiesWidget, propertiesActions, rawFront } from '../properties';
+import {
+  addPropertyCommand,
+  editYaml,
+  editYamlCommand,
+  focusGridLast,
+  frontBlock,
+  PropertiesWidget,
+  propertiesActions,
+  rawFront,
+} from '../properties';
+import type { PickItem } from '@labnoteo/core';
+import { setLang } from '../../../i18n/lang';
+import type { CommandContext } from '../../../labnote/commands/context';
+import { clearCommandsForTest } from '../../../labnote/commands/registry';
+import { openPalette } from '../../../labnote/ui/CommandPalette';
+import { appCommands, clearAppCommandsForTest, registerAllAppCommands } from '../../commands/appCommands';
 import { t } from '../../../i18n/t';
 import { insertDate } from '../../../labnote/commands/editorInserts';
 import { formatExtensions } from '../../commands/formatCommands';
@@ -477,5 +492,120 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
     input.focus();
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', ctrlKey: true, bubbles: true, cancelable: true }));
     expect(getMode()).toBe('source');
+  });
+});
+
+describe('라이브 미리보기: 속성 명령과 키보드로 격자 들어가기', () => {
+  const addInput = (v: EditorView) => v.dom.querySelector(`.lno-props input[aria-label="${t('props.add')}"]`);
+  /** 앱 명령을 그 뷰가 열린 노트인 맥락에서 돌린다. */
+  const runAppCommand = async (id: string, v: EditorView) => {
+    registerAllAppCommands();
+    const c = appCommands().find((x) => x.id === id)!;
+    expect(c).toBeTruthy();
+    const notify = vi.fn();
+    await c.run({ host: { notify }, activePath: () => 'a.labnote.md', activeView: () => v } as unknown as CommandContext);
+    return notify;
+  };
+  afterEach(() => {
+    clearAppCommandsForTest();
+    clearCommandsForTest();
+  });
+
+  it('props-add on a plain note inserts an empty block and focuses the add-row input', () => {
+    const v = view('x', 0);
+    press(v, { key: ';', code: 'Semicolon', keyCode: 186, ctrlKey: true });
+    expect(v.state.doc.toString()).toBe('---\n---\nx');
+    expect(addInput(v)).not.toBeNull();
+    expect(document.activeElement).toBe(addInput(v));
+    undo(v);
+    expect(v.state.doc.toString()).toBe('x');
+  });
+
+  it('props-add with existing front matter only focuses the add-row input', () => {
+    const doc = '---\na: 1\n---\nx';
+    const v = view(doc, 14);
+    expect(addPropertyCommand(v)).toBe(true);
+    expect(v.state.doc.toString()).toBe(doc);
+    expect(document.activeElement).toBe(addInput(v));
+  });
+
+  it('props-add in source mode opens an empty line inside the block', () => {
+    setMode('source');
+    const v = view('x', 0);
+    expect(addPropertyCommand(v)).toBe(true);
+    expect(v.state.doc.toString()).toBe('---\n\n---\nx');
+    expect(v.state.selection.main.head).toBe(4);
+  });
+
+  it('props-add does nothing in a locked view', () => {
+    const v = view('x', 0, { extensions: [EditorState.readOnly.of(true)] });
+    expect(addPropertyCommand(v)).toBe(false);
+    expect(v.state.doc.toString()).toBe('x');
+  });
+
+  it('props-add from the palette runs on the open note', async () => {
+    const v = view('x', 0);
+    await runAppCommand('props-add', v);
+    expect(v.state.doc.toString()).toBe('---\n---\nx');
+  });
+
+  it('props-edit-yaml shows the raw block', async () => {
+    const v = view('---\na: 1\n---\nx', 14);
+    await runAppCommand('props-edit-yaml', v);
+    expect(v.contentDOM.querySelector('.lno-props')).toBeNull();
+    expect(visibleText(v, 2)).toBe('a: 1');
+    expect(v.state.selection.main.head).toBe(4);
+  });
+
+  it('props-edit-yaml without front matter returns false', () => {
+    const v = view('x', 0);
+    expect(editYamlCommand(v)).toBe(false);
+    expect(v.state.doc.toString()).toBe('x');
+  });
+
+  it('ArrowUp on the first body line focuses the last grid input; Escape returns to the body', () => {
+    const v = view('---\na: 1\nb: 2\n---\nx', 19);
+    press(v, { key: 'ArrowUp', keyCode: 38 });
+    const last = [...v.dom.querySelectorAll('.lno-props input')].pop();
+    expect(document.activeElement).toBe(last);
+    last!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(document.activeElement).toBe(v.contentDOM);
+    expect(v.state.selection.main.head).toBe(18); // to + 1
+  });
+
+  it('ArrowLeft at the body start focuses the last grid input; ArrowLeft elsewhere moves normally', () => {
+    const v = view('---\na: 1\n---\nxy', 14);
+    press(v, { key: 'ArrowLeft', keyCode: 37 }); // to + 1 = 13 이 아니다
+    expect(document.activeElement instanceof HTMLInputElement).toBe(false);
+    move(v, 13);
+    press(v, { key: 'ArrowLeft', keyCode: 37 });
+    expect(document.activeElement).toBe([...v.dom.querySelectorAll('.lno-props input')].pop());
+  });
+
+  it('Escape in a value input reverts it and returns to the body', () => {
+    const v = view('---\na: 1\n---\nx', 14);
+    const input = v.contentDOM.querySelector<HTMLInputElement>('input.lno-props-value')!;
+    input.focus();
+    input.value = 'zz';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(input.value).toBe('1');
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\nx');
+    expect(document.activeElement).toBe(v.contentDOM);
+    expect(v.state.selection.main.head).toBe(13);
+  });
+
+  it('ArrowUp without a grid (source mode) is left to the editor', () => {
+    setMode('source');
+    const v = view('---\na: 1\n---\nx', 13);
+    expect(focusGridLast(v)).toBe(false);
+  });
+
+  it('the palette lists both commands', async () => {
+    setLang('ko');
+    registerAllAppCommands();
+    const pick = vi.fn(async () => undefined);
+    await openPalette({ host: { pick, notify: vi.fn() }, activePath: () => undefined, activeView: () => undefined } as unknown as CommandContext);
+    const labels = (pick.mock.calls[0] as unknown as [PickItem<unknown>[]])[0].map((i) => i.label);
+    expect(labels).toEqual(expect.arrayContaining(['속성 추가 (Ctrl+;)', '속성을 YAML로 편집']));
   });
 });
