@@ -11,10 +11,10 @@ import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { useLinkIndex } from './links/useLinkIndex';
+import { openLinkTarget } from './links/createFromLink';
 import { Editor, type EditorHandle } from './editor/Editor';
 import type { OpenTarget } from './editor/live/links';
 import type { EditorView } from '@codemirror/view';
-import { resolveGithubAnchor } from '@labnoteo/core';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { ThemeToggle } from './theme/ThemeToggle';
@@ -194,24 +194,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     ? (entry: (typeof entries)[number], anchor: { x: number; y: number } | { element: Element }) =>
         openMenu(ctx, anchor, noteTreeMenu(ctx, entry, entries))
     : undefined;
-  // 렌더된 링크의 Ctrl+클릭(D12). 앵커가 있으면 열기 전에 대상 노트를 읽어 그 제목 줄을 찾고, 처음 읽은 뒤 그 줄로 커서를 옮긴다.
-  // 새 편집기는 열기가 끝난 뒤에야 등록되므로, 열고 나서 openNote(path)?.reveal 을 부르면 대개 놓친다.
-  const legacyOpenLink = ({ path, anchor }: { path: string; anchor?: string }) =>
-    void (async () => {
-      let at: { line: number } | undefined;
-      if (anchor) {
-        try {
-          const line = resolveGithubAnchor(await host.fs.read(path), anchor);
-          if (line !== undefined) at = { line };
-        } catch {
-          // 읽지 못하면 앵커 없이 연다. 노트가 없으면 편집기가 읽기 실패를 보인다.
-        }
-      }
-      await openFile(path, at);
-    })();
-  // 편집기의 링크 열기(SP4 Task 9): 지금은 노트만 연다. 만들기와 바깥 주소, 위키링크의 subpath 는 Task 10 이 잇는다.
+  // 편집기의 링크 열기(SP4 Task 10): 노트는 subpath/앵커 줄에서 열고, 없는 노트는 만들어 열고, 바깥 주소는 openExternal 로 보낸다.
+  // 바깥 주소 열기는 Task 11 이 잇는다. 그때까지는 안내만 한다.
+  const openExternalStub = async () => host.notify('info', t('live.link.externalLater'));
   const onOpenLink = (target: OpenTarget) => {
-    if (target.kind === 'note') legacyOpenLink({ path: target.path, anchor: target.anchor });
+    if (!ctx || !selected) return;
+    void openLinkTarget(ctx, target, selected, openExternalStub);
   };
   const onEditorMenu = (e: MouseEvent, view: EditorView) => {
     const path = notes.activePath();
