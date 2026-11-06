@@ -129,6 +129,14 @@ export const editorThemeSpec = {
     padding: '0 2px',
   },
   '.lno-hl': { backgroundColor: 'var(--bg-selected)' },
+  // 링크(live/links.ts): Markdown 링크는 강조색 밑줄, 위키링크(아직 이동하지 않는다, SP4)는 강조색만.
+  '.lno-link': { color: 'var(--accent)', textDecorationLine: 'underline', textUnderlineOffset: '2px' },
+  '.lno-wikilink': { color: 'var(--accent)' },
+  // 유닛 오퍼레이션·워크플로 제목의 코드 칩: .lno-chip 위에 고정폭 글꼴과 종류별 테두리색.
+  '.lno-uo-code': { fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text)', verticalAlign: 'middle' },
+  '.lno-uo-uhw': { borderColor: 'var(--accent)' },
+  '.lno-uo-usw': { borderColor: 'var(--success)' },
+  '.lno-uo-wb': { borderColor: 'var(--warning)' },
   // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.

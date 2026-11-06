@@ -14,6 +14,8 @@ import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview } from './live';
+import { linkClickHandler } from './live/links';
+import { notify } from '../labnote/host/toastStore';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -63,6 +65,11 @@ interface Props {
   onContextMenu?: (e: MouseEvent, view: EditorView) => void;
   /** 머리의 "표 넣기" 옆에 그릴 단추들. 인자는 편집기가 바쁜지(읽는 중, 대화상자, 풀리지 않은 바깥 변경). */
   headerActions?: (busy: boolean) => ReactNode;
+  /**
+   * 렌더된 링크를 Ctrl(맥은 Cmd)+클릭해 다른 노트로 갈 때. `path` 는 보관함 기준 경로(이 노트 기준 상대 링크를 푼 것),
+   * `anchor` 는 `#` 뒤의 글(GitHub 식 제목 앵커)이다. 이 노트 안의 `#앵커` 는 편집기가 직접 옮긴다.
+   */
+  onOpenLink?: (target: { path: string; anchor?: string }) => void;
 }
 
 export interface WindowApi {
@@ -92,6 +99,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     initialReveal,
     onContextMenu,
     headerActions,
+    onOpenLink,
   },
   ref,
 ) {
@@ -127,8 +135,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -404,6 +412,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           handler(e, view);
           return e.defaultPrevented;
         },
+      }),
+      // 렌더된 링크의 Ctrl+클릭(mousedown): 노트 링크는 열고, `#앵커` 는 이 노트 안에서 옮기고, 바깥 주소는 알림만(SP4).
+      // 소스 보기에서는 렌더된 링크가 없으니 Ctrl+클릭은 CodeMirror 의 커서 더하기 그대로다.
+      linkClickHandler({
+        notePath: () => path,
+        onOpenLink: (target) => latest.current.onOpenLink?.(target),
+        toast: (message) => notify('info', message),
+        reveal: (line) => handle.reveal({ line }),
       }),
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {

@@ -11,6 +11,7 @@ import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { Editor, type EditorHandle } from './editor/Editor';
 import type { EditorView } from '@codemirror/view';
+import { resolveGithubAnchor } from '@labnoteo/core';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { ThemeToggle } from './theme/ThemeToggle';
@@ -166,6 +167,21 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     ? (entry: (typeof entries)[number], anchor: { x: number; y: number } | { element: Element }) =>
         openMenu(ctx, anchor, noteTreeMenu(ctx, entry, entries))
     : undefined;
+  // 렌더된 링크의 Ctrl+클릭(D12). 앵커가 있으면 열기 전에 대상 노트를 읽어 그 제목 줄을 찾고, 처음 읽은 뒤 그 줄로 커서를 옮긴다.
+  // 새 편집기는 열기가 끝난 뒤에야 등록되므로, 열고 나서 openNote(path)?.reveal 을 부르면 대개 놓친다.
+  const onOpenLink = ({ path, anchor }: { path: string; anchor?: string }) =>
+    void (async () => {
+      let at: { line: number } | undefined;
+      if (anchor) {
+        try {
+          const line = resolveGithubAnchor(await host.fs.read(path), anchor);
+          if (line !== undefined) at = { line };
+        } catch {
+          // 읽지 못하면 앵커 없이 연다. 노트가 없으면 편집기가 읽기 실패를 보인다.
+        }
+      }
+      await openFile(path, at);
+    })();
   const onEditorMenu = (e: MouseEvent, view: EditorView) => {
     const path = notes.activePath();
     if (!ctx || !path) return;
@@ -244,6 +260,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
               path={selected}
               initialReveal={notes.reveal}
               onContextMenu={onEditorMenu}
+              onOpenLink={onOpenLink}
               headerActions={ctx ? (busy) => <EditorActions ctx={ctx} path={selected} disabled={busy} /> : undefined}
             />
           ) : (
