@@ -241,7 +241,7 @@ class Session implements CellHandle {
         if (this.dead) return;
         v.update(trs);
         const local = trs.filter((tr) => tr.docChanged && !tr.annotation(fromOuter));
-        if (local.length) this.forward(local[local.length - 1].annotation(Transaction.userEvent));
+        if (local.length) this.forward(local[local.length - 1].annotation(Transaction.userEvent), local[0].startState.doc.toString());
       },
     });
     outers.set(this.nested, outer);
@@ -259,18 +259,26 @@ class Session implements CellHandle {
 
   // ---------------------------------------------------------------- 바깥으로
 
-  /** 셀 편집기의 글자를 바깥 칸에 쓴다. 앞뒤 공백은 GFM 이 버리므로 쓰지 않는다(친 공백은 셀 편집기에 남는다). */
-  private forward(userEvent: string | undefined): void {
+  /**
+   * 셀 편집기의 글자를 바깥 칸에 쓴다. 앞뒤 공백은 GFM 이 버리므로 쓰지 않는다(친 공백은 셀 편집기에 남는다).
+   * 쓰지 못하면 셀 편집기가 문서에 없는 글자를 보이지 않게 한다: 칸이 있으면 문서의 칸 글자로 되돌리고(pull),
+   * 표나 칸을 찾지 못하면 이번 입력 전의 글자(`before`, 마지막으로 문서와 맞춘 글자)로 되돌려 걷는다.
+   */
+  private forward(userEvent: string | undefined, before: string): void {
     const ac = this.cell;
     const found = ac && tableAt(this.outer.state, ac.tableFrom);
     const cell = found && rows(found.m)[ac.r]?.cells[ac.c];
-    if (!ac || !found || !cell) return this.close();
+    if (!ac || !found || !cell) {
+      const now = this.nested.state.doc;
+      if (now.toString() !== before) this.nested.dispatch({ changes: { from: 0, to: now.length, insert: before }, annotations: fromOuter.of(true) });
+      return this.close({ refocus: true });
+    }
     if (isLocked(this.outer.state)) return this.pull();
     const raw = this.nested.state.doc.toString();
     const text = trimBlank(raw);
     if (text === displayText(cell.text)) return;
     const changes = shift(setCell(found.m, ac.r, ac.c, text), found.span.from);
-    if (changes.length !== 1) return;
+    if (changes.length !== 1) return this.pull();
     const [ch] = changes;
     // 칸 글자가 새 문서에서 시작하는 자리. 덧붙는 것은 공백과 파이프뿐이라 글자를 그대로 찾을 수 있다.
     const start = text ? ch.from + ch.insert.indexOf(text) : ch.from;
