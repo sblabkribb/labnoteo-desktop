@@ -87,7 +87,10 @@ The installer is written to
 For development, run `npm run tauri dev`.
 
 The labnoteO core (`@labnoteo/core`) is included as a git submodule at `app/vendor/labnoteo`, so
-the app and the Obsidian plugin share the same note logic.
+the app and the Obsidian plugin share the same note logic. A scheduled workflow
+(`sync-core`) checks for a new labnoteO release every 6 hours. When the app's tests and build pass on
+it, the update goes into `main` automatically; when they fail, an issue reports which release broke
+the app.
 
 ## Roadmap
 

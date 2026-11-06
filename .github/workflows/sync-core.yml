@@ -1,0 +1,115 @@
+# Keeps the app on the newest labnoteO release.
+#
+# Every 6 hours (or on demand) this checks sblabkribb/labnoteo for a newer release tag (x.y.z).
+# If there is one, it moves app/vendor/labnoteo to that tag and runs the app's tests and build:
+#   - all green: the update is committed straight to main;
+#   - anything red: nothing is committed, and an issue labelled `core-sync` says which release broke
+#     the app, with a link to the log. The next run tries again, so a fixed upstream release goes in
+#     on its own and closes the issue.
+name: sync-core
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-core
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Find the newest labnoteO release
+        id: find
+        run: bash .github/scripts/find-core-release.sh | tee -a "$GITHUB_OUTPUT"
+
+      - name: Move the core to that release
+        if: steps.find.outputs.behind == 'true'
+        run: git -C app/vendor/labnoteo checkout --quiet "${{ steps.find.outputs.latest }}"
+
+      - uses: actions/setup-node@v4
+        if: steps.find.outputs.behind == 'true'
+        with:
+          node-version: 22
+
+      - name: Install (refreshes the lock file for the new core)
+        id: install
+        if: steps.find.outputs.behind == 'true'
+        continue-on-error: true
+        working-directory: app
+        run: npm install --no-audit --no-fund
+
+      - name: Test
+        id: test
+        if: steps.find.outputs.behind == 'true' && steps.install.outcome == 'success'
+        continue-on-error: true
+        working-directory: app
+        run: npm test
+
+      - name: Type-check and build
+        id: build
+        if: steps.find.outputs.behind == 'true' && steps.test.outcome == 'success'
+        continue-on-error: true
+        working-directory: app
+        run: npm run build
+
+      - name: Commit the update to main
+        if: steps.find.outputs.behind == 'true' && steps.build.outcome == 'success'
+        env:
+          LATEST: ${{ steps.find.outputs.latest }}
+          CURRENT: ${{ steps.find.outputs.current }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/vendor/labnoteo app/package-lock.json
+          git commit -m "chore(core): follow labnoteO $LATEST" -m "Moves app/vendor/labnoteo from $CURRENT to $LATEST. Tests and build passed in sync-core."
+          git push origin HEAD:main
+
+      - name: Close sync issues that this update resolves
+        if: steps.find.outputs.behind == 'true' && steps.build.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.find.outputs.latest }}
+        run: |
+          for n in $(gh issue list --label core-sync --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Fixed: labnoteO $LATEST passes the app's tests and is now on main."
+          done
+
+      - name: Report a release that breaks the app
+        if: steps.find.outputs.behind == 'true' && steps.build.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.find.outputs.latest }}
+          CURRENT: ${{ steps.find.outputs.current }}
+          FAILED: ${{ steps.install.outcome != 'success' && 'npm install' || steps.test.outcome != 'success' && 'npm test' || 'npm run build' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create core-sync --color D93F0B --description 'labnoteO core update needs attention' 2>/dev/null || true
+          title="labnoteO $LATEST does not pass the desktop app's checks"
+          body="The app stays on labnoteO $CURRENT. Moving to $LATEST failed at \`$FAILED\`.
+
+          Log: $RUN_URL
+
+          sync-core retries every 6 hours; it will commit the update and close this issue once a labnoteO release passes."
+          existing="$(gh issue list --label core-sync --state open --search "in:title \"labnoteO $LATEST \"" --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing at \`$FAILED\`: $RUN_URL"
+          else
+            gh issue create --title "$title" --body "$body" --label core-sync
+          fi
+          exit 1

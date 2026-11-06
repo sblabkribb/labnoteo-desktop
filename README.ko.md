@@ -83,7 +83,9 @@ npm run tauri:build
 개발할 때는 `npm run tauri dev` 를 실행합니다.
 
 labnoteO 코어(`@labnoteo/core`)는 `app/vendor/labnoteo` 에 git 서브모듈로 들어 있어, 앱과 Obsidian 플러그인이
-같은 노트 로직을 함께 씁니다.
+같은 노트 로직을 함께 씁니다. 예약된 워크플로(`sync-core`)가 6시간마다 labnoteO의 새 릴리스를 확인합니다.
+새 릴리스에서 앱의 테스트와 빌드가 통과하면 자동으로 `main`에 반영하고, 실패하면 어느 릴리스가 앱을
+깨뜨렸는지 이슈로 알립니다.
 
 ## 로드맵
 
