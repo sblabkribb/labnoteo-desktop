@@ -107,6 +107,7 @@ export const editorThemeSpec = {
   // 도구 막대는 표 위에 떠 있다가 가리키거나 포커스가 들어올 때만 보인다(키보드로도 닿는다)
   '.lno-table-toolbar': {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: 'var(--space-1)',
     justifyContent: 'flex-end',
     marginBottom: 'var(--space-1)',
@@ -129,9 +130,27 @@ export const editorThemeSpec = {
     borderRadius: 'var(--radius)',
     padding: '0 var(--space-2)',
     cursor: 'pointer',
-    '&:hover': { backgroundColor: 'var(--bg-hover)' },
+    '&:hover:not(:disabled)': { backgroundColor: 'var(--bg-hover)' },
+    '&:disabled': { color: 'var(--text-muted)', cursor: 'default' },
     '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
   },
+  // 한 번 누른 "표 지우기": 한 번 더 누르면 지운다는 것을 위험색으로 알린다
+  '.lno-table-tool[data-armed="true"]': { color: 'var(--danger)', borderColor: 'var(--danger)' },
+  // 칸의 오른쪽 클릭 메뉴: 표 틀의 오른쪽 위에 뜬다(위치를 style 로 박지 않는다)
+  '.lno-table-menu': {
+    position: 'absolute',
+    top: 'var(--space-2)',
+    right: 'var(--space-3)',
+    zIndex: '10',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1px',
+    padding: 'var(--space-1)',
+    backgroundColor: 'var(--bg-elevated)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 'var(--radius)',
+  },
+  '.lno-table-menu .lno-table-tool': { textAlign: 'left', border: 'none' },
 };
 
 /**

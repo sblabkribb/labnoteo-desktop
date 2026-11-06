@@ -4,6 +4,8 @@ import { syntaxTree } from '@codemirror/language';
 import { parseTable } from './model';
 import { TableWidget, toggleRawTable } from './widget';
 import { cellEditorExtension } from './cellEditor';
+import { tableCommandsExtension } from './commands';
+import { tablePasteExtension } from './paste';
 
 export { toggleRawTable };
 
@@ -154,7 +156,7 @@ export const tableField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-/** 표 편집 확장: 격자 위젯과 칸 안의 셀 편집기(cellEditor.ts). */
+/** 표 편집 확장: 격자 위젯, 칸 안의 셀 편집기(cellEditor.ts), 구조 연산(commands.ts), 붙여 넣기(paste.ts). */
 export function tableExtension(opts: TableOptions): Extension {
-  return [tableOptions.of(opts), rawTables, tableField, cellEditorExtension()];
+  return [tableOptions.of(opts), rawTables, tableField, cellEditorExtension(), tableCommandsExtension(), tablePasteExtension()];
 }

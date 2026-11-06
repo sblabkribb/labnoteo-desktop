@@ -10,6 +10,7 @@ import { useLang } from '../i18n/useLang';
 import { editorTheme } from './theme';
 import { labnoteMarkdown } from './markdownSyntax';
 import { tableExtension } from './table/field';
+import { insertTable } from './table/commands';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -281,6 +282,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
               return true;
             },
           },
+          // 표 넣기(머리의 단추와 같다). 잠겨 있으면 insertTable 이 false 를 돌려 키가 그대로 지나간다.
+          { key: 'Mod-Alt-t', preventDefault: true, run: (v) => insertTable(v) },
         ]),
       ),
       keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -389,10 +392,23 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   }, [windowApi]);
 
   const gone = external?.kind === 'gone';
+  // 편집기가 잠긴 동안(읽기 전, 대화상자가 열린 동안)에는 표 넣기 단추도 꺼진다
+  const editLocked = status !== 'ready' || dialogOpen;
   return (
     <section aria-label={t('editor.label')}>
       <p>
-        {path} {(external || dirty) && <span role="status">{external ? t('editor.conflicted') : t('editor.dirty')}</span>}
+        {path} {(external || dirty) && <span role="status">{external ? t('editor.conflicted') : t('editor.dirty')}</span>}{' '}
+        <button
+          type="button"
+          className="secondary"
+          disabled={editLocked}
+          onClick={() => {
+            const view = viewRef.current;
+            if (view) insertTable(view);
+          }}
+        >
+          {t('table.insert')}
+        </button>
       </p>
       {status === 'loading' && <p>{t('editor.loading')}</p>}
       {status === 'error' && <p role="alert">{t('editor.loadError')}</p>}

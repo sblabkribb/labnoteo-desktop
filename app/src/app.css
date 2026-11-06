@@ -126,6 +126,8 @@ button.primary {
   font-weight: 600;
 }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+/* 보조 동작(편집기 머리의 "표 넣기" 등): 글 줄 안에 들어가도록 작게 */
+button.secondary { padding: 0 var(--space-2); font-size: 0.85em; }
 
 input, select, textarea {
   padding: var(--space-1) var(--space-2);

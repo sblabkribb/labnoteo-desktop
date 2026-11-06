@@ -2,6 +2,7 @@ import {
   Annotation,
   Compartment,
   EditorState,
+  Facet,
   MapMode,
   Prec,
   StateEffect,
@@ -140,7 +141,21 @@ export const activeCell = StateField.define<ActiveCell | null>({
 // ---------------------------------------------------------------- 셀 편집기
 
 const sessions = new WeakMap<EditorView, Session>();
+/** 셀 편집기 → 그 칸이 든 바깥 편집기. */
+const outers = new WeakMap<EditorView, EditorView>();
 let live = 0;
+
+/** 셀 편집기의 바깥 편집기. 셀 편집기가 아니거나 이미 걷혔으면 null. */
+export function outerOf(nested: EditorView): EditorView | null {
+  const outer = outers.get(nested);
+  return outer && sessions.get(outer)?.nested === nested ? outer : null;
+}
+
+/**
+ * 셀 편집기에 더 싣는 확장(붙여 넣기 등, paste.ts). 바깥 편집기의 상태에서 읽어 셀 편집기를 띄울 때 싣는다.
+ * 이 파일이 그 모듈을 가져오지 않아도 되게 facet 으로 잇는다.
+ */
+export const cellExtras = Facet.define<Extension>();
 
 /** 지금 살아 있는 셀 편집기 수(테스트가 새는지 본다). */
 export const liveCellEditors = () => live;
@@ -206,6 +221,7 @@ class Session implements CellHandle {
           lockFilter,
           escapeFilter,
           Prec.highest(keymap.of(this.keys())),
+          outer.state.facet(cellExtras),
           EditorView.updateListener.of((u) => u.geometryChanged && this.outer.requestMeasure()),
         ],
       }),
@@ -216,6 +232,7 @@ class Session implements CellHandle {
         if (local.length) this.forward(local[local.length - 1].annotation(Transaction.userEvent));
       },
     });
+    outers.set(this.nested, outer);
     // 바깥 편집기나 다른 컨트롤로 포커스가 옮겨 가면 걷는다. 창 밖으로 나간 것(relatedTarget 없음)은 그대로 둔다.
     this.nested.contentDOM.addEventListener('focusout', (e) => {
       const to = e.relatedTarget as Node | null;
