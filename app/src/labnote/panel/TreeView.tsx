@@ -49,6 +49,24 @@ function flatten(nodes: readonly TreeNode[], expanded: ReadonlySet<string>): Row
   return rows;
 }
 
+/** 숨은(접힌 부모 아래) 현재 노드의 보이는 가장 가까운 조상 줄. 현재 노드가 없으면 undefined. */
+function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], isCurrent: (node: TreeNode) => boolean): string | undefined {
+  const find = (list: readonly TreeNode[], prefix: string): string[] | undefined => {
+    for (const node of list) {
+      const key = `${prefix}/${node.id}`;
+      if (isCurrent(node)) return [key];
+      const below = node.children ? find(node.children, key) : undefined;
+      if (below) return [key, ...below];
+    }
+    return undefined;
+  };
+  const path = find(nodes, '');
+  if (!path) return undefined;
+  const visible = new Set(rows.map((r) => r.key));
+  for (let i = path.length - 1; i >= 0; i--) if (visible.has(path[i])) return path[i];
+  return undefined;
+}
+
 /**
  * 코어 TreeNode 를 그리는 트리(role=tree). 펼친 줄만 그리는 평평한 목록이고 각 줄이 treeitem 이다(aria-level).
  * - 키보드는 vendor 의 treeKeyAction(WAI-ARIA 트리 패턴)을 따른다. 탭 정지는 한 줄(roving tabindex).
@@ -68,7 +86,9 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     refs.current.get(tabStop)?.focus();
   }, [tabStop, rows]);
 
-  const currentKey = isCurrent ? rows.find((r) => isCurrent(r.node))?.key : undefined;
+  const visibleCurrent = isCurrent ? rows.find((r) => isCurrent(r.node))?.key : undefined;
+  // scrollCurrent(개요): 현재 노드가 접힌 부모 아래 숨어 있으면 보이는 가장 가까운 조상을 대신 표시하고 스크롤한다.
+  const currentKey = scrollCurrent && isCurrent && visibleCurrent === undefined ? visibleAncestorKey(nodes, rows, isCurrent) : visibleCurrent;
   useEffect(() => {
     if (!scrollCurrent || currentKey === undefined) return;
     // jsdom 에는 scrollIntoView 가 없다. focus() 는 부르지 않는다.
@@ -129,7 +149,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             role="treeitem"
             aria-level={row.depth + 1}
             aria-expanded={row.hasChildren ? row.expanded : undefined}
-            aria-current={isCurrent?.(row.node) ? 'true' : undefined}
+            aria-current={(scrollCurrent ? row.key === currentKey : isCurrent?.(row.node)) ? 'true' : undefined}
             {...depth}
             tabIndex={row.key === tabStop ? 0 : -1}
             title={row.node.tooltip}

@@ -143,7 +143,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const publishItems = () => {
     clearTimeout(outlineTimer.current);
     const view = viewRef.current;
-    if (view) publishOutline(path, extractOutline(view.state.doc.toString()));
+    if (!view) return;
+    // CodeMirror 의 줄로 읽는다: 번호가 doc.line(n) 과 같아야 한다(섞인 줄 끝에서 toString 은 줄을 더 나눈다)
+    publishOutline(path, extractOutline(Array.from(view.state.doc.iterLines())));
   };
   /** 커서 줄(1부터)을 낸다. 한 프레임에 한 번만(선택을 끌며 옮기는 동안 패널을 매번 그리지 않게). */
   const publishCursorLine = () => {
@@ -459,7 +461,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       }),
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {
-        if (u.selectionSet) publishCursorLine();
+        // 선택 없이 위쪽 줄이 바뀌어도 커서의 줄 번호는 움직인다(한 프레임에 한 번)
+        if (u.selectionSet || u.docChanged) publishCursorLine();
         if (!u.docChanged) return;
         clearTimeout(outlineTimer.current);
         outlineTimer.current = setTimeout(publishItems, OUTLINE_MS);

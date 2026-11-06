@@ -404,6 +404,31 @@ describe('편집기', () => {
       expect(dirtyMark()).toBeNull();
       m.unmount();
     });
+
+    it('mixed-EOL note (CRLF majority): outline lines match CodeMirror lines and the jump lands on the heading', async () => {
+      const m = mount({ [P]: 'a\r\nb\nc\r\nd\r\n## H\r\nx' });
+      await waitFor(() => expect(getOutline()?.items).toHaveLength(1));
+      const view = m.view();
+      // 줄 구분자가 CRLF 라 b\nc 는 한 줄이다
+      const cmLine = Array.from({ length: view.state.doc.lines }, (_, i) => i + 1).find((n) => view.state.doc.line(n).text === '## H');
+      expect(cmLine).toBe(4);
+      const item = getOutline()!.items[0];
+      expect(item.line).toBe(cmLine);
+      act(() => m.ref.current!.reveal({ line: item.line - 1 }));
+      expect(view.state.doc.lineAt(view.state.selection.main.head).text).toBe('## H');
+      m.unmount();
+    });
+
+    it('republishes the cursor line when an edit above moves it without a selection change', async () => {
+      const m = mount({ [P]: '# A\nx\n## B\ny\n' });
+      await waitFor(() => expect(getOutline()?.items).toHaveLength(2));
+      act(() => m.view().dispatch({ selection: { anchor: m.view().state.doc.line(4).from } }));
+      await waitFor(() => expect(getOutline()!.cursorLine).toBe(4));
+      // 선택을 주지 않은 변경: 위에 두 줄을 넣는다(커서는 매핑만 된다)
+      act(() => m.view().dispatch({ changes: { from: 0, insert: 'p\nq\n' } }));
+      await waitFor(() => expect(getOutline()!.cursorLine).toBe(6));
+      m.unmount();
+    });
   });
 
   describe('창 닫기', () => {

@@ -78,6 +78,36 @@ describe('OutlinePanel', () => {
     }
   });
 
+  it('a current heading under a collapsed parent marks and scrolls to the parent instead', () => {
+    const spy = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy;
+    try {
+      render(<OutlinePanel onReveal={() => undefined} />);
+      act(() =>
+        publishOutline('n.md', [
+          { level: 2, text: 'A', kind: 'heading', line: 2 },
+          { level: 3, text: 'B', kind: 'heading', line: 5 },
+          { level: 2, text: 'C', kind: 'heading', line: 9 },
+        ]),
+      );
+      fireEvent.keyDown(screen.getByRole('treeitem', { name: /A/ }), { key: 'ArrowLeft' });
+      expect(screen.queryByRole('treeitem', { name: /B/ })).toBeNull();
+      spy.mockClear();
+      act(() => publishCursor('n.md', 7));
+      const a = screen.getByRole('treeitem', { name: /A/ });
+      expect(a.getAttribute('aria-current')).toBe('true');
+      expect(screen.getByRole('treeitem', { name: /C/ }).getAttribute('aria-current')).toBeNull();
+      expect(spy.mock.contexts.at(-1)).toBe(a);
+      // 펼치면 다시 제 줄이 현재다
+      fireEvent.keyDown(a, { key: 'ArrowRight' });
+      expect(screen.getByRole('treeitem', { name: /B/ }).getAttribute('aria-current')).toBe('true');
+      expect(screen.getByRole('treeitem', { name: /A/ }).getAttribute('aria-current')).toBeNull();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('collapsed headings reset when another note opens', () => {
     render(<OutlinePanel onReveal={() => undefined} />);
     const items: OutlineItem[] = [

@@ -12,6 +12,9 @@ describe('extractOutline', () => {
 
   it('CRLF headings parse without trailing \r', () => expect(extractOutline('# a\r\n## b\r\n').map((i) => i.text)).toEqual(['a', 'b']));
 
+  it('a line array keeps its own numbering (a lone LF inside a CRLF-split line does not add a line)', () =>
+    expect(extractOutline(['a', 'b\nc', 'd', '## H', 'x'])).toEqual([{ level: 2, text: 'H', kind: 'heading', line: 4 }]));
+
   it('finds a heading at line 5000 of a long note', () => {
     const text = 'x\n'.repeat(4999) + '### [UHW010 PCR]\n';
     expect(extractOutline(text)).toEqual([{ level: 3, text: 'PCR', code: 'UHW010', kind: 'unitOp', line: 5000 }]);

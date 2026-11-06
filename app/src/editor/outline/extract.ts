@@ -28,9 +28,12 @@ const WORKFLOW_HEADING = /^##\s+\[([A-Z]+\d+)\s+(.+?)\]\s*(.*)/;
 /**
  * ATX 제목만 읽는다. 맨 앞의 머리말(`---` … `---`/`...`)과 ``` / ~~~ 울타리 코드 안은 건너뛴다.
  * 줄 끝의 `\r` 과 닫는 `#` 들은 떼고, 글이 빈 제목은 넣지 않는다.
+ *
+ * 줄 배열을 주면 그 배열의 번호를 쓴다. 편집기는 CodeMirror 의 줄(`doc.iterLines()`)을 넘겨야 한다: CRLF 가 많은
+ * 섞인 파일은 CRLF 로만 줄을 나누므로, `doc.toString().split('\n')` 은 외톨이 LF 마다 줄 번호가 하나씩 밀린다.
  */
-export function extractOutline(text: string): OutlineItem[] {
-  const lines = text.split('\n');
+export function extractOutline(text: string | readonly string[]): OutlineItem[] {
+  const lines = typeof text === 'string' ? text.split('\n') : text;
   const items: OutlineItem[] = [];
   let i = 0;
   if (lines.length > 1 && FRONTMATTER_OPEN.test(lines[0].replace(/\r$/, ''))) {
