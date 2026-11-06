@@ -36,7 +36,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(vault::VaultState::default())
         .setup(|app| {
-            let dir = app.path().app_config_dir()?;
+            // Never abort startup over where the last vault is remembered: fall
+            // back to the temp dir (the choice is then just not kept long-term).
+            let dir = app
+                .path()
+                .app_config_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("kr.sblab.labnoteo"));
             app.manage(vault::SettingsFile(dir.join("settings.json")));
             Ok(())
         })

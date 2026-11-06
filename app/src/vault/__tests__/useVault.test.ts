@@ -1,6 +1,6 @@
 import { restoreVault, openVault, type VaultInfo } from '../useVault';
 
-const info: VaultInfo = { root: 'D:\lab', name: 'lab', hasObsidianConfig: true };
+const info: VaultInfo = { root: 'D:\\lab', name: 'lab', hasObsidianConfig: true };
 
 function fake(replies: Record<string, unknown | (() => unknown)>) {
   const calls: Array<[string, Record<string, unknown> | undefined]> = [];
@@ -36,13 +36,13 @@ describe('보관함 복원', () => {
 describe('보관함 열기', () => {
   it('고른 폴더를 vault_open 에 path 로 보내고 준비 상태가 된다', async () => {
     const f = fake({ vault_open: info });
-    expect(await openVault(f.invoke, 'D:\lab')).toEqual({ status: 'ready', vault: info });
-    expect(f.calls).toEqual([['vault_open', { path: 'D:\lab' }]]);
+    expect(await openVault(f.invoke, 'D:\\lab')).toEqual({ status: 'ready', vault: info });
+    expect(f.calls).toEqual([['vault_open', { path: 'D:\\lab' }]]);
   });
 
   it('열기가 거부되면 선택 화면에 남고 오류 문구를 준다', async () => {
     const f = fake({ vault_open: { reject: { kind: 'vaultNotFound', message: 'x' } } });
-    const s = await openVault(f.invoke, 'D:\gone');
+    const s = await openVault(f.invoke, 'D:\\gone');
     expect(s.status).toBe('picker');
     expect(s.status === 'picker' && s.error).toBeTruthy();
   });

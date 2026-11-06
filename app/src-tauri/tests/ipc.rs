@@ -1,6 +1,12 @@
-//! IPC round trip through Tauri's mock runtime, with the exact JSON argument
-//! names the TypeScript side sends (`tauriLabnoteFs.ts`, `useVault.ts`). Direct
-//! Rust calls and a fake `invoke` both pass when a name drifts; this does not.
+//! IPC round trip through Tauri's mock runtime. The argument names come from
+//! `ipc-args.json`, the one artifact shared with the TypeScript side:
+//! `src/fs/__tests__/ipcArgs.test.ts` checks that `tauriLabnoteFs.ts` and
+//! `useVault.ts` send exactly those names. This test checks that the Rust
+//! commands accept exactly those names (values are zipped positionally onto the
+//! fixture's names, so renaming one in the fixture breaks it). Renaming an
+//! argument on either side, or in the fixture alone, turns one of the two red.
+//! Neither test reads the other's source, and the fixture itself is only as
+//! right as the two tests that pin it.
 
 use serde_json::{json, Value};
 use tauri::ipc::{CallbackFn, InvokeBody};
@@ -8,6 +14,8 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INV
 use tauri::webview::InvokeRequest;
 use tauri::WebviewWindowBuilder;
 use labnoteo_app_lib::vault::{SettingsFile, VaultState};
+
+const ARGS: &str = include_str!("ipc-args.json");
 
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
@@ -42,33 +50,41 @@ fn ipc_argument_names_match_the_typescript_side() {
         call(cmd, args.clone()).unwrap_or_else(|e| panic!("{cmd} {args} was refused: {e}"))
     };
 
+    // Build a command's JSON arguments from the shared fixture's names.
+    let fixture: Value = serde_json::from_str(ARGS).unwrap();
+    let args = |cmd: &str, vals: Vec<Value>| -> Value {
+        let names = fixture[cmd].as_array().unwrap_or_else(|| panic!("{cmd} missing from ipc-args.json"));
+        assert_eq!(names.len(), vals.len(), "{cmd}: fixture lists {names:?}");
+        Value::Object(names.iter().map(|n| n.as_str().unwrap().to_string()).zip(vals).collect())
+    };
+
     // Before vault_open every file command refuses with noVault, and the
     // error reaches JS as {kind, message}.
-    assert_eq!(call("vault_exists", json!({"path": "a.md"})).unwrap_err()["kind"], "noVault");
-    assert_eq!(ok("vault_current", json!({})), Value::Null);
+    assert_eq!(call("vault_exists", args("vault_exists", vec![json!("a.md")])).unwrap_err()["kind"], "noVault");
+    assert_eq!(ok("vault_current", args("vault_current", vec![])), Value::Null);
 
-    let info = ok("vault_open", json!({"path": vault}));
+    let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
     assert_eq!(info["hasObsidianConfig"], false);
-    assert_eq!(ok("vault_current", json!({}))["name"], "vault");
+    assert_eq!(ok("vault_current", args("vault_current", vec![]))["name"], "vault");
 
-    ok("vault_mkdir", json!({"path": "notes"}));
-    ok("vault_write", json!({"path": "notes/a.md", "content": "one"}));
-    assert_eq!(ok("vault_read", json!({"path": "notes/a.md"})), "one");
-    assert_eq!(ok("vault_exists", json!({"path": "notes/a.md"})), true);
-    assert_eq!(ok("vault_list", json!({"dir": "notes"})), json!(["a.md"]));
-    assert_eq!(ok("vault_list", json!({"dir": ""})), json!(["notes"]));
+    ok("vault_mkdir", args("vault_mkdir", vec![json!("notes")]));
+    ok("vault_write", args("vault_write", vec![json!("notes/a.md"), json!("one")]));
+    assert_eq!(ok("vault_read", args("vault_read", vec![json!("notes/a.md")])), "one");
+    assert_eq!(ok("vault_exists", args("vault_exists", vec![json!("notes/a.md")])), true);
+    assert_eq!(ok("vault_list", args("vault_list", vec![json!("notes")])), json!(["a.md"]));
+    assert_eq!(ok("vault_list", args("vault_list", vec![json!("")])), json!(["notes"]));
     // `expectedBefore` (camelCase on the wire) must reach `expected_before`.
     assert_eq!(
-        ok("vault_modify", json!({"path": "notes/a.md", "content": "two", "expectedBefore": "one"})),
+        ok("vault_modify", args("vault_modify", vec![json!("notes/a.md"), json!("two"), json!("one")])),
         json!({"kind": "ok"})
     );
     assert_eq!(
-        ok("vault_modify", json!({"path": "notes/a.md", "content": "x", "expectedBefore": "stale"})),
+        ok("vault_modify", args("vault_modify", vec![json!("notes/a.md"), json!("x"), json!("stale")])),
         json!({"kind": "conflict", "current": "two"})
     );
-    ok("vault_remove", json!({"path": "notes/a.md"}));
-    ok("vault_rmdir", json!({"path": "notes"}));
+    ok("vault_remove", args("vault_remove", vec![json!("notes/a.md")]));
+    ok("vault_rmdir", args("vault_rmdir", vec![json!("notes")]));
     assert_eq!(std::fs::read_dir(dir.join("vault")).unwrap().count(), 0);
 
     // A misspelled argument is refused rather than ignored.

@@ -1,0 +1,12 @@
+{
+  "vault_open": ["path"],
+  "vault_current": [],
+  "vault_read": ["path"],
+  "vault_write": ["path", "content"],
+  "vault_modify": ["path", "content", "expectedBefore"],
+  "vault_exists": ["path"],
+  "vault_mkdir": ["path"],
+  "vault_list": ["dir"],
+  "vault_remove": ["path"],
+  "vault_rmdir": ["path"]
+}
