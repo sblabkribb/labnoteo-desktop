@@ -190,6 +190,17 @@ describe('runTableOp: 연산마다 되돌리기 한 번', () => {
     expect(v.state.doc.toString()).toBe(`${T3}\n`);
   });
 
+  it('잠긴 칸의 Mod-Alt-t 는 표를 넣지 않지만 키는 먹는다(preventDefault: 셀 편집기의 기본 동작으로 새지 않는다)', () => {
+    const lock = new Compartment();
+    const v = mount(`${T3}\n`, { lock });
+    expect(focusCell(v, 0, 1, 0)).toBe(true);
+    v.dispatch({ effects: lock.reconfigure(LOCKED) });
+    const isMac = /Mac/.test(navigator.platform);
+    const ev = new KeyboardEvent('keydown', { key: 't', altKey: true, ctrlKey: !isMac, metaKey: isMac, bubbles: true, cancelable: true });
+    expect(runScopeHandlers(activeCellView(v)!, ev, 'editor')).toBe(true);
+    expect(v.state.doc.toString()).toBe(`${T3}\n`);
+  });
+
   it('tableToTSV 는 escape 를 풀고 <br> 을 줄바꿈으로 적는다 (Excel 이 읽는 따옴표)', () => {
     const src = '| a | b \\| c |\n| --- | --- |\n| x<br>y | C:\\  |\n| 1 |';
     const m = parseTable(src, 0, src.length)!;

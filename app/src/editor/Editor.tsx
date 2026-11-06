@@ -282,8 +282,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
               return true;
             },
           },
-          // 표 넣기(머리의 단추와 같다). 잠겨 있으면 insertTable 이 false 를 돌려 키가 그대로 지나간다.
-          // 칸에 포커스가 있을 때는 셀 편집기가 같은 키를 듣는다(commands.ts 의 cellOuterKeys).
+          // 표 넣기(머리의 단추와 같다). 잠겨 있으면 insertTable 이 false 를 돌려 아무것도 넣지 않지만, preventDefault 때문에
+          // 키는 여기서 처리된 것으로 끝난다(브라우저 기본 동작이나 다른 keymap 으로 넘어가지 않는다).
+          // 칸에 포커스가 있을 때는 셀 편집기가 같은 키를 듣고, 잠긴 칸에서도 똑같이 먹는다(commands.ts 의 cellOuterKeys).
           { key: INSERT_TABLE_KEY, preventDefault: true, run: (v) => insertTable(v) },
         ]),
       ),
