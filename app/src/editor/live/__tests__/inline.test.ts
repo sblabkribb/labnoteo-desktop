@@ -2,6 +2,7 @@
 import { EditorState, Transaction, type RangeSet, type RangeValue } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { isolateHistory } from '@codemirror/commands';
+import { codeFolding, foldEffect } from '@codemirror/language';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../../table/field';
 import { livePlugin, livePreview } from '../index';
@@ -27,6 +28,7 @@ function view(doc: string, pos: number): EditorView {
         labnoteMarkdown(),
         livePreview(),
         tableExtension({ save: () => {}, root: document }),
+        codeFolding(),
       ],
     }),
   });
@@ -126,6 +128,37 @@ describe('라이브 미리보기: 인라인 플러그인', () => {
   it('front matter gets no inline decorations', () => {
     const v = view('---\ntitle: **a**\n---\nx', 22);
     expect(rangesOf([v.plugin(livePlugin)!.decorations])).toEqual([]);
+  });
+
+  it('front matter does not switch off live preview for the body below it', () => {
+    const doc = '---\ntitle: **a**\n---\n## H\n**b** x\nend';
+    const v = view(doc, doc.length);
+    expect(visibleText(v, 4)).toBe('H');
+    expect(lineClasses(v, 4)).toContain('lno-h2');
+    expect(visibleText(v, 5)).toBe('b x');
+    const fmEnd = doc.indexOf('## H');
+    expect(rangesOf([v.plugin(livePlugin)!.decorations]).filter((r) => r.from < fmEnd)).toEqual([]);
+  });
+
+  it('a table does not switch off live preview outside its span', () => {
+    const doc = '**b** x\n\n| a |\n| - |\n| **c** |\n\nz';
+    const v = view(doc, doc.length);
+    expect(visibleText(v, 1)).toBe('b x');
+    expect(rangesOf([v.plugin(livePlugin)!.hidden])).toEqual([
+      { from: 0, to: 2 },
+      { from: 3, to: 5 },
+    ]);
+  });
+
+  it('a node split by a fold is decorated once, not once per visible range', () => {
+    // visibleRanges 는 20자 이상 접힌 범위에서만 나뉜다
+    const doc = `a **bold ${'x'.repeat(30)} text** c\nend`;
+    const v = view(doc, doc.length);
+    v.dispatch({ effects: foldEffect.of({ from: 9, to: 39 }) });
+    expect(v.visibleRanges.length).toBe(2);
+    const hidden = rangesOf([v.plugin(livePlugin)!.hidden]);
+    expect(hidden.length).toBeGreaterThan(0);
+    expect(new Set(hidden.map((r) => `${r.from}-${r.to}`)).size).toBe(hidden.length);
   });
 
   it('a command batch replacing a rendered heading keeps the selection where the batch put it', () => {

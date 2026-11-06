@@ -71,12 +71,18 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     if (text.endsWith('\r')) conceal(line.to - 1, line.to);
   };
 
+  // 접힌 곳·표 틈으로 나뉜 보이는 범위들에 걸친 노드는 범위마다 다시 들어온다: 한 번만 장식한다
+  const seen = new Set<string>();
   for (const { from, to } of view.visibleRanges) {
     tree.iterate({
       from,
       to,
       enter: (ref) => {
-        if (skips.some((s) => ref.from < s.to && ref.to > s.from)) return false;
+        // 구역 안에 통째로 든 노드만 건너뛴다. 걸치기만 한 부모(Document 등)는 내려가야 본문이 그려진다.
+        if (skips.some((s) => ref.from >= s.from && ref.to <= s.to)) return false;
+        const key = `${ref.name}:${ref.from}`;
+        if (seen.has(key)) return;
+        seen.add(key);
         const m = /^ATXHeading([1-6])$/.exec(ref.name);
         if (m) {
           heading(ref.node, Number(m[1]));

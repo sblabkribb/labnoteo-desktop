@@ -152,7 +152,8 @@ function codemirrorImports(dir = 'src'): Set<string> {
 
 // 끝 공백, 탭, 섞인 줄바꿈: 공백 강조나 끝 공백 확장이 설치돼 있다면 그 요소가 그려질 본문.
 // 라이브 미리보기의 제목·굵게·인라인 코드·하이라이트도 그려지게 한다(그 표시의 색도 이 검사를 받는다).
-const SAMPLE = '# 제목  \n\t- [링크](https://x) 본문 \r\n## h\n**b** `c` ==h==\n';
+// 머리말을 앞에 둔다: 실제 노트처럼 머리말이 있어도 본문 장식이 그려져야 한다.
+const SAMPLE = '---\ntitle: a\n---\n# 제목  \n\t- [링크](https://x) 본문 \r\n## h\n**b** `c` ==h==\n';
 
 /** 앱이 싣는 확장으로 편집기를 그 모드(live/source)로 띄운다. */
 async function mountShipped(text = SAMPLE, mode: EditorMode = 'live') {
