@@ -1,5 +1,6 @@
 /**
- * `[[` completion: notes, aliases, labnote titles and (after `![[`) images (plan SP4 Task 15, decision D9).
+ * `[[` completion: notes, aliases, labnote titles and (after `![[`) images (plan SP4 Task 15, decision D9), and
+ * after `[[note#` that note's headings, after `[[#` this note's headings (Task 16).
  *
  * The source is never gated on composition: CodeMirror keeps the composing syllable in the document, so the
  * list ranks on it and stays open while a Korean syllable composes. Only acceptance is gated: `apply` returns
@@ -13,7 +14,8 @@ import { completionStatus, startCompletion, type Completion, type CompletionCont
 import type { PickItem } from '@labnoteo/core';
 import { rankPickItems } from '../labnote/port/rankPickItems';
 import { outerOf } from '../editor/table/cellEditor';
-import type { OutlineItem } from '../editor/outline/extract';
+import { extractOutline, type OutlineItem } from '../editor/outline/extract';
+import { sanitizeHeading } from './subpath';
 import { IMAGE_EXTS, wikiBasename, type Resolver } from './resolve';
 
 export const COMPLETION_MAX = 50;
@@ -110,14 +112,65 @@ function applyRow(row: Row): Completion['apply'] {
   };
 }
 
+/** Replaces the typed heading query (after `#`) with `<sanitised heading>]]`, absorbing a `]]` after the cursor. */
+function applyHeading(text: string): Completion['apply'] {
+  return (view: EditorView, _c: Completion, from: number, to: number) => {
+    if (view.composing) return; // D9: never accept mid-composition
+    const end = to + (view.state.doc.sliceString(to, to + 2) === ']]' ? 2 : 0);
+    const insert = `${text}]]`;
+    view.dispatch({
+      changes: { from, to: end, insert },
+      selection: { anchor: from + insert.length },
+      userEvent: 'input.complete',
+      scrollIntoView: true,
+    });
+  };
+}
+
+/**
+ * The heading rows after `[[<linkpath>#` (Task 16). An empty linkpath, or one that resolves to the open note, lists
+ * this document's headings from the buffer; another note's come from `deps.headings`. Unresolved: null.
+ * The inserted text is `sanitizeHeading` of the heading (D9), which `subpathLine` resolves back to it.
+ */
+async function headingCompletions(
+  deps: WikiCompletionDeps,
+  state: EditorState,
+  pos: number,
+  heading: { linkpath: string; query: string },
+): Promise<CompletionResult | null> {
+  const source = deps.notePath();
+  let items: OutlineItem[];
+  if (heading.linkpath.trim() === '') {
+    items = extractOutline(state.doc.toString());
+  } else {
+    const snap = deps.snapshot();
+    if (!snap) return null;
+    const target = snap.resolver.resolveWiki(heading.linkpath, source);
+    if (target === null || !/\.md$/i.test(target)) return null;
+    items = target === source ? extractOutline(state.doc.toString()) : await deps.headings(target);
+  }
+  const rows: PickItem<string>[] = [];
+  for (const item of items) {
+    const text = sanitizeHeading(item.text);
+    if (text !== '') rows.push({ label: item.text, value: text });
+  }
+  const ranked = rankPickItems(rows, heading.query).slice(0, COMPLETION_MAX);
+  return {
+    from: pos - heading.query.length,
+    filter: false,
+    options: ranked.map((row) => ({ label: row.label, apply: applyHeading(row.value) })),
+  };
+}
+
 export function wikiCompletionSource(deps: WikiCompletionDeps): CompletionSource {
-  return (context: CompletionContext): CompletionResult | null => {
+  return async (context: CompletionContext): Promise<CompletionResult | null> => {
     const { state, pos } = context;
     const line = state.doc.lineAt(pos);
     const lineBefore = line.text.slice(0, pos - line.from);
     const ctx = wikiContext(lineBefore);
-    if (!ctx || ctx.heading) return null; // headings: Task 16
+    if (!ctx) return null;
     if (inCode(state, pos, lineBefore)) return null;
+    if (ctx.heading) return headingCompletions(deps, state, pos, ctx.heading);
     const snap = deps.snapshot();
     if (!snap) return null;
     const source = deps.notePath();

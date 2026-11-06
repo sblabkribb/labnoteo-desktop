@@ -6,16 +6,20 @@ import { CompletionContext, type Completion, type CompletionResult } from '@code
 import { labnoteMarkdown } from '../../editor/markdownSyntax';
 import { setComposing } from '../../editor/__tests__/composing';
 import { createResolver } from '../resolve';
+import { subpathLine } from '../subpath';
+import type { OutlineItem } from '../../editor/outline/extract';
 import { COMPLETION_MAX, wikiCompletionSource, wikiContext, type WikiCompletionDeps } from '../complete';
 
 const files = ['Home.md', 'notes/PCR 조건.md', 'notes/sub/PCR 조건.md', 'notes/pcr.md', 'images/gel.png', 'labnote/061_a/README.labnote.md', 'labnote/062_b/README.labnote.md'];
 const aliases = [{ path: 'notes/pcr.md', alias: '중합' }];
 const titles = new Map([['labnote/061_a/README.labnote.md', '061 PCR 최적화'], ['labnote/062_b/README.labnote.md', '062 전기영동']]);
 
+const headings = new Map<string, OutlineItem[]>();
+
 const deps: WikiCompletionDeps = {
   notePath: () => 'n.md',
   snapshot: () => ({ files, aliases, titles, resolver: createResolver(files) }),
-  headings: async () => [],
+  headings: async (path) => headings.get(path) ?? [],
 };
 const source = wikiCompletionSource(deps);
 
@@ -113,5 +117,33 @@ describe('wikilink completion', () => {
   it('apply does nothing while composing', async () => {
     const r = (await complete('[[중합'))!;
     expect(applied('[[중합', r.options[0], 4, true).doc).toBe('[[중합');
+  });
+
+  it('lists the target note headings after #, sanitised on insert', async () => {
+    headings.set('Home.md', [{ level: 1, text: 'Intro', line: 1, kind: 'heading' }, { level: 2, text: 'Step 1: PCR', line: 2, kind: 'heading' }, { level: 2, text: 'Sample #3', line: 3, kind: 'heading' }]);
+    const r = (await complete('[[Home#st'))!;
+    expect(r.options.map((o) => o.label)).toEqual(['Step 1: PCR']);
+    expect(applied('[[Home#st', r.options[0]).doc).toBe('[[Home#Step 1 PCR]]');
+    const s = (await complete('[[Home#sam'))!;
+    expect(applied('[[Home#sam', s.options[0]).doc).toBe('[[Home#Sample 3]]');
+    expect(subpathLine('# Intro\n## Step 1: PCR\n## Sample #3\n', { subpath: 'Sample 3' })).toBe(2);
+  });
+
+  it('heading insertion absorbs ]] and does nothing while composing', async () => {
+    headings.set('Home.md', [{ level: 2, text: 'Step 1: PCR', line: 2, kind: 'heading' }]);
+    const r = (await complete('[[Home#st]]', 9))!;
+    expect(applied('[[Home#st]]', r.options[0], 9)).toEqual({ doc: '[[Home#Step 1 PCR]]', head: 19 });
+    const c = (await complete('[[Home#st', 9, true))!;
+    expect(c.options.map((o) => o.label)).toEqual(['Step 1: PCR']);
+    expect(applied('[[Home#st', c.options[0], 9, true).doc).toBe('[[Home#st');
+  });
+
+  it('[[# lists this note headings', async () => {
+    const r = (await complete('# Top\n[[#', 9))!;
+    expect(applied('# Top\n[[#', r.options[0], 9).doc).toBe('# Top\n[[#Top]]');
+  });
+
+  it('no headings for an unresolved note', async () => {
+    expect(await complete('[[Nope#')).toBeNull();
   });
 });

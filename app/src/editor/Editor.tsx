@@ -32,7 +32,7 @@ import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
 import { registerOpenNote } from '../labnote/openNotes';
 import { captureFocus } from '../ui/returnFocus';
-import { extractOutline } from './outline/extract';
+import { extractOutline, type OutlineItem } from './outline/extract';
 import { clearOutline, publishCursor, publishOutline } from './outline/outlineStore';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -438,6 +438,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     };
     // 위키링크 완성이 읽는 링크 색인. 색인이 준비되기 전에는 null(반쪽 목록을 내지 않는다). 파일·링크 판이 같으면 다시 쓴다.
     let snap: { files: number; links: number; value: ReturnType<WikiCompletionDeps['snapshot']> } | null = null;
+    const headingCache = new Map<string, { version: number; items: OutlineItem[] }>();
     const completionDeps: WikiCompletionDeps = {
       notePath: () => path,
       snapshot: () => {
@@ -455,7 +456,20 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         }
         return snap.value;
       },
-      headings: async () => [], // Task 16
+      // 다른 노트의 제목(Task 16): 디스크 본문에서 읽고, 경로와 링크 판(linksVersion)이 같으면 다시 쓴다.
+      headings: async (target) => {
+        const version = linkIndex.linksVersion;
+        const hit = headingCache.get(target);
+        if (hit && hit.version === version) return hit.items;
+        let items: OutlineItem[];
+        try {
+          items = extractOutline((await loadDocument(target, latest.current.invoke)).text);
+        } catch {
+          return []; // 읽지 못한 노트(지워졌거나 잠김): 목록만 비고, 다음 입력에서 다시 읽는다
+        }
+        headingCache.set(target, { version, items });
+        return items;
+      },
     };
     // 상태(확장 포함)는 노트를 채울 때마다 새로 만든다: 되돌리기 기록이 읽기 이전으로 거슬러 가지 못하게.
     extensions.current = (doc) => [
