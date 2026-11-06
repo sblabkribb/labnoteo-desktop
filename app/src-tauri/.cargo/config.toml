@@ -1,0 +1,4 @@
+# Windows only. Pinning the target also avoids a cargo scheduling bug seen with
+# a host-triple build here ("extern location for cc does not exist").
+[build]
+target = "x86_64-pc-windows-msvc"

@@ -94,6 +94,7 @@ pub fn open_at(state: &VaultState, settings: &Path, path: &str) -> Result<VaultI
     if !root.is_dir() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a directory").into());
     }
+    refuse_obsidian(&root)?;
     if let Err(e) = fs::sweep_temp(&root) {
         eprintln!("labnoteO: temp-file cleanup in {} failed: {e}", root.display());
     }
@@ -102,6 +103,19 @@ pub fn open_at(state: &VaultState, settings: &Path, path: &str) -> Result<VaultI
         eprintln!("labnoteO: could not remember the vault: {e}");
     }
     Ok(info_for(&root))
+}
+
+/// `.obsidian/` is never a vault, and never inside one that we write to: refuse
+/// any path with a `.obsidian` component (NTFS is case-insensitive).
+fn refuse_obsidian(p: &Path) -> Result<(), fs::FsError> {
+    let inside = p
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case(".obsidian"));
+    if inside {
+        Err(fs::FsError::Forbidden)
+    } else {
+        Ok(())
+    }
 }
 
 /// Create a new, empty vault folder at `path` and open it. The parent must
@@ -113,12 +127,7 @@ pub fn create_at(state: &VaultState, settings: &Path, path: &str) -> Result<Vaul
     if path.is_empty() || !target.is_absolute() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "vault path must be absolute").into());
     }
-    let in_obsidian = target
-        .components()
-        .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case(".obsidian"));
-    if in_obsidian {
-        return Err(fs::FsError::Forbidden);
-    }
+    refuse_obsidian(target)?;
     match std::fs::create_dir(target) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {}
@@ -265,6 +274,18 @@ mod tests {
         assert!(info.has_obsidian_config);
         assert_eq!(std::fs::read_to_string(s.vault().join(".obsidian/app.json")).unwrap(), "{}");
         assert_eq!(std::fs::read_to_string(s.vault().join("a.md")).unwrap(), "keep");
+    }
+
+    #[test]
+    fn open_refuses_obsidian_itself_as_the_vault() {
+        let s = Scratch::new();
+        let state = VaultState::default();
+        std::fs::create_dir(s.vault().join(".obsidian")).unwrap();
+        std::fs::write(s.vault().join(".obsidian").join("app.json"), "{}").unwrap();
+        let r = open(&s, &state, &s.vault().join(".obsidian"));
+        assert!(matches!(r, Err(fs::FsError::Forbidden)));
+        assert!(matches!(state.root(), Err(fs::FsError::NoVault)));
+        assert!(!s.settings().exists(), "a refused folder is not remembered");
     }
 
     #[test]

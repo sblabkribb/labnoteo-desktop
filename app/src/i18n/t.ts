@@ -14,7 +14,7 @@ const ko: Record<string, string> = {
   'update.install': '지금 업데이트',
   'update.installing': '업데이트를 설치하는 중입니다. 앱이 다시 시작됩니다.',
   'update.unsaved': '저장하지 못한 편집이 있어 업데이트를 미뤘습니다. 먼저 저장해 주세요.',
-  'update.error': '업데이트하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+  'update.error': '업데이트하지 못했습니다. 계속되면 최신 설치 파일을 내려받아 다시 설치해 주세요.',
   'vault.loading': '보관함을 불러오는 중',
   'vault.open': '보관함: {0}',
   'vault.obsidian': 'Obsidian 설정이 있는 폴더입니다. .obsidian 은 건드리지 않습니다.',

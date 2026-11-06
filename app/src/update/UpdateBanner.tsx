@@ -6,7 +6,8 @@ import { t } from '../i18n/t';
 /** plugin-updater 의 `Update` 중 쓰는 부분만. */
 export interface PendingUpdate {
   version: string;
-  downloadAndInstall: () => Promise<void>;
+  download: () => Promise<void>;
+  install: () => Promise<void>;
 }
 
 interface Props {
@@ -39,12 +40,14 @@ export function UpdateBanner({ beforeInstall, checkForUpdate = check, restart = 
   async function install(u: PendingUpdate) {
     setPhase('installing');
     try {
-      // Windows 설치 프로그램은 앱을 끝내고 시작하므로, 편집은 그 전에 디스크에 있어야 한다.
+      // 내려받는 동안에는 계속 쓸 수 있다. 그래서 저장은 내려받은 뒤, 설치 바로 전에 한다:
+      // Windows 설치 프로그램은 앱을 끝내므로, 그 사이에 친 글자는 디스크에 있어야 한다.
+      await u.download();
       if (!(await beforeInstall())) {
         setPhase('unsaved');
         return;
       }
-      await u.downloadAndInstall();
+      await u.install();
       await restart();
     } catch {
       setPhase('failed');
