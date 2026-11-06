@@ -1,0 +1,101 @@
+import { describe, expect, it } from 'vitest';
+import { applyMoves, invertMoves, movesFor, rewriteContext, rewriteLinks } from '../rewrite';
+
+const FILES = ['Home.md', 'notes/PCR 조건.md', 'notes/sub/PCR 조건.md', 'labnote/061_a/README.labnote.md', 'labnote/061_a/001_prep.labnote.md', 'labnote/062_b/README.labnote.md', 'images/gel.png', 'other/b.md', 'a.md', 'notes/n.md'];
+const ctxFor = (from: string, to: string, isDir = false, files = FILES) => rewriteContext(files, movesFor(from, to, isDir, files));
+const IN = [
+  '[[Home]] [[home|홈]] [[Home#Intro|i]] ![[Home]] [[Home.md]]',
+  '| x | [[Home\\|h]] |',
+  '|---|---|',
+  '`[[Home]]`',
+  '[h](../Home.md#intro) [h2](<../Home.md>) [h3](/Home.md)',
+].join('\n');
+
+describe('rewriteLinks', () => {
+  it('rewrites every link form and leaves every other byte alone', () => {
+    const out = rewriteLinks(IN, 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'Start.md'));
+    expect(out.text).toBe([
+      '[[Start]] [[Start|홈]] [[Start#Intro|i]] ![[Start]] [[Start.md]]',
+      '| x | [[Start\\|h]] |',
+      '|---|---|',
+      '`[[Home]]`',
+      '[h](../Start.md#intro) [h2](<../Start.md>) [h3](/Start.md)',
+    ].join('\n'));
+    expect(out.changed).toBe(9);
+    expect(out.unsafe).toBe(0);
+    expect(out.text.replace(/\[\[Start/g, '[[Home').replace(/Start\.md/g, 'Home.md')).toBe(IN.replace('[[home|', '[[Home|'));
+  });
+  it('updates front-matter links and relative checklist links on a folder rename, keeping their style', () => {
+    const text = '---\nretry_of: "[[labnote/061_a/README.labnote|061]]"\n---\n- [ ] [prep](../061_a/001_prep.labnote.md)\n[[README.labnote]]\n';
+    const out = rewriteLinks(text, 'labnote/062_b/README.labnote.md', 'labnote/062_b/README.labnote.md', ctxFor('labnote/061_a', 'labnote/061_alpha', true));
+    expect(out.text).toBe('---\nretry_of: "[[labnote/061_alpha/README.labnote|061]]"\n---\n- [ ] [prep](../061_alpha/001_prep.labnote.md)\n[[README.labnote]]\n');
+    expect(out.changed).toBe(2);
+  });
+  it('percent-encoded Korean stays percent-encoded', () => {
+    const text = '[a](../PCR%20%EC%A1%B0%EA%B1%B4.md) [b](<../PCR 조건.md>) [[notes/PCR 조건]] [[PCR 조건]]';
+    const out = rewriteLinks(text, 'notes/sub/x.md', 'notes/sub/x.md', ctxFor('notes/PCR 조건.md', 'notes/PCR 프로토콜.md'));
+    expect(out.text).toBe('[a](../PCR%20%ED%94%84%EB%A1%9C%ED%86%A0%EC%BD%9C.md) [b](<../PCR 프로토콜.md>) [[notes/PCR 프로토콜]] [[PCR 조건]]');
+  });
+  it('a space in a raw markdown path is percent-encoded', () => {
+    const out = rewriteLinks('[h](../Home.md) [[Home]]', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'My Home (old).md'));
+    expect(out.text).toBe('[h](../My%20Home%20%28old%29.md) [[My Home (old)]]');
+  });
+  it('pins a link a rename would hijack', () => {
+    const out = rewriteLinks('[[a]] [[b]]', 'x.md', 'x.md', ctxFor('a.md', 'b.md'));
+    expect(out.text).toBe('[[b]] [[other/b]]');
+    expect(out.changed).toBe(2);
+  });
+  it('a root target shadowed in the source folder gets the rooted form', () => {
+    const files = ['Home.md', 'notes/Start.md', 'notes/x.md'];
+    const out = rewriteLinks('[[Home]] [h](../Home.md)', 'notes/x.md', 'notes/x.md', ctxFor('Home.md', 'Start.md', false, files));
+    expect(out.text).toBe('[[/Start]] [h](../Start.md)');
+    expect(out.unsafe).toBe(0);
+  });
+  it('a name a wikilink cannot express is reported unsafe and left unchanged', () => {
+    const out = rewriteLinks('[[Home]] [h](../Home.md)', 'notes/n.md', 'notes/n.md', ctxFor('Home.md', 'PCR #2.md'));
+    expect(out.text).toBe('[[Home]] [h](../PCR%20%232.md)');
+    expect(out).toMatchObject({ changed: 1, unsafe: 1 });
+  });
+  it('keeps YAML single-quote escaping', () => {
+    const out = rewriteLinks("---\nauthor: '[[Home]]'\n---\n[[Home]]", 'n.md', 'n.md', ctxFor('Home.md', "Bob's.md", false, ['Home.md', 'n.md']));
+    expect(out.text).toBe("---\nauthor: '[[Bob''s]]'\n---\n[[Bob's]]");
+    const again = rewriteLinks(out.text, 'n.md', 'n.md', ctxFor("Bob's.md", 'Carol.md', false, ["Bob's.md", 'n.md']));
+    expect(again.text).toBe("---\nauthor: '[[Carol]]'\n---\n[[Carol]]"); // the escaped link is still found
+  });
+  it('CRLF and BOM survive', () => {
+    const out = rewriteLinks('﻿---\r\na: "[[Home]]"\r\n---\r\n[[Home]]\r\nx\r\n', 'n.md', 'n.md', ctxFor('Home.md', 'Start.md'));
+    expect(out.text).toBe('﻿---\r\na: "[[Start]]"\r\n---\r\n[[Start]]\r\nx\r\n');
+  });
+  it('moved notes keep working relative links; path wikilinks follow the folder', () => {
+    const text = '[up](../../Home.md) [sib](../PCR%20%EC%A1%B0%EA%B1%B4.md) [[notes/PCR 조건]] [[Home]]';
+    const out = rewriteLinks(text, 'notes/sub/PCR 조건.md', 'docs/sub/PCR 조건.md', ctxFor('notes', 'docs', true));
+    expect(out.text).toBe('[up](../../Home.md) [sib](../PCR%20%EC%A1%B0%EA%B1%B4.md) [[docs/PCR 조건]] [[Home]]');
+    expect(out.changed).toBe(1); // [sib] is recomputed to identical text: not counted
+  });
+  it('is idempotent and leaves unresolved links alone', () => {
+    const c = ctxFor('Home.md', 'Start.md');
+    const once = rewriteLinks(IN + '\n[[Nope]]', 'notes/n.md', 'notes/n.md', c).text;
+    expect(rewriteLinks(once, 'notes/n.md', 'notes/n.md', c)).toEqual({ text: once, changed: 0, unsafe: 0 });
+  });
+  it('a name with a double quote is never written into a double-quoted front-matter scalar', () => {
+    const out = rewriteLinks('---\na: "[[Home]]"\n---\n[[Home]]', 'n.md', 'n.md', ctxFor('Home.md', 'Say "hi".md', false, ['Home.md', 'n.md']));
+    expect(out.text).toBe('---\na: "[[Home]]"\n---\n[[Say "hi"]]');
+    expect(out).toMatchObject({ changed: 1, unsafe: 1 });
+  });
+});
+
+describe('moves', () => {
+  it('movesFor a folder lists every file under it in key order; applyMoves and invertMoves round-trip', () => {
+    const moves = movesFor('notes', 'docs', true, FILES);
+    expect(moves).toEqual([
+      { from: 'notes/n.md', to: 'docs/n.md' },
+      { from: 'notes/PCR 조건.md', to: 'docs/PCR 조건.md' },
+      { from: 'notes/sub/PCR 조건.md', to: 'docs/sub/PCR 조건.md' },
+    ]);
+    expect(movesFor('a.md', 'z.md', false, FILES)).toEqual([{ from: 'a.md', to: 'z.md' }]);
+    const after = applyMoves(FILES, moves);
+    expect(after).toContain('docs/sub/PCR 조건.md');
+    expect(after).not.toContain('notes/n.md');
+    expect(applyMoves(after, invertMoves(moves))).toEqual(FILES);
+  });
+});

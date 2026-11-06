@@ -1,0 +1,190 @@
+/**
+ * Pure link rewriting for renames (plan SP4 Task 22, decisions D3, D12, D13).
+ * Raw text in, raw text out: the input goes through `parseRaw` and the result through `toRaw`, so a BOM and
+ * the line endings survive byte for byte. Only the path part of each link is replaced; aliases, `#subpaths`,
+ * the table pipe escape, `!`, angle brackets and every other byte stay as they were. Every replacement is checked to resolve
+ * back to its intended target (the post-condition); a link that cannot be written safely is left unchanged
+ * and counted in `unsafe`.
+ */
+import { parseRaw, toRaw } from '../editor/documentIo';
+import { extractLinks } from './extract';
+import { createResolver, hasUnlinkableChars, linkKey, splitLinktext, type Resolver } from './resolve';
+
+export interface Move {
+  from: string;
+  to: string;
+}
+
+export interface RewriteContext {
+  before: Resolver;
+  after: Resolver;
+  /** The path a moved file has after the rename, or undefined when it did not move. */
+  moved(oldPath: string): string | undefined;
+}
+
+export interface RewriteResult {
+  text: string;
+  changed: number;
+  unsafe: number;
+}
+
+function moveMap(moves: readonly Move[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const m of moves) map.set(linkKey(m.from), m.to);
+  return map;
+}
+
+/** The file universe after the moves. */
+export function applyMoves(files: readonly string[], moves: readonly Move[]): string[] {
+  const map = moveMap(moves);
+  return files.map((f) => map.get(linkKey(f)) ?? f);
+}
+
+/** to -> from, in the same order. */
+export function invertMoves(moves: readonly Move[]): Move[] {
+  return moves.map((m) => ({ from: m.to, to: m.from }));
+}
+
+/** A file: one pair. A folder: one pair per known file under it, in key order. */
+export function movesFor(path: string, to: string, isDir: boolean, files: readonly string[]): Move[] {
+  if (!isDir) return [{ from: path, to }];
+  const prefix = `${linkKey(path)}/`;
+  return files
+    .filter((f) => linkKey(f).startsWith(prefix))
+    .map((f) => ({ key: linkKey(f), move: { from: f, to: to + f.slice(path.length) } }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .map((x) => x.move);
+}
+
+export function rewriteContext(files: readonly string[], moves: readonly Move[]): RewriteContext {
+  const map = moveMap(moves);
+  return {
+    before: createResolver(files),
+    after: createResolver(applyMoves(files, moves)),
+    moved: (oldPath) => map.get(linkKey(oldPath)),
+  };
+}
+
+function dirOf(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i < 0 ? '' : path.slice(0, i);
+}
+
+function hasMd(s: string): boolean {
+  return /\.md$/i.test(s);
+}
+
+function stripMd(s: string): string {
+  return hasMd(s) ? s.slice(0, -3) : s;
+}
+
+/** The relative path from folder `fromDir` to the vault path `to`. */
+function relativePath(fromDir: string, to: string): string {
+  const a = fromDir === '' ? [] : fromDir.split('/');
+  const b = to.split('/');
+  let i = 0;
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+  return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/');
+}
+
+const hex = (c: string): string => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
+
+/** D13 Markdown path encoding. `orig` is the old path slice (the part inside `<…>` when `angled`). */
+function encodeMdPath(path: string, orig: string, angled: boolean): string {
+  if (/%[0-9A-Fa-f]{2}/.test(orig)) {
+    return path
+      .split('/')
+      .map((seg) => encodeURIComponent(seg).replace(/[()]/g, hex))
+      .join('/');
+  }
+  // Inside <…> the path is raw; '%' and '#' are encoded too, because resolution percent-decodes and cuts at '#'.
+  if (angled) return path.replace(/[<>%#]/g, hex);
+  return path.replace(/[ ()<>#%]/g, hex);
+}
+
+const same = (a: string | null, b: string): boolean => a !== null && linkKey(a) === linkKey(b);
+
+/** The new path text for a wikilink in its original style (D13), or null when no safe text exists. */
+function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: RewriteContext): string | null {
+  const keepMd = hasMd(oldPath);
+  const withMd = (s: string): string => (keepMd && !hasMd(s) ? `${s}.md` : s);
+  let first: string | null;
+  if (!oldPath.includes('/')) {
+    const t = ctx.after.linktextFor(want, sourceAfter);
+    if (t === null) return null; // D3: no wikilink can name this target from here
+    first = withMd(t);
+  } else if (oldPath.startsWith('./') || oldPath.startsWith('../')) {
+    let rel = relativePath(dirOf(sourceAfter), stripMd(want));
+    if (oldPath.startsWith('./') && !rel.startsWith('../')) rel = `./${rel}`;
+    first = withMd(rel);
+  } else if (oldPath.startsWith('/')) {
+    first = withMd(`/${stripMd(want)}`);
+  } else {
+    first = withMd(stripMd(want));
+  }
+  // Post-condition, then the rooted form as the fallback.
+  for (const c of [first, withMd(`/${stripMd(want)}`)]) {
+    if (hasUnlinkableChars(c)) continue;
+    if (same(ctx.after.resolveWiki(c, sourceAfter), want)) return c;
+  }
+  return null;
+}
+
+/** The new path text for a Markdown link in its original style (D13), or null when no safe text exists. */
+function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: string, ctx: RewriteContext): string | null {
+  let path: string;
+  if (oldPath.startsWith('/')) path = `/${want}`;
+  else {
+    path = relativePath(dirOf(sourceAfter), want);
+    if (oldPath.startsWith('./') && !path.startsWith('../')) path = `./${path}`;
+  }
+  for (const p of [path, `/${want}`]) {
+    const encoded = encodeMdPath(p, oldPath, angled);
+    if (same(ctx.after.resolveMd(encoded, sourceAfter), want)) return encoded;
+  }
+  return null;
+}
+
+export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: string, ctx: RewriteContext): RewriteResult {
+  const doc = parseRaw(sourceBefore, raw);
+  const text = doc.text;
+  const edits: { from: number; to: number; insert: string }[] = [];
+  let unsafe = 0;
+
+  for (const link of extractLinks(text)) {
+    const isWiki = link.kind === 'wiki' || link.kind === 'embed';
+    const linkpath = isWiki ? splitLinktext(link.target).path : link.target;
+    const resolveAs = (r: Resolver, source: string): string | null =>
+      isWiki ? r.resolveWiki(linkpath, source) : r.resolveMd(link.target, source);
+    const before = resolveAs(ctx.before, sourceBefore);
+    if (before === null) continue; // unresolved links are never touched
+    const movedTo = ctx.moved(before);
+    const want = movedTo ?? before;
+    // Not moved and still resolving to the same file: leave it. Otherwise rewrite or pin it (the hijack guard).
+    if (movedTo === undefined && same(resolveAs(ctx.after, sourceAfter), want)) continue;
+
+    const oldSlice = text.slice(link.pathFrom, link.pathTo);
+    let insert: string | null;
+    if (isWiki) {
+      const quote = link.inFrontmatter ? text[link.from - 1] : '';
+      // In a single-quoted YAML scalar ' is written ''; the resolver sees the unescaped path.
+      const oldPath = quote === "'" ? oldSlice.replace(/''/g, "'") : oldSlice;
+      insert = wikiText(oldPath, want, sourceAfter, ctx);
+      // A '"' or '\' would change a double-quoted YAML scalar: never write one there.
+      if (insert !== null && quote === '"' && /["\\]/.test(insert)) insert = null;
+      if (insert !== null && quote === "'") insert = insert.replace(/'/g, "''");
+    } else {
+      insert = mdText(oldSlice, text[link.pathFrom - 1] === '<', want, sourceAfter, ctx);
+    }
+    if (insert === null) {
+      unsafe++;
+      continue;
+    }
+    if (insert !== oldSlice) edits.push({ from: link.pathFrom, to: link.pathTo, insert });
+  }
+
+  if (edits.length === 0) return { text: raw, changed: 0, unsafe };
+  let out = text;
+  for (const e of [...edits].sort((a, b) => b.from - a.from)) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
+  return { text: toRaw(doc, out), changed: edits.length, unsafe };
+}
