@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { isolateHistory } from '@codemirror/commands';
 import { t } from '../../i18n/t';
 import { notify } from '../../labnote/host/toastStore';
-import { activeCell, activeCellView } from '../table/cellEditor';
+import { activeCell, activeCellView, cellExtras } from '../table/cellEditor';
 import { inRawText } from '../table/paste';
 import { ERROR_KINDS } from '../../fs/errorKinds';
 import { imageLoader } from './imageWidget';
@@ -16,7 +16,12 @@ import { imageLoader } from './imageWidget';
  * - 이미지 파일이 없으면 손대지 않는다(false): 글 붙여 넣기, 표 붙여 넣기, pasteURLAsLink 가 그대로 돈다.
  * - 쓰는 동안 고친 글이 있어도 넣을 자리는 `pendingPaste` 가 변경을 따라 옮긴다.
  * - 넣기는 트랜잭션 하나(`input.paste`, 되돌리기 한 번).
+ * - 파일을 실은 끌어 놓기는 받지 않은 것(이미지가 아님, 읽기 전용, 조합 중, 표 칸)도 삼킨다: 그대로 두면 CodeMirror 의
+ *   기본 끌어 놓기가 파일을 크기 제한 없이 글로 읽어 노트에 넣는다. 열린 표 칸 편집기에도 같은 막이를 싣는다(cellExtras).
  */
+
+/** Rust `vault_write_image` 와 같은 크기 상한(20 MiB). 넘는 파일은 읽기 전에 거른다. */
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 /** 붙여 넣을 수 있는 MIME → 확장자. SVG 는 받지 않는다(Rust 도 쓰지 않는다). */
 export const PASTE_MIME: Readonly<Record<string, string>> = {
@@ -186,6 +191,13 @@ export interface PasteImageDeps {
   write(dir: string, name: string, bytes: Uint8Array): Promise<string>;
   /** 쓰기 실패 알림. 기본은 앱의 알림(error). */
   toast?: (message: string) => void;
+  /** 받지 않았거나 넣지 못한 것의 짧은 안내. 기본은 앱의 알림(warn). */
+  notice?: (message: string) => void;
+}
+
+/** 끌어 놓기가 OS 파일을 싣고 있는가. */
+function carriesFiles(dt: DataTransfer | null): boolean {
+  return !!dt && ((dt.files?.length ?? 0) > 0 || Array.from(dt.types ?? []).includes('Files'));
 }
 
 /** 지금 이미지를 받지 않는 상태: 읽기 전용, 한글 조합 중, 표 칸에 셀 편집기가 떠 있음, 노트 경로를 모름. */
@@ -202,12 +214,18 @@ function inert(view: EditorView, state: EditorState): boolean {
 
 export function pasteImages(deps: PasteImageDeps): Extension {
   const toast = deps.toast ?? ((message: string) => notify('error', message));
+  const notice = deps.notice ?? ((message: string) => notify('warn', message));
 
   async function run(view: EditorView, files: File[], names: string[], id: number, notePath: string): Promise<void> {
     const config = view.state.facet(imageLoader)!;
     const dir = imagesDirOf(config.notePath);
     const written: string[] = [];
     for (let i = 0; i < files.length; i++) {
+      // 크기는 읽기 전에 본다: 몇 GB 짜리를 웹뷰에 다 읽어 IPC 로 보낸 뒤에야 거부되지 않게
+      if (files[i].size > MAX_IMAGE_BYTES) {
+        toast(t('live.image.saveFailed', t('live.image.err.tooLarge')));
+        continue;
+      }
       try {
         written.push(await deps.write(dir, names[i], await bytesOf(files[i])));
       } catch (e) {
@@ -222,19 +240,26 @@ export function pasteImages(deps: PasteImageDeps): Extension {
         written.map(async (p) => embedText(p, await config.images.index.isUnique(p.slice(p.lastIndexOf('/') + 1)).catch(() => false))),
       );
     }
-    finish(view, id, notePath, embeds);
+    finish(view, id, notePath, written, embeds);
   }
 
   /**
    * 붙여 넣기 `id` 를 끝낸다. 임베드가 있으면 따라 옮긴 자리에 넣는다(한 트랜잭션).
-   * 뷰가 부서졌거나, 상태가 바뀌어 그 번호가 없거나, 다른 노트가 열려 있으면 아무것도 넣지 않는다.
+   * 뷰가 부서졌거나, 상태가 바뀌어 그 번호가 없거나, 다른 노트가 열려 있거나, 편집기가 잠겨 있으면(대화 상자가 열린 동안
+   * Editor.tsx 의 LOCKED: readOnly) 아무것도 넣지 않는다. 그때 이미 쓴 파일은 images/ 에 남으므로 그 경로를 알린다.
    */
-  function finish(view: EditorView, id: number, notePath: string, embeds: string[]): void {
-    if (!view.dom.isConnected) return;
+  function finish(view: EditorView, id: number, notePath: string, written: string[], embeds: string[]): void {
+    const orphaned = () => {
+      if (written.length) notice(t('live.image.savedNotInserted', written.join(', ')));
+    };
+    if (!view.dom.isConnected) return orphaned();
     const state = view.state;
     const pos = state.field(pendingPaste, false)?.find((p) => p.id === id)?.pos;
-    if (pos === undefined) return;
-    if (!embeds.length || state.facet(imageLoader)?.notePath !== notePath) return view.dispatch({ effects: donePending.of(id) });
+    if (pos === undefined) return orphaned();
+    if (!embeds.length || state.readOnly || state.facet(imageLoader)?.notePath !== notePath) {
+      orphaned();
+      return view.dispatch({ effects: donePending.of(id) });
+    }
     const at = Math.min(pos, state.doc.length);
     const insert = embeds.join(state.lineBreak);
     const sel = state.selection.main;
@@ -255,13 +280,24 @@ export function pasteImages(deps: PasteImageDeps): Extension {
     const at = Math.min(pos, state.doc.length);
     event.preventDefault();
     // 머리말·코드 안에는 임베드를 넣지 않는다. 사건은 삼킨다: 그대로 두면 CodeMirror 의 끌어 놓기가 파일을 글로 읽어 넣는다.
-    if (inRawText(state, at)) return true;
+    if (inRawText(state, at)) {
+      notice(t('live.image.rawText'));
+      return true;
+    }
     const now = new Date();
     const names = files.map((f) => (named ? dropName(f) : pastedImageName(now, PASTE_MIME[f.type])));
     const id = nextPasteId++;
     const notePath = state.facet(imageLoader)!.notePath;
     view.dispatch({ effects: addPending.of({ id, pos: at }) });
-    void run(view, files, names, id, notePath).catch(() => finish(view, id, notePath, []));
+    void run(view, files, names, id, notePath).catch(() => finish(view, id, notePath, [], []));
+    return true;
+  }
+
+  /** 받지 않은 파일 끌어 놓기를 삼킨다(파일 글이 노트에 들어가지 않게). 이미지가 아닌 파일이면 안내한다. */
+  function swallowFiles(e: DragEvent, images: boolean): boolean {
+    if (!carriesFiles(e.dataTransfer)) return false;
+    e.preventDefault();
+    if (!images) notice(t('live.image.dropOnlyImages'));
     return true;
   }
 
@@ -277,9 +313,14 @@ export function pasteImages(deps: PasteImageDeps): Extension {
         },
         drop(e, view) {
           const at = view.posAtCoords({ x: e.clientX, y: e.clientY });
-          return take(view, e, e.dataTransfer, at ?? view.state.selection.main.head, true);
+          if (take(view, e, e.dataTransfer, at ?? view.state.selection.main.head, true)) return true;
+          return swallowFiles(e, imageFilesOf(e.dataTransfer).length > 0);
         },
       }),
+    ),
+    // 열린 표 칸 편집기(중첩 뷰)에도: 칸에 놓은 파일이 글로 읽혀 칸에 들어가지 않게
+    cellExtras.of(
+      Prec.highest(EditorView.domEventHandlers({ drop: (e) => swallowFiles(e, imageFilesOf(e.dataTransfer).length > 0) })),
     ),
   ];
 }

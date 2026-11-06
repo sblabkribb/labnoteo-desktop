@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { EditorState, Prec, type Extension } from '@codemirror/state';
+import { Compartment, EditorState, Prec, type Extension, type Transaction } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, undo } from '@codemirror/commands';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../../table/field';
-import { focusCell as openCell } from '../../table/cellEditor';
+import { activeCellView, focusCell as openCell } from '../../table/cellEditor';
 import { LIST_KEYS } from '../listKeys';
 import { livePreview } from '../index';
 import { imageLoader } from '../imageWidget';
@@ -35,6 +35,7 @@ let unique = true;
 let invalidate = vi.fn();
 let isUnique = vi.fn(async () => unique);
 let toast = vi.fn();
+let notice = vi.fn();
 
 function fakeImages(): VaultImages {
   return {
@@ -67,7 +68,7 @@ function view(
         livePreview(),
         tableExtension({ save: () => {}, root: document }),
         imageLoader.of({ notePath: opts.notePath ?? 'exp/n.labnote.md', images: fakeImages() }),
-        pasteImages({ write: opts.write, toast }),
+        pasteImages({ write: opts.write, toast, notice }),
         opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
         ...(opts.extra ?? []),
       ],
@@ -83,7 +84,7 @@ function dataTransfer(files: File[], text = ''): DataTransfer {
     files: Object.assign([...files], { item: (i: number) => files[i] ?? null }),
     items: files.map((f) => ({ kind: 'file', type: f.type, getAsFile: () => f })),
     types: [...(files.length ? ['Files'] : []), ...(text ? ['text/plain'] : [])],
-    getData: (type: string) => (type === 'text/plain' ? text : ''),
+    getData: (type: string) => (type === 'text/plain' || type === 'Text' ? text : ''),
   } as unknown as DataTransfer;
 }
 function pasteEvent(files: File[], text = '', html = ''): Event {
@@ -98,9 +99,9 @@ function pasteEvent(files: File[], text = '', html = ''): Event {
   return ev;
 }
 const textPasteEvent = (text: string) => pasteEvent([], text);
-function dropEvent(files: File[]): Event {
+function dropEvent(files: File[], text = ''): Event {
   const ev = new MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
-  Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer(files) });
+  Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer(files, text) });
   return ev;
 }
 const png = (name = 'image.png') => new File([new Uint8Array([1])], name, { type: 'image/png' });
@@ -124,6 +125,7 @@ beforeEach(() => {
   invalidate = vi.fn();
   isUnique = vi.fn(async () => unique);
   toast = vi.fn();
+  notice = vi.fn();
   setLang('en');
 });
 afterEach(() => {
@@ -335,6 +337,141 @@ describe('라이브 미리보기: 이미지 붙여 넣기와 끌어 놓기', () 
     expect(inFm.state.doc.toString()).toBe(fm);
     expect(inCode.state.doc.toString()).toBe(code);
     expect(dropCode.state.doc.toString()).toBe(code);
+    expect(notice).toHaveBeenCalledWith(t('live.image.rawText'));
+  });
+
+  it('the embed is its own undo step: typing before or right after it is undone separately', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('a', 1, { write });
+    const type = (ch: string) => {
+      const at = v.state.selection.main.head;
+      v.dispatch({ changes: { from: at, insert: ch }, selection: { anchor: at + 1 }, userEvent: 'input.type' });
+    };
+    type('x');
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(v.state.doc.toString()).toBe(`ax![[${NAME}]]`);
+    // 바로 뒤에 친 글은 임베드와 한 단계로 묶이지 않는다(isolateHistory 'full')
+    type('y');
+    undo(v);
+    expect(v.state.doc.toString()).toBe(`ax![[${NAME}]]`);
+    undo(v);
+    expect(v.state.doc.toString()).toBe('ax');
+  });
+
+  it('the insert is a user paste event', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const seen: Transaction[] = [];
+    const v = view('a', 1, { write, extra: [EditorView.updateListener.of((u) => seen.push(...u.transactions))] });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    const inserts = seen.filter((tr) => tr.docChanged);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].isUserEvent('input.paste')).toBe(true);
+  });
+
+  it('a write that finishes while the editor is locked inserts nothing and names the saved file', async () => {
+    let resolve!: (p: string) => void;
+    const write = vi.fn<Write>(() => new Promise<string>((r) => (resolve = r)));
+    const lock = new Compartment();
+    const v = view('a', 1, { write, extra: [lock.of([])] });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    // 대화 상자가 열리면 Editor.tsx 가 LOCKED(readOnly + editable false)를 건다
+    v.dispatch({ effects: lock.reconfigure([EditorState.readOnly.of(true), EditorView.editable.of(false)]) });
+    resolve(`exp/images/${NAME}`);
+    await flush();
+    expect(v.state.doc.toString()).toBe('a');
+    expect(v.state.field(pendingPaste)).toEqual([]);
+    expect(notice).toHaveBeenCalledWith(t('live.image.savedNotInserted', `exp/images/${NAME}`));
+  });
+
+  it('a write whose note was replaced names the orphaned file', async () => {
+    let resolve!: (p: string) => void;
+    const write = vi.fn<Write>(() => new Promise<string>((r) => (resolve = r)));
+    const v = view('noteA', 0, { notePath: 'exp/a.labnote.md', write });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    v.setState(EditorState.create({ doc: 'noteB', extensions: [imageLoader.of({ notePath: 'exp/b.labnote.md', images: fakeImages() }), pasteImages({ write, toast, notice })] }));
+    resolve('exp/images/fromA.png');
+    await flush();
+    expect(v.state.doc.toString()).toBe('noteB');
+    expect(notice).toHaveBeenCalledWith(t('live.image.savedNotInserted', 'exp/images/fromA.png'));
+  });
+
+  it('an image over 20 MiB is refused before its bytes are read', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const big = png();
+    Object.defineProperty(big, 'size', { value: 20 * 1024 * 1024 + 1 });
+    const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
+    Object.defineProperty(big, 'arrayBuffer', { value: arrayBuffer });
+    const v = view('a', 1, { write });
+    v.contentDOM.dispatchEvent(pasteEvent([big]));
+    await flush();
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(t('live.image.saveFailed', t('live.image.err.tooLarge')));
+    expect(v.state.doc.toString()).toBe('a');
+    expect(v.state.field(pendingPaste)).toEqual([]);
+  });
+
+  it('a dropped non-image file is swallowed: its text is never inserted', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('a', 1, { write });
+    for (const f of [
+      new File(['hello'], 'notes.txt', { type: 'text/plain' }),
+      new File(['<svg/>'], 'x.svg', { type: 'image/svg+xml' }),
+      new File(['a,b'], 'd.csv', { type: 'text/csv' }),
+    ]) {
+      const ev = dropEvent([f]);
+      v.contentDOM.dispatchEvent(ev);
+      expect(ev.defaultPrevented, f.name).toBe(true);
+    }
+    await flush();
+    expect(write).not.toHaveBeenCalled();
+    expect(v.state.doc.toString()).toBe('a');
+    expect(notice).toHaveBeenCalledWith(t('live.image.dropOnlyImages'));
+  });
+
+  it('a dropped file into a read-only or composing editor is swallowed too', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const ro = view('a', 1, { write, readOnly: true });
+    const ev = dropEvent([new File(['hello'], 'notes.txt', { type: 'text/plain' })]);
+    ro.contentDOM.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    const composing = view('a', 1, { write });
+    setComposing(composing, true);
+    const ev2 = dropEvent([png()]);
+    composing.contentDOM.dispatchEvent(ev2);
+    await flush();
+    expect(composing.state.doc.toString()).toBe('a');
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('a file dropped into an open table cell editor is swallowed', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const doc = '| a | b |\n| - | - |\n| 1 | 2 |\n';
+    const table = view(doc, doc.length, { write });
+    expect(openCell(table, 0, 1, 0)).toBe(true);
+    await Promise.resolve();
+    const cell = activeCellView(table)!;
+    const before = cell.state.doc.toString();
+    const ev = dropEvent([new File(['hello'], 'notes.txt', { type: 'text/plain' })]);
+    cell.contentDOM.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    await flush();
+    expect(cell.state.doc.toString()).toBe(before);
+    expect(table.state.doc.toString()).toBe(doc);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('a dropped text selection (no files) is left to CodeMirror', () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('a', 1, { write });
+    v.posAtCoords = (() => 1) as typeof v.posAtCoords;
+    v.contentDOM.dispatchEvent(dropEvent([], 'zz'));
+    expect(v.state.doc.toString()).toBe('azz');
+    expect(notice).not.toHaveBeenCalled();
   });
 
   it('a known FsError kind is shown as a translated reason, an unknown one as its message', async () => {
