@@ -224,3 +224,10 @@ describe('renderInline: 위키링크', () => {
     expect(render('![[img.png]]').querySelector('span.lno-table-link')!.textContent).toBe('img.png');
   });
 });
+
+describe('labnoteMarkdown: HTML completion', () => {
+  it('offers no HTML tag completions', () => {
+    const state = EditorState.create({ doc: '<di', extensions: [labnoteMarkdown()] });
+    expect(state.languageDataAt('autocomplete', 3)).toEqual([]);
+  });
+});

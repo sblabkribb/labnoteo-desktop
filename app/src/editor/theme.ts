@@ -27,8 +27,10 @@ import type { Extension } from '@codemirror/state';
  *   highlightTrailingWhitespace 를 설치하면 살아난다.
  * - 확장 자신의 테마 모듈이 가져오는 박힌 색(설치할 때 여기서 토큰으로 덮어야 한다 — 저절로 토큰 색이 되지 않는다):
  *   drawSelection 은 네이티브 캐럿과 `::selection` 을 `!important` 로 투명하게 하고 시스템 색 `Highlight !important` 를 쓴다.
- *   @codemirror/language 의 접기는 `.cm-foldPlaceholder` 의 #eee/#ddd/#888, @codemirror/autocomplete 는
- *   `&light … li[aria-selected]` 의 #17c/white 와 `&light .cm-snippetField`, @codemirror/lint 는 범위 없는 진단 색.
+ *   @codemirror/language 의 접기는 `.cm-foldPlaceholder` 의 #eee/#ddd/#888, @codemirror/lint 는 범위 없는 진단 색.
+ * - @codemirror/autocomplete 는 이제 설치돼 있다(Editor.tsx 의 autocompletion(), SP4): 그 테마 모듈의
+ *   `&light … li[aria-selected]` 의 #17c/white, 비활성 목록의 #777, 구역 머리의 silver, `.cm-snippetField`·`.cm-snippetFieldPosition`
+ *   의 박힌 색은 아래 자동 완성 규칙이 토큰으로 덮는다. 그 `&dark` 규칙은 다크 클래스에 걸려 늘 꺼져 있다(D1).
  *   @codemirror/search 의 `&light` 일치 색은 리뷰가 확인한 것이다(이 저장소에는 설치돼 있지 않아 여기서 보지 못했다).
  * - theme-guard.test.tsx 가 이것을 지킨다: 편집기가 처음 뜰 때 그림자 루트에 들어간 박힌 색마다, 같은 선택자·같은 속성을 같거나
  *   높은 특이도로 덮는 토큰 규칙이 있는지 보고, 위의 "요소가 없는" 규칙은 확장 이름과 함께 목록에 둔다. 처음 뜰 때 실리는 확장이
@@ -82,6 +84,15 @@ export const editorThemeSpec = {
       '&:after': arrow('Bottom', 'var(--bg-elevated)'),
     },
   },
+  // 자동 완성(@codemirror/autocomplete 6.20.4). 그 기본 테마의 선택자를 글자 그대로 다시 쓴다: 특이도가 같고 이 테마 모듈이 뒤에
+  // 붙으므로 이긴다. 덮는 색: `&light … li[aria-selected]` 의 #17c/white, 비활성 목록의 #777, 구역 머리의 silver 밑줄,
+  // 스니펫 칸의 #00000022 와 #888 점선. `&.cm-editor` 를 앞에 붙이지 않는다: theme-guard 는 같은 선택자 글자만 덮은 것으로 친다.
+  '& .cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent)', color: 'var(--accent-text)' },
+  '& .cm-tooltip-autocomplete-disabled ul li[aria-selected]': { background: 'var(--text-muted)' },
+  '& .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': { borderBottomColor: 'var(--border)' },
+  '& .cm-snippetField': { backgroundColor: 'var(--bg-selection)' },
+  '& .cm-snippetFieldPosition': { borderLeftColor: 'var(--text-muted)' },
+  '& .cm-tooltip-autocomplete': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' },
   // 위젯 기본 클래스. 위젯 고유의 규칙(.lno-table-tool 등)은 같은 특이도로 이 뒤에 오므로 여기 값을 덧쓴다.
   '.lno-widget': { fontFamily: 'var(--font-ui)', color: 'var(--text)' },
   '.lno-btn': {

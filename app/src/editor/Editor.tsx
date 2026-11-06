@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { autocompletion } from '@codemirror/autocomplete';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { editorTheme } from './theme';
@@ -484,6 +485,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       Prec.high(keymap.of(LIST_KEYS)),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
+      // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었고(markdownSyntax.ts),
+      // override 가 빈 지금은 아무것도 제안하지 않는 자리다. 위키링크 완성 원본은 다음 작업이 채운다.
+      autocompletion({ override: [], icons: false }),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
       // 링크 풀이: 모드 칸 밖에 두어 모드를 바꿔도 남는다. 조합 중에 미룬 값은 resolutionFlusher 가 조합이 끝난 뒤 넣는다.
       resolutionSlot.current.of(linkResolution.of(resolutionRef.current)),

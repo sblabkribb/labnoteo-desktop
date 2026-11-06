@@ -128,7 +128,9 @@ export const labnoteParser: MarkdownParser = (markdownLanguage.parser as Markdow
  * lang-markdown 의 자체 Enter/Backspace keymap 은 끈다(`addKeymap: false`): 바깥 편집기가 한글 조합을 지키는
  * 목록 키(live/listKeys.ts)를 단다. 켜 두면 같은 키의 처리기가 둘이 되어 하나는 영영 돌지 않는다.
  * 셀 편집기도 이 언어를 싣지만 칸은 한 줄이라 Enter 를 스스로 다룬다.
+ * HTML 태그 완성도 끈다(`completeHTMLTags: false`): `<` 를 칠 때마다 태그 목록이 뜨면 글쓰기를 방해하고, 편집기의 자동 완성은
+ * 위키링크(`[[`)만 제안한다.
  */
 export function labnoteMarkdown(): Extension {
-  return markdown({ base: markdownLanguage, extensions: EXTENSIONS, addKeymap: false });
+  return markdown({ base: markdownLanguage, extensions: EXTENSIONS, addKeymap: false, completeHTMLTags: false });
 }
