@@ -141,7 +141,8 @@ input, select, textarea {
 }
 
 [role="alert"] { color: var(--danger); }
-[role="alert"] button { color: var(--text); }
+/* 경고 안의 주된 단추는 자기 글자색(--accent-text)을 지킨다 */
+[role="alert"] button:not(.primary) { color: var(--text); }
 
 .plain-list {
   list-style: none;
@@ -184,7 +185,8 @@ input, select, textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.first-run > p { color: var(--text-muted); }
+/* :not([role]) — 경고(role="alert")는 이 규칙에 묻히지 않고 위험색을 지킨다 */
+.first-run > p:not([role]) { color: var(--text-muted); }
 .first-run-choices {
   display: flex;
   flex-wrap: wrap;
@@ -245,7 +247,8 @@ input, select, textarea {
 }
 /* "새 노트" 이름 입력은 상단 바 안에서 열린다: 입력 줄 뒤에 안내문이 한 줄을 다 쓴다 */
 .topbar form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.topbar form p { flex-basis: 100%; color: var(--text-muted); }
+.topbar form p { flex-basis: 100%; }
+.topbar form p:not([role]) { color: var(--text-muted); }
 
 /* 업데이트 배너와 노트 목록 오류: 상단 바 아래 전체 폭. 둘 다 떠도 줄이 쌓일 뿐 서로 가리지 않는다. */
 .notices { grid-area: notices; max-height: 30vh; overflow-y: auto; }
@@ -360,12 +363,14 @@ input, select, textarea {
 
 /* 지금 열린 노트: 색이 아니라 모양으로 알린다 — 왼쪽 끝 3px 강조 막대.
    배경 색조(--bg-selected)는 배경과 1.56:1 이라 상태 표시로는 모자라고, 막대가 3:1 을 채운다.
-   색조는 :has() 에 기대지 않는 규칙에도 둔다: :has() 를 못 읽는 환경에서도 색조는 남는다. */
-.sidebar nav li > button[aria-current="true"] { background: var(--bg-selected); }
-.sidebar nav li:has(> button[aria-current="true"]) {
+   막대는 줄(li)이 아니라 단추에 그린다: 단추가 줄을 덮는 불투명 배경이라 li 에 그린 막대는 가려진다
+   (들여쓰기 padding 이 있는 깊이 1 이상에서만 보였고, 보관함 맨 위 노트는 막대 없이 색조뿐이었다).
+   색조는 :has() 에 기대지 않는 규칙에도 둔다: :has() 를 못 읽는 환경에서도 색조와 막대가 남는다. */
+.sidebar nav li > button[aria-current="true"] {
   background: var(--bg-selected);
   box-shadow: inset 3px 0 0 var(--accent);
 }
+.sidebar nav li:has(> button[aria-current="true"]) { background: var(--bg-selected); }
 /* 열린 줄도 커서에 반응한다. 일반 줄의 hover 보다 구체적이어야 이긴다. */
 .sidebar nav li:has(> button[aria-current="true"]):hover { background: var(--bg-selection); }
 /* 위와 한 목록으로 묶지 않는다: :has() 를 못 읽는 환경은 목록 전체를 버려 열린 줄이 hover 에서 색조를 잃는다. */

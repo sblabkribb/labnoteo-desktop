@@ -279,7 +279,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       ),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown(),
-      editorTheme(),
+      editorTheme,
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
       highlightSpecialChars(),
       EditorView.lineWrapping,

@@ -32,9 +32,11 @@ describe('앱 셸 CSS 계약', () => {
   });
 
   it('열린 노트는 색조 말고 모양(왼쪽 3px 강조 막대)으로도 드러난다', () => {
-    const rule = ruleFor('.sidebar nav li:has(> button[aria-current="true"])');
+    // 막대는 줄을 덮는 단추에 그린다: li 에 그리면 불투명한 단추 배경이 가린다 (깊이 0 의 열린 노트).
+    const rule = ruleFor('.sidebar nav li > button[aria-current="true"]');
     expect(rule).not.toBeNull();
     expect(rule!.body).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--accent\)/);
+    expect(ruleFor('.sidebar nav li:has(> button[aria-current="true"])')!.body).not.toMatch(/box-shadow/);
   });
 
   it('트리 줄 안의 단추에는 테두리가 없다 (--border-strong 은 선택 배경에서 2.43:1)', () => {

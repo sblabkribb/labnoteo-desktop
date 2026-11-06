@@ -6,7 +6,8 @@ import { vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
 import { Editor, MAX_SAVE_ATTEMPTS, type EditorHandle, type WindowApi } from '../Editor';
-import { editorThemeSpec, highlightSpec } from '../theme';
+import { defaultHighlightStyle } from '@codemirror/language';
+import { editorTheme, editorThemeSpec, highlightSpec } from '../theme';
 import type { VaultChange } from '../../vault/useVaultEvents';
 import { ERROR_KINDS_FIXTURE, EVENTS_FIXTURE } from '../../__tests__/fixtures';
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
@@ -538,12 +539,29 @@ describe('편집기', () => {
 /** 색이 들어갈 수 있는 값에서 var(--…) 참조를 걷어 내고 남는 것(16진수·rgb()·이름 있는 색)을 돌려준다. */
 const bareColours = (value: string) =>
   (value.replace(/var\(--[\w-]+\)/g, '').match(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(|\b[a-z]{3,}\b/gi) ?? []).filter(
-    (w) => !['solid', 'none', 'underline', 'italic'].includes(w),
+    (w) => !['solid', 'none', 'underline', 'line', 'through', 'italic'].includes(w),
   );
+
+/** 마운트된 편집기의 그림자 루트에 들어간 스타일 전체(<style> 이든 adoptedStyleSheets 든). */
+const shadowCss = (root: ShadowRoot) =>
+  [
+    ...Array.from(root.querySelectorAll('style')).map((s) => s.textContent ?? ''),
+    ...Array.from(root.adoptedStyleSheets ?? []).map((sheet) => Array.from(sheet.cssRules).map((r) => r.cssText).join('\n')),
+  ].join('\n');
+
+/** 스타일 텍스트에서 `.클래스 { … color: X … }` 를 읽어 클래스 → 글자색. */
+function colourByClass(css: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of css.matchAll(/^\.(\S+) \{([^}]*)\}/gm)) {
+    const c = /(?:^|[;\s])color:\s*([^;]+)/.exec(m[2]);
+    if (c) out.set(m[1], c[1].trim());
+  }
+  return out;
+}
 
 describe('편집기 테마', () => {
   it('에디터 테마가 색을 직접 박지 않고 토큰을 읽는다', () => {
-    const colourProp = /color|background|border|outline|shadow/i;
+    const colourProp = /color|background|border|outline|shadow|decoration|fill|stroke/i;
     const checked: string[] = [];
     const walk = (rules: object) => {
       for (const [prop, value] of Object.entries(rules)) {
@@ -567,21 +585,69 @@ describe('편집기 테마', () => {
     expect(bareColours('#fff')).not.toEqual([]);
     expect(bareColours('rgb(0,0,0)')).not.toEqual([]);
     expect(bareColours('red')).not.toEqual([]);
+    expect(bareColours('underline red')).not.toEqual([]);
     expect(bareColours('1px solid var(--border)')).toEqual([]);
+    expect(bareColours('line-through')).toEqual([]);
+  });
+
+  it('CodeMirror 기본 테마가 박아 두는 요소(활성 줄·거터·패널·단추·입력·툴팁)를 토큰으로 덮어 둔다', () => {
+    // 이 테마는 dark 로 표시하지 않아 기본 테마의 라이트 규칙이 켜져 있다: 같은 선택자 길이로 덮는다.
+    for (const sel of ['.cm-activeLine', '.cm-gutters', '.cm-activeLineGutter', '.cm-panels', '.cm-panels-top', '.cm-panels-bottom', '.cm-button', '.cm-textfield', '.cm-tooltip', '.cm-tooltip-section:not(:first-child)', '.cm-content', '.cm-specialChar', '.cm-content ::selection'])
+      expect(Object.keys(editorThemeSpec), sel).toContain(sel);
+  });
+
+  it('선택 영역은 기본 글자색(--text)을 쓴다: 강조색·흐린 글자가 선택 배경 위에서 4.5:1 아래로 내려가지 않게', () => {
+    expect(editorThemeSpec['.cm-content ::selection']).toEqual({ background: 'var(--bg-selection)', color: 'var(--text)' });
+  });
+
+  it('테마 확장은 한 번만 만든다 (노트를 열 때마다 새 스타일 모듈이 쌓이지 않게)', async () => {
+    expect(Array.isArray(editorTheme)).toBe(true);
+    const m = mount({ [P]: 'one\n' });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('one\n'));
+    const root = m.view().root as ShadowRoot;
+    const before = shadowCss(root);
+    m.files[P] = 'two\n';
+    await m.emit({ path: P, kind: 'modified' }); // 조용한 다시 읽기: 상태를 새로 만든다
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('two\n'));
+    expect(shadowCss(root)).toBe(before);
   });
 
   it('마운트된 편집기의 스타일이 토큰을 읽고, 기본 구문 강조의 박힌 색은 없다', async () => {
     const m = mount({ [P]: '# 제목\n본문\n' });
     await waitFor(() => expect(m.view().state.doc.toString()).toBe('# 제목\n본문\n'));
-    const root = m.view().root as ShadowRoot;
-    const css = [
-      ...Array.from(root.querySelectorAll('style')).map((s) => s.textContent ?? ''),
-      ...Array.from(root.adoptedStyleSheets ?? []).map((sheet) => Array.from(sheet.cssRules).map((r) => r.cssText).join('\n')),
-    ].join('\n');
+    const css = shadowCss(m.view().root as ShadowRoot);
     expect(css).toContain('var(--text)');
-    expect(css).toContain('var(--bg-selection)');
+    expect(css).toMatch(/::selection[^{]*\{[^}]*var\(--bg-selection\)/); // 네이티브 선택(살아 있는 규칙)이 토큰을 읽는다
     expect(css).toContain('var(--accent)'); // 구문 강조(링크 등)가 토큰에서 온다
-    // 기본 구문 강조(defaultHighlightStyle)의 박힌 색은 없다. 기본 테마의 &light/&dark 색은 위 규칙이 덮는다.
-    expect(css).not.toMatch(/#(?:219|708|164|a11|e40|00f|116|f5d|085|256)/i);
+    // 기본 구문 강조 모듈의 색은 실제 모듈에서 읽는다
+    const baked = new Set<string>();
+    for (const spec of defaultHighlightStyle.specs) if (typeof spec.color === 'string') baked.add(spec.color.toLowerCase());
+    expect(baked.size).toBeGreaterThan(8);
+    for (const c of baked) expect(css.toLowerCase(), c).not.toContain(`color: ${c}`);
+  });
+
+  it('목록 안의 본문은 강조색이 아니고, 목록 기호는 흐린 색이다', async () => {
+    const m = mount({ [P]: '- item text\n- second\n' });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('- item text\n- second\n'));
+    const root = m.view().root as ShadowRoot;
+    const colours = colourByClass(shadowCss(root));
+    const line = root.querySelector('.cm-line') as HTMLElement;
+    const colourOf = (el: Element | null) => {
+      for (let e = el; e && e !== line.parentElement; e = e.parentElement) {
+        for (const cls of Array.from(e.classList)) if (colours.has(cls)) return colours.get(cls);
+      }
+      return undefined;
+    };
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    let textEl: Element | null = null;
+    let markEl: Element | null = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.textContent?.includes('item text')) textEl = n.parentElement;
+      if (n.textContent === '-') markEl = n.parentElement;
+    }
+    expect(textEl).not.toBeNull();
+    expect(markEl).not.toBeNull();
+    expect(colourOf(textEl)).not.toBe('var(--accent)');
+    expect(colourOf(markEl)).toBe('var(--text-muted)');
   });
 });
