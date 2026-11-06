@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { t } from './i18n/t';
 import { VaultPicker } from './vault/VaultPicker';
 import { useVault, type VaultInfo } from './vault/useVault';
+import { useVaultEvents } from './vault/useVaultEvents';
 import { NoteTree } from './tree/NoteTree';
 import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
@@ -9,7 +10,9 @@ import { rebuildIndex } from './search/indexApi';
 import { fetchAppVersion } from './appVersion';
 
 function VaultView({ vault, version }: { vault: VaultInfo; version: string }) {
-  const { entries, failed } = useTree(vault.root);
+  const { entries, failed, reload } = useTree(vault.root);
+  // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
+  useVaultEvents(reload);
   const [selected, setSelected] = useState<string>();
   const [indexing, setIndexing] = useState(true);
   const [skipped, setSkipped] = useState(0);

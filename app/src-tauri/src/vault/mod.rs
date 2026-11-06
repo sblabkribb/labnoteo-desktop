@@ -1,6 +1,7 @@
 pub mod fs;
 pub mod path;
 pub mod tree;
+pub mod watcher;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -118,17 +119,26 @@ pub fn current_at(state: &VaultState, settings: &Path) -> Option<VaultInfo> {
 pub fn vault_open(
     state: tauri::State<'_, VaultState>,
     settings: tauri::State<'_, SettingsFile>,
+    watcher: tauri::State<'_, watcher::WatcherState>,
     path: String,
 ) -> Result<VaultInfo, fs::FsError> {
-    open_at(&state, &settings.0, &path)
+    let info = open_at(&state, &settings.0, &path)?;
+    // The watched vault follows the open one (the same vault again keeps its watcher).
+    watcher.follow(&state.root()?);
+    Ok(info)
 }
 
 #[tauri::command]
 pub fn vault_current(
     state: tauri::State<'_, VaultState>,
     settings: tauri::State<'_, SettingsFile>,
+    watcher: tauri::State<'_, watcher::WatcherState>,
 ) -> Option<VaultInfo> {
-    current_at(&state, &settings.0)
+    let info = current_at(&state, &settings.0)?;
+    if let Ok(root) = state.root() {
+        watcher.follow(&root);
+    }
+    Some(info)
 }
 
 #[cfg(test)]

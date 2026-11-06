@@ -89,7 +89,11 @@ struct Row {
     path: String,
     title: String,
     body: String,
+    /// Modified time and size as they were just before the file was read.
+    stamp: Stamp,
 }
+
+type Stamp = (Option<std::time::SystemTime>, u64);
 
 /// Read one listed note. `None` when it cannot be read as a plain file (gone,
 /// locked, a link swapped in since the walk, too big).
@@ -99,11 +103,12 @@ fn read_row(root: &Path, rel: &str) -> Option<Row> {
     if !meta.is_file() || meta.len() > MAX_NOTE_BYTES {
         return None;
     }
+    let stamp = (meta.modified().ok(), meta.len());
     let bytes = std::fs::read(&abs).ok()?;
     // TODO(NFD): Hangul pasted from macOS can be decomposed; fold to NFC here and in the query
     // so it matches. Needs a normalisation crate; not done yet.
     let body = String::from_utf8_lossy(&bytes).into_owned();
-    Some(Row { key: schema::fold(rel), path: rel.to_string(), title: title_of(rel, &body), body })
+    Some(Row { key: schema::fold(rel), path: rel.to_string(), title: title_of(rel, &body), body, stamp })
 }
 
 fn put(conn: &rusqlite::Connection, row: &Row) -> rusqlite::Result<()> {
@@ -160,12 +165,7 @@ impl Index {
                     row
                 })
                 .collect();
-            let conn = lock(&self.conn);
-            let tx = conn.unchecked_transaction().map_err(db_err)?;
-            for row in &rows {
-                put(&tx, row).map_err(db_err)?;
-            }
-            tx.commit().map_err(db_err)?;
+            self.commit_chunk(&root, &rows)?;
         }
         let conn = lock(&self.conn);
         let tx = conn.unchecked_transaction().map_err(db_err)?;
@@ -179,6 +179,29 @@ impl Index {
         }
         tx.commit().map_err(db_err)?;
         Ok(IndexStats { indexed: seen.len() - skipped, skipped })
+    }
+
+    /// Write one chunk of rows read by `rebuild`, in one transaction.
+    ///
+    /// The chunk was read with no lock held, so a note may have changed since,
+    /// and the watcher's `upsert` may already have stored its newer text. Under
+    /// the connection, each note is stat-ed again and a row whose time or size
+    /// moved since its read is skipped: either `upsert` already wrote the newer
+    /// text, or the change's own event is still on its way and will. (The
+    /// alternative, holding the connection while reading, would make every
+    /// search wait for file reads.) If the stamp is unchanged here, the bytes
+    /// are current, and a later `upsert` needs the connection we hold, so it
+    /// writes after us.
+    fn commit_chunk(&self, root: &Path, rows: &[Row]) -> Result<(), FsError> {
+        let conn = lock(&self.conn);
+        let tx = conn.unchecked_transaction().map_err(db_err)?;
+        for row in rows {
+            let now = std::fs::symlink_metadata(root.join(&row.path)).ok().map(|m| (m.modified().ok(), m.len()));
+            if now == Some(row.stamp) {
+                put(&tx, row).map_err(db_err)?;
+            }
+        }
+        tx.commit().map_err(db_err)
     }
 
     /// Re-read one note and replace its row. What is not part of the vault
@@ -378,6 +401,33 @@ mod tests {
         let mut paths = ix.paths().unwrap();
         paths.sort();
         assert_eq!(paths, ["a/b/three.md", "a/two.labnote.md", "top.md"]);
+    }
+
+    #[test]
+    fn rebuild_does_not_overwrite_an_upsert_that_landed_after_its_read() {
+        let s = Scratch::new();
+        s.note("a.md", "old text");
+        let ix = s.index();
+        let root = s.vault();
+        // What a rebuild read of the note before it commits its chunk...
+        let stale = vec![read_row(&root, "a.md").unwrap()];
+        // ...then the note changes (same length: only the time tells) and the
+        // watcher's upsert lands before the rebuild gets the connection.
+        s.note("a.md", "new text");
+        let f = std::fs::OpenOptions::new().write(true).open(root.join("a.md")).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5)).unwrap();
+        drop(f);
+        ix.upsert(&root, "a.md").unwrap();
+        ix.commit_chunk(&root, &stale).unwrap();
+        assert_eq!(found(&ix, "new"), ["a.md"], "the older bytes must not win");
+        assert!(found(&ix, "old").is_empty());
+        // A chunk read of a note that did not move is written as usual.
+        let fresh = vec![read_row(&root, "a.md").unwrap()];
+        s.note("b.md", "other");
+        let mut rows = fresh;
+        rows.push(read_row(&root, "b.md").unwrap());
+        ix.commit_chunk(&root, &rows).unwrap();
+        assert_eq!(found(&ix, "other"), ["b.md"]);
     }
 
     #[test]

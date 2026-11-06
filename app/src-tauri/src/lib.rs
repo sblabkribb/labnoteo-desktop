@@ -56,6 +56,9 @@ pub fn run() {
                 .app_local_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("kr.sblab.labnoteo"));
             app.manage(index::IndexState::new(data.join("index")));
+            // Watches the open vault for changes made outside the app; started
+            // by `vault_open` / `vault_current`, moved when the vault changes.
+            app.manage(vault::watcher::WatcherState::new(vault::watcher::app_starter(app.handle().clone())));
             Ok(())
         })
         .run(tauri::generate_context!())

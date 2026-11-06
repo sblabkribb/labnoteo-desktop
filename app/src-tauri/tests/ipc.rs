@@ -29,6 +29,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(VaultState::default())
         .manage(SettingsFile(dir.join("config").join("settings.json")))
         .manage(IndexState::new(dir.join("data").join("index")))
+        .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();

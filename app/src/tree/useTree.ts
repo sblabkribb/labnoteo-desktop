@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 /** Rust 의 `TreeEntry` 직렬화 모양(camelCase). `path` 는 vault-relative POSIX 경로다. */
@@ -21,14 +21,20 @@ export function useTree(vaultKey: string, invoke: InvokeFn = tauriInvoke) {
   const [entries, setEntries] = useState<TreeEntry[]>([]);
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
+  // 줄을 비우는 건 다른 보관함으로 바뀔 때뿐이다. `reload()` 는 같은 보관함을 다시 읽을 뿐이라
+  // 파일이 바뀔 때마다 트리가 깜빡이며 비면 안 된다.
+  const shownFor = useRef<string>();
 
   useEffect(() => {
     let live = true;
     // 다른 보관함의 줄을 새 걸음이 끝날 때까지 남겨 두면 존재하지 않는 경로가 선택될 수 있다.
-    setEntries([]);
-    setFailed(false);
+    if (shownFor.current !== vaultKey) {
+      shownFor.current = vaultKey;
+      setEntries([]);
+      setFailed(false);
+    }
     fetchTree(invoke).then(
-      (e) => live && setEntries(e),
+      (e) => live && (setEntries(e), setFailed(false)),
       () => live && (setEntries([]), setFailed(true)),
     );
     return () => {
