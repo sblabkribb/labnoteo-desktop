@@ -13,7 +13,9 @@
 //! refuses non-empty directories.
 //!
 //! `rename` takes the locks of both paths (in a fixed order), and `trash`
-//! takes the lock of the path it sends to the Recycle Bin.
+//! takes the lock of the path it sends to the Recycle Bin. Both act on the
+//! entry itself: a junction or symlink is moved or trashed as the link, never
+//! the folder it points to (`confine_entry`).
 
 use std::collections::HashMap;
 use std::fmt;
@@ -379,56 +381,149 @@ pub fn rmdir(root: &Path, rel: &str) -> Result<(), FsError> {
     }
 }
 
+/// Whether two paths name the same file-system entry: same volume and same file
+/// index, compared without following a final link (a link and its target are two
+/// entries). Hard links of one file are the same entry.
+#[cfg(windows)]
+fn same_entry(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ByHandleFileInformation {
+        attributes: u32,
+        creation: [u32; 2],
+        last_access: [u32; 2],
+        last_write: [u32; 2],
+        volume_serial: u32,
+        size_high: u32,
+        size_low: u32,
+        links: u32,
+        index_high: u32,
+        index_low: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(file: *mut std::ffi::c_void, info: *mut ByHandleFileInformation) -> i32;
+    }
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+    fn id(p: &Path) -> std::io::Result<(u32, u32, u32)> {
+        // Access 0 is enough to query attributes; backup semantics opens folders.
+        let f = std::fs::OpenOptions::new()
+            .access_mode(0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(p)?;
+        let mut info = ByHandleFileInformation::default();
+        // SAFETY: `f` is an open handle for the whole call and `info` is a
+        // properly sized, writable BY_HANDLE_FILE_INFORMATION.
+        if unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok((info.volume_serial, info.index_high, info.index_low))
+    }
+    Ok(id(a)? == id(b)?)
+}
+
+#[cfg(unix)]
+fn same_entry(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let (ma, mb) = (std::fs::symlink_metadata(a)?, std::fs::symlink_metadata(b)?);
+    Ok(ma.dev() == mb.dev() && ma.ino() == mb.ino())
+}
+
+/// Confine for commands that act on an entry itself (`rename`, `trash`): the
+/// parent goes through `confine_write`, the final component is kept literally.
+///
+/// `confine` canonicalizes existing entries, so `confine(rel)` of a junction or
+/// symlink is the folder it points to, and of `A.md` is the on-disk `a.md`.
+/// Moving or trashing must touch the link itself and must see the spelling the
+/// caller asked for (a case-only rename), so the last component is not resolved.
+fn confine_entry(root: &Path, rel: &str) -> Result<PathBuf, FsError> {
+    if rel.starts_with('/') {
+        return Err(VaultError::Escape.into());
+    }
+    let (parent, name) = rel.rsplit_once('/').unwrap_or(("", rel));
+    if matches!(name, "" | "." | "..") || !is_safe_component(name) {
+        return Err(VaultError::Escape.into());
+    }
+    if is_obsidian(rel) {
+        return Err(FsError::Forbidden);
+    }
+    let parent_abs = if parent.is_empty() {
+        std::fs::canonicalize(root).map_err(|e| match e.kind() {
+            ErrorKind::NotFound => FsError::Vault(VaultError::NotFound),
+            _ => FsError::from(e),
+        })?
+    } else {
+        confine_write(root, parent)?
+    };
+    let abs = parent_abs.join(name);
+    if is_obsidian(&to_rel(root, &abs)?) {
+        return Err(FsError::Forbidden);
+    }
+    Ok(abs)
+}
+
+fn lower(p: &Path) -> PathBuf {
+    PathBuf::from(p.to_string_lossy().to_lowercase())
+}
+
 /// Move or rename a file or folder inside the vault.
 ///
-/// The target is resolved as `confine(parent of to)` plus the literal final
-/// component, never `confine(to)`: `confine` canonicalizes an existing target, so
-/// `a.md -> A.md` would resolve back to the old spelling and do nothing. An
-/// existing target that is another entry is `Exists`; the same entry under
-/// another case is a case-only rename and goes ahead.
+/// Both ends are resolved with `confine_entry` (see there): a link is moved as
+/// a link, and `a.md -> A.md` is not folded back to the old spelling. An
+/// existing target is `Exists` unless it is a case-only rename of the very same
+/// entry (same spelling ignoring case *and* same file identity, so the two
+/// distinct files `a.md` / `A.md` of a case-sensitive folder stay apart). A
+/// folder can not move into its own subtree. Missing target parents are created,
+/// and removed again if the move then fails.
 pub fn rename(locks: &PathLocks, root: &Path, from: &str, to: &str) -> Result<(), FsError> {
     locks.with_two(root, from, to, || {
-        let src = confine_write(root, from)?;
+        let src = confine_entry(root, from)?;
         std::fs::symlink_metadata(&src)?;
-        if to.starts_with('/') {
-            return Err(VaultError::Escape.into());
-        }
-        let (parent, name) = to.rsplit_once('/').unwrap_or(("", to));
-        if matches!(name, "" | "." | "..") || !is_safe_component(name) {
-            return Err(VaultError::Escape.into());
-        }
-        if is_obsidian(to) {
-            return Err(FsError::Forbidden);
-        }
-        let dst_parent = if parent.is_empty() {
-            std::fs::canonicalize(root).map_err(|e| match e.kind() {
-                ErrorKind::NotFound => FsError::Vault(VaultError::NotFound),
-                _ => FsError::from(e),
-            })?
-        } else {
-            confine_write(root, parent)?
-        };
-        let dst = dst_parent.join(name);
-        if is_obsidian(&to_rel(root, &dst)?) {
-            return Err(FsError::Forbidden);
+        let dst = confine_entry(root, to)?;
+        let (src_l, dst_l) = (lower(&src), lower(&dst));
+        if dst_l != src_l && dst_l.starts_with(&src_l) {
+            return Err(FsError::Io(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "a folder can not be moved into itself",
+            )));
         }
         match std::fs::symlink_metadata(&dst) {
             Ok(_) => {
-                let same = std::fs::canonicalize(&dst)
-                    .is_ok_and(|d| d.to_string_lossy().to_lowercase() == src.to_string_lossy().to_lowercase());
-                if !same {
+                if dst_l != src_l || !same_entry(&src, &dst)? {
                     return Err(FsError::Exists);
                 }
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        std::fs::create_dir_all(&dst_parent)?;
-        Ok(std::fs::rename(&src, &dst)?)
+        let dst_parent = dst.parent().ok_or(VaultError::Escape)?;
+        let mut created = Vec::new();
+        let mut dir = dst_parent;
+        while std::fs::symlink_metadata(dir).is_err() {
+            created.push(dir.to_path_buf());
+            dir = match dir.parent() {
+                Some(d) => d,
+                None => break,
+            };
+        }
+        let result = std::fs::create_dir_all(dst_parent).and_then(|()| std::fs::rename(&src, &dst));
+        if result.is_err() {
+            // Deepest first; `remove_dir` only ever removes an empty folder.
+            for d in &created {
+                let _ = std::fs::remove_dir(d);
+            }
+        }
+        Ok(result?)
     })
 }
 
-/// Send a file or folder to the Windows Recycle Bin. A missing path is Ok.
+/// Send a file or folder to the Windows Recycle Bin. A missing path is Ok. A
+/// link is sent as the link, never the folder it points to (`confine_entry`).
 pub fn trash(locks: &PathLocks, root: &Path, rel: &str) -> Result<(), FsError> {
     trash_with(locks, root, rel, |p| trash::delete(p))
 }
@@ -443,7 +538,7 @@ pub fn trash_with(
     deleter: impl FnOnce(&Path) -> Result<(), trash::Error>,
 ) -> Result<(), FsError> {
     locks.with(root, rel, || {
-        let abs = confine_write(root, rel)?;
+        let abs = confine_entry(root, rel)?;
         match std::fs::symlink_metadata(&abs) {
             Ok(_) => {}
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
@@ -926,42 +1021,145 @@ mod tests {
     }
 
     #[test]
-    fn crossing_renames_do_not_deadlock() {
+    fn rename_refuses_moving_a_folder_into_itself_and_leaves_no_parents() {
         let t = Tmp::new();
         let l = PathLocks::default();
-        mkdir(&t.0, "a-dir").unwrap();
-        mkdir(&t.0, "b-dir").unwrap();
+        write(&l, &t.0, "d/f.md", "x").unwrap();
+        for bad in ["d/new/x", "D/new/x", "d/x"] {
+            assert_eq!(kind_of(rename(&l, &t.0, "d", bad).unwrap_err()), "io", "{bad}");
+        }
+        assert!(!t.0.join("d/new").exists(), "no empty parent left behind");
+        assert_eq!(read(&l, &t.0, "d/f.md").unwrap(), "x");
+        // a sibling whose name only starts with the folder's name is not inside it
+        rename(&l, &t.0, "d", "d2").unwrap();
+        assert_eq!(read(&l, &t.0, "d2/f.md").unwrap(), "x");
+    }
+
+    #[test]
+    fn a_failed_rename_removes_the_parents_it_created() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        write(&l, &t.0, "a.md", "x").unwrap();
+        mkdir(&t.0, "keep").unwrap();
+        // Open without FILE_SHARE_DELETE so the move is refused by Windows.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(t.0.join("a.md")).unwrap();
+        assert!(rename(&l, &t.0, "a.md", "keep/new/deep/b.md").is_err());
+        drop(held);
+        assert!(t.0.join("keep").is_dir(), "a parent that existed before stays");
+        assert!(!t.0.join("keep/new").exists(), "created parents are removed again");
+        assert_eq!(read(&l, &t.0, "a.md").unwrap(), "x");
+    }
+
+    #[test]
+    fn same_entry_compares_file_identity_not_names() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        write(&l, &t.0, "a.md", "a").unwrap();
+        write(&l, &t.0, "b.md", "b").unwrap();
+        std::fs::hard_link(t.0.join("a.md"), t.0.join("link.md")).unwrap();
+        assert!(same_entry(&t.0.join("a.md"), &t.0.join("A.MD")).unwrap());
+        assert!(same_entry(&t.0.join("a.md"), &t.0.join("link.md")).unwrap());
+        assert!(!same_entry(&t.0.join("a.md"), &t.0.join("b.md")).unwrap());
+        mkdir(&t.0, "d").unwrap();
+        assert!(same_entry(&t.0.join("d"), &t.0.join("D")).unwrap());
+        assert!(!same_entry(&t.0.join("d"), &t.0.join("a.md")).unwrap());
+    }
+
+    /// A per-directory case-sensitive folder (`fsutil file setCaseSensitiveInfo`,
+    /// as WSL creates) can hold `a.md` and `A.md` as two files: renaming one onto
+    /// the other is not a case-only rename and must not replace it.
+    #[test]
+    fn rename_never_replaces_a_distinct_file_in_a_case_sensitive_folder() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        mkdir(&t.0, "cs").unwrap();
+        let ok = std::process::Command::new("fsutil")
+            .args(["file", "setCaseSensitiveInfo"])
+            .arg(t.0.join("cs"))
+            .arg("enable")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !ok {
+            eprintln!("skipped: per-directory case sensitivity is not available here");
+            return;
+        }
+        std::fs::write(t.0.join("cs/a.md"), "lower").unwrap();
+        std::fs::write(t.0.join("cs/A.md"), "upper").unwrap();
+        if std::fs::read_to_string(t.0.join("cs/a.md")).unwrap() != "lower" {
+            eprintln!("skipped: the folder did not become case-sensitive");
+            return;
+        }
+        assert!(matches!(rename(&l, &t.0, "cs/a.md", "cs/A.md"), Err(FsError::Exists)));
+        assert_eq!(std::fs::read_to_string(t.0.join("cs/a.md")).unwrap(), "lower");
+        assert_eq!(std::fs::read_to_string(t.0.join("cs/A.md")).unwrap(), "upper");
+    }
+
+    fn junction(link: &Path, target: &Path) {
+        let out = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("failed to run cmd");
+        assert!(out.status.success(), "mklink /J failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// `rename` and `trash` act on a link itself, never on the folder it points to.
+    #[test]
+    fn rename_and_trash_act_on_a_junction_not_its_target() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        write(&l, &t.0, "real/f.md", "x").unwrap();
+        junction(&t.0.join("alias"), &t.0.join("real"));
+        rename(&l, &t.0, "alias", "moved").unwrap();
+        assert!(t.0.join("real/f.md").is_file(), "the target folder stays put");
+        assert!(std::fs::symlink_metadata(t.0.join("moved")).unwrap().file_type().is_symlink());
+        let mut seen = Vec::new();
+        trash_with(&l, &t.0, "moved", |p| {
+            seen.push(p.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].ends_with("moved"), "{:?}", seen[0]);
+        std::fs::remove_dir(t.0.join("moved")).unwrap();
+        assert_eq!(read(&l, &t.0, "real/f.md").unwrap(), "x");
+    }
+
+    /// Two threads take the same two keys in opposite orders (`a -> b` while
+    /// `b -> a`): without the sorted acquisition in `with_two` this is the
+    /// classic lock-order inversion and hangs. The renames themselves mostly
+    /// fail (`exists` / `notFound`), but the locks are taken before any
+    /// filesystem check, so every call still exercises the ordering.
+    #[test]
+    fn crossing_renames_do_not_deadlock() {
+        let t = Tmp::new();
+        let l = Arc::new(PathLocks::default());
+        write(&l, &t.0, "a", "x").unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let root = t.0.clone();
-        let l = Arc::new(l);
         let l2 = l.clone();
         std::thread::spawn(move || {
             std::thread::scope(|s| {
                 let (l, root) = (&l2, &root);
                 s.spawn(move || {
-                    for _ in 0..200 {
-                        let _ = rename(l, root, "a", "b-dir/a");
-                        let _ = rename(l, root, "b-dir/a", "a");
+                    for _ in 0..2_000 {
+                        let _ = rename(l, root, "a", "b");
+                        let _ = rename(l, root, "b", "a");
                     }
                 });
                 s.spawn(move || {
-                    for _ in 0..200 {
-                        let _ = rename(l, root, "b", "a-dir/b");
-                        let _ = rename(l, root, "a-dir/b", "b");
-                    }
-                });
-                s.spawn(move || {
-                    for _ in 0..200 {
-                        let _ = rename(l, root, "b-dir/a", "a-dir/b");
-                        let _ = rename(l, root, "a-dir/b", "b-dir/a");
+                    for _ in 0..2_000 {
+                        let _ = rename(l, root, "b", "a");
+                        let _ = rename(l, root, "a", "b");
                     }
                 });
             });
             tx.send(()).unwrap();
         });
-        write(&l, &t.0, "a", "x").unwrap();
-        write(&l, &t.0, "b", "y").unwrap();
         rx.recv_timeout(std::time::Duration::from_secs(60)).expect("crossing renames deadlocked");
+        assert_eq!(l.len(), 0, "lock map is pruned once idle");
     }
 
     #[test]
