@@ -3,9 +3,8 @@ import type { TreeNode } from '@labnoteo/core';
 import { treeKeyAction, type KeyRow } from '../../../vendor/labnoteo/src/views/treeKeys';
 import type { MenuAnchor } from '../ui/menuStore';
 import { iconClass } from './treeIcons';
+import { depthAttrs } from '../../tree/depth';
 
-/** app.css 가 들여쓰기를 정해 둔 가장 깊은 단계. */
-const MAX_DEPTH = 24;
 
 interface Row extends KeyRow {
   node: TreeNode;
@@ -106,32 +105,36 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
 
   return (
     <ul role="tree" aria-label={label} className={className}>
-      {rows.map((row, i) => (
-        <li
-          key={row.key}
-          ref={(el) => {
-            if (el) refs.current.set(row.key, el);
-            else refs.current.delete(row.key);
-          }}
-          role="treeitem"
-          aria-level={row.depth + 1}
-          aria-expanded={row.hasChildren ? row.expanded : undefined}
-          aria-current={isCurrent?.(row.node) ? 'true' : undefined}
-          data-depth={Math.min(row.depth, MAX_DEPTH)}
-          tabIndex={row.key === tabStop ? 0 : -1}
-          title={row.node.tooltip}
-          className={row.node.dimmed ? 'wf-tree-row dimmed' : 'wf-tree-row'}
-          onClick={() => activate(row)}
-          onKeyDown={(e) => onKeyDown(e, i)}
-          onContextMenu={(e) => onContextMenu(e, row)}
-          onFocus={(e) => {
-            if (e.target === e.currentTarget) setFocusKey(row.key);
-          }}
-        >
-          <span className={`tree-icon ${iconClass(row.node.icon)}`} aria-hidden="true" />
-          <span className="wf-tree-label">{row.node.label}</span>
-        </li>
-      ))}
+      {rows.map((row, i) => {
+        const { className: deep, ...depth } = depthAttrs(row.depth);
+        const rowClass = ['wf-tree-row', row.node.dimmed ? 'dimmed' : '', deep ?? ''].filter(Boolean).join(' ');
+        return (
+          <li
+            key={row.key}
+            ref={(el) => {
+              if (el) refs.current.set(row.key, el);
+              else refs.current.delete(row.key);
+            }}
+            role="treeitem"
+            aria-level={row.depth + 1}
+            aria-expanded={row.hasChildren ? row.expanded : undefined}
+            aria-current={isCurrent?.(row.node) ? 'true' : undefined}
+            {...depth}
+            tabIndex={row.key === tabStop ? 0 : -1}
+            title={row.node.tooltip}
+            className={rowClass}
+            onClick={() => activate(row)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+            onContextMenu={(e) => onContextMenu(e, row)}
+            onFocus={(e) => {
+              if (e.target === e.currentTarget) setFocusKey(row.key);
+            }}
+          >
+            <span className={`tree-icon ${iconClass(row.node.icon)}`} aria-hidden="true" />
+            <span className="wf-tree-label">{row.node.label}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

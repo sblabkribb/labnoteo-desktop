@@ -176,6 +176,10 @@ export const editorThemeSpec = {
   '@media (forced-colors: active)': {
     '.lno-table .lno-cell-active': { outline: '2px solid Highlight', outlineOffset: '-2px' },
   },
+  // 인쇄: 표 도구 막대는 화면 조작용이라 종이에 남기지 않는다(앱 틀은 app.css 의 @media print 가 숨긴다)
+  '@media print': {
+    '.lno-table-toolbar': { display: 'none' },
+  },
 };
 
 /**

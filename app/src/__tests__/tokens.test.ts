@@ -87,6 +87,12 @@ const SYSTEM = new Set(SYSTEM_COLOURS);
  */
 function rawColoursOutside(source: string, opts: { allowSystemIn?: string } = {}): string[] {
   const blocks = [SEL.light, SEL.dark, SEL.media, SEL.root].map((sel) => block(sel, source));
+  // 인쇄 블록의 토큰 정의(라이트 값을 다시 적는다)도 토큰 블록이다. 그 블록의 나머지 규칙은 여전히 검사한다.
+  const print = source.indexOf('@media print {');
+  if (print >= 0) {
+    const tokens = block(':root[data-theme], :root:not([data-theme])', source.slice(print));
+    blocks.push({ ...tokens, start: print + tokens.start, end: print + tokens.end });
+  }
   const forced = opts.allowSystemIn ? forcedColourBlocks(source).filter((b) => b.text.slice(0, b.text.indexOf('{')).includes(opts.allowSystemIn!)) : [];
   let outside = source;
   for (const b of [...blocks, ...forced].sort((a, b) => b.start - a.start)) outside = outside.slice(0, b.start) + outside.slice(b.end);
@@ -271,8 +277,16 @@ describe('디자인 토큰', () => {
     expect(rule![1]).toMatch(/outline:\s*2px solid var\(--accent\)/);
   });
 
-  it('트리 들여쓰기는 --indent 토큰으로 계산한다', () => {
-    for (let d = 1; d <= 24; d++) expect(css).toContain(`[data-depth="${d}"] { padding-left: calc(var(--indent) * ${d}); }`);
-    expect(css).not.toContain('[data-depth="25"]');
+  it('print forces the light colour tokens over every dark block', () => {
+    const printRules = parseRules(css).filter((r) => r.atRule === '@media print' && r.selectors.some((sel) => sel.startsWith(':root')));
+    expect(printRules).toHaveLength(1);
+    const p = printRules[0];
+    // 두 다크 블록(:root:not([data-theme="light"]), :root[data-theme="dark"])은 특이도 (0,2,0): 뒤에 오는 같은 특이도가 이긴다
+    expect(p.selectors).toEqual([':root[data-theme]', ':root:not([data-theme])']);
+    expect(p.order).toBeGreaterThan(Math.max(...parseRules(css).filter((r) => r.selectors.includes(SEL.dark) || r.selectors.includes(SEL.darkSystem)).map((r) => r.order)));
+    const values = Object.fromEntries(declarations(p.body).map((d) => [d.prop, d.value]));
+    const colourTokens = Object.keys(root).filter((k) => literalColours(root[k]).length > 0);
+    for (const k of colourTokens) expect(values[k], k).toBe(themes.light[k]);
+    expect(values['color-scheme']).toBe('light');
   });
 });

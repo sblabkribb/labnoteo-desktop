@@ -35,6 +35,21 @@ describe('노트 트리', () => {
     expect(container.querySelector('[style]')).toBeNull();
   });
 
+  it('rows deeper than INDENT_CAP carry .deep and data-depth is clamped to MAX_DEPTH', () => {
+    const deep: TreeEntry[] = Array.from({ length: 30 }, (_, d) => ({
+      path: Array.from({ length: d + 1 }, (_, i) => `d${i}`).join('/'),
+      name: `d${d}`,
+      isDir: d < 29,
+      depth: d,
+    }));
+    render(<NoteTree entries={deep} onSelect={() => {}} />);
+    const row = (name: string) => screen.getByText(name).closest('li') as HTMLElement;
+    expect(row('d8').classList.contains('deep')).toBe(false);
+    expect(row('d9').classList.contains('deep')).toBe(true);
+    expect(row('d9').classList.contains('wf-tree-row')).toBe(true);
+    expect(row('d29').getAttribute('data-depth')).toBe('24');
+  });
+
   it('노트를 고르면 onSelect 에 vault-relative 경로를 넘긴다', async () => {
     const user = userEvent.setup();
     const picked: string[] = [];

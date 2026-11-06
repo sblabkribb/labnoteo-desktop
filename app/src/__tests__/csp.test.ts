@@ -51,10 +51,6 @@ describe('인라인 스타일', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('트리 깊이마다 app.css 에 들여쓰기 규칙이 있다', () => {
-    const css = readFileSync('src/app.css', 'utf-8');
-    for (let d = 1; d <= 24; d++) expect(css).toContain(`[data-depth="${d}"] { padding-left: calc(var(--indent) * ${d}); }`);
-  });
 });
 
 // script-src 'self' 는 같은 출처의 파일은 허용하고 인라인 스크립트는 막는다. 개발 서버의 CSP 는 느슨해서 인라인을 써도 개발 중에는 보이지 않는다.

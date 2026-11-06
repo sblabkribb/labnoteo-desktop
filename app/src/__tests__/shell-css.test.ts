@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 
 import { declarations, parseRules } from './css';
+import { INDENT_CAP, MAX_DEPTH } from '../tree/depth';
+import { editorThemeSpec } from '../editor/theme';
 
 const css = readFileSync('src/app.css', 'utf-8');
 
@@ -20,12 +22,32 @@ function ruleFor(selector: string): { selectors: string[]; body: string; decls: 
 }
 
 describe('앱 셸 CSS 계약', () => {
-  it('깊은 트리: 8단계보다 깊은 줄은 사이드바 안에서 8단계 들여쓰기로 고정된다', () => {
-    const cap = ruleFor('.note-tree [role="treeitem"][data-depth="24"]');
-    expect(cap).not.toBeNull();
-    expect(cap!.body).toMatch(/padding-left:\s*calc\(var\(--indent\) \* 8\)/);
-    for (let d = 9; d <= 24; d++) expect(cap!.selectors, `depth ${d}`).toContain(`.note-tree [role="treeitem"][data-depth="${d}"]`);
-    for (let d = 1; d <= 8; d++) expect(cap!.selectors, `depth ${d}`).not.toContain(`.note-tree [role="treeitem"][data-depth="${d}"]`);
+  // 따옴표가 든 정규식은 String.raw 로 쓴다(escapes.test.ts 가 정규식 리터럴 안의 따옴표를 문자열의 시작으로 읽는다)
+  const DEEP_DEPTH_RULE = new RegExp(String.raw`\.(sidebar|note-tree) .*data-depth="(9|1\d|2\d)"`);
+  it('one depth rule per level up to MAX_DEPTH and a single deep cap', () => {
+    for (let d = 1; d <= MAX_DEPTH; d++) expect(ruleFor(`[data-depth="${d}"]`)?.decls['padding-left'], `depth ${d}`).toBe(`calc(var(--indent) * ${d})`);
+    expect(ruleFor(`[data-depth="${MAX_DEPTH + 1}"]`)).toBeNull();
+    expect(parseRules(css).filter((r) => r.selectors.some((sel) => DEEP_DEPTH_RULE.test(sel)))).toEqual([]);
+    expect(ruleFor('.sidebar .deep')!.decls['padding-left']).toBe(`calc(var(--indent) * ${INDENT_CAP})`);
+  });
+
+  it('print hides chrome', () => {
+    const p = parseRules(css).filter((r) => r.atRule === '@media print').flatMap((r) => r.selectors).join(',');
+    for (const s of ['.topbar', '.sidebar', '.statusbar', '.notices', '.toaster', '.dialog-layer', '.context-menu', '.editor-path button']) expect(p).toContain(s);
+  });
+
+  it('print drops the full-window grid and the content scroller', () => {
+    const inPrint = (sel: string) => {
+      const r = parseRules(css).find((x) => x.atRule === '@media print' && x.selectors.includes(sel));
+      return r ? Object.fromEntries(declarations(r.body).map((d) => [d.prop, d.value])) : null;
+    };
+    expect(inPrint('.shell')).toMatchObject({ display: 'block', height: 'auto' });
+    expect(inPrint('.content')).toMatchObject({ overflow: 'visible' });
+  });
+
+  it('print hides the table toolbar inside the editor shadow root', () => {
+    const print = editorThemeSpec['@media print'] as Record<string, Record<string, string>>;
+    expect(print['.lno-table-toolbar']?.display).toBe('none');
   });
 
   it('긴 노트 이름은 사이드바를 밀지 않고 말줄임된다', () => {

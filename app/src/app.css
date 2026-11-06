@@ -183,7 +183,7 @@ input, select, textarea {
   padding: 0;
 }
 
-/* 트리 들여쓰기: data-depth 한 단계 = --indent (MAX_DEPTH 보다 깊은 줄은 같은 들여쓰기) */
+/* 트리 들여쓰기: data-depth 한 단계 = --indent. 1..MAX_DEPTH(src/tree/depth.ts)마다 하나씩, 더 깊은 줄은 depthAttrs 가 MAX_DEPTH 로 고정한다 */
 [data-depth="1"] { padding-left: calc(var(--indent) * 1); }
 [data-depth="2"] { padding-left: calc(var(--indent) * 2); }
 [data-depth="3"] { padding-left: calc(var(--indent) * 3); }
@@ -347,26 +347,9 @@ input, select, textarea {
 /* 줄 전체(들여쓰기 포함)가 하나의 대상이다: 포커스 링이 사이드바 가장자리에서 잘리지 않게 안으로 그린다 */
 .note-tree [role="treeitem"]:focus-visible { outline-offset: -2px; }
 
-/* 깊은 트리는 8단계까지만 들여쓴다. 그보다 깊은 줄은 같은 들여쓰기로 이어지고, 이름이 들여쓰기에 밀려 안 보이지 않는다.
-   (data-depth 규칙 자체는 24단계까지 두고, 노트 트리 안에서만 상한을 둔다.) */
-.note-tree [role="treeitem"][data-depth="9"],
-.note-tree [role="treeitem"][data-depth="10"],
-.note-tree [role="treeitem"][data-depth="11"],
-.note-tree [role="treeitem"][data-depth="12"],
-.note-tree [role="treeitem"][data-depth="13"],
-.note-tree [role="treeitem"][data-depth="14"],
-.note-tree [role="treeitem"][data-depth="15"],
-.note-tree [role="treeitem"][data-depth="16"],
-.note-tree [role="treeitem"][data-depth="17"],
-.note-tree [role="treeitem"][data-depth="18"],
-.note-tree [role="treeitem"][data-depth="19"],
-.note-tree [role="treeitem"][data-depth="20"],
-.note-tree [role="treeitem"][data-depth="21"],
-.note-tree [role="treeitem"][data-depth="22"],
-.note-tree [role="treeitem"][data-depth="23"],
-.note-tree [role="treeitem"][data-depth="24"] {
-  padding-left: calc(var(--indent) * 8);
-}
+/* 깊은 트리는 사이드바 안에서 8단계(INDENT_CAP, src/tree/depth.ts)까지만 들여쓴다. 그보다 깊은 줄은 depthAttrs 가 .deep 을 달아
+   같은 들여쓰기로 이어지고, 이름이 들여쓰기에 밀려 안 보이지 않는다. (data-depth 규칙 자체는 MAX_DEPTH=24 단계까지 둔다.) */
+.sidebar .deep { padding-left: calc(var(--indent) * 8); }
 
 /* 지금 열린 노트: 색이 아니라 모양으로도 알린다 — 왼쪽 끝 3px 강조 막대.
    배경 색조(--bg-selected)는 배경과 1.56:1 이라 상태 표시로는 모자라고, 막대가 3:1 을 채운다.
@@ -651,4 +634,42 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
   [aria-selected="true"] { outline: 2px solid CanvasText; outline-offset: -2px; }
   :focus-visible { outline: 2px solid Highlight; }
   .editor-frame:focus-within { outline: 2px solid Highlight; }
+}
+
+/* 인쇄: 노트 본문만 종이에 남긴다. 창 틀(상단 바·사이드바·상태줄·알림·대화상자·메뉴)을 숨기고, 창 높이 격자와 본문의 스크롤을 풀어
+   긴 노트가 여러 쪽으로 이어지게 한다. 화면이 다크여도 종이에는 라이트 값으로 찍는다.
+   토큰 블록은 두 다크 블록과 같은 특이도 (0,2,0) 이고 파일에서 더 뒤에 있어 이긴다. 값은 :root 의 라이트 값과 같다(tokens.test.ts).
+   편집기 그림자 루트 안의 표 도구 막대는 editorThemeSpec 의 '@media print' 키가 숨긴다. */
+@media print {
+  :root[data-theme], :root:not([data-theme]) {
+    --bg: #ffffff;
+    --bg-elevated: #f4f4f5;
+    --bg-hover: #ebebed;
+    --bg-selected: #c9ccf6;
+    --bg-selection: #b0b5f2;
+    --border: #d9d9de;
+    --border-strong: #8a8a94;
+    --text: #1f1f23;
+    --text-muted: #52525c;
+    --accent: #4338ca;
+    --accent-text: #ffffff;
+    --danger: #a31d15;
+    --warning: #8a5a00;
+    --success: #1f7a3a;
+    --shadow: rgba(0, 0, 0, 0.16);
+    --scrim: rgba(255, 255, 255, 0.6);
+    color-scheme: light;
+  }
+  .topbar,
+  .sidebar,
+  .statusbar,
+  .notices,
+  .toaster,
+  .dialog-layer,
+  .context-menu,
+  .editor-path button { display: none; }
+  .shell { display: block; height: auto; min-height: 0; }
+  .content { overflow: visible; padding: 0; }
+  .editor-frame { border: none; }
+  .editor-frame:focus-within { outline: none; }
 }
