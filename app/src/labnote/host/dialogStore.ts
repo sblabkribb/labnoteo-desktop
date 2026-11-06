@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react';
 import type { PickItem, PromptOpts } from '@labnoteo/core';
+import type { AliasOpts } from './AliasDialog';
 
 /**
- * 앱 LabnoteHost 의 대화상자(고르기, 여러 개 고르기, 입력, 확인) 저장소.
+ * 앱 LabnoteHost 의 대화상자(고르기, 여러 개 고르기, 입력, 별칭, 확인) 저장소.
  *
  * React 밖의 작은 저장소이고, DialogLayer 가 useSyncExternalStore 로 읽는다. 한 번에 하나만 보이고 나머지는 연 순서대로 기다린다
  * (명령이 확인을 묻는 사이 다른 명령이 고르기를 열어도 두 창이 겹치지 않는다). 각 대화상자는 정확히 한 번 끝난다.
@@ -14,6 +15,7 @@ export type DialogSpec =
   | { kind: 'pick'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string; selected?: unknown }
   | { kind: 'pickMany'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string }
   | { kind: 'prompt'; opts: PromptOpts }
+  | { kind: 'alias'; opts: AliasOpts }
   | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean };
 
 export interface DialogEntry {
@@ -131,6 +133,11 @@ export function pickManyDialog<T>(items: readonly PickItem<T>[], opts: { title?:
 
 export function promptDialog(opts: PromptOpts): Promise<string | undefined> {
   return openDialog<string | undefined>({ kind: 'prompt', opts }, undefined);
+}
+
+/** 별칭 입력(AppHost.alias). '' = 빈 채로 냈다, undefined = 닫았다. */
+export function aliasDialog(opts: AliasOpts): Promise<string | undefined> {
+  return openDialog<string | undefined>({ kind: 'alias', opts }, undefined);
 }
 
 export function confirmDialog(

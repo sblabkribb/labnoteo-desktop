@@ -1,0 +1,40 @@
+import type { EditTarget, LabnoteHost } from '@labnoteo/core';
+import type { AppFs } from '../../fs/tauriLabnoteFs';
+import { coreT } from '../i18n';
+import type { AliasOpts } from './AliasDialog';
+import { aliasDialog, confirmDialog, pickDialog, pickManyDialog, promptDialog } from './dialogStore';
+import { notify } from './toastStore';
+
+export type { AliasOpts } from './AliasDialog';
+
+/** 앱의 LabnoteHost: 코어 호스트에 이름 바꾸기·휴지통이 있는 fs 와 별칭 대화상자를 더한다. */
+export interface AppHost extends LabnoteHost {
+  readonly fs: AppFs;
+  /** '' = 빈 채로 냈다, undefined = 닫았다. */
+  alias(opts: AliasOpts): Promise<string | undefined>;
+}
+
+/**
+ * 앱 호스트를 만든다. 대화상자는 dialogStore(한 번에 하나, 연 순서대로), 알림은 toastStore 로 간다.
+ * 번역은 coreT 라서 부를 때마다 지금 언어를 따른다.
+ */
+export function createAppHost(deps: {
+  /** VaultView 는 Task 6 의 편집기를 아는 fs 를 넘긴다. */
+  fs: AppFs;
+  /** 열린 노트가 없거나 편집기가 바쁘면 undefined. */
+  editTarget: () => EditTarget | undefined;
+  openFile: (path: string, at?: { line: number; ch?: number }) => Promise<void>;
+}): AppHost {
+  return {
+    fs: deps.fs,
+    pick: (items, opts) => pickDialog(items, opts),
+    pickMany: (items, opts) => pickManyDialog(items, opts),
+    prompt: (opts) => promptDialog(opts),
+    confirm: (message, opts) => confirmDialog(message, opts),
+    alias: (opts) => aliasDialog(opts),
+    notify: (kind, message) => notify(kind, message),
+    editTarget: () => deps.editTarget(),
+    openFile: (path, at) => deps.openFile(path, at),
+    t: coreT,
+  };
+}

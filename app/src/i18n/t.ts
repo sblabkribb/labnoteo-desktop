@@ -105,6 +105,9 @@ const ko: Record<string, string> = {
   'picker.label': '검색',
   'picker.list': '항목',
   'prompt.label': '입력',
+  'alias.prefixLabel': '{0} 뒤에 붙일 이름',
+  'toast.region': '알림',
+  'toast.close': '알림 닫기',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -212,6 +215,9 @@ const en: Record<string, string> = {
   'picker.label': 'Search',
   'picker.list': 'Items',
   'prompt.label': 'Input',
+  'alias.prefixLabel': 'Name after {0}',
+  'toast.region': 'Notifications',
+  'toast.close': 'Dismiss notification',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
