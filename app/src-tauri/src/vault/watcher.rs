@@ -30,8 +30,9 @@ const QUIET: Duration = Duration::from_millis(200);
 /// busy the folder stays (an endless stream of writes must not hold back the
 /// tree and the index forever).
 const MAX_WAIT: Duration = Duration::from_millis(1000);
-/// A flush naming more paths than this is reported as one `Rescan` instead of
-/// one change per path. A git pull or a sync of thousands of files would
+/// A flush with more vault changes than this (counted after paths that are not
+/// part of the vault, such as `.git/` and non-notes, are dropped) is reported as
+/// one `Rescan` instead of one change per path. A git pull or a sync of thousands of files would
 /// otherwise cost a `stat`, a note read, an emit and a window refresh each,
 /// with every search waiting behind them; one rebuild (chunked, so searches
 /// still get in) does the same job. 500 is well above what a person produces by
@@ -184,7 +185,7 @@ fn is_link(p: &Path) -> bool {
 }
 
 fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnMut(Vec<Delta>)) {
-    if pending.rescan || pending.paths.len() > RESCAN_ABOVE {
+    if pending.rescan {
         sink(vec![Delta::Rescan]);
         return;
     }
@@ -196,7 +197,11 @@ fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnM
         }
         out.extend(classify(root, &abs, appeared, &mut links).map(Delta::Change));
     }
-    if !out.is_empty() {
+    // Counted after `classify`: thousands of writes under `.git/` (a git pull)
+    // or `node_modules/` are not changes to the vault and must cost nothing.
+    if out.len() > RESCAN_ABOVE {
+        sink(vec![Delta::Rescan]);
+    } else if !out.is_empty() {
         sink(out);
     }
 }
@@ -603,20 +608,47 @@ mod tests {
     }
 
     #[test]
-    fn a_big_burst_becomes_one_rescan_and_a_small_one_stays_one_batch() {
+    fn a_big_burst_of_real_notes_becomes_one_rescan_and_a_small_one_stays_one_batch() {
         let s = Scratch::new();
-        for i in 0..3 {
-            s.write(&format!("n{i}.md"), "x");
-        }
-        let small: Vec<_> = (0..3).map(|i| file_event(&s.0.join(format!("n{i}.md")))).collect();
-        let got = flushes(&s.0, small);
+        let notes = |n: usize| -> Vec<notify::Result<Event>> {
+            (0..n)
+                .map(|i| {
+                    s.write(&format!("m{i}.md"), "x");
+                    file_event(&s.0.join(format!("m{i}.md")))
+                })
+                .collect()
+        };
+        let got = flushes(&s.0, notes(3));
         assert_eq!(got.len(), 1, "one flush, one sink call: {got:?}");
         assert_eq!(got[0].len(), 3);
-        // RESCAN_ABOVE paths is still a batch; one more is a rescan.
-        let at = |n: usize| (0..n).map(|i| file_event(&s.0.join(format!("m{i}.md")))).collect::<Vec<_>>();
-        let got = flushes(&s.0, at(RESCAN_ABOVE));
+        // RESCAN_ABOVE notes is still a batch (all of them existing, so all real changes); one more is a rescan.
+        let got = flushes(&s.0, notes(RESCAN_ABOVE));
         assert_eq!(got.iter().map(Vec::len).collect::<Vec<_>>(), [RESCAN_ABOVE]);
-        assert_eq!(flushes(&s.0, at(RESCAN_ABOVE + 1)), [[Delta::Rescan]]);
+        assert!(got[0].iter().all(|d| matches!(d, Delta::Change(c) if c.kind == Kind::Modified)));
+        assert_eq!(flushes(&s.0, notes(RESCAN_ABOVE + 1)), [[Delta::Rescan]]);
+    }
+
+    #[test]
+    fn a_git_pull_inside_the_vault_costs_nothing() {
+        let s = Scratch::new();
+        // Thousands of writes under `.git/`, `node_modules/` and non-notes: none is
+        // part of the vault, so no change, no rescan, no sink call at all.
+        let mut events = Vec::new();
+        for i in 0..RESCAN_ABOVE * 3 {
+            let rel = match i % 3 {
+                0 => format!(".git/objects/{i}"),
+                1 => format!("node_modules/p/{i}.md"),
+                _ => format!("data/{i}.csv"),
+            };
+            s.write(&rel, "x");
+            events.push(file_event(&s.0.join(rel)));
+        }
+        assert_eq!(flushes(&s.0, events), Vec::<Vec<Delta>>::new());
+        // And a few real notes among that noise are still reported, only they.
+        s.write("real.md", "x");
+        s.write(".git/HEAD", "x");
+        let got = flushes(&s.0, vec![file_event(&s.0.join(".git/HEAD")), file_event(&s.0.join("real.md"))]);
+        assert_eq!(got, [[change("real.md", Kind::Modified)]]);
     }
 
     #[test]

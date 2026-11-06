@@ -33,6 +33,12 @@ pub struct Index {
     /// what is stored and are not committed. Always locked while `conn` is held
     /// (in that order), so marking and writing are one step to a rebuild.
     touched: Mutex<std::collections::HashSet<String>>,
+    /// Keys written or removed by `upsert` / `remove` / `apply` since the running
+    /// rebuild began (`None` when none runs). Unlike `touched` it is not cleared
+    /// per chunk: the rebuild's final sweep must not delete a note that was
+    /// created after the walk listed the vault and stored by a watcher flush.
+    /// Same lock order as `touched`: `conn` first.
+    written_in_rebuild: Mutex<Option<std::collections::HashSet<String>>>,
 }
 
 fn db_err(e: rusqlite::Error) -> FsError {
@@ -164,7 +170,7 @@ fn delete_tree(conn: &rusqlite::Connection, rel: &str) -> rusqlite::Result<()> {
 impl Index {
     pub fn open(db: &Path) -> Result<Index, FsError> {
         let conn = schema::open(db).map_err(db_err)?;
-        Ok(Index { conn: Mutex::new(conn), rebuilding: Mutex::new(()), touched: Mutex::default() })
+        Ok(Index { conn: Mutex::new(conn), rebuilding: Mutex::new(()), touched: Mutex::default(), written_in_rebuild: Mutex::default() })
     }
 
     /// Bring the index in line with the vault from scratch: every listed note is
@@ -179,7 +185,21 @@ impl Index {
     /// note that cannot be read keeps its previous row and is only counted in
     /// `skipped`; only notes the walk no longer lists are dropped.
     pub fn rebuild(&self, root: &Path) -> Result<IndexStats, FsError> {
+        self.rebuild_with(root, &mut || {})
+    }
+
+    /// `rebuild`, calling `mid` once after the notes are written and before the
+    /// sweep of vanished notes (tests use it to change the vault at that point).
+    fn rebuild_with(&self, root: &Path, mid: &mut dyn FnMut()) -> Result<IndexStats, FsError> {
         let _one_at_a_time = lock(&self.rebuilding);
+        *lock(&self.written_in_rebuild) = Some(Default::default());
+        let result = self.rebuild_locked(root, mid);
+        // Also on an error: nothing may keep collecting keys once no rebuild runs.
+        *lock(&self.written_in_rebuild) = None;
+        result
+    }
+
+    fn rebuild_locked(&self, root: &Path, mid: &mut dyn FnMut()) -> Result<IndexStats, FsError> {
         let root = std::fs::canonicalize(root).map_err(FsError::Io)?;
         let files: Vec<String> = crate::vault::tree::walk(&root)?
             .into_iter()
@@ -207,14 +227,18 @@ impl Index {
             overtaken.extend(self.commit_chunk(&rows)?);
         }
         self.retry_overtaken(&root, &overtaken)?;
+        mid();
         let conn = lock(&self.conn);
+        // Taken under the connection, so no flush is half-way between its write
+        // and its mark: a note written since the rebuild began is not stale.
+        let written = lock(&self.written_in_rebuild).take().unwrap_or_default();
         let tx = conn.unchecked_transaction().map_err(db_err)?;
         let stale: Vec<String> = {
             let mut stmt = tx.prepare("SELECT key FROM notes").map_err(db_err)?;
             let keys = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(db_err)?;
             keys.collect::<Result<Vec<_>, _>>().map_err(db_err)?
         };
-        for key in stale.iter().filter(|k| !seen.contains(*k)) {
+        for key in stale.iter().filter(|k| !seen.contains(*k) && !written.contains(*k)) {
             tx.execute("DELETE FROM notes WHERE key = ?1", [key]).map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
@@ -299,19 +323,24 @@ impl Index {
     fn store(&self, items: Vec<(String, Prepared)>) -> Result<(), FsError> {
         let conn = lock(&self.conn);
         let mut touched = lock(&self.touched);
+        let mut written = lock(&self.written_in_rebuild);
         let tx = conn.unchecked_transaction().map_err(db_err)?;
         for (rel, p) in &items {
-            match p {
+            let key = match p {
                 Prepared::Put(row) => {
                     put(&tx, row).map_err(db_err)?;
-                    touched.insert(row.key.clone());
+                    row.key.clone()
                 }
                 Prepared::Drop => {
                     delete_tree(&tx, rel).map_err(db_err)?;
-                    touched.insert(schema::fold(rel));
+                    schema::fold(rel)
                 }
-                Prepared::Ignore => {}
+                Prepared::Ignore => continue,
+            };
+            if let Some(w) = written.as_mut() {
+                w.insert(key.clone());
             }
+            touched.insert(key);
         }
         tx.commit().map_err(db_err)
     }
@@ -535,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn a_skipped_note_that_has_no_row_is_read_again_at_the_end_of_the_rebuild() {
+    fn retry_overtaken_writes_a_skipped_note_that_has_no_row() {
         let s = Scratch::new();
         s.note("b.md", "created during the walk");
         let ix = s.index();
@@ -550,6 +579,32 @@ mod tests {
         assert!(found(&ix, "walk").is_empty());
         ix.retry_overtaken(&root, &skipped).unwrap();
         assert_eq!(found(&ix, "walk"), ["b.md"]);
+    }
+
+    #[test]
+    fn a_note_that_appears_during_a_rebuild_is_still_searchable_afterwards() {
+        let s = Scratch::new();
+        s.note("early.md", "listed by the walk");
+        let ix = s.index();
+        let root = s.vault();
+        // The note is created after the walk listed the vault; the watcher's
+        // flush (`apply`) stores its row; then the rebuild reaches its sweep of
+        // notes the walk did not list.
+        let stats = ix
+            .rebuild_with(&root, &mut || {
+                s.note("late.md", "appeared mid rebuild");
+                ix.apply(&root, &[("late.md".to_string(), false)]).unwrap();
+            })
+            .unwrap();
+        assert_eq!(stats.indexed, 1);
+        assert_eq!(found(&ix, "mid rebuild"), ["late.md"], "the sweep deleted a note written after the walk");
+        assert_eq!(found(&ix, "walk"), ["early.md"]);
+        // A note that vanished after the walk, with nobody writing it, is still swept.
+        s.note("old.md", "was here");
+        ix.upsert(&root, "old.md").unwrap();
+        std::fs::remove_file(root.join("old.md")).unwrap();
+        ix.rebuild(&root).unwrap();
+        assert!(found(&ix, "here").is_empty());
     }
 
     #[test]
