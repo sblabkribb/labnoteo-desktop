@@ -11,6 +11,8 @@ import { editorTheme } from './theme';
 import { labnoteMarkdown } from './markdownSyntax';
 import { tableExtension } from './table/field';
 import { INSERT_TABLE_KEY, insertTable } from './table/commands';
+import { cellOuterKeys } from './table/cellEditor';
+import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
@@ -97,6 +99,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const lock = useRef(new Compartment());
   /** 편집 영역의 이름표(aria-label). 언어를 바꾸면 이 칸만 갈아 끼운다: 뷰와 본문, 되돌리기 기록은 그대로다. */
   const label = useRef(new Compartment());
+  /**
+   * 라이브 미리보기 칸. 그리는 확장(지금은 표 격자)이 모두 여기 들어 있고, 소스 보기에서는 비어 있다(live/mode.ts).
+   * 모드는 상태 밖의 저장소에 산다: adopt 가 상태를 새로 만들 때 modeRef 에서 다시 읽는다.
+   */
+  const mode = useRef(new Compartment());
+  const modeRef = useRef<EditorMode>(getMode());
+  const [modeState, setModeState] = useState<EditorMode>(modeRef.current);
+  /** 라이브 미리보기의 확장. 그림자 루트와 저장 함수가 필요해 마운트 effect 가 채운다. */
+  const liveExtensions = useRef<() => Extension>(() => []);
   const lang = useLang();
   const docRef = useRef<LoadedDocument>();
   /** 마지막으로 저장했거나 읽은 에디터 본문. 이것과 같으면 깨끗하다 (되돌리기로 돌아와도). */
@@ -331,6 +342,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     // 그림자 루트 안에 만든다: CodeMirror 의 스타일이 <style> 태그 대신 adoptedStyleSheets 로 들어가, CSP 에 'unsafe-inline' 을 열지 않아도 된다.
     // (개발 모드의 StrictMode 는 effect 를 두 번 돌린다: 이미 붙인 루트는 다시 붙일 수 없으니 재사용한다.)
     const shadow = host.current!.shadowRoot ?? host.current!.attachShadow({ mode: 'open' });
+    // 표는 격자로 그리고 칸 안에서 고친다. 칸의 입력은 이 문서로 곧바로 들어오므로 저장·자동 저장·되돌리기는 그대로다.
+    // 소스 보기에서는 표도 원문 그대로다(Obsidian 의 소스 모드처럼): 이상한 파일을 고치는 안전한 길이다.
+    liveExtensions.current = () => [tableExtension({ save: () => void api.current.save(), root: shadow })];
     // 상태(확장 포함)는 노트를 채울 때마다 새로 만든다: 되돌리기 기록이 읽기 이전으로 거슬러 가지 못하게.
     extensions.current = (doc) => [
       // 줄 구분자는 파일에서 온 그대로: 섞인 파일에서도 손대지 않은 줄의 바이트가 바뀌지 않는다.
@@ -350,12 +364,25 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           // 키는 여기서 처리된 것으로 끝난다(브라우저 기본 동작이나 다른 keymap 으로 넘어가지 않는다).
           // 칸에 포커스가 있을 때는 셀 편집기가 같은 키를 듣고, 잠긴 칸에서도 똑같이 먹는다(commands.ts 의 cellOuterKeys).
           { key: INSERT_TABLE_KEY, preventDefault: true, run: (v) => insertTable(v) },
+          // 라이브 미리보기 ↔ 소스 보기. 저장소를 바꾸면 띄워 둔 편집기마다(이 편집기 포함) 아래 구독이 모드 칸을 갈아 끼운다.
+          { key: TOGGLE_MODE_KEY, preventDefault: true, run: () => (toggleMode(), true) },
         ]),
       ),
+      // 칸에 포커스가 있어도 듣는다. 모드를 바꾸면 표 확장이 빠지면서 셀 편집기가 부서지므로, 셀 편집기의 keydown 처리
+      // 안에서 바꾸지 않고 그 처리가 끝난 뒤(마이크로태스크)에 바꾸고 바깥 편집기에 초점을 돌려준다.
+      cellOuterKeys.of({
+        key: TOGGLE_MODE_KEY,
+        run: (outer) => {
+          queueMicrotask(() => {
+            toggleMode();
+            outer.focus();
+          });
+          return true;
+        },
+      }),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
-      // 표는 격자로 그리고 칸 안에서 고친다. 칸의 입력은 이 문서로 곧바로 들어오므로 저장·자동 저장·되돌리기는 그대로다.
-      tableExtension({ save: () => void api.current.save(), root: shadow }),
+      mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
       editorTheme,
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.
       highlightSpecialChars(),
@@ -393,6 +420,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     });
     viewRef.current = view;
     alive.current = true;
+    // 모드가 바뀌면(이 편집기의 Ctrl+E, 다른 편집기, 명령) 모드 칸만 갈아 끼운다: 본문과 되돌리기 기록은 그대로다.
+    const unsubscribeMode = subscribeMode((m) => {
+      modeRef.current = m;
+      setModeState(m);
+      view.dispatch({ effects: mode.current.reconfigure(m === 'live' ? liveExtensions.current() : []) });
+    });
     const unregister = registerOpenNote(path, handle);
     loadDocument(path, invoke).then(
       (doc) => {
@@ -409,6 +442,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       live = false;
       alive.current = false;
       unregister();
+      unsubscribeMode();
       clearTimers();
       // 노트를 닫는데 저장 안 된 편집이 있으면 마지막으로 한 번 저장해 본다(충돌이면 쓰지 않는다).
       if (!externalRef.current && api.current.isDirty()) void api.current.save();
@@ -493,10 +527,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const editLocked = status !== 'ready' || dialogOpen;
   // 명령 단추는 바깥 변경이 풀리지 않은 동안에도 쉰다("그대로 두기" 뒤 포함): 명령은 그 노트를 고치지 않는다(NoteBusyError)
   const commandsBusy = editLocked || external !== null;
+  const liveMode = modeState === 'live';
   return (
     <section aria-label={t('editor.label')}>
       <p className="editor-path">
-        {path} {(external || dirty) && <span role="status">{external ? t('editor.conflicted') : t('editor.dirty')}</span>}{' '}
+        {path}{' '}
+        <span className="editor-mode" role="status">
+          {t(liveMode ? 'editor.mode.live' : 'editor.mode.source')}
+        </span>{' '}
+        {(external || dirty) && <span role="status">{external ? t('editor.conflicted') : t('editor.dirty')}</span>}{' '}
         <button
           type="button"
           className="secondary"

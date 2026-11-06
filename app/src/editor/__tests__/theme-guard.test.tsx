@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { render, waitFor } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { Editor } from '../Editor';
+import { setMode, type EditorMode } from '../live/mode';
 import { compareSpecificity, declarations, literalColours, parseRules, specificity, SYSTEM_COLOURS, type Rule } from '../../__tests__/css';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
@@ -152,9 +153,9 @@ function codemirrorImports(dir = 'src'): Set<string> {
 // 끝 공백, 탭, 섞인 줄바꿈: 공백 강조나 끝 공백 확장이 설치돼 있다면 그 요소가 그려질 본문
 const SAMPLE = '# 제목  \n\t- [링크](https://x) 본문 \r\n';
 
-/** mode 는 받아 두기만 한다: 편집기 모드(live/source)가 생기면(Task 9) 그 모드로 띄운다. */
-async function mountShipped(text = SAMPLE, mode?: 'live' | 'source') {
-  void mode;
+/** 앱이 싣는 확장으로 편집기를 그 모드(live/source)로 띄운다. */
+async function mountShipped(text = SAMPLE, mode: EditorMode = 'live') {
+  setMode(mode);
   const invoke = (async () => text) as never;
   const listen = (async () => () => {}) as never;
   const windowApi = { onCloseRequested: async () => () => {}, destroy: async () => {} };
@@ -180,9 +181,31 @@ function darkClass(): string {
 
 const report = (fs: Finding[]) => fs.map((f) => `${f.selector} { ${f.prop}: ${f.value} }`);
 
+// Node 의 자체 localStorage 가 jsdom 의 것을 가리므로 메모리 저장소를 꽂는다(useTheme.test.ts 와 같다).
+function memoryStorage(): Storage {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k) => m.get(k) ?? null,
+    setItem: (k, v) => void m.set(k, String(v)),
+    removeItem: (k) => void m.delete(k),
+    clear: () => m.clear(),
+    key: (i) => [...m.keys()][i] ?? null,
+    get length() {
+      return m.size;
+    },
+  };
+}
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', memoryStorage());
+  localStorage.clear();
+  setMode('live');
+});
+afterEach(() => vi.unstubAllGlobals());
+
 describe('편집기 그림자 루트의 날것의 색', () => {
-  it('앱이 싣는 확장으로 띄운 편집기에서, 박힌 색은 모두 토큰으로 덮였거나 다크 전용이거나 아직 그려지지 않는 요소의 것이다', async () => {
-    const { shadow, view } = await mountShipped();
+  it.each(['live', 'source'] as const)('no LEAK in %s mode: 박힌 색은 모두 토큰으로 덮였거나 다크 전용이거나 아직 그려지지 않는 요소의 것이다', async (m) => {
+    const { shadow, view } = await mountShipped(SAMPLE, m);
     const css = shadowCss(shadow);
     const rootClasses = Array.from(view.dom.classList).filter((c) => /^ͼ/.test(c));
     const dark = darkClass();
@@ -209,7 +232,7 @@ describe('편집기 그림자 루트의 날것의 색', () => {
     for (const name of [...new Set(Object.values(DORMANT).map((d) => d.extension)), ...BUNDLES, 'codemirror'])
       expect(imported.has(name), `${name} 을 설치하면 DORMANT 의 해당 항목을 지우고 theme.ts 에서 토큰으로 덮어야 한다`).toBe(false);
     // 요소 탐침: 본문이 있는 노트(공백·탭·끝 공백)와 빈 노트(placeholder 는 빈 본문에서만 그려진다) 둘 다에서 찾는다.
-    const shadows = [(await mountShipped()).shadow, (await mountShipped('')).shadow];
+    const shadows = [(await mountShipped()).shadow, (await mountShipped('')).shadow, (await mountShipped(SAMPLE, 'source')).shadow];
     for (const [sel, { probe }] of Object.entries(DORMANT)) {
       if (probe === null) continue; // 헛도는 탐침: 가져오기 검사만 이 항목을 지킨다
       for (const shadow of shadows) expect(shadow.querySelector(probe), `${sel}: ${probe}`).toBeNull();
