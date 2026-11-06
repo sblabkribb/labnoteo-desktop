@@ -123,6 +123,48 @@ describe('셀 편집기: 띄우기', () => {
     expect(focusCell(m.view, 99, 0, 0)).toBe(false);
   });
 
+  it('초점이 대화상자 층이나 맥락 메뉴로 가면 셀 편집기는 남고, 거기서 다른 곳으로 가면 걷힌다', () => {
+    const m = mount(`${T}\n`);
+    focusCell(m.view, 0, 1, 1, 'end');
+    const nv = nested(m.view);
+    expect(document.activeElement).toBe(nv.contentDOM);
+    // 커서만 옮긴 셀 편집기 트랜잭션: 바깥 선택도 칸 안의 같은 자리로 간다
+    nv.dispatch({ selection: { anchor: 0 } });
+    expect(m.view.state.selection.main.head).toBe(T.lastIndexOf('2'));
+
+    for (const cls of ['dialog-layer', 'context-menu']) {
+      const layer = document.createElement('div');
+      layer.className = cls;
+      const button = document.createElement('button');
+      layer.appendChild(button);
+      document.body.appendChild(layer);
+      button.focus();
+      expect(activeCellView(m.view)).toBe(nv);
+      // 층이 닫히며 초점을 칸에 돌려준다: 같은 셀 편집기
+      nv.focus();
+      expect(activeCellView(m.view)).toBe(nv);
+      layer.remove();
+    }
+
+    // 층에서 초점이 칸이 아닌 곳(바깥 편집기)으로 가면 걷는다
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    const item = document.createElement('button');
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+    item.focus();
+    expect(activeCellView(m.view)).toBe(nv);
+    m.view.contentDOM.focus();
+    expect(activeCellView(m.view)).toBeNull();
+
+    // 보통의 컨트롤로 가면 곧바로 걷힌다(전과 같다)
+    focusCell(m.view, 0, 1, 0, 'end');
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    expect(activeCellView(m.view)).toBeNull();
+  });
+
   it('끝 백슬래시를 지키는 escape 공백은 셀 편집기에 보이지 않는다', () => {
     const m = mount('| p |\n| --- |\n| C:\\  |\n');
     focusCell(m.view, 0, 1, 0);

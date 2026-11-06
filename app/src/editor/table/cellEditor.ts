@@ -53,6 +53,11 @@ const fromOuter = Annotation.define<boolean>();
 export const setActiveCell = StateEffect.define<ActiveCell | null>();
 
 const LOCKED = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+/**
+ * 잠깐 초점을 가져갔다가 돌려주는 앱의 층: 대화상자 층(labnote/host/DialogLayer.tsx 의 .dialog-layer)과
+ * 맥락 메뉴(labnote/ui/ContextMenu.tsx 의 .context-menu). 그리로 초점이 가도 셀 편집기를 걷지 않는다.
+ */
+const TRANSIENT_LAYERS = '.dialog-layer, .context-menu';
 const isLocked = (state: EditorState) => state.readOnly || !state.facet(EditorView.editable);
 /** 빈 줄: 공백뿐인 줄도 빈 줄로 본다(GFM 도 그렇게 읽는다). */
 const isBlank = (text: string) => text.trim() === '';
@@ -268,15 +273,40 @@ class Session implements CellHandle {
         v.update(trs);
         const local = trs.filter((tr) => tr.docChanged && !tr.annotation(fromOuter));
         if (local.length) this.forward(local[local.length - 1].annotation(Transaction.userEvent), local[0].startState.doc.toString());
+        else if (trs.some((tr) => tr.selection && !tr.annotation(fromOuter))) this.followCaret();
       },
     });
     outers.set(this.nested, outer);
     // 바깥 편집기나 다른 컨트롤로 포커스가 옮겨 가면 걷는다. 창 밖으로 나간 것(relatedTarget 없음)은 그대로 둔다.
+    // 대화상자(팔레트, 고르기)나 맥락 메뉴로 간 것도 그대로 둔다: 닫히면 초점이 이 칸으로 돌아오고, 그 사이 명령(날짜 넣기)은
+    // 이 셀 편집기의 커서에 쓴다. 그 층들은 그림자 루트 밖(문서)에 있어서 relatedTarget 이 그 요소 자체이고 closest 가 닿는다.
     this.nested.contentDOM.addEventListener('focusout', (e) => {
       const to = e.relatedTarget as Node | null;
       if (this.dead || !to || this.td.contains(to)) return;
+      if (to instanceof Element && to.closest(TRANSIENT_LAYERS)) return this.awaitReturn();
       this.close();
     });
+  }
+
+  private awaiting = false;
+
+  /**
+   * 초점이 대화상자나 메뉴에 가 있는 동안: 다음에 초점이 그 층도 이 칸도 아닌 곳(바깥 편집기를 누른 것 등)에 닿으면 걷는다.
+   * 칸으로 돌아오면 그만 본다. 그림자 루트 안의 초점은 문서에서 그 호스트로 보이므로 composedPath 의 첫 요소를 본다.
+   */
+  private awaitReturn(): void {
+    if (this.awaiting) return;
+    this.awaiting = true;
+    const doc = this.td.ownerDocument;
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.composedPath()[0];
+      if (!this.dead && target instanceof Element && target.closest(TRANSIENT_LAYERS)) return;
+      doc.removeEventListener('focusin', onFocusIn, true);
+      this.awaiting = false;
+      if (this.dead || (target instanceof Node && this.td.contains(target))) return;
+      this.close();
+    };
+    doc.addEventListener('focusin', onFocusIn, true);
   }
 
   private get cell(): ActiveCell | null {
@@ -316,6 +346,23 @@ class Session implements CellHandle {
       selection: { anchor: start + offset },
       annotations,
     });
+  }
+
+  /**
+   * 셀 편집기에서 선택만 바뀌었다(화살표, 클릭): 바깥 선택을 칸 안의 같은 자리로 옮긴다. 그래야 바깥 커서를 읽는 것
+   * (셀 편집기가 걷힌 뒤의 명령, 되돌리기 자리)이 칸 안의 커서를 본다. 문서는 바꾸지 않는다.
+   */
+  private followCaret(): void {
+    const ac = this.cell;
+    const found = ac && tableAt(this.outer.state, ac.tableFrom);
+    const cell = found && rows(found.m)[ac.r]?.cells[ac.c];
+    if (!ac || !found || !cell) return;
+    const raw = this.nested.state.doc.toString();
+    const len = cell.contentTo - cell.contentFrom;
+    const offset = Math.max(0, Math.min(this.nested.state.selection.main.head - leadingBlank(raw), len));
+    const anchor = found.span.from + cell.contentFrom + offset;
+    if (this.outer.state.selection.main.empty && this.outer.state.selection.main.head === anchor) return;
+    this.outer.dispatch({ selection: { anchor } });
   }
 
   // ---------------------------------------------------------------- 바깥에서

@@ -12,11 +12,12 @@ import { copyFrontMatterKeys, setFrontMatterKeys } from '@labnoteo/core';
 import { createLabnoteStructure, retryOfLink, setRetryOf } from '@labnoteo/core/lib/labnoteStructure';
 import { createWorkflowFileName, insertWorkflowChecklistEntries } from '@labnoteo/core/lib/workflowStructure';
 import { App } from '../../App';
+import { activeCellView, focusCell } from '../../editor/table/cellEditor';
 import { installFakeVault, type FakeVault } from '../../__tests__/fakeVault';
 import { setLang } from '../../i18n/lang';
 import { readmeStamp } from '../commands/stamp';
 import { clearCommandsForTest } from '../commands/registry';
-import { closeAllDialogs, currentDialog, settleDialog, type DialogEntry, type DialogSpec } from '../host/dialogStore';
+import { closeAllDialogs, currentDialog, deepActiveElement, settleDialog, type DialogEntry, type DialogSpec } from '../host/dialogStore';
 import { clearToasts, subscribeToasts, currentToasts, type Toast } from '../host/toastStore';
 import { coreT, paletteName } from '../i18n';
 import { fromPluginData } from '../settings';
@@ -299,4 +300,42 @@ describe('하루의 흐름(앱 전체)', () => {
     },
     60_000,
   );
+
+  it('Ctrl+P "Insert date" in a table cell puts the date at the cell caret and returns focus to the live cell', async () => {
+    const user = userEvent.setup();
+    const NOTE = 'notes/표.labnote.md';
+    const TABLE = '| 시료 | 부피 |\n| --- | --- |\n| A | 1234 |\n';
+    vault = installFakeVault({ [NOTE]: `# 표\n\n${TABLE}` });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await user.click(await screen.findByRole('button', { name: /^표/ }));
+    await editorReady(NOTE, '| A | 1234 |');
+
+    // 칸(A 행의 부피)에 들어가 커서를 "12|34" 로 옮긴다(선택만 바뀌는 셀 편집기 트랜잭션)
+    const outer = currentView();
+    const tableFrom = outer.state.doc.toString().indexOf('| 시료');
+    act(() => void focusCell(outer, tableFrom, 1, 1, 'end'));
+    const cell = activeCellView(outer)!;
+    expect(cell.state.doc.toString()).toBe('1234');
+    act(() => cell.dispatch({ selection: { anchor: 2 } }));
+    // (b) 바깥 선택도 칸 안의 같은 자리를 따라간다
+    expect(outer.state.selection.main.head).toBe(outer.state.doc.toString().indexOf('1234') + 2);
+    expect(deepActiveElement()).toBe(cell.contentDOM);
+
+    // 팔레트가 열리면 초점은 고르기 입력으로 간다. 셀 편집기는 걷히지 않아야 한다
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'p', code: 'KeyP', ctrlKey: true });
+    });
+    await waitFor(() => expect(document.activeElement?.closest('.dialog-layer')).toBeTruthy());
+    expect(activeCellView(outer)).toBe(cell);
+    await answer('pick', itemStarting(paletteName('Insert date')));
+
+    await waitFor(() => expect(outer.state.doc.toString()).toMatch(/\| A \| 12\d{4}-\d{2}-\d{2}34 \|/));
+    expect(activeCellView(outer)).toBe(cell);
+    expect(cell.state.doc.toString()).toMatch(/^12\d{4}-\d{2}-\d{2}34$/);
+    await waitFor(() => expect(deepActiveElement()).toBe(cell.contentDOM));
+    // 돌아온 초점은 걷히지 않은 그 셀 편집기에 있고, 이어 친 글자는 날짜 뒤에 들어간다
+    expect(activeCellView(outer)).toBe(cell);
+    expect(cell.state.selection.main.head).toBe('12'.length + 10);
+  });
 });
