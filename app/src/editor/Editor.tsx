@@ -104,26 +104,29 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       setExternalState(e);
     };
     const adopt = (doc: LoadedDocument) => {
-      docRef.current = doc;
-      baseline.current = doc.text;
-      // 새 상태를 통째로 올린다: 되돌리기 기록이 비어서 시작하므로, 불러오기 이전의 본문(빈 본문 포함)으로
-      // 되돌릴 수 없다. 되돌리기가 그 본문을 디스크에 저장해 버리는 일이 없다.
       const view = viewRef.current;
       if (view) {
-        // 조용한 다시 읽기는 보이지 않아야 한다: 커서와 스크롤 위치를 새 본문 길이 안에서 그대로 둔다.
+        // 새 상태를 통째로 올린다: 되돌리기 기록이 비어서 시작하므로, 불러오기 이전의 본문(빈 본문 포함)으로
+        // 되돌릴 수 없다. 되돌리기가 그 본문을 디스크에 저장해 버리는 일이 없다.
+        // 조용한 다시 읽기는 보이지 않아야 한다: 커서와 스크롤 위치를 새 본문 안에서 그대로 둔다.
+        // 길이는 만들어진 상태의 doc.length 로 잰다 — 섞인 CRLF 노트는 doc.text.length 보다 짧다(CRLF 가 한 칸).
         const { anchor, head } = view.state.selection.main;
         const top = view.scrollDOM.scrollTop;
-        const len = doc.text.length;
-        view.setState(
-          EditorState.create({
-            doc: doc.text,
-            selection: { anchor: Math.min(anchor, len), head: Math.min(head, len) },
-            extensions: extensions.current(doc),
-          }),
-        );
+        const extensionsFor = extensions.current(doc);
+        const len = EditorState.create({ doc: doc.text, extensions: extensionsFor }).doc.length;
+        const next = EditorState.create({
+          doc: doc.text,
+          selection: { anchor: Math.min(anchor, len), head: Math.min(head, len) },
+          extensions: extensionsFor,
+        });
+        view.setState(next); // 여기서 던져도 아래의 기준 본문은 아직 바뀌지 않았다
         view.scrollDOM.scrollTop = top;
         requestAnimationFrame(() => (view.scrollDOM.scrollTop = top));
       }
+      // 뷰가 새 본문을 보여 준 뒤에만 기준을 옮긴다: 뷰와 기준이 어긋나면 낡은 버퍼가 저장될 수 있다.
+      docRef.current = doc;
+      baseline.current = doc.text;
+      saveFailures.current = 0; // 다시 읽기는 새 출발이다
       setCloseAsk(false);
       setExternal(null);
       setDialogOpen(false);
@@ -284,7 +287,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       lock.current.of(locked.current ? LOCKED : []),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
-        setDirty(api.current.isDirty());
+        const dirty = api.current.isDirty();
+        setDirty(dirty);
+        if (!dirty) setCloseAsk(false); // 되돌려서 깨끗해졌다: 저장 안 된 편집 때문에 던진 질문은 거둔다
         api.current.scheduleAutosave();
       }),
     ];

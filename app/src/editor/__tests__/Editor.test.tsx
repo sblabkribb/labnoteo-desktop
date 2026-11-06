@@ -435,6 +435,49 @@ describe('편집기', () => {
     expect(m.view().state.selection.main.head).toBe(3); // 길이 안으로 맞춘다
   });
 
+  it('섞인 CRLF 노트로 조용히 다시 읽어도, 커서가 새 상태 길이를 넘는 자리에 있어도 낡은 버퍼를 저장하지 않는다', async () => {
+    const m = mount({ [P]: 'abcdefghijklmnopqrstuvwxyz\n' }, 40);
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('abcdefghijklmnopqrstuvwxyz\n'));
+    await act(async () => m.view().dispatch({ selection: { anchor: 17 } }));
+    // 새 본문: CRLF 줄 6개 + LF 줄 1개. 글자 수는 20 이지만 CodeMirror 상태에서는 CRLF 가 한 칸이라 14 다.
+    // 커서 17 은 14 보다 크고 20 보다 작다: 글자 수로 자르면 RangeError 다.
+    const theirs = 'a\r\nb\r\nc\r\nd\r\ne\r\nf\r\nh\n';
+    expect(theirs.length).toBe(20);
+    m.files[P] = theirs;
+    await m.emit({ path: P, kind: 'modified' });
+    await waitFor(() => expect(m.view().state.sliceDoc()).toBe(theirs));
+    expect(m.view().state.doc.length).toBe(14);
+    expect(m.view().state.selection.main.head).toBeLessThanOrEqual(14);
+    await new Promise((r) => setTimeout(r, 200)); // 자동 저장 시간이 지나도
+    expect(m.files[P]).toBe(theirs); // 밖에서 들어온 내용 그대로다
+    expect(m.writes()).toBe(0);
+    expect(dirtyMark()).toBeNull();
+  });
+
+  it('되돌려서 깨끗해지면 닫기 질문도 거둔다', async () => {
+    const w = (() => {
+      let handler: (e: { preventDefault(): void }) => void | Promise<void> = () => {};
+      const api: WindowApi = {
+        onCloseRequested: async (h) => {
+          handler = h;
+          return () => {};
+        },
+        destroy: async () => {},
+      };
+      return { api, close: () => act(async () => void (await handler({ preventDefault: () => {} }))) };
+    })();
+    const m = mount({ [P]: 'mine\n' }, 60_000, { windowApi: w.api });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+    await m.type('!');
+    m.files[P] = 'theirs\n';
+    await w.close();
+    expect(await screen.findByText(/저장하지 못해 창을 닫지 않았습니다/)).toBeTruthy();
+    await act(async () => {
+      m.view().dispatch({ changes: { from: 0, to: m.view().state.doc.length, insert: 'mine\n' } }); // 읽을 때의 본문으로 되돌렸다
+    });
+    expect(screen.queryByText(/저장하지 못해 창을 닫지 않았습니다/)).toBeNull();
+  });
+
   it('줄바꿈이 섞인 노트의 소수 쪽 줄 끝은 눈에 보이는 기호로 나온다', async () => {
     const m = mount({ [P]: 'a\r\nb\nc\r\n' });
     await waitFor(() => expect(m.view().state.sliceDoc()).toBe('a\r\nb\nc\r\n'));
