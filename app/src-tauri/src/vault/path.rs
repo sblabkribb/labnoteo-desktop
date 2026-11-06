@@ -121,23 +121,27 @@ pub fn to_rel(root: &Path, abs: &Path) -> Result<String, VaultError> {
         std::io::ErrorKind::NotFound => VaultError::NotFound,
         _ => VaultError::Io(e),
     })?;
-    let root_s = strip_verbatim(&canon_root);
     let abs_s = strip_verbatim(abs);
-    let root_parts: Vec<&str> = root_s.split(|c| c == '\\' || c == '/').filter(|p| !p.is_empty()).collect();
     let abs_parts: Vec<&str> = abs_s.split(|c| c == '\\' || c == '/').filter(|p| !p.is_empty()).collect();
-    if abs_parts.len() < root_parts.len()
-        || !root_parts
-            .iter()
-            .zip(&abs_parts)
-            .all(|(r, a)| r.to_lowercase() == a.to_lowercase())
-    {
-        return Err(VaultError::Escape);
+    // The same folder has two spellings: canonical (long names) and the one the caller gave, which
+    // may hold 8.3 short names such as `RUNNER~1`. A path under either is under the vault.
+    for root_s in [strip_verbatim(&canon_root), strip_verbatim(root)] {
+        let root_parts: Vec<&str> = root_s.split(|c| c == '\\' || c == '/').filter(|p| !p.is_empty()).collect();
+        if abs_parts.len() < root_parts.len()
+            || !root_parts
+                .iter()
+                .zip(&abs_parts)
+                .all(|(r, a)| r.to_lowercase() == a.to_lowercase())
+        {
+            continue;
+        }
+        let rest = &abs_parts[root_parts.len()..];
+        if rest.iter().any(|p| *p == "." || *p == "..") {
+            return Err(VaultError::Escape);
+        }
+        return Ok(rest.join("/"));
     }
-    let rest = &abs_parts[root_parts.len()..];
-    if rest.iter().any(|p| *p == "." || *p == "..") {
-        return Err(VaultError::Escape);
-    }
-    Ok(rest.join("/"))
+    Err(VaultError::Escape)
 }
 
 #[cfg(test)]
@@ -416,6 +420,29 @@ mod tests {
         let canon = fs::canonicalize(&root).unwrap();
         assert_eq!(to_rel(&root, &canon).unwrap(), "");
         assert_eq!(to_rel(&root, &root).unwrap(), "");
+    }
+
+    #[test]
+    fn to_rel_accepts_the_short_8dot3_spelling_of_the_root() {
+        let s = Scratch::new();
+        let long = s.vault().join("a long folder name");
+        fs::create_dir_all(long.join("sub")).unwrap();
+        use std::os::windows::process::CommandExt;
+        // cmd.exe does not follow the quoting Command::args uses, so pass the line verbatim.
+        let out = Command::new("cmd")
+            .raw_arg(format!("/c for %I in (\"{}\") do @echo %~sI", long.display()))
+            .output()
+            .unwrap();
+        let short = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string());
+        if short.as_os_str().is_empty() || short == long || !short.exists() {
+            eprintln!("8.3 names are off on this volume; nothing to check");
+            return;
+        }
+        // Root given in short form, event path in long form, and the other way round.
+        assert_eq!(to_rel(&short, &long.join("sub").join("n.md")).unwrap(), "sub/n.md");
+        assert_eq!(to_rel(&short, &short.join("sub").join("n.md")).unwrap(), "sub/n.md");
+        assert_eq!(to_rel(&long, &long.join("n.md")).unwrap(), "n.md");
+        assert!(matches!(to_rel(&short, &s.vault().join("other.md")), Err(VaultError::Escape)));
     }
 
     #[test]
