@@ -8,6 +8,7 @@ import { t } from '../../i18n/t';
 import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
 import { isImageTarget, resolveImagePath, splitAltSize } from './imagePath';
 import { ImageWidget, imageLoader } from './imageWidget';
+import { linkResolution, linkStateOf } from './linkResolution';
 
 /**
  * 라이브 미리보기의 인라인 플러그인(계획 D4). 보이는 범위(visibleRanges)만 훑어 다음을 단다:
@@ -30,6 +31,10 @@ import { ImageWidget, imageLoader } from './imageWidget';
  * - 이미지(`![alt](경로)`, `![[x.png|200]]`): 대상이 이미지 파일(isImageTarget)이면 ImageWidget. 커서 줄이 아니면 원문을
  *   위젯으로 바꾸고, 커서 줄이면 원문을 두고 그 뒤(side 1)에 위젯을 단다. 이미지가 아닌 `![[노트]]` 는 위키링크처럼 그린다.
  *
+ * - 링크 풀이(linkResolution.ts): 대상이 없는 위키링크·임베드는 lno-wikilink lno-unresolved(누르면 만든다는 제목),
+ *   없는 노트로 가는 마크다운 링크는 lno-link lno-unresolved. 풀이가 아직 없으면(색인 준비 전) 아무것도 흐리게 그리지 않는다.
+ * - 맨 주소(GFM 의 맨 URL, `<https://…>` 자동 링크)는 lno-link 표시를 단다(D4: 링크와 같은 누름 규칙).
+ *
  * 무엇을 원문으로 보일지는 reveal.ts 가 정한다. 표 구역과 머리말은 건너뛴다(skipRanges).
  * 한글 조합 중에는 다시 만들지 않고 바뀐 위치로 옮기기만 한다: 조합 중인 줄에 장식을 더하거나 빼면 IME 가 깨진다.
  * 조합이 끝난 뒤 첫 갱신(pending)에서 다시 만든다.
@@ -41,6 +46,8 @@ const headingLine = [1, 2, 3, 4, 5, 6].map((n) => Decoration.line({ class: `lno-
 const codeMark = Decoration.mark({ class: 'lno-code' });
 const highlightMark = Decoration.mark({ class: 'lno-hl' });
 const wikiMark = Decoration.mark({ class: 'lno-wikilink' });
+/** 링크의 부모가 이것이면 그 URL 은 맨 주소가 아니다(링크 대상, 이미지 경로, 참조 정의). */
+const NOT_BARE_URL = new Set(['Link', 'Image', 'LinkReference']);
 const chipMark: Record<UnitOpKind, Decoration> = {
   UHW: Decoration.mark({ class: 'lno-chip lno-uo-code lno-uo-uhw' }),
   USW: Decoration.mark({ class: 'lno-chip lno-uo-code lno-uo-usw' }),
@@ -105,6 +112,10 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
   const tree = syntaxTree(state);
   // 링크의 제목 글(title)은 그릴 때 읽는다: 언어를 바꾸면 다음 다시 그리기부터 새 언어다
   const linkMark = Decoration.mark({ class: 'lno-link', attributes: { title: t('live.link.title') } });
+  const unresolvedLinkMark = Decoration.mark({ class: 'lno-link lno-unresolved', attributes: { title: t('live.link.title') } });
+  const unresolvedWikiMark = Decoration.mark({ class: 'lno-wikilink lno-unresolved', attributes: { title: t('links.create.title') } });
+  /** 링크 풀이(색인 준비 전에는 null: 흐리게 그리는 것이 없다). */
+  const resolution = state.facet(linkResolution);
   /** 유닛 오퍼레이션·워크플로 제목 줄: 그 줄의 Link 는 링크로 그리지 않는다. */
   const unitOpLines = new Set<number>();
   const sameLine = (from: number, to: number) => state.doc.lineAt(from).number === state.doc.lineAt(to).number;
@@ -158,7 +169,9 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
         break;
       }
     if (!open || open.name !== 'LinkMark' || !close) return;
-    if (open.to < close.from) decos.push(linkMark.range(open.to, close.from));
+    const url = node.getChild('URL');
+    const missing = !!url && linkStateOf(resolution, 'md', state.sliceDoc(url.from, url.to), notePath) === 'unresolved';
+    if (open.to < close.from) decos.push((missing ? unresolvedLinkMark : linkMark).range(open.to, close.from));
     // 숨김은 줄바꿈을 넘지 않는다: 여러 줄에 걸친 링크는 원문 그대로 둔다
     if (!sameLine(node.from, node.to) || revealInline(state, node.from, node.to)) return;
     conceal(open.from, open.to);
@@ -170,13 +183,15 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     const target = node.getChild('WikiTarget');
     if (!target) return;
     const shown = node.getChild('WikiAlias') ?? target;
+    const missing = linkStateOf(resolution, 'wiki', state.sliceDoc(target.from, target.to), notePath) === 'unresolved';
+    const mark = missing ? unresolvedWikiMark : wikiMark;
     if (revealInline(state, node.from, node.to)) {
       const first = node.firstChild!;
       const last = node.lastChild!;
-      if (first.to < last.from) decos.push(wikiMark.range(first.to, last.from));
+      if (first.to < last.from) decos.push(mark.range(first.to, last.from));
       return;
     }
-    decos.push(wikiMark.range(shown.from, shown.to));
+    decos.push(mark.range(shown.from, shown.to));
     conceal(node.from, shown.from);
     conceal(shown.to, node.to);
   };
@@ -345,6 +360,12 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
           link(ref.node);
           return;
         }
+        if (ref.name === 'URL') {
+          // 맨 주소: GFM 의 맨 URL(부모가 문단 등)과 `<https://…>` 자동 링크(부모가 Autolink)의 주소
+          if (!NOT_BARE_URL.has(ref.node.parent?.name ?? '') && ref.from < ref.to && sameLine(ref.from, ref.to))
+            decos.push(linkMark.range(ref.from, ref.to));
+          return;
+        }
         if (ref.name === 'WikiLink') {
           wikiLink(ref.node);
           return false;
@@ -393,7 +414,14 @@ class LivePlugin {
       this.pending = true;
       return;
     }
-    if (this.pending || u.docChanged || u.selectionSet || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
+    if (
+      this.pending ||
+      u.docChanged ||
+      u.selectionSet ||
+      u.viewportChanged ||
+      syntaxTree(u.startState) !== syntaxTree(u.state) ||
+      u.startState.facet(linkResolution) !== u.state.facet(linkResolution)
+    ) {
       ({ decorations: this.decorations, hidden: this.hidden } = buildDecorations(u.view));
       this.pending = false;
     }

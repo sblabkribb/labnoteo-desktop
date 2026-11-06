@@ -21,6 +21,7 @@ import { vaultImages, type VaultImages } from './live/vaultImages';
 import { pasteImages } from './live/pasteImage';
 import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
 import { linkIndex } from '../links/linkIndex';
+import { linkResolution, resolutionFlusher, scheduleResolution, type LinkResolution } from './live/linkResolution';
 import { LIST_KEYS } from './live/listKeys';
 import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
 import { notify } from '../labnote/host/toastStore';
@@ -156,6 +157,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const outlineTimer = useRef<ReturnType<typeof setTimeout>>();
   const cursorFrame = useRef<number>();
   const linksTimer = useRef<ReturnType<typeof setTimeout>>();
+  /**
+   * 링크 풀이 칸(SP4 Task 8). 풀이는 파일 목록에만 달려 있어 linkIndex 의 filesVersion 이나 준비 상태가 바뀔 때만 갈아 끼운다
+   * (타이핑으로는 바뀌지 않는다). adopt 가 상태를 새로 만들 때 resolutionRef 에서 다시 읽는다. 색인이 준비되기 전에는 null.
+   */
+  const resolutionSlot = useRef(new Compartment());
+  const resolutionRef = useRef<LinkResolution | null>(null);
   /** 조합 중이라 내지 못한 덧씌움이 남았다: 조합이 끝난 첫 갱신에서 낸다. */
   const linksPending = useRef(false);
   /** 링크 색인(linkIndex)에 이 버퍼를 덧씌움으로 낸다. 조합 중에는 색인을 건드리지 않는다(IME 를 깨지 않게). */
@@ -471,6 +478,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
+      // 링크 풀이: 모드 칸 밖에 두어 모드를 바꿔도 남는다. 조합 중에 미룬 값은 resolutionFlusher 가 조합이 끝난 뒤 넣는다.
+      resolutionSlot.current.of(linkResolution.of(resolutionRef.current)),
+      resolutionFlusher,
       // 이미지 위젯이 읽는 노트 경로와 이미지 묶음(경로는 이 노트 기준으로 푼다). 소스 보기에서는 쓰는 것이 없다.
       imageLoader.of({ notePath: path, images }),
       // 속성 격자가 앱에 넘기는 일(상태 칩 → 앱의 상태 명령). 늘 최신 prop 을 부른다.
@@ -546,6 +556,29 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       setModeState(m);
       view.dispatch({ effects: mode.current.reconfigure(m === 'live' ? liveExtensions.current() : []) });
     });
+    // 링크 색인을 따른다: 파일 목록(filesVersion)이나 준비 상태가 바뀐 알림에서만 새 풀이를 만든다. linksVersion 만 바뀐 알림
+    // (타이핑, 덧씌움, 다른 노트의 본문)은 아무것도 하지 않는다.
+    let seenFiles = -1;
+    let seenReady = false;
+    const refreshResolution = (): boolean => {
+      const files = linkIndex.filesVersion;
+      const ready = linkIndex.ready();
+      if (files === seenFiles && ready === seenReady) return false;
+      seenFiles = files;
+      seenReady = ready;
+      if (!ready) {
+        resolutionRef.current = null;
+        return true;
+      }
+      const r = linkIndex.resolver();
+      resolutionRef.current = { version: files, resolveWiki: r.resolveWiki, resolveMd: r.resolveMd, isUnknownTarget: r.isUnknownTarget };
+      return true;
+    };
+    refreshResolution();
+    if (resolutionRef.current !== null) view.dispatch({ effects: resolutionSlot.current.reconfigure(linkResolution.of(resolutionRef.current)) });
+    const unsubscribeLinks = linkIndex.subscribe(() => {
+      if (alive.current && refreshResolution()) scheduleResolution(view, resolutionSlot.current, resolutionRef.current);
+    });
     const unregister = registerOpenNote(path, handle);
     loadDocument(path, invoke).then(
       (doc) => {
@@ -563,6 +596,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       alive.current = false;
       unregister();
       unsubscribeMode();
+      unsubscribeLinks();
       clearTimers();
       clearTimeout(outlineTimer.current);
       clearTimeout(linksTimer.current);
