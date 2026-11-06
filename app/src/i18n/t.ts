@@ -213,6 +213,7 @@ const ko: Record<string, string> = {
   'command.noteBusy': '노트가 아직 열리는 중이거나 바깥 변경을 확인해야 해서 바꾸지 않았습니다.',
   'command.noteNotSaved': '변경은 편집기에 들어갔지만 저장하지 못했습니다. 편집기의 안내를 따르세요.',
   'command.noteChanged': '명령이 도는 동안 노트가 바뀌어 아무것도 넣지 않았습니다. 다시 실행하세요.',
+  'command.noteGone': '노트가 지워져서 바꾸지 않았습니다',
   'syncChecklist.partial': '목록에서 빼거나 고칠 항목도 있습니다. 그 정리는 이름 바꾸기 기능과 함께 추가됩니다.',
   'workflow.readmeNotUpdated':
     'README.labnote.md 를 지금 바꿀 수 없어 워크플로를 체크리스트에 넣지 못했을 수 있습니다. 편집기의 README 를 정리한 뒤 "{0}"을(를) 실행하세요.',
@@ -455,6 +456,7 @@ const en: Record<string, string> = {
   'command.noteBusy': 'The note is still loading or has an unresolved outside change, so nothing was changed.',
   'command.noteNotSaved': "The change is in the editor but could not be saved. Follow the editor's notice.",
   'command.noteChanged': 'The note changed while the command ran, so nothing was inserted. Run it again.',
+  'command.noteGone': 'The note was deleted, so it was not changed',
   'syncChecklist.partial': 'Some entries also need removing or fixing; that cleanup arrives with the rename feature.',
   'workflow.readmeNotUpdated':
     'README.labnote.md could not be updated right now, so the workflow may be missing from its checklist. Once the README in the editor is settled, run "{0}".',

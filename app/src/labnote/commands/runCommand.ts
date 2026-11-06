@@ -2,7 +2,7 @@ import { WINDOWS_PATH_MAX, isPathTooLongError } from '@labnoteo/core/lib/regexUt
 import { t } from '../../i18n/t';
 import { ERROR_KINDS, hasErrorKind } from '../../fs/errorKinds';
 import { coreT } from '../i18n';
-import { NoteBusyError, NoteChangedError, NoteSaveError } from '../noteErrors';
+import { NoteBusyError, NoteChangedError, NoteGoneError, NoteSaveError } from '../noteErrors';
 import type { CommandContext } from './context';
 import type { Command } from './registry';
 
@@ -38,6 +38,8 @@ export async function runCommand(ctx: CommandContext, c: Command | (() => Promis
       host.notify('error', t('command.noteNotSaved'));
     } else if (err instanceof NoteChangedError) {
       host.notify('warn', t('command.noteChanged'));
+    } else if (err instanceof NoteGoneError) {
+      host.notify('warn', t('command.noteGone'));
     } else {
       host.notify('error', coreT('Command failed: {0}', messageOf(err)));
     }

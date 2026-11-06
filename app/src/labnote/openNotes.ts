@@ -5,10 +5,10 @@ import type { EditorHandle } from '../editor/Editor';
 import { lineSeparatorOf, parseRaw, toRaw } from '../editor/documentIo';
 import type { AppFs } from '../fs/tauriLabnoteFs';
 import { editTargetFor, toDocBreaks } from './editTarget';
-import { NoteBusyError, NoteSaveError } from './noteErrors';
+import { NoteBusyError, NoteGoneError, NoteSaveError } from './noteErrors';
 import { pathKey } from './paths';
 
-export { NoteBusyError, NoteSaveError } from './noteErrors';
+export { NoteBusyError, NoteGoneError, NoteSaveError } from './noteErrors';
 
 /**
  * 열린 노트의 목록. 편집기(Editor)가 마운트할 때 자기 손잡이를 등록하고 내려갈 때 지운다.
@@ -60,6 +60,7 @@ function transformRaw(path: string, raw: string, transform: (text: string) => st
  * 사용자가 아직 저장하지 않은 입력은 그대로 남는다 — 디스크가 아니라 버퍼가 기준이다.
  *
  * 닫힌 노트: `fs.modify` 의 비교 후 쓰기(충돌 시 다시 시도)로. 없는 파일은 거부한다(notFound).
+ * 처음 읽은 뒤 지워진 노트(`modify` 가 빈 글을 건넨다)는 NoteGoneError: 다시 만들지 않는다.
  *
  * 글이 바뀌었는지를 돌려준다. 바뀌지 않았으면 아무것도 쓰지 않는다.
  */
@@ -84,6 +85,8 @@ export async function processNote(fs: AppFs, path: string, transform: (text: str
   if (transformRaw(path, raw, transform) === raw) return false;
   let changed = false;
   await fs.modify(path, (current) => {
+    // modify 는 없는 파일을 빈 글로 건넨다. 읽을 때 글이 있었다면 그 사이 지워진 것이다: 되살리지 않는다.
+    if (current === '' && raw !== '') throw new NoteGoneError(path);
     const next = transformRaw(path, current, transform);
     changed = next !== current;
     return next;

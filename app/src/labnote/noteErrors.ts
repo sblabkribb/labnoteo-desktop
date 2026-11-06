@@ -21,3 +21,11 @@ export class NoteChangedError extends Error {
     this.name = 'NoteChangedError';
   }
 }
+
+/** 명령이 읽은 뒤 노트가 지워졌다. 다시 만들지 않았다(아무것도 쓰지 않았다). */
+export class NoteGoneError extends Error {
+  constructor(readonly path: string) {
+    super(`the note was deleted, so it was not changed: ${path}`);
+    this.name = 'NoteGoneError';
+  }
+}

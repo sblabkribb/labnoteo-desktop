@@ -1,6 +1,7 @@
 import { WINDOWS_PATH_MAX } from '@labnoteo/core/lib/regexUtils';
 import { setLang } from '../../../i18n/lang';
-import { NoteBusyError, NoteChangedError, NoteSaveError } from '../../noteErrors';
+import { t } from '../../../i18n/t';
+import { NoteBusyError, NoteChangedError, NoteGoneError, NoteSaveError } from '../../noteErrors';
 import type { CommandContext } from '../context';
 import { runCommand } from '../runCommand';
 
@@ -58,6 +59,14 @@ describe('runCommand', () => {
     setLang('en');
     await runCommand(ctx, () => Promise.reject(new NoteSaveError('a.md')));
     expect(notify.mock.calls[3][1]).toBe("The change is in the editor but could not be saved. Follow the editor's notice.");
+  });
+
+  it('runCommand reports NoteGoneError as a warning', async () => {
+    const { ctx, notify } = fakeCtx();
+    await runCommand(ctx, async () => {
+      throw new NoteGoneError('a.md');
+    });
+    expect(notify.mock.calls.at(-1)).toEqual(['warn', t('command.noteGone')]);
   });
 
   it("an unknown rejection shows 'Command failed: …' and does not throw", async () => {

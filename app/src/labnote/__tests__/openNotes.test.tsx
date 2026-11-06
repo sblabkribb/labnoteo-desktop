@@ -5,6 +5,7 @@ import { createFakeVault } from '../../__tests__/fakeVault';
 import { TauriLabnoteFs } from '../../fs/tauriLabnoteFs';
 import { ERROR_KINDS } from '../../fs/errorKinds';
 import { activeEditTarget, NoteBusyError, NoteSaveError, openNote, processNote, registerOpenNote } from '../openNotes';
+import { NoteGoneError } from '../noteErrors';
 import type { EditorHandle } from '../../editor/Editor';
 import { mountEditor } from './editorHarness';
 
@@ -114,6 +115,24 @@ describe('processNote', () => {
     expect(await processNote(fs, 'closed.md', (t) => t)).toBe(false);
     expect(vault.log.some((c) => c.cmd === 'vault_modify')).toBe(false);
     m.unmount();
+  });
+});
+
+describe('processNote on a note deleted mid-run', () => {
+  it('processNote refuses to recreate a note deleted after its read', async () => {
+    const vault = createFakeVault({ 'a.md': '[[Home]]' });
+    let first = true;
+    const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'vault_modify' && first) {
+        first = false;
+        await vault.invoke('vault_remove', { path: 'a.md' });
+      }
+      return vault.invoke(cmd, args);
+    }) as typeof vault.invoke;
+    await expect(processNote(new TauriLabnoteFs(invoke), 'a.md', (t) => t.replace('Home', 'Start'))).rejects.toBeInstanceOf(
+      NoteGoneError,
+    );
+    expect(vault.files()['a.md']).toBeUndefined();
   });
 });
 
