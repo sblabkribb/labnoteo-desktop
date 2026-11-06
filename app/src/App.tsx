@@ -27,6 +27,7 @@ import { closeAllDialogs } from './labnote/host/dialogStore';
 import { editorAwareFs } from './labnote/editorAwareFs';
 import { activeEditTarget } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
+import { registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
 import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
@@ -137,6 +138,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   }, [ctx]);
   useEffect(() => {
     registerAllCommands();
+    registerAllAppCommands();
     // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다
     return () => {
       closeAllDialogs();

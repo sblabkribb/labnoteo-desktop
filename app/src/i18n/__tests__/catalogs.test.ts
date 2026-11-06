@@ -72,6 +72,7 @@ describe('소스가 부르는 번역 키', () => {
     'src/labnote/i18n.ts': ['key'], // overrideOr: OverrideKey 합집합의 글자
     'src/labnote/ui/ContextMenu.tsx': ['item.labelKey'], // MenuItem.labelKey: 메뉴를 여는 쪽이 적은 키 글자
     'src/labnote/commands/fileOps.ts': ['GUARD_MESSAGE[guard]'], // GUARD_MESSAGE 의 'fileOps.renameGuarded.*' 글자
+    'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'], // AppCommand.nameKey: appCommands.ts 에 적은 'cmd.*' 글자(appCommands.test.ts 가 ko·en 을 본다)
   };
   const LIT = String.raw`(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")`;
   const ALLOWED_ARG = new RegExp(String.raw`^\s*(?:${LIT}|!?[\w.]+\s*\?\s*${LIT}\s*:\s*${LIT})\s*$`);
