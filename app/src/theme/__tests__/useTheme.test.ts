@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useTheme, THEME_KEY } from '../useTheme';
 
 const html = document.documentElement;
@@ -76,6 +76,74 @@ describe('useTheme', () => {
     expect(result.current.theme).toBe('system');
     act(() => result.current.setTheme('dark'));
     expect(result.current.theme).toBe('dark'); // 저장은 못 해도 이번 실행에는 적용된다
+    expect(html.getAttribute('data-theme')).toBe('dark');
+  });
+});
+
+describe('useTheme: 창 제목 표시줄', () => {
+  // 부른 값은 calls 로 센다. setTheme 자체를 vi.fn 으로 감싸지 않는다: vi.fn 은 돌려준 약속에 처리기를 달아(settledResults)
+  // 훅이 거부를 받아 주지 않아도 처리된 것처럼 보이게 한다.
+  const fakeWindow = (impl: (t: 'light' | 'dark' | null) => Promise<void> = async () => {}) => {
+    const calls = vi.fn();
+    return { calls, setTheme: (t: 'light' | 'dark' | null) => (calls(t), impl(t)) };
+  };
+
+  it('시작할 때 저장된 선택을 창에도 건다 (다크를 고른 사람의 제목 표시줄도 다크로 뜬다)', async () => {
+    storage.setItem(THEME_KEY, 'dark');
+    const win = fakeWindow();
+    renderHook(() => useTheme(win));
+    await waitFor(() => expect(win.calls).toHaveBeenCalledWith('dark'));
+    expect(win.calls).toHaveBeenCalledTimes(1);
+  });
+
+  it('고를 때마다 창에 같은 값을 건다: system 은 null(다시 OS 를 따른다)', async () => {
+    const win = fakeWindow();
+    const { result } = renderHook(() => useTheme(win));
+    await waitFor(() => expect(win.calls).toHaveBeenLastCalledWith(null)); // 저장값 없음 = system
+    for (const [choice, sent] of [['dark', 'dark'], ['light', 'light'], ['system', null]] as const) {
+      act(() => result.current.setTheme(choice));
+      await waitFor(() => expect(win.calls).toHaveBeenLastCalledWith(sent));
+    }
+    expect(win.calls.mock.calls.map((c) => c[0])).toEqual([null, 'dark', 'light', null]);
+  });
+
+  it('창 API 가 거부하거나 던져도 토글은 그대로 동작한다 (제목 표시줄만 못 바뀐다)', async () => {
+    // 거부를 받아 주지 않으면 처리되지 않은 거부가 된다. 이 환경의 vitest 는 그것을 실패로 치지 않으므로 직접 센다.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await toggleSurvives();
+      await new Promise((r) => setTimeout(r, 20)); // 거부 추적은 마이크로태스크가 다 돈 뒤에 알린다
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
+  });
+
+  async function toggleSurvives() {
+    for (const win of [
+      fakeWindow(async () => Promise.reject(new Error('not allowed: set_theme'))),
+      fakeWindow(() => {
+        throw new Error('no window');
+      }),
+    ]) {
+      html.removeAttribute('data-theme');
+      const { result, unmount } = renderHook(() => useTheme(win));
+      act(() => result.current.setTheme('dark'));
+      await waitFor(() => expect(win.calls).toHaveBeenLastCalledWith('dark'));
+      expect(result.current.theme).toBe('dark');
+      expect(html.getAttribute('data-theme')).toBe('dark');
+      expect(storage.getItem(THEME_KEY)).toBe('dark');
+      act(() => result.current.setTheme('system'));
+      expect(html.hasAttribute('data-theme')).toBe(false);
+      unmount();
+    }
+  }
+
+  it('Tauri 창이 없는 환경(주입 없음)에서도 훅이 뜬다', () => {
+    const { result } = renderHook(() => useTheme());
+    act(() => result.current.setTheme('dark'));
     expect(html.getAttribute('data-theme')).toBe('dark');
   });
 });

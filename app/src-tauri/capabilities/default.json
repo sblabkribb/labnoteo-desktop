@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core IPC, the folder pickers for choosing or creating a vault, the updater, and window destroy (the editor saves before it closes the window).",
+  "description": "Main window: core IPC, the folder pickers for choosing or creating a vault, the updater, window destroy (the editor saves before it closes the window) and window set-theme (the title bar follows the theme chosen in the app).",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-destroy", "dialog:allow-open", "dialog:allow-save", "updater:default", "process:allow-restart"]
+  "permissions": ["core:default", "core:window:allow-destroy", "core:window:allow-set-theme", "dialog:allow-open", "dialog:allow-save", "updater:default", "process:allow-restart"]
 }

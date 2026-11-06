@@ -89,3 +89,26 @@ describe('index.html', () => {
     expect(statSync('public/theme-boot.js').isFile()).toBe(true);
   });
 });
+
+// 권한은 쓰는 것만 하나씩 연다. 목록을 통째로 고정해, 누가 편하자고 권한을 넓히면 여기서 보인다.
+describe('창 권한', () => {
+  const cap = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf-8'));
+
+  it('기본 권한 묶음은 정확히 이 목록이다 (set-theme 은 제목 표시줄을 고른 테마에 맞추려고 연다)', () => {
+    expect(cap.windows).toEqual(['main']);
+    expect(cap.permissions).toEqual([
+      'core:default',
+      'core:window:allow-destroy',
+      'core:window:allow-set-theme',
+      'dialog:allow-open',
+      'dialog:allow-save',
+      'updater:default',
+      'process:allow-restart',
+    ]);
+  });
+
+  it('여는 창 권한은 Tauri 가 만든 스키마에 실제로 있는 이름이다', () => {
+    const schema = readFileSync('src-tauri/gen/schemas/desktop-schema.json', 'utf-8');
+    for (const p of cap.permissions as string[]) expect(schema, p).toContain(`"const": "${p}"`);
+  });
+});
