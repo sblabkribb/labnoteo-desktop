@@ -5,12 +5,15 @@ import type { SyntaxNode } from '@lezer/common';
 import { revealInline, revealLine, skipRanges, touchedLines } from './reveal';
 import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
+import { bulletWidget } from './widgets';
 
 /**
  * 라이브 미리보기의 인라인 플러그인(계획 D4). 보이는 범위(visibleRanges)만 훑어 다음을 단다:
  * - 줄 클래스: ATX 제목(lno-h1..lno-h6). Setext 제목은 원문 그대로 둔다.
  * - 숨김(replace): 제목의 `# `, 강조·취소선·인라인 코드·하이라이트의 구분 기호. 줄바꿈을 넘는 숨김은 없다.
  * - 표시(mark): 인라인 코드 내용(lno-code), 하이라이트 내용(lno-hl).
+ * - 목록: 항목 줄에 lno-li 와 깊이 클래스(lno-li-d1..lno-li-d8, 8 에서 멈춘다). 글머리 기호(`- ` 등)는 줄이 드러나지
+ *   않았을 때 점 위젯(BulletWidget)으로 바꾸고, 번호 목록의 번호는 글자 그대로 두고 lno-ol-mark 로 표시한다.
  * - 링크(links.ts): 진짜 링크(isRealLink)는 `[` 와 `](주소)` 를 숨기고 글을 lno-link 로, 위키링크는 표시와
  *   (별칭이 있으면) 대상을 숨기고 보이는 글을 lno-wikilink 로. 유닛 오퍼레이션·워크플로 제목은 링크로 그리지 않고
  *   대괄호를 숨긴 뒤 코드를 칩(lno-chip lno-uo-code lno-uo-…)으로 단다.
@@ -42,16 +45,22 @@ const INLINE: Record<string, { mark: string; content?: Decoration }> = {
   Highlight: { mark: 'HighlightMark', content: highlightMark },
 };
 
+/** 목록 깊이의 끝. 더 깊은 항목도 lno-li-d8 이다. */
+const MAX_LIST_DEPTH = 8;
+const listLine = Array.from({ length: MAX_LIST_DEPTH }, (_, i) => Decoration.line({ class: `lno-li lno-li-d${i + 1}` }));
+const olMark = Decoration.mark({ class: 'lno-ol-mark' });
+const bullet = Decoration.replace({ widget: bulletWidget });
+
 const isBlank = (ch: string) => ch === ' ' || ch === '\t';
 
 export function buildDecorations(view: EditorView): { decorations: DecorationSet; hidden: DecorationSet } {
   const { state } = view;
   const decos: Range<Decoration>[] = [];
   const hides: Range<Decoration>[] = [];
-  const conceal = (from: number, to: number) => {
+  const conceal = (from: number, to: number, deco: Decoration = hide) => {
     // 플러그인의 바꾸기 장식은 줄바꿈을 넘으면 CodeMirror 가 던진다: 줄 끝을 지나는 범위는 아예 숨기지 않는다
     if (from >= to || to > state.doc.lineAt(from).to) return;
-    const r = hide.range(from, to);
+    const r = deco.range(from, to);
     decos.push(r);
     hides.push(r);
   };
@@ -136,6 +145,24 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     conceal(shown.to, node.to);
   };
 
+  /** 목록 항목: 깊이 줄 클래스, 글머리 점 또는 번호 표시. */
+  const listItem = (node: SyntaxNode) => {
+    let depth = 0;
+    for (let p = node.parent; p; p = p.parent) if (p.name === 'BulletList' || p.name === 'OrderedList') depth++;
+    const line = state.doc.lineAt(node.from);
+    decos.push(listLine[Math.min(Math.max(depth, 1), MAX_LIST_DEPTH) - 1].range(line.from));
+    const mark = node.firstChild;
+    if (!mark || mark.name !== 'ListMark' || mark.from >= mark.to) return;
+    if (node.parent?.name === 'OrderedList') {
+      decos.push(olMark.range(mark.from, mark.to));
+      return;
+    }
+    if (revealLine(state, line.number, lines)) return;
+    // 기호 뒤의 공백 한 칸까지 점이 대신한다
+    const end = mark.to < line.to && isBlank(line.text[mark.to - line.from]) ? mark.to + 1 : mark.to;
+    conceal(mark.from, end, bullet);
+  };
+
   // 접힌 곳·표 틈으로 나뉜 보이는 범위들에 걸친 노드는 범위마다 다시 들어온다: 한 번만 장식한다
   const seen = new Set<string>();
   for (const { from, to } of view.visibleRanges) {
@@ -152,6 +179,10 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
         if (m) {
           heading(ref.node, Number(m[1]));
           unitOp(ref.node, Number(m[1]));
+          return;
+        }
+        if (ref.name === 'ListItem') {
+          listItem(ref.node);
           return;
         }
         if (ref.name === 'Link') {

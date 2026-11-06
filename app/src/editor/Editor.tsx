@@ -15,6 +15,7 @@ import { cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview } from './live';
 import { linkClickHandler } from './live/links';
+import { LIST_KEYS } from './live/listKeys';
 import { notify } from '../labnote/host/toastStore';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
@@ -389,6 +390,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           return true;
         },
       }),
+      // 목록 키(Enter 이어 쓰기, Backspace, Tab/Shift+Tab 들이기·내밀기): 두 모드 모두에서 듣도록 모드 칸 밖에 둔다.
+      // 마크다운 언어의 자체 keymap 은 꺼 두었다(markdownSyntax.ts): Enter 처리기는 이것 하나다. 조합 중에는 모두 쉰다.
+      Prec.high(keymap.of(LIST_KEYS)),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       labnoteMarkdown(),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),

@@ -132,6 +132,18 @@ export const editorThemeSpec = {
   // 링크(live/links.ts): Markdown 링크는 강조색 밑줄, 위키링크(아직 이동하지 않는다, SP4)는 강조색만.
   '.lno-link': { color: 'var(--accent)', textDecorationLine: 'underline', textUnderlineOffset: '2px' },
   '.lno-wikilink': { color: 'var(--accent)' },
+  // 목록: 글머리 점(BulletWidget)과 번호. 깊이마다 왼쪽 여백을 늘리고 같은 만큼 첫 줄을 당겨(textIndent) 걸친 줄이
+  // 항목의 글 첫 칸에 맞는다(내어쓰기). 줄 앞의 들임 공백은 글자 그대로 남아 첫 줄을 그 깊이로 민다.
+  '.lno-bullet': { display: 'inline-block', minWidth: '2ch', textIndent: '0', color: 'var(--text-muted)' },
+  '.lno-ol-mark': { color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' },
+  '.lno-li-d1': { paddingLeft: 'calc(var(--space-3) + 2ch)', textIndent: '-2ch' },
+  '.lno-li-d2': { paddingLeft: 'calc(var(--space-3) + 4ch)', textIndent: '-4ch' },
+  '.lno-li-d3': { paddingLeft: 'calc(var(--space-3) + 6ch)', textIndent: '-6ch' },
+  '.lno-li-d4': { paddingLeft: 'calc(var(--space-3) + 8ch)', textIndent: '-8ch' },
+  '.lno-li-d5': { paddingLeft: 'calc(var(--space-3) + 10ch)', textIndent: '-10ch' },
+  '.lno-li-d6': { paddingLeft: 'calc(var(--space-3) + 12ch)', textIndent: '-12ch' },
+  '.lno-li-d7': { paddingLeft: 'calc(var(--space-3) + 14ch)', textIndent: '-14ch' },
+  '.lno-li-d8': { paddingLeft: 'calc(var(--space-3) + 16ch)', textIndent: '-16ch' },
   // 유닛 오퍼레이션·워크플로 제목의 코드 칩: .lno-chip 위에 고정폭 글꼴과 종류별 테두리색.
   '.lno-uo-code': { fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text)', verticalAlign: 'middle' },
   '.lno-uo-uhw': { borderColor: 'var(--accent)' },
