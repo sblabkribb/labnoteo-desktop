@@ -132,6 +132,8 @@ describe('창 권한', () => {
       'dialog:allow-save',
       'updater:default',
       'process:allow-restart',
+      // 바깥 링크 열기(SP4 Task 11): opener 는 이 네 스킴으로만 범위를 좁힌다. capabilities.test.ts 도 지킨다.
+      { identifier: 'opener:allow-open-url', allow: [{ url: 'http://*' }, { url: 'https://*' }, { url: 'mailto:*' }, { url: 'partbank:*' }] },
     ]);
   });
 
@@ -143,7 +145,7 @@ describe('창 권한', () => {
     const REQUIRES = new RegExp(String.raw`Requires the .(core:window:allow-[\w-]+). permission`, 'g');
     const required = new Set([...api.matchAll(REQUIRES)].map((m) => m[1]));
     expect(required.size).toBeGreaterThan(10); // 문서를 실제로 읽었다
-    const windowPerms = (cap.permissions as string[]).filter((p) => p.startsWith('core:window:'));
+    const windowPerms = (cap.permissions as unknown[]).filter((p): p is string => typeof p === 'string' && p.startsWith('core:window:'));
     expect(windowPerms.length).toBeGreaterThanOrEqual(2); // 위 목록이 고정한 destroy·set-theme
     for (const p of windowPerms) expect(required.has(p), p).toBe(true);
   });
