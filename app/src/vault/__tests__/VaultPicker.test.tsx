@@ -9,19 +9,24 @@ vi.mock('@tauri-apps/plugin-dialog', () => dialog);
 beforeEach(() => dialog.open.mockReset());
 
 describe('보관함 선택 화면', () => {
+  it('테스트 경로 문자열은 실제 백슬래시를 담고 있다', () => {
+    expect('D:\\lab').toHaveLength(6);
+    expect('D:\\lab'.charCodeAt(2)).toBe(92);
+  });
+
   it('고른 폴더 경로를 onPick 으로 넘긴다', async () => {
-    dialog.open.mockResolvedValue('D:\lab');
+    dialog.open.mockResolvedValue('D:\\lab');
     const onPick = vi.fn();
     render(<VaultPicker onPick={onPick} />);
     await userEvent.click(screen.getByRole('button', { name: '폴더 선택' }));
-    expect(onPick).toHaveBeenCalledWith('D:\lab');
+    expect(onPick).toHaveBeenCalledWith('D:\\lab');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('대화상자를 취소하면(문자열이 아닌 값) 아무 일도 없고 오류도 없다', async () => {
     const onPick = vi.fn();
     render(<VaultPicker onPick={onPick} />);
-    for (const cancelled of [null, undefined, ['D:\a', 'D:\b']]) {
+    for (const cancelled of [null, undefined, ['D:\\a', 'D:\\b']]) {
       dialog.open.mockResolvedValue(cancelled);
       await userEvent.click(screen.getByRole('button', { name: '폴더 선택' }));
     }

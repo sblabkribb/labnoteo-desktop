@@ -32,7 +32,7 @@ export function App() {
       <h1>{t('app.title')}</h1>
       {state.status === 'loading' && <p>{t('vault.loading')}</p>}
       {state.status === 'picker' && <VaultPicker error={state.error} onPick={open} />}
-      {state.status === 'ready' && <VaultView vault={state.vault} version={version} />}
+      {state.status === 'ready' && <VaultView key={state.vault.root} vault={state.vault} version={version} />}
     </main>
   );
 }

@@ -24,6 +24,8 @@ export function useTree(vaultKey: string, invoke: InvokeFn = tauriInvoke) {
 
   useEffect(() => {
     let live = true;
+    // 다른 보관함의 줄을 새 걸음이 끝날 때까지 남겨 두면 존재하지 않는 경로가 선택될 수 있다.
+    setEntries([]);
     setFailed(false);
     fetchTree(invoke).then(
       (e) => live && setEntries(e),

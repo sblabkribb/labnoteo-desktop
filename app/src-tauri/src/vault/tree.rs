@@ -20,46 +20,97 @@ pub struct TreeEntry {
     pub depth: u32,
 }
 
-/// Directories that are never vault content: `.obsidian`, `.git`,
-/// `node_modules`, and every other dot-directory. The one definition of this
-/// rule; the file watcher uses it too rather than restating it. Names compare
-/// case-insensitively because NTFS does.
+/// Names that are never vault content, as a file or a folder: `.obsidian`,
+/// `.git`, `node_modules`, and everything else that starts with a dot (so
+/// `.draft.md` is hidden too). Case-insensitive because NTFS is. Prefer
+/// `is_listed_path`, which adds the other name rules; this is its building block.
 pub fn is_excluded(name: &str) -> bool {
     name.starts_with('.') || name.eq_ignore_ascii_case("node_modules")
+}
+
+fn is_listed_name(name: &str) -> bool {
+    !name.is_empty() && is_safe_component(name) && !is_excluded(name)
+}
+
+/// `.md` (any case) after at least one character.
+fn has_md_extension(name: &str) -> bool {
+    name.len() > 3 && name.get(name.len() - 3..).is_some_and(|e| e.eq_ignore_ascii_case(".md"))
+}
+
+/// Whether the vault-relative POSIX path `rel` belongs in the tree: every
+/// component is a name `confine` accepts and is not excluded, and a file
+/// (`is_dir == false`) ends in `.md`. This is the single definition of "what is
+/// in the vault"; the walk uses its pieces and the file watcher must call this
+/// on each event path rather than restate the rule. It looks at names only: a
+/// watcher must also skip links (the walk does not follow them), which needs the
+/// file system.
+pub fn is_listed_path(rel: &str, is_dir: bool) -> bool {
+    let mut parts = rel.split('/').peekable();
+    while let Some(part) = parts.next() {
+        let last = parts.peek().is_none();
+        let ok = is_listed_name(part) && (!last || is_dir || has_md_extension(part));
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Dir,
+    File,
+    Link,
+}
+
+/// Split directory entries into listed folder names and listed note names.
+/// An entry that cannot be read, whose type cannot be read, whose name is not
+/// UTF-8, or that is a link is skipped on its own: one bad entry must never
+/// make its siblings (or the whole tree) disappear.
+fn partition(
+    items: impl Iterator<Item = std::io::Result<(std::ffi::OsString, std::io::Result<Kind>)>>,
+) -> (Vec<String>, Vec<String>) {
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+    for item in items {
+        let Ok((name, kind)) = item else { continue };
+        let Ok(name) = name.into_string() else { continue };
+        if !is_listed_name(&name) {
+            continue;
+        }
+        match kind {
+            Ok(Kind::Dir) => dirs.push(name),
+            Ok(Kind::File) if has_md_extension(&name) => files.push(name),
+            _ => {}
+        }
+    }
+    (dirs, files)
 }
 
 /// Walk `root` (depth-first, folders before files, names case-insensitive).
 ///
 /// Paths are built from the names the walk reads, never from `to_rel`, and
 /// links (symlinks, junctions) are not followed: nothing outside the vault is
-/// listed and a link cannot create a cycle. Entries whose names `confine` would
-/// refuse (reserved device names, trailing dot or space) are left out so every
-/// row offered can actually be opened. A subfolder that cannot be read is
-/// skipped; only an unreadable root is an error. `.md` is matched
-/// case-insensitively; folders are kept even when they hold no notes, so a
-/// folder the user just made shows up.
+/// listed and a link cannot create a cycle. What is listed follows
+/// `is_listed_path`, so every row offered can be opened. A subfolder that
+/// cannot be read is shown but empty; only an unreadable root is an error.
+/// Folders are kept even when they hold no notes, so a folder the user just
+/// made shows up.
 pub fn walk(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
     fn visit(dir: &Path, prefix: &str, depth: u32, out: &mut Vec<TreeEntry>) -> std::io::Result<()> {
-        let mut dirs: Vec<String> = Vec::new();
-        let mut files: Vec<String> = Vec::new();
-        for entry in std::fs::read_dir(dir)? {
+        let (mut dirs, mut files) = partition(std::fs::read_dir(dir)?.map(|entry| {
             let entry = entry?;
-            let Ok(name) = entry.file_name().into_string() else { continue };
-            if !is_safe_component(&name) {
-                continue;
-            }
-            let ft = entry.file_type()?;
-            if ft.is_symlink() {
-                continue;
-            }
-            if ft.is_dir() {
-                if !is_excluded(&name) {
-                    dirs.push(name);
+            let kind = entry.file_type().map(|ft| {
+                if ft.is_symlink() {
+                    Kind::Link
+                } else if ft.is_dir() {
+                    Kind::Dir
+                } else {
+                    Kind::File
                 }
-            } else if ft.is_file() && has_md_extension(&name) {
-                files.push(name);
-            }
-        }
+            });
+            Ok((entry.file_name(), kind))
+        }));
         dirs.sort_by_cached_key(|n| (n.to_lowercase(), n.clone()));
         files.sort_by_cached_key(|n| (n.to_lowercase(), n.clone()));
         for name in dirs {
@@ -82,10 +133,6 @@ pub fn walk(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
     let mut out = Vec::new();
     visit(&canon, "", 0, &mut out)?;
     Ok(out)
-}
-
-fn has_md_extension(name: &str) -> bool {
-    name.len() > 3 && name.get(name.len() - 3..).is_some_and(|e| e.eq_ignore_ascii_case(".md"))
 }
 
 #[tauri::command]
@@ -212,5 +259,58 @@ mod tests {
     fn missing_root_is_an_error_not_an_empty_tree() {
         let s = Scratch::new();
         assert!(walk(&s.0.join("gone")).is_err());
+    }
+
+    #[test]
+    fn hidden_markdown_files_are_not_listed() {
+        let s = Scratch::new();
+        s.file(".draft.md");
+        s.file("sub/.draft.md");
+        s.file("sub/ok.md");
+        assert_eq!(paths(&s), ["sub", "sub/ok.md"]);
+    }
+
+    #[test]
+    fn is_listed_path_is_the_one_rule_the_walk_and_the_watcher_share() {
+        // Files: every ancestor must be a listed folder, the name must be a safe `.md` that is not hidden.
+        for ok in ["a.md", "A.MD", "labnote/001/02.md", "x.labnote.md"] {
+            assert!(is_listed_path(ok, false), "{ok}");
+        }
+        for no in [
+            "", "a.txt", ".draft.md", "sub/.draft.md", ".obsidian/a.md", "a/.git/b.md", "node_modules/p/r.md",
+            "Node_Modules/r.md", "a//b.md", "a/../b.md", "./a.md", "/a.md", "con.md", "a/nul.md", "a./b.md", "dir/b .md ",
+        ] {
+            assert!(!is_listed_path(no, false), "{no}");
+        }
+        // Folders: same ancestors, no `.md` requirement.
+        assert!(is_listed_path("a/b", true) && is_listed_path("notes.md", true));
+        assert!(!is_listed_path(".obsidian", true) && !is_listed_path("a/node_modules", true));
+        assert!(!is_listed_path("a/.cache", true) && !is_listed_path("aux", true));
+        // Every row the walk returns satisfies it.
+        let s = Scratch::new();
+        s.file("a/b/c.md");
+        s.file("z.md");
+        s.file(".hid/x.md");
+        s.file("a/.x.md");
+        for e in walk(&s.0).unwrap() {
+            assert!(is_listed_path(&e.path, e.is_dir), "{}", e.path);
+        }
+    }
+
+    #[test]
+    fn one_bad_entry_does_not_hide_its_siblings() {
+        use std::io::{Error, ErrorKind};
+        let denied = || Error::from(ErrorKind::PermissionDenied);
+        let items: Vec<std::io::Result<(std::ffi::OsString, std::io::Result<Kind>)>> = vec![
+            Ok(("a.md".into(), Ok(Kind::File))),
+            Err(denied()),                                // the directory iterator failed on one entry
+            Ok(("broken.md".into(), Err(denied()))),      // its type could not be read
+            Ok(("sub".into(), Ok(Kind::Dir))),
+            Ok(("link".into(), Ok(Kind::Link))),
+            Ok(("b.md".into(), Ok(Kind::File))),
+        ];
+        let (dirs, files) = partition(items.into_iter());
+        assert_eq!(dirs, ["sub"]);
+        assert_eq!(files, ["a.md", "b.md"]);
     }
 }
