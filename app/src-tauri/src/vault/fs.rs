@@ -3,6 +3,14 @@
 //! Every path goes through `confine` before touching the filesystem. The
 //! `.obsidian/` ban is enforced here, on the write side only: Task 5's
 //! `vault_open` must be able to *look* at `.obsidian/`.
+//!
+//! Locking: `read`, `exists`, `write`, `modify` and `remove` take the per-path
+//! lock, because they touch one file that a concurrent atomic replace can
+//! swap under `confine` (see `PathLocks`). `mkdir`, `list` and `rmdir` do not:
+//! they operate on directories, which this module never replaces, so there is
+//! no read-modify-write to protect and no transient state to observe;
+//! `create_dir_all` is idempotent and `remove_dir` is already atomic and
+//! refuses non-empty directories.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -20,6 +28,8 @@ pub enum FsError {
     Vault(VaultError),
     /// Write-side operation aimed at `.obsidian/`.
     Forbidden,
+    /// No vault has been opened yet (`VaultState` has no root).
+    NoVault,
     Io(std::io::Error),
 }
 
@@ -28,12 +38,40 @@ impl fmt::Display for FsError {
         match self {
             FsError::Vault(e) => write!(f, "{e}"),
             FsError::Forbidden => write!(f, ".obsidian is never written by labnoteO"),
+            FsError::NoVault => write!(f, "no vault is open"),
             FsError::Io(e) => write!(f, "io error: {e}"),
         }
     }
 }
 
 impl std::error::Error for FsError {}
+
+/// Wire shape of errors: `{kind: "forbidden" | "escape" | "vaultNotFound" |
+/// "noVault" | "notFound" | "io", message}`. `notFound` is a missing file or
+/// directory; `vaultNotFound` is a missing vault root. `message` is for
+/// display only; callers branch on `kind`.
+impl Serialize for FsError {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let kind = match self {
+            FsError::Forbidden => "forbidden",
+            FsError::NoVault => "noVault",
+            FsError::Vault(VaultError::Escape) => "escape",
+            FsError::Vault(VaultError::NotFound) => "vaultNotFound",
+            FsError::Vault(VaultError::Io(e)) | FsError::Io(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    "notFound"
+                } else {
+                    "io"
+                }
+            }
+        };
+        let mut st = ser.serialize_struct("FsError", 2)?;
+        st.serialize_field("kind", kind)?;
+        st.serialize_field("message", &self.to_string())?;
+        st.end()
+    }
+}
 
 impl From<VaultError> for FsError {
     fn from(e: VaultError) -> Self {
@@ -118,6 +156,12 @@ fn confine_write(root: &Path, rel: &str) -> Result<PathBuf, FsError> {
     Ok(abs)
 }
 
+const TMP_SUFFIX: &str = ".labnote-tmp";
+
+fn is_tmp_name(name: &str) -> bool {
+    name.starts_with('.') && name.ends_with(TMP_SUFFIX)
+}
+
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Atomic replace: write a sibling temp file, fsync, rename over the target.
@@ -130,7 +174,7 @@ fn write_atomic(abs: &Path, content: &str) -> Result<(), FsError> {
     std::fs::create_dir_all(parent)?;
     let name = abs.file_name().ok_or(VaultError::Escape)?.to_string_lossy();
     let tmp = parent.join(format!(
-        ".{name}.{}.{}.labnote-tmp",
+        ".{name}.{}.{}{TMP_SUFFIX}",
         std::process::id(),
         TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
@@ -232,7 +276,11 @@ pub fn list(root: &Path, dir: &str) -> Result<Vec<String>, FsError> {
     };
     let mut names = Vec::new();
     for entry in rd {
-        names.push(entry?.file_name().to_string_lossy().into_owned());
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        // In-flight or orphaned atomic-write temp files are not vault content.
+        if !is_tmp_name(&name) {
+            names.push(name);
+        }
     }
     names.sort();
     Ok(names)
@@ -254,74 +302,85 @@ pub fn rmdir(root: &Path, rel: &str) -> Result<(), FsError> {
     }
 }
 
+/// Delete orphaned atomic-write temp files (left by a crash between create and
+/// rename) anywhere under `root`; returns how many were removed. Call it once
+/// when a vault is opened, before any writes: a temp file belonging to a live
+/// `write` would be indistinguishable from an orphan. Skips `.obsidian/` (never
+/// touched) and does not follow links.
+pub fn sweep_temp(root: &Path) -> Result<usize, FsError> {
+    fn walk(dir: &Path, top: bool, removed: &mut usize) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let ft = entry.file_type()?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if ft.is_symlink() {
+                continue;
+            }
+            if ft.is_dir() {
+                if !(top && name.eq_ignore_ascii_case(".obsidian")) {
+                    walk(&entry.path(), false, removed)?;
+                }
+            } else if is_tmp_name(&name) && std::fs::remove_file(entry.path()).is_ok() {
+                *removed += 1;
+            }
+        }
+        Ok(())
+    }
+    let canon = std::fs::canonicalize(root).map_err(|e| match e.kind() {
+        ErrorKind::NotFound => FsError::Vault(VaultError::NotFound),
+        _ => FsError::Io(e),
+    })?;
+    let mut removed = 0;
+    walk(&canon, true, &mut removed)?;
+    Ok(removed)
+}
+
 // ---- Tauri layer ----------------------------------------------------------
 
-/// Managed state: the open vault's root (set by Task 5's `vault_open`) and the
-/// per-path lock map.
-#[derive(Default)]
-pub struct VaultState {
-    root: Mutex<Option<PathBuf>>,
-    locks: PathLocks,
-}
-
-impl VaultState {
-    pub fn set_root(&self, root: Option<PathBuf>) {
-        *lock(&self.root) = root;
-    }
-
-    fn root(&self) -> Result<PathBuf, String> {
-        lock(&self.root).clone().ok_or_else(|| "no vault is open".to_string())
-    }
-}
-
-fn s<T>(r: Result<T, FsError>) -> Result<T, String> {
-    r.map_err(|e| e.to_string())
+#[tauri::command]
+pub fn vault_read(state: tauri::State<'_, super::VaultState>, path: String) -> Result<String, FsError> {
+    read(&state.locks, &state.root()?, &path)
 }
 
 #[tauri::command]
-pub fn vault_read(state: tauri::State<'_, VaultState>, path: String) -> Result<String, String> {
-    s(read(&state.locks, &state.root()?, &path))
-}
-
-#[tauri::command]
-pub fn vault_write(state: tauri::State<'_, VaultState>, path: String, content: String) -> Result<(), String> {
-    s(write(&state.locks, &state.root()?, &path, &content))
+pub fn vault_write(state: tauri::State<'_, super::VaultState>, path: String, content: String) -> Result<(), FsError> {
+    write(&state.locks, &state.root()?, &path, &content)
 }
 
 // Tauri maps JS camelCase args to these snake_case parameters.
 #[tauri::command]
 pub fn vault_modify(
-    state: tauri::State<'_, VaultState>,
+    state: tauri::State<'_, super::VaultState>,
     path: String,
     content: String,
     expected_before: Option<String>,
-) -> Result<ModifyResult, String> {
-    s(modify(&state.locks, &state.root()?, &path, &content, expected_before.as_deref()))
+) -> Result<ModifyResult, FsError> {
+    modify(&state.locks, &state.root()?, &path, &content, expected_before.as_deref())
 }
 
 #[tauri::command]
-pub fn vault_exists(state: tauri::State<'_, VaultState>, path: String) -> Result<bool, String> {
-    s(exists(&state.locks, &state.root()?, &path))
+pub fn vault_exists(state: tauri::State<'_, super::VaultState>, path: String) -> Result<bool, FsError> {
+    exists(&state.locks, &state.root()?, &path)
 }
 
 #[tauri::command]
-pub fn vault_mkdir(state: tauri::State<'_, VaultState>, path: String) -> Result<(), String> {
-    s(mkdir(&state.root()?, &path))
+pub fn vault_mkdir(state: tauri::State<'_, super::VaultState>, path: String) -> Result<(), FsError> {
+    mkdir(&state.root()?, &path)
 }
 
 #[tauri::command]
-pub fn vault_list(state: tauri::State<'_, VaultState>, dir: String) -> Result<Vec<String>, String> {
-    s(list(&state.root()?, &dir))
+pub fn vault_list(state: tauri::State<'_, super::VaultState>, dir: String) -> Result<Vec<String>, FsError> {
+    list(&state.root()?, &dir)
 }
 
 #[tauri::command]
-pub fn vault_remove(state: tauri::State<'_, VaultState>, path: String) -> Result<(), String> {
-    s(remove(&state.locks, &state.root()?, &path))
+pub fn vault_remove(state: tauri::State<'_, super::VaultState>, path: String) -> Result<(), FsError> {
+    remove(&state.locks, &state.root()?, &path)
 }
 
 #[tauri::command]
-pub fn vault_rmdir(state: tauri::State<'_, VaultState>, path: String) -> Result<(), String> {
-    s(rmdir(&state.root()?, &path))
+pub fn vault_rmdir(state: tauri::State<'_, super::VaultState>, path: String) -> Result<(), FsError> {
+    rmdir(&state.root()?, &path)
 }
 
 #[cfg(test)]
@@ -353,7 +412,10 @@ mod tests {
     fn read_rejects_missing_file() {
         let t = Tmp::new();
         let l = PathLocks::default();
-        assert!(read(&l, &t.0, "nope.md").is_err());
+        match read(&l, &t.0, "nope.md") {
+            Err(FsError::Io(e)) => assert_eq!(e.kind(), ErrorKind::NotFound),
+            other => panic!("expected Io(NotFound), got {other:?}"),
+        }
     }
 
     #[test]
@@ -540,6 +602,46 @@ mod tests {
         for bad in ["..", "/", ".", "a//b", "../x"] {
             assert!(matches!(list(&t.0, bad), Err(FsError::Vault(VaultError::Escape))), "{bad}");
         }
+    }
+
+    #[test]
+    fn list_hides_atomic_write_temp_files() {
+        let t = Tmp::new();
+        std::fs::write(t.0.join("n.labnote.md"), "x").unwrap();
+        std::fs::write(t.0.join(".n.labnote.md.1.2.labnote-tmp"), "partial").unwrap();
+        assert_eq!(list(&t.0, "").unwrap(), vec!["n.labnote.md"]);
+    }
+
+    #[test]
+    fn sweep_removes_orphaned_temp_files() {
+        let t = Tmp::new();
+        std::fs::create_dir_all(t.0.join("a/b")).unwrap();
+        std::fs::create_dir_all(t.0.join(".obsidian")).unwrap();
+        std::fs::write(t.0.join("keep.labnote.md"), "x").unwrap();
+        std::fs::write(t.0.join(".keep.labnote.md.1.2.labnote-tmp"), "p").unwrap();
+        std::fs::write(t.0.join("a/b/.deep.md.3.4.labnote-tmp"), "p").unwrap();
+        // not ours: no leading dot / inside .obsidian
+        std::fs::write(t.0.join("user.labnote-tmp"), "mine").unwrap();
+        std::fs::write(t.0.join(".obsidian/.x.1.1.labnote-tmp"), "o").unwrap();
+        assert_eq!(sweep_temp(&t.0).unwrap(), 2);
+        assert!(!t.0.join(".keep.labnote.md.1.2.labnote-tmp").exists());
+        assert!(!t.0.join("a/b/.deep.md.3.4.labnote-tmp").exists());
+        assert_eq!(std::fs::read_to_string(t.0.join("keep.labnote.md")).unwrap(), "x");
+        assert!(t.0.join("user.labnote-tmp").exists());
+        assert!(t.0.join(".obsidian/.x.1.1.labnote-tmp").exists());
+    }
+
+    #[test]
+    fn errors_serialize_with_a_kind() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let kind = |e: FsError| serde_json::to_value(&e).unwrap()["kind"].as_str().unwrap().to_string();
+        assert_eq!(kind(read(&l, &t.0, "nope.md").unwrap_err()), "notFound");
+        assert_eq!(kind(write(&l, &t.0, ".obsidian/a", "x").unwrap_err()), "forbidden");
+        assert_eq!(kind(read(&l, &t.0, "../x").unwrap_err()), "escape");
+        assert_eq!(kind(FsError::NoVault), "noVault");
+        assert_eq!(kind(read(&l, &t.0.join("missing-root"), "a.md").unwrap_err()), "vaultNotFound");
+        assert!(serde_json::to_value(FsError::Forbidden).unwrap()["message"].is_string());
     }
 
     #[test]

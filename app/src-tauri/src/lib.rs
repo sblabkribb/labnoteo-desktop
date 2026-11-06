@@ -8,7 +8,7 @@ fn app_version() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(vault::fs::VaultState::default())
+        .manage(vault::VaultState::default())
         .invoke_handler(tauri::generate_handler![
             app_version,
             vault::fs::vault_read,
