@@ -6,6 +6,7 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../field';
 import { activeCell, activeCellView, focusCell } from '../cellEditor';
+import { isTabular } from '../tsv';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -164,6 +165,7 @@ describe('바깥 편집기에 붙여 넣기', () => {
       const v = mount(k.doc);
       ensureSyntaxTree(v.state, v.state.doc.length, 1000);
       v.dispatch({ selection: { anchor: k.at } });
+      expect(isTabular(k.text)).toBe(true); // 밖에서였다면 표가 됐을 글이다: 막는 것은 코드·머리말 검사다
       paste(v.contentDOM, k.text);
       expect(v.state.doc.toString()).toBe(k.out);
     });

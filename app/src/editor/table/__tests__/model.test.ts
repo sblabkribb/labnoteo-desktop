@@ -332,6 +332,15 @@ describe('setCell', () => {
       expect(run(doc, (m) => setCell(m, 1, 1, ws)), at).toBe('a | b\n--- | ---\n1 | |\nplain');
       expect(run(doc, (m) => setCell(m, 2, 0, ws)), at).toBe('a | b\n--- | ---\n1 | 2\n|  |');
     }
+    // 파이프 없는 행이 표의 마지막 행일 때(리뷰의 재현): 칸이 밀리거나 빠지지 않고 표도 그대로다
+    const last = 'a | b\n--- | ---\n1 | 2';
+    expect(run(last, (m) => setCell(m, 1, 0, '\t'))).toBe('a | b\n--- | ---\n|  | 2');
+    expect(run(last, (m) => setCell(m, 1, 1, ' '))).toBe('a | b\n--- | ---\n1 | |');
+    expect(run(last, (m) => setCell(m, 0, 1, '  '))).toBe('a | |\n--- | ---\n1 | 2');
+    for (const [r, c, ws] of [[1, 0, '\t'], [1, 1, ' '], [0, 1, '  ']] as const) {
+      const o = run(last, (m) => setCell(m, r, c, ws));
+      expect(lezerTable(o), o).not.toBeNull();
+    }
     const out = run(doc, (m) => setCell(m, 0, 1, ' '));
     expect(shape(parseTable(out, 0, out.length)!)).toEqual([['a', ''], ['1', '2'], ['plain', null]]);
     // 바깥 파이프가 있는 행에서도 빈 셀이 된다
