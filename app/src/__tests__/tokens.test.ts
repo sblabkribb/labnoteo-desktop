@@ -17,7 +17,7 @@ function block(selector: string): { body: string; start: number; end: number } {
 
 function props(body: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const m of body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+  for (const m of body.matchAll(/(--[\w-]+)\s*:\s*([^;}]+?)\s*(?:;|$)/g)) out[m[1]] = m[2].trim();
   return out;
 }
 
@@ -45,7 +45,7 @@ function ratio(a: string, b: string): number {
 }
 
 const REQUIRED = [
-  '--bg', '--bg-elevated', '--bg-hover', '--bg-selected', '--border', '--border-strong', '--text', '--text-muted',
+  '--bg', '--bg-elevated', '--bg-hover', '--bg-selected', '--bg-selection', '--border', '--border-strong', '--text', '--text-muted',
   '--accent', '--accent-text', '--danger', '--radius', '--space-1', '--space-2', '--space-3', '--space-4', '--space-5',
   '--space-6', '--indent', '--font-ui', '--font-mono', '--font-size',
 ];
@@ -62,8 +62,9 @@ describe('디자인 토큰', () => {
     expect(Object.keys(props(DARK_SYSTEM.body)).sort()).toEqual(light);
     // 시스템 다크와 수동 다크는 값도 같아야 한다 (같은 모양이 두 곳에서 갈라지지 않게)
     expect(props(DARK_SYSTEM.body)).toEqual(props(DARK.body));
-    // 테마가 바꾸는 토큰은 :root 에도 기본값이 있다
-    for (const name of light) expect(root[name], name).toBeTruthy();
+    // 테마가 바꾸는 토큰은 :root 에도 기본값이 있고, 그 값은 수동 라이트와 같다 (data-theme 없는 시스템 라이트 사용자가 보는 값)
+    const lightProps = props(LIGHT.body);
+    for (const name of light) expect(root[name], name).toBe(lightProps[name]);
   });
 
   it('시스템 다크 규칙은 수동 라이트 선택을 덮지 않는다', () => {
@@ -75,7 +76,7 @@ describe('디자인 토큰', () => {
       for (const [fg, bg] of [
         ['--text', '--bg'], ['--text-muted', '--bg'], ['--text', '--bg-elevated'], ['--text-muted', '--bg-elevated'],
         ['--text', '--bg-hover'], ['--text-muted', '--bg-hover'], ['--text', '--bg-selected'], ['--text-muted', '--bg-selected'],
-        ['--accent-text', '--accent'], ['--danger', '--bg'], ['--danger', '--bg-elevated'],
+        ['--accent-text', '--accent'], ['--accent', '--bg-selected'], ['--accent', '--bg-hover'], ['--danger', '--bg-selected'], ['--danger', '--bg'], ['--danger', '--bg-elevated'],
       ]) {
         expect(ratio(t[fg], t[bg]), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
       }
@@ -88,6 +89,20 @@ describe('디자인 토큰', () => {
         for (const bg of ['--bg', '--bg-elevated']) expect(ratio(t[fg], t[bg]), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+
+  it('선택 행·텍스트 선택은 배경과 눈에 띄게 구분되고, 그 위 글자도 읽힌다', () => {
+    for (const [name, t] of Object.entries(themes)) {
+      expect(ratio(t['--bg-selected'], t['--bg']), `${name} selected row on bg`).toBeGreaterThanOrEqual(1.5);
+      expect(ratio(t['--bg-selection'], t['--bg']), `${name} ::selection on bg`).toBeGreaterThanOrEqual(1.9);
+      expect(ratio(t['--text'], t['--bg-selection']), `${name} text on ::selection`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('props 는 세미콜론 없는 마지막 선언도 읽는다', () => {
+    expect(props('--a: #111111; --b: #222222')).toEqual({ '--a': '#111111', '--b': '#222222' });
+    expect(props('--a: #111111;\n  --b: #222222\n')).toEqual({ '--a': '#111111', '--b': '#222222' });
+    expect(props('--a: #111111; color-scheme: dark;')).toEqual({ '--a': '#111111' });
   });
 
   it('대비 계산이 실제로 틀린 색을 걸러 낸다 (검사기 자체의 자기 점검)', () => {
