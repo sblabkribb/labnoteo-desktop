@@ -78,6 +78,54 @@ export const editorThemeSpec = {
       '&:after': arrow('Bottom', 'var(--bg-elevated)'),
     },
   },
+  // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
+  '.lno-table-wrap': { position: 'relative', padding: 'var(--space-2) var(--space-3)', overflowX: 'auto' },
+  // 칸 사이 선이 겹치지 않게: 칸은 오른쪽·아래 선만, 표가 왼쪽·위 선을 긋는다(border-collapse 의 값이 색 이름 검사에 걸린다)
+  '.lno-table': {
+    borderSpacing: '0',
+    borderLeft: '1px solid var(--border)',
+    borderTop: '1px solid var(--border)',
+    fontSize: 'inherit',
+    lineHeight: '1.5',
+  },
+  '.lno-table th, .lno-table td': {
+    borderRight: '1px solid var(--border)',
+    borderBottom: '1px solid var(--border)',
+    padding: 'var(--space-1) var(--space-2)',
+    verticalAlign: 'top',
+    textAlign: 'left',
+    minWidth: '3em',
+  },
+  '.lno-table th': { backgroundColor: 'var(--bg-elevated)', fontWeight: '700' },
+  '.lno-table .lno-al-left': { textAlign: 'left' },
+  '.lno-table .lno-al-center': { textAlign: 'center' },
+  '.lno-table .lno-al-right': { textAlign: 'right' },
+  '.lno-table .lno-cell-overflow': { color: 'var(--text-muted)', borderBottom: '1px solid var(--danger)', borderRight: '1px solid var(--danger)' },
+  '.lno-table code': { fontFamily: 'var(--font-mono)', fontSize: '0.93em', backgroundColor: 'var(--bg-hover)', borderRadius: 'var(--radius)' },
+  '.lno-table-link': { color: 'var(--accent)', textDecoration: 'underline' },
+  '.lno-table-image': { color: 'var(--text-muted)', fontStyle: 'italic' },
+  // 도구 막대는 표 위에 떠 있다가 가리키거나 포커스가 들어올 때만 보인다(키보드로도 닿는다)
+  '.lno-table-toolbar': {
+    display: 'flex',
+    gap: 'var(--space-1)',
+    justifyContent: 'flex-end',
+    marginBottom: 'var(--space-1)',
+    opacity: '0',
+    transition: 'opacity 120ms',
+  },
+  '.lno-table-wrap:hover > .lno-table-toolbar, .lno-table-wrap:focus-within > .lno-table-toolbar': { opacity: '1' },
+  '.lno-table-tool': {
+    font: 'inherit',
+    fontSize: '0.85em',
+    color: 'var(--text)',
+    backgroundColor: 'var(--bg-elevated)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 'var(--radius)',
+    padding: '0 var(--space-2)',
+    cursor: 'pointer',
+    '&:hover': { backgroundColor: 'var(--bg-hover)' },
+    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
+  },
 };
 
 /**

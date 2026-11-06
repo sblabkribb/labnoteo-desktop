@@ -69,6 +69,11 @@ const ko: Record<string, string> = {
   'editor.closeAsk.discard': '저장하지 않고 닫기',
   'editor.closeAsk.stay': '계속 편집',
   'editor.keep': '그대로 두기',
+  'table.toolbar': '표 도구',
+  'table.insertRowBelow': '아래에 행 추가',
+  'table.insertColumnRight': '오른쪽에 열 추가',
+  'table.editAsMarkdown': '마크다운으로 편집',
+  'table.overflow': '머리 행보다 많은 칸입니다. 내보내기에서 빠질 수 있습니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -140,6 +145,11 @@ const en: Record<string, string> = {
   'editor.closeAsk.discard': 'Close without saving',
   'editor.closeAsk.stay': 'Keep editing',
   'editor.keep': 'Decide later',
+  'table.toolbar': 'Table tools',
+  'table.insertRowBelow': 'Add row below',
+  'table.insertColumnRight': 'Add column to the right',
+  'table.editAsMarkdown': 'Edit as Markdown',
+  'table.overflow': 'Extra cell beyond the header row. Exports may leave it out.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
