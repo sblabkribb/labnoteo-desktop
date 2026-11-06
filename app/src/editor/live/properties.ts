@@ -15,11 +15,11 @@ import {
   type StateEffectType,
   type TransactionSpec,
 } from '@codemirror/state';
-import { Decoration, EditorView, keymap, WidgetType, type DecorationSet } from '@codemirror/view';
+import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { frontMatterNames, parseFrontMatterYaml } from '@labnoteo/core';
 import { frontMatterText } from '../../labnote/frontMatterText';
 import { t } from '../../i18n/t';
-import { addKey, editValue, isWikilinkValue, keyOfLine, READ_ONLY_KEYS, removeKey, renameKey } from './frontEdit';
+import { addKey, APP_KEYS, editValue, isWikilinkValue, keyOfLine, READ_ONLY_KEYS, removeKey, renameKey } from './frontEdit';
 import { tableOptions } from '../table/field';
 import { toggleMode } from './mode';
 
@@ -66,6 +66,16 @@ function frontNode(state: EditorState): { from: number; to: number } | null {
 
 const isScalar = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
 
+/** 값(또는 목록의 항목)에 줄바꿈이 든 글이 있는가. */
+const hasLineBreak = (v: unknown): boolean =>
+  typeof v === 'string' ? /[\r\n]/.test(v) : Array.isArray(v) && v.some((x) => typeof x === 'string' && /[\r\n]/.test(x));
+
+/** 블록(`|`)·접힌(`>`) 스칼라의 머리: 키 줄의 `:` 뒤, 또는 목록 항목 `- ` 뒤. */
+const BLOCK_SCALAR = /^\s*(?:-\s+)?[|>][-+0-9]*\s*(?:#.*)?$/;
+
+/** 한 줄 입력이 실제로 지니는 글: HTML 은 input.value 에서 줄바꿈(CR·LF)을 지운다. */
+const inputText = (s: string) => s.replace(/[\r\n]/g, '');
+
 /** 격자로 보일 머리말. 위 조건 중 하나라도 어기면 null(원문). */
 export function frontBlock(state: EditorState): FrontBlock | null {
   const node = frontNode(state);
@@ -99,6 +109,8 @@ export function frontBlock(state: EditorState): FrontBlock | null {
     const source = span?.source ?? [];
     let cell: FrontEntry['cell'];
     if (READ_ONLY_KEYS.has(key)) cell = 'readOnly';
+    // 여러 줄 글(블록·접힌 스칼라, 줄바꿈이 든 따옴표 글)은 한 줄 입력에 담기면 납작해진다: "YAML로 편집"으로만 고친다
+    else if (hasLineBreak(value) || source.some((l) => BLOCK_SCALAR.test(l))) cell = 'nested';
     else if (isWikilinkValue(source) || (Array.isArray(value) && value.length > 0 && value.every((x) => typeof x === 'string' && /^\[\[.*\]\]$/.test(x))))
       cell = 'wikilink';
     else if (Array.isArray(value)) cell = value.every(isScalar) ? 'list' : 'nested';
@@ -112,7 +124,8 @@ export function frontBlock(state: EditorState): FrontBlock | null {
 
 /** 칸에 보일 글. 목록은 쉼표로 잇고, 위키링크는 이름만 보인다(고치면 `[[…]]` 로 다시 적는다). */
 function cellText(e: FrontEntry): string {
-  if (e.cell === 'wikilink') return frontMatterNames(e.value).join(', ');
+  // 쉼표가 든 이름은 `[[…]]` 째로 보인다(고칠 때 쉼표로 나뉘지 않게)
+  if (e.cell === 'wikilink') return frontMatterNames(e.value).map((n) => (n.includes(',') ? `[[${n}]]` : n)).join(', ');
   if (e.cell === 'list') return (e.value as unknown[]).map((x) => (x === null ? '' : String(x))).join(', ');
   if (e.cell === 'nested') return JSON.stringify(e.value);
   return e.value === null || e.value === undefined ? '' : String(e.value);
@@ -182,6 +195,27 @@ export const propertiesActions: Facet<PropertiesActions, PropertiesActions> = Fa
 /** 원래 값(되돌리기·바뀌었는지 비교용). */
 const ORIG = 'orig';
 
+/**
+ * 편집기가 잠겨 있는가(Editor.tsx 의 LOCKED: 바깥 변경·충돌 대화 상자, 불러오는 중, 오류). 격자의 입력은 ignoreEvent 위젯 안의
+ * 브라우저 입력이라 편집기의 readOnly·editable 이 막지 못한다: 잠긴 동안 입력은 읽기 전용, 단추는 쓰지 못하게 한다.
+ */
+const locked = (state: EditorState) => state.readOnly || !state.facet(EditorView.editable);
+
+/** 격자 안의 입력·쓰는 단추를 잠금에 맞춘다. */
+function applyLock(box: HTMLElement, on: boolean): void {
+  for (const input of box.querySelectorAll<HTMLInputElement>('input.lno-props-input')) input.readOnly = on;
+  for (const b of box.querySelectorAll<HTMLButtonElement>('.lno-props-remove, .lno-props-add-btn, .lno-props-status')) b.disabled = on;
+}
+
+/** 잠금이 바뀌면(장식은 그대로) 보이는 격자에 알린다. */
+const lockSync = ViewPlugin.define(() => ({
+  update(u: ViewUpdate) {
+    const on = locked(u.state);
+    if (on === locked(u.startState)) return;
+    for (const box of u.view.dom.querySelectorAll<HTMLElement>('.lno-props')) applyLock(box, on);
+  },
+}));
+
 const focused = (el: Element) => (el.getRootNode() as Document | ShadowRoot).activeElement === el;
 
 /** 조합 중인 키인가(한글 IME). 조합 중의 Enter·Escape 는 IME 의 것이다. */
@@ -217,13 +251,19 @@ function gridInput(view: EditorView, o: InputOpts): HTMLInputElement {
   input.type = 'text';
   input.className = `lno-props-input ${o.className}`;
   input.value = o.value;
-  input.dataset[ORIG] = o.value;
+  // 비교는 입력이 실제로 지닌 글로: 보이는 것만 다른(줄바꿈이 지워진) 값이 적히는 일이 없게
+  input.dataset[ORIG] = input.value;
   input.setAttribute('aria-label', o.label);
   input.spellcheck = false;
+  input.readOnly = locked(view.state);
   let composing = false;
   const commit = () => {
     const orig = input.dataset[ORIG] ?? '';
     if (input.value === orig) return;
+    if (input.readOnly || locked(view.state)) {
+      input.value = orig;
+      return;
+    }
     const spec = o.edit(view.state, input.value);
     if (!spec) {
       input.value = orig;
@@ -301,6 +341,7 @@ export class PropertiesWidget extends WidgetType {
     box.append(head);
     for (const e of this.block.entries) box.append(this.row(e, view));
     box.append(addRow(view));
+    applyLock(box, locked(view.state));
     return box;
   }
 
@@ -310,7 +351,9 @@ export class PropertiesWidget extends WidgetType {
     row.dataset.key = e.key;
     row.dataset.cell = e.cell;
     const editable = e.cell !== 'readOnly' && e.cell !== 'nested';
-    const key = editable
+    // status 는 앱의 상태 명령으로만 고친다: 이름 바꾸기·지우기도 격자에서 하지 않는다
+    const appKey = APP_KEYS.has(e.key);
+    const key = editable && !appKey
       ? gridInput(view, {
           className: 'lno-props-key',
           value: e.key,
@@ -319,7 +362,7 @@ export class PropertiesWidget extends WidgetType {
           after: () => refocus(view, `.lno-props-row[data-key=${cssString(e.key)}] input.lno-props-key`),
         })
       : document.createElement('span');
-    if (!editable) {
+    if (!editable || appKey) {
       key.className = 'lno-props-key';
       key.textContent = e.key;
     }
@@ -327,7 +370,7 @@ export class PropertiesWidget extends WidgetType {
     const actions = document.createElement('span');
     actions.className = 'lno-props-actions';
     if (e.cell === 'nested') actions.append(editYamlButton(view));
-    if (e.cell !== 'readOnly') actions.append(removeButton(view, e.key));
+    if (e.cell !== 'readOnly' && !appKey) actions.append(removeButton(view, e.key));
     row.append(actions);
     return row;
   }
@@ -362,7 +405,7 @@ export class PropertiesWidget extends WidgetType {
   }
 
   /** 같은 키들(같은 순서·종류)이면 값만 제자리에서 바꾼다. 초점이 있고 고치던 입력은 건드리지 않는다. */
-  updateDOM(dom: HTMLElement): boolean {
+  updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const rowEls = [...dom.querySelectorAll<HTMLElement>(':scope > .lno-props-row')];
     const entries = this.block.entries;
     if (rowEls.length !== entries.length) return false;
@@ -371,13 +414,14 @@ export class PropertiesWidget extends WidgetType {
       const v = r.querySelector<HTMLElement>('.lno-props-value');
       const text = cellText(entries[i]);
       if (v instanceof HTMLInputElement) {
-        if (v.dataset[ORIG] === text) return;
+        if (v.dataset[ORIG] === inputText(text)) return;
         if (focused(v) && v.value !== v.dataset[ORIG]) return; // 고치는 중이다: 사용자의 글을 덮지 않는다
         v.value = text;
-        v.dataset[ORIG] = text;
+        v.dataset[ORIG] = v.value;
       } else if (v && v.textContent !== text) v.textContent = text;
     });
     dom.setAttribute('aria-label', t('props.label'));
+    applyLock(dom, locked(view.state));
     return true;
   }
 
@@ -427,6 +471,7 @@ function addRow(view: EditorView): HTMLElement {
   button.className = 'lno-btn lno-props-add-btn';
   button.textContent = t('props.add');
   const add = () => {
+    if (locked(view.state)) return;
     const spec = addKey(view.state, key.value, value.value);
     if (!spec) {
       key.setAttribute('aria-invalid', 'true');
@@ -485,7 +530,7 @@ export const propertiesField = StateField.define<DecorationSet>({
       tr.state.field(rawFront, false) !== tr.startState.field(rawFront, false);
     return changed ? buildGrid(tr.state) : deco;
   },
-  provide: (f) => [EditorView.decorations.from(f), EditorView.atomicRanges.of((v) => v.state.field(f))],
+  provide: (f) => [EditorView.decorations.from(f), EditorView.atomicRanges.of((v) => v.state.field(f)), lockSync],
 });
 
 /** 지금 보이는 격자의 끝(닫는 `---` 줄의 끝). 격자가 없으면 null. */

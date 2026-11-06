@@ -123,6 +123,42 @@ describe('속성 격자의 최소 편집(frontEdit)', () => {
     expect(l.update(editValue(l, 'tags', 'a, b')!).state.sliceDoc()).toBe(['---', 'tags:', '  - a', '  - b', '---', 'x'].join('\r\n'));
   });
 
+  it('a read-only state gets no edit spec', () => {
+    const ro = EditorState.create({ doc: '---\na: 1\n---\nx', extensions: [labnoteMarkdown(), EditorState.readOnly.of(true)] });
+    expect(editValue(ro, 'a', '2')).toBeNull();
+    expect(renameKey(ro, 'a', 'b')).toBeNull();
+    expect(addKey(ro, 'b', '1')).toBeNull();
+    expect(removeKey(ro, 'a')).toBeNull();
+  });
+
+  it('multi-line and block scalars are nested, never flattened', () => {
+    expect(editValue(st(L('---', 'summary: |', '  line one', '  line two', 'b: 1', '---', 'x')), 'summary', 'line oneline two')).toBeNull();
+    expect(editValue(st(L('---', 'summary: >-', '  one', 'b: 1', '---', 'x')), 'summary', 'one')).toBeNull();
+    expect(editValue(st('---\na: "x\\ny"\n---\nx'), 'a', 'xy')).toBeNull();
+    expect(editValue(st(L('---', 'l:', '  - "x\\ny"', '---', 'x')), 'l', 'xy')).toBeNull();
+  });
+
+  it('wikilink cells split only outside [[...]] and strip stray brackets', () => {
+    const doc = '---\nauthor: [[이서연]]\n---\nx';
+    expect(docOf(doc, (s) => editValue(s, 'author', 'b]], c'))).toBe(L('---', 'author:', '  - "[[b]]"', '  - "[[c]]"', '---', 'x'));
+    expect(docOf(doc, (s) => editValue(s, 'author', '[[Kim, J]]'))).toBe('---\nauthor: "[[Kim, J]]"\n---\nx');
+  });
+
+  it('a typed YAML float stays a number; a leading-zero id stays a string', () => {
+    const out = docOf('---\na: 1\n---\nx', (s) => editValue(s, 'a', '1.0'));
+    expect(out).toBe('---\na: 1.0\n---\nx');
+    expect(parseFrontMatterYaml(frontMatterText(out)).frontMatter.a).toBe(1);
+    expect(parseFrontMatterYaml(frontMatterText(docOf('---\na: 1\n---\nx', (s) => editValue(s, 'a', '007')))).frontMatter.a).toBe('007');
+  });
+
+  it('status is renamed, removed or added only by the app command', () => {
+    const doc = '---\nstatus: Planned\na: 1\n---\nx';
+    expect(renameKey(st(doc), 'status', 'state')).toBeNull();
+    expect(removeKey(st(doc), 'status')).toBeNull();
+    expect(renameKey(st('---\na: 1\n---\nx'), 'a', 'status')).toBeNull();
+    expect(addKey(st('---\na: 1\n---\nx'), 'status', 'Done')).toBeNull();
+  });
+
   it('one commit is one undo step with userEvent input.properties', () => {
     const tr = st('---\na: 1\n---\nx').update(editValue(st('---\na: 1\n---\nx'), 'a', '2')!);
     expect(tr.isUserEvent('input.properties')).toBe(true);

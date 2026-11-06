@@ -10,11 +10,15 @@ import { frontBlock, type FrontBlock, type FrontEntry } from './properties';
  *   한 줄 값의 꼬리 주석(` # …`)은 남긴다. 바뀐 만큼만(minimalReplacement) 문서에 넣고, 줄바꿈은 문서의 것(toDocBreaks)으로.
  * - 키 이름 바꾸기는 토큰만, 지우기는 그 키의 줄들과 줄바꿈만, 더하기는 닫는 `---` 바로 앞의 한 줄이다.
  * - 한 번의 편집은 되돌리기 한 번(isolateHistory 'full'), userEvent 는 input.properties 다(frontGuard 가 지나보낸다).
- * 머리말이 격자로 보일 수 없거나(frontBlock 이 null), 키가 읽기 전용이면 null 이다.
+ * 머리말이 격자로 보일 수 없거나(frontBlock 이 null), 키가 읽기 전용이거나, 편집기가 잠겨 있으면(state.readOnly) null 이다.
+ * 흐름 목록(`tags: [a, b] # c`)을 고치면 블록 목록으로 다시 적으므로 그 줄 끝 주석은 남지 않는다(한 줄 스칼라 값의 주석만 남긴다).
  */
 
 /** 앱이 적는 키. 격자에서 고치지 않는다. */
 export const READ_ONLY_KEYS: ReadonlySet<string> = new Set(['last_updated_date']);
+
+/** 앱의 명령으로만 고치는 키(status 는 "실험 상태 바꾸기"). 격자에서 이름을 바꾸거나 지우거나 더하지 않는다. */
+export const APP_KEYS: ReadonlySet<string> = new Set(['status']);
 
 /** 줄 맨 앞의 YAML 키(따옴표 키, 또는 `:`·`#` 이 없는 평범한 키) 다음의 `:`. */
 // 따옴표 글자는 \x22 와 \x27 로 쓴다: escapes.test.ts 는 소스의 따옴표 사이를 문자열로 읽는다.
@@ -130,11 +134,46 @@ function scalarOf(raw: string): unknown {
   return text;
 }
 
+/** YAML 이 숫자로 읽는 소수 글(`1.0`, `.5`, `1e3`). 코어는 1.0 을 1 로 적으므로 받은 글 그대로 적는다(entryText). `007` 같은 정수 글은 들지 않는다. */
+const YAML_FLOAT = /^[-+]?(?:\d+\.\d*|\.\d+|\d+(?:\.\d*)?[eE][-+]?\d+)$/;
+function isYamlFloat(text: string): boolean {
+  if (!YAML_FLOAT.test(text)) return false;
+  const parsed = parseFrontMatterYaml(`---\nk: ${text}\n---\n`);
+  return !parsed.parseError && typeof parsed.frontMatter.k === 'number';
+}
+
 const splitList = (raw: string) =>
   raw
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+
+/** 위키링크 칸의 글을 링크들로: 쉼표는 `[[…]]` 밖에서만 나누고, 맨 이름의 `[`·`]` 는 지운 뒤 `[[…]]` 로 감싼다. */
+function splitLinks(raw: string): string[] {
+  const parts: string[] = [];
+  let cur = '';
+  let inside = false;
+  for (let i = 0; i < raw.length; i++) {
+    if (!inside && raw.startsWith('[[', i)) {
+      inside = true;
+      cur += '[[';
+      i++;
+    } else if (inside && raw.startsWith(']]', i)) {
+      inside = false;
+      cur += ']]';
+      i++;
+    } else if (!inside && raw[i] === ',') {
+      parts.push(cur);
+      cur = '';
+    } else cur += raw[i];
+  }
+  parts.push(cur);
+  return parts
+    .map((s) => s.trim())
+    .map((s) => (WIKI.test(s) ? s : s.replace(/[[\]]/g, '').trim()))
+    .filter(Boolean)
+    .map((s) => (WIKI.test(s) ? s : `[[${s}]]`));
+}
 
 /** `k:` 로 시작하는 코어의 항목에서 키를 `token` 으로 바꾼다. */
 const withToken = (entry: string, token: string) => token + entry.slice(1);
@@ -142,12 +181,20 @@ const withToken = (entry: string, token: string) => token + entry.slice(1);
 /** 칸의 종류에 맞춰 입력을 YAML 항목(`token: …`, 여러 줄일 수 있다)으로 적는다. */
 function entryText(cell: FrontEntry['cell'], token: string, raw: string): string {
   if (cell === 'wikilink') {
-    const links = splitList(raw).map((s) => (WIKI.test(s) ? s : `[[${s}]]`));
+    const links = splitLinks(raw);
     if (links.length === 0) return `${token}: `;
-    if (links.length === 1) return `${token}: ${links[0]}`;
+    // 따옴표 없는 `[[a, b]]` 는 YAML 이 두 항목으로 읽는다: 쉼표가 든 링크 하나는 따옴표로 적는다
+    if (links.length === 1) return `${token}: ${links[0].includes(',') ? JSON.stringify(links[0]) : links[0]}`;
     return [`${token}:`, ...links.map((l) => `  - ${JSON.stringify(l)}`)].join('\n');
   }
   if (cell === 'list') return withToken(serializeFrontMatterEntry('k', splitList(raw).map(scalarOf)), token);
+  return scalarEntry(token, raw);
+}
+
+/** 스칼라 값 하나의 항목. YAML 소수 글(`1.0`)은 숫자로 읽히도록 받은 그대로 적는다. */
+function scalarEntry(token: string, raw: string): string {
+  const text = raw.trim();
+  if (isYamlFloat(text)) return `${token}: ${text}`;
   return withToken(serializeFrontMatterEntry('k', scalarOf(raw)), token);
 }
 
@@ -161,7 +208,7 @@ function spec(state: EditorState, from: number, to: number, insert: string): Tra
 
 function editable(state: EditorState, key: string): { block: FrontBlock; entry: FrontEntry } | null {
   const block = frontBlock(state);
-  if (!block || READ_ONLY_KEYS.has(key)) return null;
+  if (!block || state.readOnly || READ_ONLY_KEYS.has(key)) return null;
   const entry = block.entries.find((e) => e.key === key);
   if (!entry || entry.cell === 'readOnly') return null;
   return { block, entry };
@@ -184,11 +231,12 @@ export function editValue(state: EditorState, key: string, raw: string): Transac
   return spec(state, span.from + m.start, span.from + m.end, m.text);
 }
 
-/** 키 이름만 바꾼다(값과 주석은 그대로). 새 이름이 이미 있거나 받을 수 없는 이름이면 null. */
+/** 키 이름만 바꾼다(값과 주석은 그대로). 새 이름이 이미 있거나 받을 수 없는 이름, 또는 앱의 키(status)면 null. */
 export function renameKey(state: EditorState, from: string, to: string): TransactionSpec | null {
   const name = to.trim();
   const found = editable(state, from);
   if (!found || name === from || !NEW_KEY.test(name) || READ_ONLY_KEYS.has(name)) return null;
+  if (APP_KEYS.has(from) || APP_KEYS.has(name)) return null;
   if (found.block.entries.some((e) => e.key === name)) return null;
   const span = keySpan(found.block.text, from);
   if (!span) return null;
@@ -199,16 +247,16 @@ export function renameKey(state: EditorState, from: string, to: string): Transac
 export function addKey(state: EditorState, key: string, raw: string): TransactionSpec | null {
   const name = key.trim();
   const block = frontBlock(state);
-  if (!block || !NEW_KEY.test(name) || READ_ONLY_KEYS.has(name)) return null;
+  if (!block || state.readOnly || !NEW_KEY.test(name) || READ_ONLY_KEYS.has(name) || APP_KEYS.has(name)) return null;
   if (block.entries.some((e) => e.key === name) || keySpan(block.text, name)) return null;
   const at = block.text.lastIndexOf('\n') + 1;
-  return spec(state, at, at, `${withToken(serializeFrontMatterEntry('k', scalarOf(raw)), yamlKey(name))}\n`);
+  return spec(state, at, at, `${scalarEntry(yamlKey(name), raw)}\n`);
 }
 
 /** 그 키의 줄들과 그 뒤의 줄바꿈을 지운다. */
 export function removeKey(state: EditorState, key: string): TransactionSpec | null {
   const found = editable(state, key);
-  if (!found) return null;
+  if (!found || APP_KEYS.has(key)) return null;
   const span = keySpan(found.block.text, key);
   if (!span) return null;
   return spec(state, span.from, span.to + 1, '');

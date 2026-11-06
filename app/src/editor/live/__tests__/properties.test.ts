@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
+import { Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { history, historyKeymap, undo } from '@codemirror/commands';
 import { labnoteMarkdown } from '../../markdownSyntax';
@@ -418,6 +418,56 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
     input.value = 'b';
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }));
     expect(saved).toBe(original.replace('title: a', 'title: b')); // 적은 뒤에 저장한다
+  });
+
+  const focusAndBlurAll = (v: EditorView) => {
+    for (const input of v.contentDOM.querySelectorAll<HTMLInputElement>('.lno-props input')) {
+      input.focus();
+      input.blur();
+    }
+  };
+
+  it('focus and blur on a block-scalar row leave the document unchanged', () => {
+    const doc = ['---', 'summary: |', '  line one', '  line two', 'b: 1', '---', 'x'].join('\n');
+    const v = view(doc, doc.length);
+    expect(rowEl(v, 'summary').dataset.cell).toBe('nested');
+    focusAndBlurAll(v);
+    expect(v.state.doc.toString()).toBe(doc);
+  });
+
+  it('a quoted scalar with a line break is not flattened by focus and blur', () => {
+    const doc = '---\na: "x\\ny"\nb: 1\n---\nx';
+    const v = view(doc, doc.length);
+    focusAndBlurAll(v);
+    expect(v.state.doc.toString()).toBe(doc);
+  });
+
+  it('Enter in a locked view does not change the document; inputs are read-only', () => {
+    const v = view(original, original.length, { extensions: [EditorState.readOnly.of(true), EditorView.editable.of(false)] });
+    const input = valueInput(v, 'title');
+    expect(input.readOnly).toBe(true);
+    input.focus();
+    input.value = 'b';
+    enter(input);
+    expect(v.state.doc.toString()).toBe(original);
+    expect(v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.add')}"]`)!.readOnly).toBe(true);
+    expect(rowEl(v, 'title').querySelector<HTMLButtonElement>('.lno-props-remove')!.disabled).toBe(true);
+  });
+
+  it('a lock that arrives after the grid is drawn makes the inputs read-only, and unlocking restores them', () => {
+    const lock = new Compartment();
+    const v = view(original, original.length, { extensions: [lock.of([])] });
+    expect(valueInput(v, 'title').readOnly).toBe(false);
+    v.dispatch({ effects: lock.reconfigure([EditorState.readOnly.of(true), EditorView.editable.of(false)]) });
+    expect(valueInput(v, 'title').readOnly).toBe(true);
+    v.dispatch({ effects: lock.reconfigure([]) });
+    expect(valueInput(v, 'title').readOnly).toBe(false);
+  });
+
+  it('the status row key is not editable and has no remove button', () => {
+    const v = view(original, original.length);
+    expect(rowEl(v, 'status').querySelector('input.lno-props-key')).toBeNull();
+    expect(rowEl(v, 'status').querySelector('.lno-props-remove')).toBeNull();
   });
 
   it('Mod-e with focus inside a grid input flips the global mode exactly once', () => {
