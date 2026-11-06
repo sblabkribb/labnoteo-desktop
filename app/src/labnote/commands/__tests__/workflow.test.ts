@@ -2,7 +2,10 @@
 import { act } from '@testing-library/react';
 import type { PickItem, WorkflowItem } from '@labnoteo/core';
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
+import type { EditorHandle } from '../../../editor/Editor';
 import { setLang } from '../../../i18n/lang';
+import { openNote, registerOpenNote } from '../../openNotes';
+import { runCommand } from '../runCommand';
 import { createTestHost, type TestHost } from '../../__tests__/testHost';
 import { rankPickItems } from '../../port/rankPickItems';
 import { clearCommandsForTest, commandById } from '../registry';
@@ -118,6 +121,50 @@ describe('create-workflow', () => {
     expect(h.vault.log.filter((c) => c.cmd === 'vault_modify' && c.args.path === README_PATH)).toEqual([]);
     expect(h.notes.map((n) => n.kind)).toEqual(['info', 'warn']);
     expect(h.notes[1].message).toContain('Related Workflows');
+    expect(h.notes[1].message).toContain('폴더와 워크플로 체크리스트 맞추기');
+  });
+
+  it('README open and busy: the note is still created, refreshed, opened and announced, with a warning that the README checklist was not updated', async () => {
+    const before = readme();
+    h = createTestHost({ [README_PATH]: before });
+    h.setActive(README_PATH);
+    const off = registerOpenNote(README_PATH, { busy: () => true, view: () => undefined, rawText: () => before } as unknown as EditorHandle);
+    try {
+      h.answer.pick(byId('WD010'));
+      h.answer.alias('');
+      await runCommand(h.ctx, () => createWorkflow(h.ctx));
+    } finally {
+      off();
+    }
+    const path = `${DIR}/001_WD010_General_Design_of_Experiment.labnote.md`;
+    expect(h.vault.files()[path]).toBeDefined();
+    expect(h.vault.files()[README_PATH]).toBe(before);
+    expect(h.refreshes()).toBe(1);
+    expect(h.opened).toEqual([path]);
+    expect(h.notes.map((n) => n.kind)).toEqual(['info', 'warn']);
+    expect(h.notes[0].message).toContain('001_WD010_General_Design_of_Experiment.labnote.md');
+    expect(h.notes[1].message).toContain('폴더와 워크플로 체크리스트 맞추기');
+    expect(h.notes[1].message).not.toContain('바꾸지 않았습니다');
+  });
+
+  it('README open but its save fails: the note is created, refreshed, opened and announced with the same warning', async () => {
+    h = createTestHost({ [README_PATH]: readme() });
+    await h.mount(README_PATH);
+    const real = openNote(README_PATH)!;
+    const handle = { ...real, flush: () => Promise.resolve(false) } as EditorHandle;
+    const off = registerOpenNote(README_PATH, handle);
+    try {
+      h.answer.pick(byId('WD010'));
+      h.answer.alias('');
+      await act(() => runCommand(h.ctx, () => createWorkflow(h.ctx)));
+    } finally {
+      off();
+    }
+    const path = `${DIR}/001_WD010_General_Design_of_Experiment.labnote.md`;
+    expect(h.vault.files()[path]).toBeDefined();
+    expect(h.refreshes()).toBe(1);
+    expect(h.opened).toEqual([path]);
+    expect(h.notes.map((n) => n.kind)).toEqual(['info', 'warn']);
     expect(h.notes[1].message).toContain('폴더와 워크플로 체크리스트 맞추기');
   });
 

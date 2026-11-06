@@ -22,7 +22,9 @@ import {
   insertWorkflowChecklistEntries,
   parseExperimenterFromReadme,
 } from '@labnoteo/core/lib/workflowStructure';
+import { t } from '../../i18n/t';
 import { coreLocale } from '../i18n';
+import { NoteBusyError, NoteSaveError } from '../noteErrors';
 import { processNote } from '../openNotes';
 import { README, VAULT_ROOT } from '../paths';
 import {
@@ -39,8 +41,11 @@ import type { CommandContext } from './context';
 import type { Command } from './registry';
 import { readmeStamp } from './stamp';
 
-/** registerWorkflowInReadme 가 한 일. */
-export type WorkflowRegistration = 'registered' | 'noSection' | 'noReadme';
+/**
+ * registerWorkflowInReadme 가 한 일. 'notRegistered': README 가 편집기에 열려 있는데 바쁘거나(NoteBusyError)
+ * 저장하지 못해서(NoteSaveError) 체크리스트를 디스크에 넣지 못했다. 노트는 이미 만들어졌으니 만들기는 실패가 아니다.
+ */
+export type WorkflowRegistration = 'registered' | 'noSection' | 'noReadme' | 'notRegistered';
 
 /** 새로 만든 워크플로 노트. */
 export interface CreatedWorkflow {
@@ -82,6 +87,8 @@ function notifyWorkflowCreated(ctx: CommandContext, created: CreatedWorkflow): v
         host.t('Sync workflow checklist with folder'),
       ),
     );
+  } else if (created.registered === 'notRegistered') {
+    host.notify('warn', t('workflow.readmeNotUpdated', host.t('Sync workflow checklist with folder')));
   }
 }
 
@@ -123,7 +130,18 @@ export async function createWorkflowFile(
   warnIfWindowsPathTooLong(host, ctx.vaultRoot, workflowPath);
 
   const displayTitle = cleanAlias ? `${chosen.id} ${chosen.name} ${cleanAlias}` : `${chosen.id} ${chosen.name}`;
-  const registered = await registerWorkflowInReadme(ctx, readmePath, { title: displayTitle, fileName });
+  // 노트는 이미 디스크에 있다: README 를 못 바꿨다고 명령 전체를 실패로 알리면(command.noteBusy "바꾸지 않았습니다")
+  // 사람은 다시 실행해 002_ 쌍둥이를 만든다. 그러니 그 두 오류는 여기서 받아 경고로 바꾸고, 새로고침·열기·알림은 그대로 한다.
+  let registered: WorkflowRegistration;
+  try {
+    registered = await registerWorkflowInReadme(ctx, readmePath, { title: displayTitle, fileName });
+  } catch (err) {
+    if (!(err instanceof NoteBusyError || err instanceof NoteSaveError)) {
+      ctx.refresh();
+      throw err;
+    }
+    registered = 'notRegistered';
+  }
   ctx.refresh();
   return { path: workflowPath, fileName, displayTitle, registered };
 }
