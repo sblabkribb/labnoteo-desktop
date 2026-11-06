@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { EditorState, Transaction, type Extension } from '@codemirror/state';
+import { EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { history, historyKeymap, undo } from '@codemirror/commands';
 import { labnoteMarkdown } from '../../markdownSyntax';
@@ -9,6 +9,8 @@ import { getMode, setMode } from '../mode';
 import { editYaml, frontBlock, PropertiesWidget, propertiesActions, rawFront } from '../properties';
 import { t } from '../../../i18n/t';
 import { insertDate } from '../../../labnote/commands/editorInserts';
+import { formatExtensions } from '../../commands/formatCommands';
+import { tableOptions } from '../../table/field';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -320,7 +322,7 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
 
   it('removes a row and adds one from the add row', () => {
     const v = view(original, original.length);
-    click(rowEl(v, 'title').querySelector(`button[aria-label="${t('props.remove')}: title"]`)!);
+    click(rowEl(v, 'title').querySelector(`button[aria-label="${t('props.removeKey', 'title')}"]`)!);
     expect(v.state.doc.toString()).toBe('---\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx');
     const key = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.add')}"]`)!;
     const value = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.newValue')}"]`)!;
@@ -368,6 +370,54 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
     expect(document.activeElement).toBe(input);
     expect(input.value).toBe('typing');
     expect(rowEl(v, 'status').querySelector('.lno-chip')!.textContent).toBe('Done');
+  });
+
+  it('a composing Ctrl+B inside a grid input never formats the note body', () => {
+    const doc = '---\ntitle: a\n---\nhello';
+    const v = view(doc, 0, { extensions: [formatExtensions()] });
+    v.dispatch({ selection: { anchor: 17, head: 21 } }); // 'hell'
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart'));
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, isComposing: true, keyCode: 229, bubbles: true, cancelable: true }),
+    );
+    expect(v.state.doc.toString()).toBe(doc);
+  });
+
+  it('a value typed into a focused input survives a programmatic change to its own key', () => {
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.value = 'typing';
+    v.dispatch({ changes: { from: 11, to: 12, insert: 'z' } }); // title: a → z (프로그램 편집)
+    expect(valueInput(v, 'title')).toBe(input);
+    expect(input.value).toBe('typing');
+  });
+
+  it('a blur during composition commits once the composition ends', async () => {
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart'));
+    input.value = '한';
+    input.blur(); // 조합 중에 초점을 잃는다
+    expect(v.state.doc.toString()).toBe(original);
+    input.dispatchEvent(new CompositionEvent('compositionend'));
+    await Promise.resolve();
+    expect(v.state.doc.toString()).toBe(original.replace('title: a', 'title: 한'));
+  });
+
+  it('Mod-s inside a grid input commits the pending value, then saves', () => {
+    let saved = '';
+    const v = view(original, original.length, {
+      extensions: [Prec.highest(tableOptions.of({ save: () => (saved = v.state.doc.toString()), root: document }))],
+    });
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.value = 'b';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(saved).toBe(original.replace('title: a', 'title: b')); // 적은 뒤에 저장한다
   });
 
   it('Mod-e with focus inside a grid input flips the global mode exactly once', () => {

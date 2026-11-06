@@ -20,6 +20,7 @@ import { frontMatterNames, parseFrontMatterYaml } from '@labnoteo/core';
 import { frontMatterText } from '../../labnote/frontMatterText';
 import { t } from '../../i18n/t';
 import { addKey, editValue, isWikilinkValue, keyOfLine, READ_ONLY_KEYS, removeKey, renameKey } from './frontEdit';
+import { tableOptions } from '../table/field';
 import { toggleMode } from './mode';
 
 /**
@@ -190,6 +191,13 @@ const composingKey = (e: KeyboardEvent, composing: boolean) => composing || e.is
 const isToggleMode = (e: KeyboardEvent) =>
   (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key.toLowerCase() === 'e' || e.code === 'KeyE');
 
+/** Ctrl(맥은 Cmd)+S. 입력 안의 키는 편집기 keymap 에 닿지 않으므로 칸에서 적은 뒤 편집기의 저장을 부른다. */
+const isSave = (e: KeyboardEvent) =>
+  (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS');
+
+/** 편집기의 저장(표 확장이 실은 tableOptions.save, Editor.tsx 의 Mod-s 와 같은 저장). */
+const save = (view: EditorView) => view.state.facet(tableOptions)?.save();
+
 interface InputOpts {
   className: string;
   value: string;
@@ -226,7 +234,13 @@ function gridInput(view: EditorView, o: InputOpts): HTMLInputElement {
     o.after?.();
   };
   input.addEventListener('compositionstart', () => (composing = true));
-  input.addEventListener('compositionend', () => (composing = false));
+  input.addEventListener('compositionend', () => {
+    composing = false;
+    // 조합 중에 초점을 잃었으면(blur 는 적지 않았다) 조합이 끝난 글을 여기서 적는다
+    queueMicrotask(() => {
+      if (input.isConnected && !focused(input)) commit();
+    });
+  });
   input.addEventListener('keydown', (e) => {
     if (composingKey(e, composing)) return;
     if (isToggleMode(e)) {
@@ -234,6 +248,10 @@ function gridInput(view: EditorView, o: InputOpts): HTMLInputElement {
       commit();
       toggleMode();
       view.focus();
+    } else if (isSave(e)) {
+      e.preventDefault();
+      commit();
+      save(view);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       commit();
@@ -377,9 +395,9 @@ function removeButton(view: EditorView, key: string): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'lno-btn lno-props-remove';
-  b.textContent = '×';
+  b.textContent = '×'; // 기호(글자 아님): 읽어 주는 이름은 aria-label
   b.title = t('props.remove');
-  b.setAttribute('aria-label', `${t('props.remove')}: ${key}`);
+  b.setAttribute('aria-label', t('props.removeKey', key));
   b.addEventListener('click', (e) => {
     e.preventDefault();
     const spec = removeKey(view.state, key);
@@ -428,6 +446,9 @@ function addRow(view: EditorView): HTMLElement {
         e.preventDefault();
         toggleMode();
         view.focus();
+      } else if (isSave(e)) {
+        e.preventDefault();
+        save(view);
       } else if (e.key === 'Enter') {
         e.preventDefault();
         add();

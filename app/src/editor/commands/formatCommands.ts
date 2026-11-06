@@ -126,13 +126,25 @@ function matchesCode(cmKey: string, e: KeyboardEvent): boolean {
 }
 
 /**
+ * 이 뷰의 편집 글에서 온 키인가. 위젯 안의 입력(속성 격자 칸 등)이나 안에 띄운 다른 편집기(표 칸의 셀 편집기)에서 거품으로
+ * 올라온 키는 아니다: 그 키는 그 입력이나 그 편집기의 것이다(ignoreEvent 는 raw 리스너를 막지 못한다).
+ */
+function ownKey(view: EditorView, e: KeyboardEvent): boolean {
+  const target = e.target;
+  if (!(target instanceof Element) || target === view.contentDOM) return true;
+  // 블록 위젯은 contenteditable="false" 를 달지 않을 수 있다: 입력 요소는 그 자체로 가른다
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return false;
+  return target.closest('[contenteditable]') === view.contentDOM;
+}
+
+/**
  * 조합 중의 서식 키. CodeMirror 는 조합 중의 키 사건을 keymap 에 넘기지 않는다(ignoreDuringComposition): 그래서 contentDOM 에
  * 직접 듣고, 물리 키로 맞춰 runFormat 에 넘긴다(runFormat 이 compositionend 까지 미룬다). keymap 이 이미 처리한 사건은
  * (defaultPrevented) 건너뛴다. 셀 편집기에도 실어(cellExtras) 칸의 조합도 같다.
  */
 const composingFormatKeys = ViewPlugin.define((view) => {
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.defaultPrevented) return;
+    if (e.defaultPrevented || !ownKey(view, e)) return;
     if (!(view.composing || e.isComposing || e.keyCode === 229)) return;
     const f = FORMAT_KEYS.find((k) => matchesCode(k.key, e));
     if (!f) return;
