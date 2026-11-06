@@ -1,3 +1,4 @@
+import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, language, syntaxTree } from '@codemirror/language';
 import {
   ChangeSet,
@@ -7,6 +8,7 @@ import {
   StateEffect,
   StateField,
   Transaction,
+  type Annotation,
   type ChangeSpec,
   type Extension,
   type StateEffectType,
@@ -22,6 +24,8 @@ import { t } from '../../i18n/t';
  * - 머리말(front matter)이 문서 0 에서 시작해 `---` 로 닫히고, 그 글에 `\r` 이 없고(섞인 줄 끝은 원문으로 둔다),
  *   코어 parseFrontMatterYaml 이 오류를 내지 않을 때만 격자가 머리말 전체를 블록 위젯으로 대신한다. 아니면 원문 그대로다.
  * - "YAML로 편집" 단추는 이 블록만 원문으로 돌린다(rawFront). 선택이 블록을 떠나면 다시 격자다(SP1 rawTables 와 같다).
+ * - 원문으로 보이던 머리말을 사용자가 고쳐(IME 조합 포함) 올바르게 되어도 격자는 그 자리에서 나타나지 않는다:
+ *   rawFront 가 켜지고, 선택이 블록을 떠날 때 격자로 돌아간다(조합 중인 줄 위에 장식을 얹지 않는다).
  * - 격자가 보이는 동안 사용자 입력(input*·delete*)은 머리말을 건드리지 못한다(frontGuard). 명령(input.labnote)과
  *   격자 자신의 편집(input.properties), userEvent 없는 프로그램 편집은 그대로 지나간다.
  */
@@ -142,7 +146,16 @@ function cellText(e: FrontEntry): string {
 /** 이 블록을 원문(YAML)으로 보인다(true) / 격자로 돌린다(false). */
 export const editYaml: StateEffectType<boolean> = StateEffect.define<boolean>();
 
-/** "YAML로 편집"이 켜져 있는가. 선택이 머리말을 떠나면 꺼진다(켜는 그 트랜잭션에서는 끄지 않는다). */
+/** 머리말을 고치는 사용자 입력·지움인가(명령과 격자 자신의 편집은 빼고). IME 조합(input.type.compose)도 여기 든다. */
+function isUserEdit(tr: Transaction): boolean {
+  if (!(tr.isUserEvent('input') || tr.isUserEvent('delete'))) return false;
+  return !(tr.isUserEvent('input.properties') || tr.isUserEvent('input.labnote'));
+}
+
+/**
+ * "YAML로 편집"이 켜져 있는가. 선택이 머리말을 떠나면 꺼진다(켜는 그 트랜잭션에서는 끄지 않는다).
+ * 격자가 없던 머리말 안에서 사용자가 고치면 저절로 켜진다: 고친 결과가 올바른 머리말이어도 격자가 입력 밑에서 나타나지 않는다.
+ */
 export const rawFront = StateField.define<boolean>({
   create: () => false,
   update(on, tr) {
@@ -152,6 +165,10 @@ export const rawFront = StateField.define<boolean>({
         on = e.value;
         set = true;
       }
+    }
+    if (!on && !set && tr.docChanged && isUserEdit(tr) && gridEnd(tr.startState) === null) {
+      const node = frontNode(tr.state);
+      if (node && tr.state.selection.main.head <= node.to) return true;
     }
     if (!on || set || (!tr.selection && !tr.docChanged)) return on;
     const node = frontNode(tr.state);
@@ -281,47 +298,63 @@ function gridEnd(state: EditorState): number | null {
 /**
  * 격자가 보이는 동안 사용자 입력이 머리말을 건드리지 못하게 한다.
  * - 0 이나 `to` (또는 그 사이)에 넣는 글은 본문 첫 자리(to + 1)로 옮긴다. 문서가 `to` 에서 끝나면 줄바꿈을 먼저 넣는다.
- * - [0, to + 1) 에 닿는 지움은 통째로 버린다.
+ * - [0, to + 1) 에 닿는 지움은 to + 1 부터로 자른다(머리말은 그대로, 본문 쪽만 지운다). 남는 바뀜이 없으면 버린다.
+ * - 옮긴 트랜잭션은 userEvent·addToHistory·isolateHistory·remote 주석을 그대로 지닌다.
  */
 const guardFilter = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged) return tr;
-  if (!(tr.isUserEvent('input') || tr.isUserEvent('delete'))) return tr;
-  if (tr.isUserEvent('input.properties') || tr.isUserEvent('input.labnote')) return tr;
+  if (!tr.docChanged || !isUserEdit(tr)) return tr;
   const to = gridEnd(tr.startState);
   if (to === null) return tr;
   const start = tr.startState;
-  let drop = false;
+  const body = to + 1;
   let moved = false;
+  let kept = 0;
   const specs: ChangeSpec[] = [];
+  /** 머리말에 닿은 넣기는 본문 첫 자리로. 문서가 `to` 에서 끝나면 줄바꿈을 먼저 넣는다. */
+  const insertAtBody = (text: string) => {
+    if (!text) return;
+    kept++;
+    if (start.doc.length === to) specs.push({ from: to, insert: start.lineBreak + text });
+    else specs.push({ from: body, insert: text });
+  };
   tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-    if (toA > fromA) {
-      if (fromA < to + 1) drop = true;
+    if (fromA >= body || (toA === fromA && fromA > to)) {
+      kept++;
       specs.push({ from: fromA, to: toA, insert: inserted });
       return;
     }
-    if (fromA > to) {
-      specs.push({ from: fromA, insert: inserted });
-      return;
-    }
     moved = true;
-    const text = inserted.toString();
-    if (start.doc.length === to) specs.push({ from: to, insert: start.lineBreak + text });
-    else specs.push({ from: to + 1, insert: text });
+    // [0, to + 1) 에 닿는 지움은 본문 쪽만 남긴다(Ctrl+A 뒤 입력·지움, Ctrl+Shift+Home 뒤 입력)
+    if (toA > body) {
+      kept++;
+      specs.push({ from: body, to: toA, insert: inserted });
+    } else insertAtBody(inserted.toString());
   });
-  if (drop) return [];
   if (!moved) return tr;
+  if (!kept) return [];
   const changes = ChangeSet.of(specs, start.doc.length, start.lineBreak);
-  const after = changes.mapPos(Math.min(to + 1, start.doc.length), 1);
-  const ranges = start.selection.ranges.map((r) =>
-    r.head <= to ? EditorSelection.cursor(after) : EditorSelection.range(changes.mapPos(r.anchor, 1), changes.mapPos(r.head, 1)),
-  );
+  const after = changes.mapPos(Math.min(body, start.doc.length), 1);
+  const wanted = tr.selection;
+  const ranges = start.selection.ranges.map((r, i) => {
+    if (r.head <= to) return EditorSelection.cursor(after);
+    if (wanted?.ranges[i]?.empty) return EditorSelection.cursor(changes.mapPos(r.head, 1));
+    return EditorSelection.range(changes.mapPos(r.anchor, 1), changes.mapPos(r.head, 1));
+  });
+  const annotations: Annotation<unknown>[] = [];
   const userEvent = tr.annotation(Transaction.userEvent);
+  if (userEvent) annotations.push(Transaction.userEvent.of(userEvent));
+  const addToHistory = tr.annotation(Transaction.addToHistory);
+  if (addToHistory !== undefined) annotations.push(Transaction.addToHistory.of(addToHistory));
+  const isolate = tr.annotation(isolateHistory);
+  if (isolate !== undefined) annotations.push(isolateHistory.of(isolate));
+  const remote = tr.annotation(Transaction.remote);
+  if (remote !== undefined) annotations.push(Transaction.remote.of(remote));
   return {
     changes,
     selection: EditorSelection.create(ranges, start.selection.mainIndex),
     effects: tr.effects,
     scrollIntoView: tr.scrollIntoView,
-    annotations: userEvent ? [Transaction.userEvent.of(userEvent)] : [],
+    annotations,
   };
 });
 
@@ -341,4 +374,19 @@ const guardKeys = Prec.high(
   ]),
 );
 
-export const frontGuard: Extension = [guardFilter, guardKeys];
+/**
+ * IME 조합이 격자 왼쪽 끝(0 등, 머리말 안)의 커서에서 시작하면 DOM 조합은 그 자리에 남고 글은 본문으로 옮겨져 어긋난다.
+ * 조합을 여는 keydown(Process / keyCode 229)에서 커서를 먼저 본문 첫 자리로 옮긴다(조합이 시작되기 전이다).
+ */
+const guardCompose = EditorView.domEventHandlers({
+  keydown(e, view) {
+    if (view.composing || !(e.keyCode === 229 || e.key === 'Process')) return false;
+    const to = gridEnd(view.state);
+    const main = view.state.selection.main;
+    if (to === null || !main.empty || main.head > to) return false;
+    view.dispatch({ selection: { anchor: Math.min(to + 1, view.state.doc.length) }, userEvent: 'select' });
+    return false;
+  },
+});
+
+export const frontGuard: Extension = [guardFilter, guardKeys, guardCompose];

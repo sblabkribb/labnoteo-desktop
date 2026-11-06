@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { EditorState, type Extension } from '@codemirror/state';
+import { EditorState, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { history, historyKeymap, undo } from '@codemirror/commands';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../../table/field';
 import { livePreview } from '../index';
 import { getMode, setMode } from '../mode';
-import { editYaml, frontBlock, PropertiesWidget } from '../properties';
+import { editYaml, frontBlock, PropertiesWidget, rawFront } from '../properties';
 import { t } from '../../../i18n/t';
 import { insertDate } from '../../../labnote/commands/editorInserts';
 
@@ -197,6 +197,47 @@ describe('라이브 미리보기: 속성(front matter) 격자', () => {
     expect(v.state.doc.toString()).toMatch(/^---\nend_date: '?2026-11-07'?\n---\nx$/);
     undo(v);
     expect(v.state.doc.toString()).toBe(original);
+  });
+
+  it('a compose that makes an invalid block valid keeps it raw, and the next compose update applies', () => {
+    const v = view('---\na: 1\na: 2\n---\nx', 9);
+    expect(v.contentDOM.querySelector('.lno-props')).toBeNull();
+    v.dispatch({ changes: { from: 9, to: 10 }, userEvent: 'delete.forward' });
+    v.dispatch({ changes: { from: 9, insert: 'ㄱ' }, selection: { anchor: 10 }, userEvent: 'input.type.compose' });
+    expect(v.state.doc.toString()).toBe('---\na: 1\nㄱ: 2\n---\nx');
+    expect(v.state.field(rawFront)).toBe(true);
+    expect(v.contentDOM.querySelector('.lno-props')).toBeNull();
+    v.dispatch({ changes: { from: 9, to: 10, insert: '가' }, selection: { anchor: 10 }, userEvent: 'input.type.compose' });
+    expect(v.state.doc.toString()).toBe('---\na: 1\n가: 2\n---\nx');
+    v.dispatch({ changes: { from: 10, insert: 'b' }, selection: { anchor: 11 }, userEvent: 'input.type' });
+    expect(v.state.doc.toString()).toBe('---\na: 1\n가b: 2\n---\nx');
+    move(v, v.state.doc.length);
+    expect(v.contentDOM.querySelector('.lno-props')).not.toBeNull();
+  });
+
+  it('an IME keydown at the left edge of the grid moves the cursor into the body first', () => {
+    const v = view('---\na: 1\n---\nx', 0);
+    expect(v.contentDOM.querySelector('.lno-props')).not.toBeNull();
+    press(v, { key: 'Process', keyCode: 229 });
+    expect(v.state.selection.main.head).toBe(13);
+  });
+
+  it('select-all then typing replaces the body and keeps the front matter', () => {
+    const v = view('---\na: 1\n---\nxyz', 16);
+    v.dispatch({ selection: { anchor: 0, head: 16 } });
+    v.dispatch(v.state.replaceSelection('q'), { userEvent: 'input.type' });
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\nq');
+    expect(v.state.selection.main.head).toBe(14);
+    v.dispatch({ selection: { anchor: 0, head: 14 } });
+    v.dispatch({ changes: { from: 0, to: 14 }, userEvent: 'delete.backward' });
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\n');
+  });
+
+  it('a moved input keeps its history annotations', () => {
+    const v = view('---\na: 1\n---\nx', 14);
+    v.dispatch({ changes: { from: 0, insert: 'z' }, userEvent: 'input.type', annotations: Transaction.addToHistory.of(false) });
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\nzx');
+    expect(undo(v)).toBe(false);
   });
 
   it('PropertiesWidget.eq compares the block text and ignores events', () => {
