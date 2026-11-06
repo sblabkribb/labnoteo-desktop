@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { literalColours } from './css';
+import { declarations, literalColours, parseRules } from './css';
 
 const css = readFileSync('src/app.css', 'utf-8');
 
@@ -174,6 +174,21 @@ describe('디자인 토큰', () => {
       expect(ratio(t['--bg-selected'], t['--bg']), `${name} selected row on bg`).toBeGreaterThanOrEqual(1.5);
       expect(ratio(t['--bg-selection'], t['--bg']), `${name} ::selection on bg`).toBeGreaterThanOrEqual(1.9);
       expect(ratio(t['--text'], t['--bg-selection']), `${name} text on ::selection`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('편집기 밖의 텍스트 선택도 글자색을 정한다: 흐린 글자·강조색·위험색이 선택 배경 위에서 4.5:1 아래로 내려가지 않게', () => {
+    // 규칙에 실제로 쓰인 글자색·배경 토큰을 읽어 그 쌍을 잰다 (배경만 정하면 원래 글자색이 남아 3.5~4:1 로 떨어진다)
+    const rules = parseRules(css).filter((r) => !r.atRule && r.selectors.includes('::selection'));
+    expect(rules).toHaveLength(1);
+    const decl = Object.fromEntries(declarations(rules[0].body).map((d) => [d.prop, d.value]));
+    expect(decl.background).toBe('var(--bg-selection)');
+    expect(decl.color).toBe('var(--text)');
+    const token = (v: string) => /^var\((--[\w-]+)\)$/.exec(v)![1];
+    for (const [name, t] of Object.entries(themes)) {
+      expect(ratio(t[token(decl.color)], t[token(decl.background)]), `${name} ::selection`).toBeGreaterThanOrEqual(4.5);
+      // 정하지 않았을 때 남았을 글자색들은 실제로 모자란다: 이 규칙이 하는 일이 있다
+      expect(Math.min(...['--text-muted', '--accent', '--danger'].map((fg) => ratio(t[fg], t['--bg-selection']))), name).toBeLessThan(4.5);
     }
   });
 

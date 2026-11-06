@@ -103,7 +103,8 @@ h3 { font-size: 1rem; }
 p { margin: 0 0 var(--space-3); }
 a { color: var(--accent); }
 code, pre, kbd { font-family: var(--font-mono); font-size: 0.93em; }
-::selection { background: var(--bg-selection); }
+/* 글자색도 정한다: 배경만 바꾸면 흐린 글자·강조색·위험색이 선택 배경 위에서 4.5:1 아래로 떨어진다 (편집기의 선택 규칙과 같다) */
+::selection { background: var(--bg-selection); color: var(--text); }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 
@@ -117,7 +118,7 @@ button {
 button:hover:not(:disabled) { background: var(--bg-hover); }
 button:disabled { opacity: 0.55; cursor: default; }
 
-/* 한 화면에서 주된 동작 하나만 강조색을 쓴다 */
+/* 영역(상단 바, 알림 배너, 확인 창)마다 주된 동작 하나만 강조색을 쓴다: 한 화면에는 영역 수만큼 있을 수 있다 */
 button.primary {
   background: var(--accent);
   color: var(--accent-text);
@@ -315,7 +316,7 @@ input, select, textarea {
   border: 0;
   border-radius: 0;
   text-align: left;
-  /* 긴 이름은 사이드바를 밀지 않고 한 줄에서 말줄임 */
+  /* 긴 이름은 사이드바를 밀지 않고 한 줄에서 말줄임. 전체 이름은 단추의 title 로 본다(NoteTree) */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
