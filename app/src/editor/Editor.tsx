@@ -1,19 +1,22 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import { Compartment, EditorState, Prec } from '@codemirror/state';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { t } from '../i18n/t';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
-import { loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
+import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 /** 마지막 입력 뒤 이만큼 조용하면 저장한다. */
 export const AUTOSAVE_MS = 2000;
+/** 계속 치고 있어도 이 시간이 지나면 저장한다: 무입력 대기만으로는 쉬지 않고 쓰는 사람의 글이 저장되지 않는다. */
+export const MAX_AUTOSAVE_MS = 10_000;
 
 export interface EditorHandle {
   /** 다른 노트로 넘어가기 전에 부른다. 잃을 편집이 없으면(저장됐거나 원래 깨끗하면) true. */
@@ -26,6 +29,14 @@ interface Props {
   invoke?: InvokeFn;
   listen?: ListenFn;
   autosaveMs?: number;
+  maxAutosaveMs?: number;
+  /** 창 닫기 요청을 가로채 저장하기 위한 이음새. 기본은 Tauri 창. */
+  windowApi?: WindowApi;
+}
+
+export interface WindowApi {
+  onCloseRequested(handler: (e: { preventDefault(): void }) => void | Promise<void>): Promise<() => void>;
+  destroy(): Promise<void>;
 }
 
 /**
@@ -39,7 +50,14 @@ type External = { kind: 'changed'; current: string } | { kind: 'gone' };
 const LOCKED = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
 
 export const Editor = forwardRef<EditorHandle, Props>(function Editor(
-  { path, invoke = tauriInvoke as InvokeFn, listen = tauriListen as ListenFn, autosaveMs = AUTOSAVE_MS },
+  {
+    path,
+    invoke = tauriInvoke as InvokeFn,
+    listen = tauriListen as ListenFn,
+    autosaveMs = AUTOSAVE_MS,
+    maxAutosaveMs = MAX_AUTOSAVE_MS,
+    windowApi,
+  },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
@@ -51,11 +69,19 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const externalRef = useRef<External | null>(null);
   const programmatic = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  const maxTimer = useRef<ReturnType<typeof setTimeout>>();
+  const clearTimers = () => {
+    clearTimeout(timer.current);
+    clearTimeout(maxTimer.current);
+    maxTimer.current = undefined;
+  };
+  const extensions = useRef<(doc: LoadedDocument | undefined) => Extension[]>(() => []);
+  const locked = useRef(true);
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs });
-  latest.current = { invoke, autosaveMs };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs };
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [dirty, setDirty] = useState(false);
@@ -66,23 +92,19 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   // 아래 함수들은 ref 와 setState 만 만지므로 렌더마다 새로 만들어도 같은 일을 한다. effect 는 api.current 를 거쳐 부른다.
   const api = useRef({} as ReturnType<typeof makeApi>);
   function makeApi() {
-    const text = () => viewRef.current?.state.doc.toString() ?? '';
+    // sliceDoc 은 상태의 줄 구분자로 잇는다. doc.toString() 은 항상 LF 로 이어서, 섞인 파일의 CRLF 줄이 LF 가 된다.
+    const text = () => viewRef.current?.state.sliceDoc() ?? '';
     const isDirty = () => text() !== baseline.current;
     const setExternal = (e: External | null) => {
       externalRef.current = e;
       setExternalState(e);
     };
-    const setBuffer = (next: string) => {
-      const view = viewRef.current;
-      if (!view) return;
-      programmatic.current = true;
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
-      programmatic.current = false;
-    };
     const adopt = (doc: LoadedDocument) => {
       docRef.current = doc;
       baseline.current = doc.text;
-      setBuffer(doc.text);
+      // 새 상태를 통째로 올린다: 되돌리기 기록이 비어서 시작하므로, 불러오기 이전의 본문(빈 본문 포함)으로
+      // 되돌릴 수 없다. 되돌리기가 그 본문을 디스크에 저장해 버리는 일이 없다.
+      viewRef.current?.setState(EditorState.create({ doc: doc.text, extensions: extensions.current(doc) }));
       setExternal(null);
       setDialogOpen(false);
       setSaveError(false);
@@ -96,12 +118,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     const scheduleAutosave = () => {
       clearTimeout(timer.current);
       if (externalRef.current) return; // 대화상자가 답을 받기 전에는 자동 저장도 멈춘다
-      timer.current = setTimeout(() => void run(() => doSave()), latest.current.autosaveMs);
+      const fire = () => void run(() => doSave());
+      timer.current = setTimeout(fire, latest.current.autosaveMs);
+      maxTimer.current ??= setTimeout(fire, latest.current.maxAutosaveMs);
     };
 
     /** 저장. 저장된(또는 저장할 것이 없는) 상태면 true. `force` 는 대화상자에서 덮어쓰기를 고른 경우다. */
     async function doSave(force?: { against?: string }): Promise<boolean> {
-      clearTimeout(timer.current);
+      clearTimers();
       const doc = docRef.current;
       if (!doc || !viewRef.current) return false;
       if (!force && externalRef.current) {
@@ -115,6 +139,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         result = await saveDocument(doc, body, { force: !!force, against: force?.against, invoke: latest.current.invoke });
       } catch {
         setSaveError(true);
+        scheduleAutosave(); // 일시적인 실패(백신 잠금, 디스크 가득)면 다음 시도가 저장한다: 키를 다시 칠 때까지 기다리지 않는다
         return false;
       }
       if (!result.ok) {
@@ -143,7 +168,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         raw = await latest.current.invoke<string>('vault_read', { path: doc.path });
       } catch (e) {
         if ((e as { kind?: string } | null)?.kind === 'notFound') {
-          clearTimeout(timer.current);
+          clearTimers();
           setExternal({ kind: 'gone' });
           setDialogOpen(true);
         }
@@ -162,7 +187,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         adopt(parseRaw(doc.path, raw)); // 잃을 편집이 없다: 조용히 새 내용을 보여 준다
         return;
       }
-      clearTimeout(timer.current);
+      clearTimers();
       const wasOpen = externalRef.current !== null;
       setExternal({ kind: 'changed', current: raw });
       if (!wasOpen) setDialogOpen(true);
@@ -203,41 +228,40 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     // 그림자 루트 안에 만든다: CodeMirror 의 스타일이 <style> 태그 대신 adoptedStyleSheets 로 들어가, CSP 에 'unsafe-inline' 을 열지 않아도 된다.
     // (개발 모드의 StrictMode 는 effect 를 두 번 돌린다: 이미 붙인 루트는 다시 붙일 수 없으니 재사용한다.)
     const shadow = host.current!.shadowRoot ?? host.current!.attachShadow({ mode: 'open' });
+    // 상태(확장 포함)는 노트를 채울 때마다 새로 만든다: 되돌리기 기록이 읽기 이전으로 거슬러 가지 못하게.
+    extensions.current = (doc) => [
+      // 줄 구분자는 파일에서 온 그대로: 섞인 파일에서도 손대지 않은 줄의 바이트가 바뀌지 않는다.
+      EditorState.lineSeparator.of(doc ? lineSeparatorOf(doc) : '\n'),
+      history(),
+      Prec.highest(
+        keymap.of([
+          {
+            key: 'Mod-s',
+            preventDefault: true,
+            run: () => {
+              void api.current.save();
+              return true;
+            },
+          },
+        ]),
+      ),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
+      markdown(),
+      syntaxHighlighting(defaultHighlightStyle),
+      EditorView.lineWrapping,
+      EditorView.theme({ '&': { minHeight: '50vh' } }),
+      EditorView.contentAttributes.of({ 'aria-label': t('editor.label') }),
+      lock.current.of(locked.current ? LOCKED : []),
+      EditorView.updateListener.of((u) => {
+        if (!u.docChanged) return;
+        setDirty(api.current.isDirty());
+        api.current.scheduleAutosave();
+      }),
+    ];
     const view = new EditorView({
       parent: shadow,
       root: shadow,
-      state: EditorState.create({
-        doc: '',
-        extensions: [
-          // CR 단독도 줄바꿈으로 세지 않는다: 본문에 있던 그대로 남긴다.
-          EditorState.lineSeparator.of('\n'),
-          history(),
-          Prec.highest(
-            keymap.of([
-              {
-                key: 'Mod-s',
-                preventDefault: true,
-                run: () => {
-                  void api.current.save();
-                  return true;
-                },
-              },
-            ]),
-          ),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
-          markdown(),
-          syntaxHighlighting(defaultHighlightStyle),
-          EditorView.lineWrapping,
-          EditorView.theme({ '&': { minHeight: '50vh' } }),
-          EditorView.contentAttributes.of({ 'aria-label': t('editor.label') }),
-          lock.current.of(LOCKED),
-          EditorView.updateListener.of((u) => {
-            if (!u.docChanged || programmatic.current) return;
-            setDirty(api.current.isDirty());
-            api.current.scheduleAutosave();
-          }),
-        ],
-      }),
+      state: EditorState.create({ doc: '', extensions: extensions.current(undefined) }),
     });
     viewRef.current = view;
     loadDocument(path, invoke).then(
@@ -250,7 +274,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     );
     return () => {
       live = false;
-      clearTimeout(timer.current);
+      clearTimers();
       // 노트를 닫는데 저장 안 된 편집이 있으면 마지막으로 한 번 저장해 본다(충돌이면 쓰지 않는다).
       if (!externalRef.current && api.current.isDirty()) void api.current.save();
       view.destroy();
@@ -261,8 +285,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
 
   // 대화상자가 열려 있는 동안, 그리고 읽기가 끝나기 전에는 편집을 막는다: 사용자가 결정하는 내용이 바뀌지 않게.
   useEffect(() => {
-    const locked = status !== 'ready' || dialogOpen;
-    viewRef.current?.dispatch({ effects: lock.current.reconfigure(locked ? LOCKED : []) });
+    locked.current = status !== 'ready' || dialogOpen;
+    viewRef.current?.dispatch({ effects: lock.current.reconfigure(locked.current ? LOCKED : []) });
   }, [status, dialogOpen]);
 
   // 밖에서 바뀜: 이 노트나 이 노트를 담은 폴더가 바뀌었거나, 무엇이 바뀌었는지 놓쳤다(빈 경로).
@@ -281,6 +305,35 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       unlisten?.();
     };
   }, [path, listen]);
+
+  // 창을 닫을 때: 저장 안 된 편집이 있으면 저장한 뒤에 닫는다. 저장하지 못하면(충돌 등) 닫지 않고 대화상자를 보인다.
+  // 그래도 닫고 싶은 사용자가 갇히지 않게, 바로 이어서 한 번 더 닫으면 닫힌다.
+  useEffect(() => {
+    let live = true;
+    let unlisten: (() => void) | undefined;
+    let refused = false;
+    let win: WindowApi;
+    try {
+      win = windowApi ?? (getCurrentWindow() as unknown as WindowApi);
+    } catch {
+      return; // 창 API 가 없는 환경(테스트 등)
+    }
+    win
+      .onCloseRequested(async (ev) => {
+        if (refused || !api.current.isDirty()) return; // 기본 동작: 닫힌다
+        ev.preventDefault();
+        if (await api.current.flush()) await win.destroy();
+        else refused = true;
+      })
+      .then(
+        (fn) => (live ? (unlisten = fn) : fn()),
+        () => undefined,
+      );
+    return () => {
+      live = false;
+      unlisten?.();
+    };
+  }, [windowApi]);
 
   const gone = external?.kind === 'gone';
   return (

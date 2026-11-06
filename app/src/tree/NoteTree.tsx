@@ -16,6 +16,9 @@ interface Props {
  */
 const fold = (path: string) => path.toLowerCase();
 
+/** app.css 가 들여쓰기를 정해 둔 가장 깊은 단계. */
+const MAX_DEPTH = 24;
+
 export function NoteTree({ entries, selected, onSelect }: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
@@ -47,11 +50,10 @@ export function NoteTree({ entries, selected, onSelect }: Props) {
   const selectedKey = selected === undefined ? undefined : fold(selected);
   return (
     <nav aria-label={t('tree.label')}>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+      <ul className="plain-list">
         {visible.map((e) => {
-          const indent = { paddingLeft: `${e.depth}rem` };
           return (
-            <li key={fold(e.path)} style={indent}>
+            <li key={fold(e.path)} data-depth={Math.min(e.depth, MAX_DEPTH)}>
               {e.isDir ? (
                 <button type="button" aria-expanded={!collapsed.has(fold(e.path))} onClick={() => toggle(e.path)}>
                   {e.name}

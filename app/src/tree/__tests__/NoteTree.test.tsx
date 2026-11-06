@@ -27,6 +27,14 @@ describe('노트 트리', () => {
     expect(screen.getByText('02.md')).toBeTruthy();
   });
 
+  it('깊이는 style 속성이 아니라 data-depth 로 표시한다 (CSP 가 인라인 style 을 막는다)', () => {
+    const { container } = render(<NoteTree entries={entries} onSelect={() => {}} />);
+    const row = (name: string) => screen.getByText(name).closest('li') as HTMLElement;
+    expect(row('02.md').getAttribute('data-depth')).toBe('2');
+    expect(row('top.md').getAttribute('data-depth')).toBe('0');
+    expect(container.querySelector('[style]')).toBeNull();
+  });
+
   it('노트를 고르면 onSelect 에 vault-relative 경로를 넘긴다', async () => {
     const user = userEvent.setup();
     const picked: string[] = [];

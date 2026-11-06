@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-const BOM = '\uFEFF';
+const BOM = '﻿';
 
 /**
  * 읽은 노트. `text` 는 에디터에 주는 본문(BOM 없음, 줄바꿈은 LF)이고
@@ -11,7 +11,13 @@ const BOM = '\uFEFF';
 export interface LoadedDocument {
   path: string;
   text: string;
+  /** 줄바꿈 방식. 섞인 파일(`mixed`)에서는 더 많은 쪽이다. */
   eol: 'lf' | 'crlf';
+  /**
+   * CRLF 줄과 LF 줄이 섞여 있다. 이 경우 `text` 는 원문 그대로(CR 을 지우지 않음)이고 저장도 그대로 되돌려 쓴다 —
+   * 한 줄을 고쳤는데 파일 전체의 줄바꿈이 바뀌어 git 에서 모든 줄이 바뀐 것으로 보이는 일이 없다.
+   */
+  mixed: boolean;
   hadBom: boolean;
   loadedText: string;
 }
@@ -32,22 +38,16 @@ export interface SaveOptions {
 
 type ModifyResult = { kind: 'ok' } | { kind: 'conflict'; current: string };
 
-/**
- * 줄바꿈 방식. 모든 `\n` 이 `\r\n` 의 일부일 때만 CRLF 가 아니라, CRLF 줄이 LF 만 있는 줄보다
- * 많으면 CRLF 로 본다. 섞여 있는 파일은 저장하면 한쪽으로 통일된다(드문 경우).
- */
-function detectEol(raw: string): 'lf' | 'crlf' {
-  const crlf = (raw.match(/\r\n/g) ?? []).length;
-  const lf = (raw.match(/\n/g) ?? []).length - crlf;
-  return crlf > 0 && crlf >= lf ? 'crlf' : 'lf';
-}
-
 /** 디스크 원문에서 BOM 과 줄바꿈 방식을 감지해 에디터용 본문을 만든다. */
 export function parseRaw(path: string, raw: string): LoadedDocument {
   const hadBom = raw.startsWith(BOM);
   const body = hadBom ? raw.slice(BOM.length) : raw;
-  const eol = detectEol(body);
-  return { path, text: body.replace(/\r\n/g, '\n'), eol, hadBom, loadedText: raw };
+  const crlf = (body.match(/\r\n/g) ?? []).length;
+  const lf = (body.match(/\n/g) ?? []).length - crlf; // CRLF 의 일부가 아닌 단독 LF
+  const mixed = crlf > 0 && lf > 0;
+  const eol = crlf > 0 && crlf >= lf ? 'crlf' : 'lf';
+  // 섞이지 않은 CRLF 파일만 LF 본문으로 정규화한다(저장 때 되돌린다). 섞인 파일은 손대지 않는다.
+  return { path, text: mixed ? body : body.replace(/\r\n/g, '\n'), eol, mixed, hadBom, loadedText: raw };
 }
 
 export async function loadDocument(path: string, invoke: InvokeFn = tauriInvoke): Promise<LoadedDocument> {
@@ -55,10 +55,16 @@ export async function loadDocument(path: string, invoke: InvokeFn = tauriInvoke)
 }
 
 /** 에디터 본문을 읽었을 때의 인코딩(BOM, 줄바꿈)으로 되돌린 디스크 원문. BOM 이나 CRLF 를 새로 만들지 않는다. */
-export function toRaw(doc: Pick<LoadedDocument, 'eol' | 'hadBom'>, text: string): string {
+export function toRaw(doc: Pick<LoadedDocument, 'eol' | 'hadBom' | 'mixed'>, text: string): string {
+  if (doc.mixed) return doc.hadBom ? BOM + text : text; // 본문에 줄 끝이 이미 있는 그대로 들어 있다
   const lf = text.replace(/\r\n/g, '\n');
   const body = doc.eol === 'crlf' ? lf.replace(/\n/g, '\r\n') : lf;
   return doc.hadBom ? BOM + body : body;
+}
+
+/** 에디터가 줄을 나누는 구분자. 섞인 파일은 본문에 CR 이 남아 있으므로 더 많은 쪽 구분자를 쓴다. */
+export function lineSeparatorOf(doc: Pick<LoadedDocument, 'eol' | 'mixed'>): '\n' | '\r\n' {
+  return doc.mixed && doc.eol === 'crlf' ? '\r\n' : '\n';
 }
 
 /**

@@ -1,0 +1,32 @@
+/* 인라인 style 속성은 CSP(style-src self)가 막는다: 모양은 모두 여기서 정한다. */
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 트리 들여쓰기: data-depth (MAX_DEPTH 보다 깊은 줄은 같은 들여쓰기) */
+[data-depth="1"] { padding-left: 1rem; }
+[data-depth="2"] { padding-left: 2rem; }
+[data-depth="3"] { padding-left: 3rem; }
+[data-depth="4"] { padding-left: 4rem; }
+[data-depth="5"] { padding-left: 5rem; }
+[data-depth="6"] { padding-left: 6rem; }
+[data-depth="7"] { padding-left: 7rem; }
+[data-depth="8"] { padding-left: 8rem; }
+[data-depth="9"] { padding-left: 9rem; }
+[data-depth="10"] { padding-left: 10rem; }
+[data-depth="11"] { padding-left: 11rem; }
+[data-depth="12"] { padding-left: 12rem; }
+[data-depth="13"] { padding-left: 13rem; }
+[data-depth="14"] { padding-left: 14rem; }
+[data-depth="15"] { padding-left: 15rem; }
+[data-depth="16"] { padding-left: 16rem; }
+[data-depth="17"] { padding-left: 17rem; }
+[data-depth="18"] { padding-left: 18rem; }
+[data-depth="19"] { padding-left: 19rem; }
+[data-depth="20"] { padding-left: 20rem; }
+[data-depth="21"] { padding-left: 21rem; }
+[data-depth="22"] { padding-left: 22rem; }
+[data-depth="23"] { padding-left: 23rem; }
+[data-depth="24"] { padding-left: 24rem; }

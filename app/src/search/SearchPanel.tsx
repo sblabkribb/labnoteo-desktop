@@ -60,7 +60,7 @@ export function SearchPanel({ onOpen, indexing = false, skipped = 0, invoke = ta
       {result.status === 'ok' && result.hits.length === 0 && <p>{t('search.none')}</p>}
       {result.status === 'ok' && result.truncated && <p>{t('search.truncated', result.hits.length)}</p>}
       {result.status === 'ok' && result.hits.length > 0 && (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul className="plain-list">
           {result.hits.map((h) => (
             <li key={h.path.toLowerCase()}>
               <button type="button" onClick={() => onOpen(h.path)}>

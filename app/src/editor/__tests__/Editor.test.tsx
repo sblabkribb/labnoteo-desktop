@@ -2,8 +2,10 @@
 import { createRef, StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { Editor, type EditorHandle } from '../Editor';
+import { undo } from '@codemirror/commands';
+import { Editor, type EditorHandle, type WindowApi } from '../Editor';
 import type { VaultChange } from '../../vault/useVaultEvents';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
@@ -14,7 +16,8 @@ Range.prototype.getBoundingClientRect ??= () => new DOMRect();
 const P = 'lab/a.labnote.md';
 
 /** 가짜 보관함 + 가짜 이벤트. Rust 와 같은 의미: 없는 파일 읽기는 notFound, 수정은 기대값 비교. */
-function setup(files: Record<string, string>) {
+function setup(files: Record<string, string>, failWrites = 0) {
+  let failures = failWrites;
   const calls: string[] = [];
   const invoke = (async (cmd: string, args: Record<string, unknown>) => {
     calls.push(cmd);
@@ -24,6 +27,7 @@ function setup(files: Record<string, string>) {
       return files[path];
     }
     if (cmd === 'vault_modify') {
+      if (failures-- > 0) throw { kind: 'io', message: 'locked' };
       const current = files[path] ?? '';
       const expected = args.expectedBefore as string | undefined;
       if (expected !== undefined && expected !== current) return { kind: 'conflict', current };
@@ -41,10 +45,16 @@ function setup(files: Record<string, string>) {
   return { files, calls, invoke, listen, emit, writes: () => calls.filter((c) => c === 'vault_modify').length };
 }
 
-function mount(files: Record<string, string>, autosaveMs = 60_000) {
-  const s = setup(files);
+function mount(files: Record<string, string>, autosaveMs = 60_000, extra: { failWrites?: number; maxAutosaveMs?: number; windowApi?: WindowApi } = {}) {
+  const s = setup(files, extra.failWrites);
   const ref = createRef<EditorHandle>();
-  const utils = render(<Editor ref={ref} path={P} invoke={s.invoke} listen={s.listen} autosaveMs={autosaveMs} />);
+  const utils = render(
+    <Editor
+      ref={ref} path={P} invoke={s.invoke} listen={s.listen} autosaveMs={autosaveMs}
+      maxAutosaveMs={extra.maxAutosaveMs}
+      windowApi={extra.windowApi}
+    />,
+  );
   // 편집기는 그림자 루트 안에 있다(CSP 때문에): 테스트 라이브러리의 질의는 거기까지 들어가지 못하므로 뷰로 직접 간다.
   const view = () => {
     const root = (utils.container.querySelector('section > div') as HTMLElement).shadowRoot!;
@@ -78,6 +88,40 @@ describe('편집기', () => {
     const root = (container.querySelector('section > div') as HTMLElement).shadowRoot!;
     await waitFor(() => expect(root.querySelector('.cm-content')?.textContent).toBe('a'));
     expect(root.querySelectorAll('.cm-editor')).toHaveLength(1); // 첫 번째 뷰는 치워졌다
+  });
+
+  it('되돌리기를 끝까지 눌러도 열 때 채운 본문까지 지우지 않고, 빈 노트를 저장하지 않는다', async () => {
+    const m = mount({ [P]: 'keep me\n' }, 40);
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('keep me\n'));
+    await m.type('x');
+    await act(async () => {
+      undo(m.view());
+      undo(m.view()); // 사용자가 친 것은 이미 되돌렸다: 두 번째는 되돌릴 것이 없어야 한다
+      undo(m.view());
+    });
+    expect(m.view().state.doc.toString()).toBe('keep me\n');
+    await new Promise((r) => setTimeout(r, 200)); // 자동 저장 시간이 지나도
+    expect(m.files[P]).toBe('keep me\n');
+    expect(m.writes()).toBe(0);
+  });
+
+  it('다시 불러온 뒤 되돌리기를 눌러도 불러오기 전 본문으로 돌아가지 않는다', async () => {
+    const user = userEvent.setup();
+    const m = mount({ [P]: 'mine\n' }, 40);
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+    await m.type('!');
+    m.files[P] = 'theirs\n';
+    await m.emit({ path: P, kind: 'modified' });
+    await user.click(await screen.findByRole('button', { name: /다시 불러오기/ }));
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('theirs\n'));
+    await act(async () => {
+      undo(m.view());
+      undo(m.view());
+    });
+    expect(m.view().state.doc.toString()).toBe('theirs\n');
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.files[P]).toBe('theirs\n');
+    expect(m.writes()).toBe(0);
   });
 
   it('고치면 저장 안 됨 표시가 뜬다', async () => {
@@ -251,5 +295,91 @@ describe('편집기', () => {
     expect(ok).toBe(false);
     expect(m.files[P]).toBe('theirs\n');
     expect(await screen.findByRole('alertdialog')).toBeTruthy();
+  });
+
+  it('줄바꿈이 섞인 노트: 한 글자를 넣어도 다른 줄의 줄바꿈은 그대로다', async () => {
+    const m = mount({ [P]: 'a\r\nb\nc\r\n' });
+    await waitFor(() => expect(m.view().state.sliceDoc()).toBe('a\r\nb\nc\r\n')); // 본문이 정규화되지 않았다
+    expect(m.view().state.lineBreak).toBe('\r\n');
+    await act(async () => m.view().dispatch({ changes: { from: 0, insert: 'X' }, userEvent: 'input.type' }));
+    m.ctrlS();
+    await waitFor(() => expect(dirtyMark()).toBeNull());
+    expect(m.files[P]).toBe('Xa\r\nb\nc\r\n');
+  });
+
+  it('계속 치는 중에도 최대 간격이 지나면 저장한다 (무입력 대기는 끝내 오지 않는다)', async () => {
+    const m = mount({ [P]: 'a\n' }, 150, { maxAutosaveMs: 250 });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('a\n'));
+    for (let i = 0; i < 10; i++) {
+      await m.type('x');
+      await new Promise((r) => setTimeout(r, 40)); // 150ms 무입력은 한 번도 없다
+    }
+    // 마지막 입력 직후다: 무입력 시간(150ms)으로는 저장될 수 없었다.
+    expect(m.writes()).toBeGreaterThanOrEqual(1);
+    expect(m.files[P].startsWith('a\nx')).toBe(true);
+  });
+
+  it('저장이 일시적으로 실패하면 키를 다시 치지 않아도 다시 시도해 저장한다', async () => {
+    const m = mount({ [P]: 'a\n' }, 40, { failWrites: 1 });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe('a\n'));
+    await m.type('b');
+    expect(await screen.findByText('저장하지 못했습니다. 내용은 편집기에 그대로 있습니다.')).toBeTruthy();
+    await waitFor(() => expect(m.files[P]).toBe('a\nb'));
+    expect(m.writes()).toBe(2); // 실패 한 번 + 재시도
+    await waitFor(() => expect(screen.queryByText(/저장하지 못했습니다/)).toBeNull());
+    expect(dirtyMark()).toBeNull();
+  });
+
+  describe('창 닫기', () => {
+    function fakeWindow() {
+      let handler: (e: { preventDefault(): void }) => void | Promise<void> = () => {};
+      const destroy = vi.fn(async () => {});
+      const api: WindowApi = {
+        onCloseRequested: async (h) => {
+          handler = h;
+          return () => {};
+        },
+        destroy,
+      };
+      /** 닫기 요청을 보내고, preventDefault 가 불렸는지 돌려준다. */
+      const requestClose = async () => {
+        const prevent = vi.fn();
+        await act(async () => void (await handler({ preventDefault: prevent })));
+        return prevent.mock.calls.length > 0;
+      };
+      return { api, destroy, requestClose };
+    }
+
+    it('저장 안 된 편집이 있으면 저장한 뒤에 닫는다', async () => {
+      const w = fakeWindow();
+      const m = mount({ [P]: 'a\n' }, 60_000, { windowApi: w.api });
+      await waitFor(() => expect(m.view().state.doc.toString()).toBe('a\n'));
+      await m.type('b');
+      expect(m.files[P]).toBe('a\n'); // 자동 저장은 아직 멀었다
+      expect(await w.requestClose()).toBe(true); // 기본 닫기를 막고
+      expect(m.files[P]).toBe('a\nb'); // 저장했고
+      expect(w.destroy).toHaveBeenCalledTimes(1); // 그다음에 닫았다
+    });
+
+    it('고친 것이 없으면 그냥 닫는다', async () => {
+      const w = fakeWindow();
+      const m = mount({ [P]: 'a\n' }, 60_000, { windowApi: w.api });
+      await waitFor(() => expect(m.view().state.doc.toString()).toBe('a\n'));
+      expect(await w.requestClose()).toBe(false);
+      expect(m.writes()).toBe(0);
+    });
+
+    it('충돌로 저장하지 못하면 닫지 않고 묻는다 — 바로 이어 다시 닫으면 닫힌다', async () => {
+      const w = fakeWindow();
+      const m = mount({ [P]: 'mine\n' }, 60_000, { windowApi: w.api });
+      await waitFor(() => expect(m.view().state.doc.toString()).toBe('mine\n'));
+      await m.type('!');
+      m.files[P] = 'theirs\n';
+      expect(await w.requestClose()).toBe(true);
+      expect(w.destroy).not.toHaveBeenCalled();
+      expect(m.files[P]).toBe('theirs\n');
+      expect(await screen.findByRole('alertdialog')).toBeTruthy();
+      expect(await w.requestClose()).toBe(false); // 갇히지 않는다
+    });
   });
 });

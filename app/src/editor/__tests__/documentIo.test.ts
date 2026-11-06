@@ -105,4 +105,28 @@ describe('문서 읽기/쓰기', () => {
     expect(v.files[P]).toBe('x\n');
     expect('expectedBefore' in (v.calls.at(-1)?.args ?? {})).toBe(false);
   });
+
+  it('줄바꿈이 섞인 노트는 한 단어를 고쳐도 다른 줄의 바이트가 바뀌지 않는다', async () => {
+    const raw = 'one\r\ntwo\nthree\r\nfour\n';
+    const v = fakeVault({ [P]: raw });
+    const doc = await loadDocument(P, v.invoke);
+    expect(doc.mixed).toBe(true); // 입력이 정말 섞여 있었다
+    expect(doc.text).toBe(raw); // 섞인 파일은 정규화하지 않는다
+    await saveDocument(doc, doc.text.replace('three', '3'), { invoke: v.invoke });
+    expect(v.files[P]).toBe('one\r\ntwo\n3\r\nfour\n');
+  });
+
+  it('섞인 노트도 고치지 않고 저장하면 그대로이고, BOM 은 유지된다', async () => {
+    const raw = '﻿a\r\nb\n';
+    const v = fakeVault({ [P]: raw });
+    const doc = await loadDocument(P, v.invoke);
+    expect(doc.mixed).toBe(true);
+    expect(toRaw(doc, doc.text)).toBe(raw);
+  });
+
+  it('섞이지 않은 CRLF 노트는 여전히 LF 본문이다 (mixed 가 아니다)', async () => {
+    const doc = await loadDocument(P, fakeVault({ [P]: 'a\r\nb\r\n' }).invoke);
+    expect(doc.mixed).toBe(false);
+    expect(doc.text).toBe('a\nb\n');
+  });
 });

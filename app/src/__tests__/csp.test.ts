@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 // CodeMirror 는 그림자 루트 안에서 adoptedStyleSheets 로 스타일을 넣으므로 style-src 에 'unsafe-inline' 이 필요 없다.
 // 이 테스트는 누가 편하자고 CSP 를 다시 열거나 지우는 것을 막는다. (개발 서버용 devCsp 는 따로 두며 여기서 보지 않는다.)
@@ -32,5 +33,26 @@ describe('콘텐츠 보안 정책', () => {
   it('Tauri IPC 가 쓰는 연결은 열려 있다', () => {
     const d = directives(csp as string);
     expect(d['connect-src']).toEqual(expect.arrayContaining(['ipc:', 'http://ipc.localhost']));
+  });
+});
+
+// style-src 'self' 는 style="..." 속성도 막는다. React 의 style={{...}} 는 그 속성으로 나온다.
+function tsx(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) return name === '__tests__' ? [] : tsx(p);
+    return name.endsWith('.tsx') ? [p] : [];
+  });
+}
+
+describe('인라인 스타일', () => {
+  it('화면 컴포넌트는 style 속성을 쓰지 않는다 (모양은 app.css)', () => {
+    const offenders = tsx('src').filter((f) => /style=\{/.test(readFileSync(f, 'utf-8')));
+    expect(offenders).toEqual([]);
+  });
+
+  it('트리 깊이마다 app.css 에 들여쓰기 규칙이 있다', () => {
+    const css = readFileSync('src/app.css', 'utf-8');
+    for (let d = 1; d <= 24; d++) expect(css).toContain(`[data-depth="${d}"] { padding-left: ${d}rem; }`);
   });
 });
