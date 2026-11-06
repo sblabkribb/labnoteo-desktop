@@ -29,6 +29,8 @@ import { closeAllDialogs } from './labnote/host/dialogStore';
 import { editorAwareFs } from './labnote/editorAwareFs';
 import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
+import { commandById } from './labnote/commands/registry';
+import { runCommand } from './labnote/commands/runCommand';
 import { registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
@@ -294,6 +296,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
               initialReveal={notes.reveal}
               onContextMenu={onEditorMenu}
               onOpenLink={onOpenLink}
+              onChangeStatus={ctx ? () => void runCommand(ctx, commandById('change-experiment-status')!) : undefined}
               headerActions={ctx ? (busy) => <EditorActions ctx={ctx} path={selected} disabled={busy} /> : undefined}
             />
           ) : (

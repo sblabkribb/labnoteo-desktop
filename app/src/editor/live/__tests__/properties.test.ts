@@ -6,7 +6,7 @@ import { labnoteMarkdown } from '../../markdownSyntax';
 import { tableExtension } from '../../table/field';
 import { livePreview } from '../index';
 import { getMode, setMode } from '../mode';
-import { editYaml, frontBlock, PropertiesWidget, rawFront } from '../properties';
+import { editYaml, frontBlock, PropertiesWidget, propertiesActions, rawFront } from '../properties';
 import { t } from '../../../i18n/t';
 import { insertDate } from '../../../labnote/commands/editorInserts';
 
@@ -20,6 +20,7 @@ const views: EditorView[] = [];
 
 interface Opts {
   lineSeparator?: string;
+  extensions?: Extension[];
 }
 
 /** 편집기(Editor.tsx 처럼 모드가 'live' 일 때만 라이브 미리보기와 표 확장을 싣는다). */
@@ -28,6 +29,7 @@ function view(doc: string, pos: number, opts: Opts = {}): EditorView {
   document.body.appendChild(parent);
   const extra: Extension[] = [];
   if (opts.lineSeparator) extra.push(EditorState.lineSeparator.of(opts.lineSeparator));
+  if (opts.extensions) extra.push(...opts.extensions);
   const start = EditorState.create({
     doc,
     extensions: [
@@ -62,10 +64,12 @@ afterEach(() => {
 const lineEl = (v: EditorView, n: number) => v.contentDOM.querySelectorAll<HTMLElement>('.cm-line')[n - 1];
 const visibleText = (v: EditorView, n: number) => lineEl(v, n)?.textContent;
 const move = (v: EditorView, pos: number) => v.dispatch({ selection: { anchor: pos } });
+/** 칸(키·값)에 보이는 글: 입력이면 그 값, 아니면 글. */
+const valueText = (el: Element | null) => (el instanceof HTMLInputElement ? el.value : (el?.textContent ?? ''));
 const rows = (v: EditorView): [string, string][] =>
   [...v.contentDOM.querySelectorAll('.lno-props-row')].map((r) => [
-    r.querySelector('.lno-props-key')?.textContent ?? '',
-    r.querySelector('.lno-props-value')?.textContent ?? '',
+    valueText(r.querySelector('.lno-props-key')),
+    valueText(r.querySelector('.lno-props-value')),
   ]);
 const click = (el: Element) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
 function press(v: EditorView, init: KeyboardEventInit) {
@@ -249,5 +253,129 @@ describe('라이브 미리보기: 속성(front matter) 격자', () => {
     expect(w.eq(new PropertiesWidget({ ...b, text: '---\na: 2\n---' }))).toBe(false);
     expect(w.ignoreEvent()).toBe(true);
     expect(w.estimatedHeight).toBeGreaterThan(0);
+  });
+});
+
+describe('라이브 미리보기: 속성 격자 고치기', () => {
+  const original = '---\ntitle: a\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx';
+  const rowEl = (v: EditorView, key: string) =>
+    [...v.contentDOM.querySelectorAll<HTMLElement>('.lno-props-row')].find((r) => r.dataset.key === key)!;
+  const valueInput = (v: EditorView, key: string) => rowEl(v, key).querySelector<HTMLInputElement>('input.lno-props-value')!;
+  const keyInput = (v: EditorView, key: string) => rowEl(v, key).querySelector<HTMLInputElement>('input.lno-props-key')!;
+  const enter = (el: Element, init: KeyboardEventInit = {}) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
+
+  it('commits a value on Enter as one undo step with userEvent input.properties', () => {
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.value = 'b';
+    enter(input);
+    expect(v.state.doc.toString()).toBe(original.replace('title: a', 'title: b'));
+    expect(document.activeElement).toBe(input); // 같은 키들이면 격자는 제자리에서 값만 바꾼다
+    undo(v);
+    expect(v.state.doc.toString()).toBe(original);
+  });
+
+  it('does not commit while the input is composing; commits on Enter after compositionend', () => {
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart'));
+    input.value = '한';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229, bubbles: true }));
+    expect(v.state.doc.toString()).toBe(original);
+    input.dispatchEvent(new FocusEvent('blur')); // 조합 중의 blur 도 적지 않는다
+    expect(v.state.doc.toString()).toBe(original);
+    input.dispatchEvent(new CompositionEvent('compositionend'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(v.state.doc.toString()).toBe(original.replace('title: a', 'title: 한'));
+  });
+
+  it('Escape reverts the input; blur commits', () => {
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.value = 'zz';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(input.value).toBe('a');
+    expect(v.state.doc.toString()).toBe(original);
+    input.value = 'c';
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(v.state.doc.toString()).toBe(original.replace('title: a', 'title: c'));
+  });
+
+  it('renames a key from its key input and keeps the value', () => {
+    const v = view(original, original.length);
+    const input = keyInput(v, 'title');
+    input.value = '제목';
+    enter(input);
+    expect(v.state.doc.toString()).toBe(original.replace('title: a', '제목: a'));
+    expect(rows(v).map(([k]) => k)).toEqual(['제목', 'status', 'last_updated_date']);
+    const taken = keyInput(v, '제목');
+    taken.value = 'status';
+    enter(taken);
+    expect(v.state.doc.toString()).toBe(original.replace('title: a', '제목: a'));
+    expect(taken.value).toBe('제목'); // 받지 않은 이름은 되돌린다
+  });
+
+  it('removes a row and adds one from the add row', () => {
+    const v = view(original, original.length);
+    click(rowEl(v, 'title').querySelector(`button[aria-label="${t('props.remove')}: title"]`)!);
+    expect(v.state.doc.toString()).toBe('---\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx');
+    const key = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.add')}"]`)!;
+    const value = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.newValue')}"]`)!;
+    key.value = '시료';
+    value.value = 's1';
+    enter(value);
+    expect(v.state.doc.toString()).toBe('---\nstatus: Planned\nlast_updated_date: 2026-11-01\n시료: s1\n---\nx');
+    expect(document.activeElement).toBe(v.contentDOM.querySelector(`.lno-props input[aria-label="${t('props.add')}"]`));
+  });
+
+  it('last_updated_date has no input and no remove button', () => {
+    const v = view(original, original.length);
+    expect(rowEl(v, 'last_updated_date').querySelector('input')).toBeNull();
+    expect(rowEl(v, 'last_updated_date').querySelector('button')).toBeNull();
+  });
+
+  it('a status chip click calls onChangeStatus and never writes directly', () => {
+    const onChangeStatus = vi.fn();
+    const v = view(original, original.length, { extensions: [propertiesActions.of({ onChangeStatus })] });
+    expect(rowEl(v, 'status').querySelector('input.lno-props-value')).toBeNull();
+    click(rowEl(v, 'status').querySelector('.lno-chip')!);
+    expect(onChangeStatus).toHaveBeenCalledTimes(1);
+    expect(v.state.doc.toString()).toBe(original);
+  });
+
+  it('a list and a wikilink value are edited as comma-separated text', () => {
+    const doc = ['---', 'tags:', '  - a', 'author: [[이서연]]', '---', 'x'].join('\n');
+    const v = view(doc, doc.length);
+    const tags = valueInput(v, 'tags');
+    tags.value = 'a, b';
+    enter(tags);
+    const author = valueInput(v, 'author');
+    author.value = '새이름';
+    enter(author);
+    expect(v.state.doc.toString()).toBe(['---', 'tags:', '  - a', '  - b', 'author: [[새이름]]', '---', 'x'].join('\n'));
+  });
+
+  it('a focused input being edited is not replaced or overwritten when another value changes', () => {
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.value = 'typing';
+    v.dispatch({ changes: { from: 21, to: 28, insert: 'Done' } }); // status: Planned → Done (프로그램 편집)
+    expect(valueInput(v, 'title')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('typing');
+    expect(rowEl(v, 'status').querySelector('.lno-chip')!.textContent).toBe('Done');
+  });
+
+  it('Mod-e with focus inside a grid input flips the global mode exactly once', () => {
+    setMode('live');
+    const v = view(original, original.length);
+    const input = valueInput(v, 'title');
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(getMode()).toBe('source');
   });
 });

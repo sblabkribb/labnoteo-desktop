@@ -14,6 +14,7 @@ import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview } from './live';
+import { propertiesActions } from './live/properties';
 import { linkClickHandler } from './live/links';
 import { imageLoader } from './live/imageWidget';
 import { vaultImages, type VaultImages } from './live/vaultImages';
@@ -82,6 +83,8 @@ interface Props {
   onOpenLink?: (target: { path: string; anchor?: string }) => void;
   /** 라이브 미리보기의 이미지(blob: URL 캐시와 이름 색인). 기본은 앱의 보관함 이미지. 테스트는 가짜를 꽂는다. */
   images?: VaultImages;
+  /** 속성 격자의 상태 칩을 눌렀을 때. 격자는 status 를 직접 쓰지 않는다: 앱이 "실험 상태 바꾸기" 명령을 돌린다. */
+  onChangeStatus?: () => void;
 }
 
 export interface WindowApi {
@@ -113,6 +116,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     headerActions,
     onOpenLink,
     images = vaultImages,
+    onChangeStatus,
   },
   ref,
 ) {
@@ -167,8 +171,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -209,7 +213,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     };
     const adopt = (doc: LoadedDocument) => {
       const view = viewRef.current;
-      if (view) {
+      // 본문과 줄 구분자가 그대로인 조용한 다시 읽기(디스크의 BOM 만 바뀐 경우 등)는 상태를 갈아 끼우지 않는다:
+      // 보이는 것이 같으니 위젯의 DOM(초점이 있는 속성 격자 입력 포함)과 되돌리기 기록을 그대로 둔다. 처음 읽기는 늘 새 상태다.
+      const same = !!view && !!docRef.current && view.state.sliceDoc() === doc.text && view.state.lineBreak === lineSeparatorOf(doc);
+      if (view && !same) {
         // 새 상태를 통째로 올린다: 되돌리기 기록이 비어서 시작하므로, 불러오기 이전의 본문(빈 본문 포함)으로
         // 되돌릴 수 없다. 되돌리기가 그 본문을 디스크에 저장해 버리는 일이 없다.
         // 조용한 다시 읽기는 보이지 않아야 한다: 커서와 스크롤 위치를 새 본문 안에서 그대로 둔다.
@@ -439,6 +446,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
       // 이미지 위젯이 읽는 노트 경로와 이미지 묶음(경로는 이 노트 기준으로 푼다). 소스 보기에서는 쓰는 것이 없다.
       imageLoader.of({ notePath: path, images }),
+      // 속성 격자가 앱에 넘기는 일(상태 칩 → 앱의 상태 명령). 늘 최신 prop 을 부른다.
+      propertiesActions.of({ onChangeStatus: () => latest.current.onChangeStatus?.() }),
       // 이미지 붙여 넣기·끌어 놓기 → 노트 폴더의 images/ 에 새 파일 + `![[이름]]`. 두 모드 모두에서 되도록 모드 칸 밖에 둔다.
       // 쓴 뒤에는 pasteImages 가 이름 색인을 버리고(isUnique 가 새 파일을 보게) 이름만 넣을지 경로를 넣을지 정한다.
       pasteImages({

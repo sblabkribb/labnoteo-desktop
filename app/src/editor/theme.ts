@@ -223,6 +223,32 @@ export const editorThemeSpec = {
   '.lno-props-value': { color: 'var(--text)', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
   '.lno-props-row[data-cell="readOnly"] .lno-props-value, .lno-props-row[data-cell="nested"] .lno-props-value': { color: 'var(--text-muted)' },
   '.lno-props-raw': { fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' },
+  // 격자의 입력 칸(Task 25): 평소에는 글처럼 보이고, 가리키거나 초점이 오면 칸의 테두리가 드러난다
+  '.lno-props-input': {
+    font: 'inherit',
+    minWidth: '0',
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '0 var(--space-1)',
+    color: 'var(--text)',
+    backgroundColor: 'var(--bg-elevated)',
+    border: '1px solid var(--bg-elevated)', // 배경과 같은 색: 테두리가 드러날 때 칸이 움직이지 않는다
+    borderRadius: 'var(--radius)',
+    '&:hover': { borderColor: 'var(--border)' },
+    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-1px' },
+    '&[aria-invalid="true"]': { borderColor: 'var(--danger)' },
+  },
+  '.lno-props-input.lno-props-key': { color: 'var(--text-muted)' },
+  '.lno-props-status': { cursor: 'pointer', justifySelf: 'start' },
+  '.lno-props-actions': { display: 'inline-flex', gap: 'var(--space-1)' },
+  '.lno-props-add': {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(8em, 30%) 1fr auto',
+    alignItems: 'baseline',
+    gap: 'var(--space-2)',
+    padding: 'var(--space-1) 0',
+    borderTop: '1px solid var(--border)',
+  },
   '.lno-table-wrap': { position: 'relative', padding: 'var(--space-2) var(--space-3)', width: 'fit-content', maxWidth: '100%', boxSizing: 'border-box' },
   '.lno-table-scroll': { overflowX: 'auto' },
   // 칸 사이 선이 겹치지 않게: 칸은 오른쪽·아래 선만, 표가 왼쪽·위 선을 긋는다(border-collapse 의 값이 색 이름 검사에 걸린다)

@@ -550,6 +550,38 @@ describe('편집기', () => {
     });
   });
 
+  it('a focused grid input survives a silent reload of identical text', async () => {
+    const text = '---\ntitle: a\n---\nx\n';
+    const m = mount({ [P]: text });
+    await waitFor(() => expect(m.view().state.doc.toString()).toBe(text));
+    const root = m.view().root as ShadowRoot;
+    const input = root.querySelector<HTMLInputElement>('.lno-props-row input.lno-props-value')!;
+    input.focus();
+    expect(root.activeElement).toBe(input);
+    // 디스크의 바이트는 다르지만(BOM) 본문은 같다: 조용한 다시 읽기가 상태를 갈아 끼우지 않는다
+    m.files[P] = '﻿' + text;
+    await m.emit({ path: P, kind: 'modified' });
+    await waitFor(() => expect(m.calls.filter((c) => c === 'vault_read')).toHaveLength(2));
+    await act(async () => new Promise((r) => setTimeout(r, 0)));
+    expect(input.isConnected).toBe(true);
+    expect(root.activeElement).toBe(input);
+    // 그 뒤의 저장은 새로 읽은 인코딩(BOM)으로 쓴다
+    input.value = 'b';
+    await act(async () => void input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await act(async () => void m.ref.current!.flush());
+    expect(m.files[P]).toBe('﻿---\ntitle: b\n---\nx\n');
+  });
+
+  it('a status chip calls onChangeStatus', async () => {
+    const s = setup({ [P]: '---\nstatus: Planned\n---\nx\n' });
+    const onChangeStatus = vi.fn();
+    const { container } = render(<Editor path={P} invoke={s.invoke} listen={s.listen} onChangeStatus={onChangeStatus} />);
+    const root = (container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
+    await waitFor(() => expect(root.querySelector('.lno-props-status')).not.toBeNull());
+    fireEvent.click(root.querySelector('.lno-props-status')!);
+    expect(onChangeStatus).toHaveBeenCalledTimes(1);
+  });
+
   it('조용한 다시 읽기는 커서 위치를 그대로 두고, 새 본문이 짧아지면 끝으로 맞춘다', async () => {
     const m = mount({ [P]: 'abcdefghij\n' });
     await waitFor(() => expect(m.view().state.doc.toString()).toBe('abcdefghij\n'));
