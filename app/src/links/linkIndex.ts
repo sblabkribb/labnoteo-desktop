@@ -41,7 +41,7 @@ function cmpKey(a: string, b: string): number {
 }
 
 /** The path a link names: the wiki path before '#', or the decoded Markdown href before '#'. */
-function linkPathOf(link: ExtractedLink): string {
+export function linkPathOf(link: ExtractedLink): string {
   if (link.kind === 'wiki' || link.kind === 'embed') return splitLinktext(link.target).path;
   const hash = link.target.indexOf('#');
   const raw = hash < 0 ? link.target : link.target.slice(0, hash);

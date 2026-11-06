@@ -654,6 +654,25 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 .links-list { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
 .links-context { font-size: var(--font-size-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 .links-context mark { background: var(--bg-selection); color: var(--text); border-radius: var(--radius); }
+.links-target {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+button.links-target:hover { background: var(--bg-hover); }
+button.links-target:focus-visible { outline-offset: -2px; }
+.links-target-unresolved { color: var(--text-muted); }
+.links-target-unknown { color: var(--text); cursor: default; }
+.links-unresolved-mark { margin-left: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); }
 
 /* 트리 아이콘(treeIcons.ts): CSS 글리프만, 토큰 색 */
 .tree-icon { flex: none; width: 1.2em; text-align: center; color: var(--text-muted); }

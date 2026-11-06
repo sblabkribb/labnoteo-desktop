@@ -76,3 +76,35 @@ describe('LinksPanel backlinks', () => {
     expect(await screen.findByRole('heading', { name: t('links.backlinks', '1') })).toBeTruthy();
   });
 });
+
+describe('LinksPanel outgoing links', () => {
+  it('lists outgoing links, marks unresolved and creates on click', async () => {
+    linkIndex.setFiles(['n.md', 'Home.md']);
+    linkIndex.setNote('n.md', '[[Home]] [[Home#A]] [[Nope]] [[spec.pdf]]');
+    linkIndex.markReady();
+    render(<LinksPanel activePath="n.md" onOpen={onOpen} onCreate={onCreate} />);
+    const rows = [...document.querySelectorAll('.links-outgoing li')].map((li) => li.textContent);
+    expect(rows).toEqual(['Home', `Nope${t('links.unresolved')}`, 'spec.pdf']);
+    await userEvent.click(screen.getByText('Nope', { exact: false }));
+    expect(onCreate).toHaveBeenCalledWith('Nope');
+    await userEvent.click(screen.getByText('Home'));
+    expect(onOpen).toHaveBeenCalledWith('Home.md', undefined);
+  });
+
+  it('shows the outgoing count and none', () => {
+    linkIndex.setFiles(['n.md']);
+    linkIndex.setNote('n.md', 'no links');
+    linkIndex.markReady();
+    render(<LinksPanel activePath="n.md" onOpen={onOpen} onCreate={onCreate} />);
+    expect(screen.getByRole('heading', { name: t('links.outgoing', '0') })).toBeTruthy();
+    expect(screen.getByText(t('links.outgoing.none'))).toBeTruthy();
+  });
+
+  it('an unknown target is not clickable', () => {
+    linkIndex.setFiles(['n.md']);
+    linkIndex.setNote('n.md', '[[spec.pdf]]');
+    linkIndex.markReady();
+    render(<LinksPanel activePath="n.md" onOpen={onOpen} onCreate={onCreate} />);
+    expect(document.querySelector('.links-outgoing li button')).toBeNull();
+  });
+});
