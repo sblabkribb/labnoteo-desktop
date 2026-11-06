@@ -89,6 +89,18 @@ describe('index.html', () => {
     // Vite 는 public/ 을 dist 맨 위로 그대로 복사한다: 앱과 같은 출처의 /theme-boot.js 가 된다
     expect(statSync('public/theme-boot.js').isFile()).toBe(true);
   });
+
+  it('언어 부트 스크립트도 <head> 에서 앱보다 먼저, 막는 고전 스크립트로 돈다 (첫 그림 전에 html lang 이 맞다)', () => {
+    const boot = scripts.find((s) => srcOf(s.attrs) === '/lang-boot.js');
+    const app = scripts.find((s) => srcOf(s.attrs) === '/src/main.tsx');
+    expect(boot).toBeDefined();
+    expect(app).toBeDefined();
+    expect(headEnd).toBeGreaterThanOrEqual(0);
+    expect(boot!.at).toBeLessThan(headEnd);
+    expect(boot!.at).toBeLessThan(app!.at);
+    expect(boot!.attrs).not.toMatch(/\b(type|async|defer)\b/);
+    expect(statSync('public/lang-boot.js').isFile()).toBe(true);
+  });
 });
 
 // 권한은 쓰는 것만 하나씩 연다. 목록을 통째로 고정해, 누가 편하자고 권한을 넓히면 여기서 보인다.
