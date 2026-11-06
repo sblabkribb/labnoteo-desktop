@@ -19,7 +19,10 @@ const literals = (code: string) => [...code.matchAll(QUOTED)].map((m) => unescap
  * 글자가 하나도 없는 첫 인자: "파일 경로": [인자 글자(앞뒤 공백 뺀 것)]. 새 항목에는 그 키가 어디서 오는지
  * (그리고 그 글자들이 obsidianKo 에 있음을 무엇이 지키는지) 주석으로 이유를 단다.
  */
-const DYNAMIC_ARGS: Record<string, string[]> = {};
+const DYNAMIC_ARGS: Record<string, string[]> = {
+  // 등록된 명령의 nameKey. commands/__tests__/registry.test.ts 가 registerAllCommands 뒤 모든 nameKey 가 obsidianKo 에 있는지 본다.
+  'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'],
+};
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

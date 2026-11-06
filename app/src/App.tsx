@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { t } from './i18n/t';
 import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
@@ -18,6 +18,18 @@ import { LanguageToggle } from './i18n/LanguageToggle';
 import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
+import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
+import { createAppHost } from './labnote/host/createAppHost';
+import { DialogLayer } from './labnote/host/DialogLayer';
+import { Toaster } from './labnote/host/Toaster';
+import { closeAllDialogs } from './labnote/host/dialogStore';
+import { editorAwareFs } from './labnote/editorAwareFs';
+import { activeEditTarget } from './labnote/openNotes';
+import { registerAllCommands } from './labnote/commands/registerAll';
+import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
+import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
+import { ContextMenu } from './labnote/ui/ContextMenu';
+import { closeMenu } from './labnote/ui/menuStore';
 
 interface ViewProps {
   vault: VaultInfo;
@@ -32,16 +44,47 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   const { entries, failed, reload } = useTree(vault.root);
   // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
   useVaultEvents(reload);
-  const [selected, setSelected] = useState<string>();
   const editor = useRef<EditorHandle>(null);
+  const shell = useRef<HTMLDivElement>(null);
   // 저장 안 된 편집이 있으면 먼저 저장한다. 저장하지 못하면(충돌 등) 노트를 바꾸지 않는다 — 편집이 사라지지 않게.
-  const openNote = async (path: string) => {
-    if (path === selected) return;
-    if (editor.current && !(await editor.current.flush())) return;
-    setSelected(path);
-  };
+  const notes = useNoteSwitcher(editor);
+  const { selected, openFile, closeActive } = notes;
+  const openNote = (path: string) => openFile(path);
   // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
-  const { imported: settingsImported } = useVaultSettings(vault.root);
+  const { settings, imported: settingsImported, update: updateSettings } = useVaultSettings(vault.root);
+  // 명령이 쓰는 호스트: 대화상자, 알림, 열린 노트는 버퍼를 기준으로 하는 파일 시스템, 열린 편집기의 편집 대상.
+  const host = useMemo(
+    () =>
+      createAppHost({
+        fs: editorAwareFs(new TauriLabnoteFs()),
+        editTarget: () => activeEditTarget(notes.activePath()),
+        openFile,
+      }),
+    // notes 의 함수들은 마운트 동안 같은 객체다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const ctx = useCommandContext({
+    host,
+    vaultRoot: vault.root,
+    settings,
+    updateSettings,
+    selected,
+    activePath: notes.activePath,
+    editor,
+    reloadTree: reload,
+    openFile,
+    closeActive,
+  });
+  usePaletteHotkey(ctx);
+  useEffect(() => {
+    registerAllCommands();
+    // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다
+    return () => {
+      closeAllDialogs();
+      closeMenu();
+    };
+  }, []);
   const [indexing, setIndexing] = useState(true);
   const [skipped, setSkipped] = useState(0);
   // 색인은 캐시다: 보관함을 열 때마다 파일에서 다시 채운다. 실패해도 노트 사용은 막지 않는다.
@@ -59,43 +102,54 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   }, [vault.root]);
   const flush = async () => !editor.current || (await editor.current.flush());
   return (
-    <div className="shell">
-      <header className="topbar">
-        <h1>{t('app.title')}</h1>
-        <p className="vault-name" title={vault.name}>
-          {t('vault.open', vault.name)}
-        </p>
-        <div className="topbar-actions">
-          <NewNote flush={flush} onCreated={openNote} />
-          <ChangeVault flush={flush} onChange={onChangeVault} />
-          <ThemeToggle theme={theme} onChange={setTheme} />
-          <LanguageToggle lang={lang} onChange={setLang} />
+    <>
+      <div className="shell" ref={shell}>
+        <header className="topbar">
+          <h1>{t('app.title')}</h1>
+          <p className="vault-name" title={vault.name}>
+            {t('vault.open', vault.name)}
+          </p>
+          <div className="topbar-actions">
+            <PaletteButton ctx={ctx} />
+            <NewNote flush={flush} onCreated={openNote} />
+            <ChangeVault flush={flush} onChange={onChangeVault} />
+            <ThemeToggle theme={theme} onChange={setTheme} />
+            <LanguageToggle lang={lang} onChange={setLang} />
+          </div>
+        </header>
+        <div className="notices">
+          <UpdateBanner beforeInstall={flush} />
+          {failed && <p role="alert">{t('tree.error')}</p>}
+          {settingsImported && <p role="status">{t('settings.imported')}</p>}
         </div>
-      </header>
-      <div className="notices">
-        <UpdateBanner beforeInstall={flush} />
-        {failed && <p role="alert">{t('tree.error')}</p>}
-        {settingsImported && <p role="status">{t('settings.imported')}</p>}
+        <aside className="sidebar" aria-label={t('app.sidebar')}>
+          <SearchPanel onOpen={openNote} />
+          {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
+          {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
+        </aside>
+        <main className="content">
+          {selected ? (
+            <Editor key={selected} ref={editor} path={selected} initialReveal={notes.reveal} />
+          ) : (
+            <p className="empty-state">{t('editor.empty')}</p>
+          )}
+        </main>
+        <footer className="statusbar">
+          <div className="status-notes">
+            {indexing && <span>{t('search.indexing')}</span>}
+            {skipped > 0 && <span role="status">{t('search.skipped', skipped)}</span>}
+            {vault.hasObsidianConfig && <span>{t('vault.obsidian')}</span>}
+          </div>
+          <span className="status-version">
+            {t('app.ready')} {version}
+          </span>
+        </footer>
       </div>
-      <aside className="sidebar" aria-label={t('app.sidebar')}>
-        <SearchPanel onOpen={openNote} />
-        {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
-        {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} />}
-      </aside>
-      <main className="content">
-        {selected ? <Editor key={selected} ref={editor} path={selected} /> : <p className="empty-state">{t('editor.empty')}</p>}
-      </main>
-      <footer className="statusbar">
-        <div className="status-notes">
-          {indexing && <span>{t('search.indexing')}</span>}
-          {skipped > 0 && <span role="status">{t('search.skipped', skipped)}</span>}
-          {vault.hasObsidianConfig && <span>{t('vault.obsidian')}</span>}
-        </div>
-        <span className="status-version">
-          {t('app.ready')} {version}
-        </span>
-      </footer>
-    </div>
+      {/* .shell 밖: 대화상자가 열려 있는 동안 .shell 은 inert 다. 알림과 메뉴는 그 위에 뜬다 */}
+      <DialogLayer blockRef={shell} />
+      <Toaster />
+      <ContextMenu />
+    </>
   );
 }
 

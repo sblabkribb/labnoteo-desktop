@@ -536,3 +536,35 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 .toast-message { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .toast-close { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--text-muted); }
 .toast-close::before { content: "×"; content: "×" / ""; }
+
+/* 명령 팔레트 단추(상단 바): 이름은 aria-label 과 title 에 있다 */
+.palette-open::before { content: "⌘"; content: "⌘" / ""; }
+
+/* 맥락 메뉴: .shell 밖의 층. 위치(left, top)는 ContextMenu 가 CSSOM 으로 정한다 */
+.context-menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 105;
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  max-width: min(24rem, calc(100vw - 2 * var(--space-2)));
+  max-height: calc(100vh - 2 * var(--space-2));
+  overflow-y: auto;
+  padding: var(--space-1);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.context-menu-item {
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+}
+.context-menu-item:hover:not(:disabled), .context-menu-item:focus { background: var(--bg-selected); }
+.context-menu-item:disabled { color: var(--text-muted); }

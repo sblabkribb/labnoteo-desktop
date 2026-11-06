@@ -70,6 +70,7 @@ describe('소스가 부르는 번역 키', () => {
     'src/tree/NewNote.tsx': ['error'], // createNote 가 주는 'newNote.error.*' 글자
     'src/onboarding/FirstRun.tsx': ["error ?? 'vault.error.generic'"], // useVault 의 VaultErrorKey
     'src/labnote/i18n.ts': ['key'], // overrideOr: OverrideKey 합집합의 글자
+    'src/labnote/ui/ContextMenu.tsx': ['item.labelKey'], // MenuItem.labelKey: 메뉴를 여는 쪽이 적은 키 글자
   };
   const LIT = String.raw`(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")`;
   const ALLOWED_ARG = new RegExp(String.raw`^\s*(?:${LIT}|!?[\w.]+\s*\?\s*${LIT}\s*:\s*${LIT})\s*$`);

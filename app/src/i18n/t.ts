@@ -108,6 +108,13 @@ const ko: Record<string, string> = {
   'alias.prefixLabel': '{0} 뒤에 붙일 이름',
   'toast.region': '알림',
   'toast.close': '알림 닫기',
+  'palette.open': '명령 팔레트 (Ctrl+P)',
+  'palette.title': '명령',
+  'palette.placeholder': '명령 이름으로 찾기',
+  'menu.label': '메뉴',
+  'command.noteBusy': '노트가 아직 열리는 중이거나 바깥 변경을 확인해야 해서 바꾸지 않았습니다.',
+  'command.noteNotSaved': '변경은 편집기에 들어갔지만 저장하지 못했습니다. 편집기의 안내를 따르세요.',
+  'command.noteChanged': '명령이 도는 동안 노트가 바뀌어 아무것도 넣지 않았습니다. 다시 실행하세요.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -218,6 +225,13 @@ const en: Record<string, string> = {
   'alias.prefixLabel': 'Name after {0}',
   'toast.region': 'Notifications',
   'toast.close': 'Dismiss notification',
+  'palette.open': 'Command palette (Ctrl+P)',
+  'palette.title': 'Commands',
+  'palette.placeholder': 'Type a command name',
+  'menu.label': 'Menu',
+  'command.noteBusy': 'The note is still loading or has an unresolved outside change, so nothing was changed.',
+  'command.noteNotSaved': "The change is in the editor but could not be saved. Follow the editor's notice.",
+  'command.noteChanged': 'The note changed while the command ran, so nothing was inserted. Run it again.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

@@ -37,7 +37,7 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
 /** 문서의 실제 초점 요소: 그림자 루트(CodeMirror) 안의 요소까지 따라간다. */
-function deepActiveElement(): HTMLElement | null {
+export function deepActiveElement(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
   let el: Element | null = document.activeElement;
   while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;

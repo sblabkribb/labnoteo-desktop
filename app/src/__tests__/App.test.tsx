@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App';
 import { baseInvoke } from './fixtures';
@@ -155,6 +155,23 @@ describe('앱', () => {
     await waitFor(() => expect(tauri.invoke.mock.calls.filter(([c]) => c === 'settings_vault_read')).toHaveLength(2));
     expect(screen.queryByText('labnoteO(Obsidian) 설정을 이 보관함으로 가져왔습니다.')).toBeNull();
     expect(tauri.invoke.mock.calls.filter(([c]) => c === 'settings_import_plugin')).toHaveLength(1);
+  });
+  it('Ctrl+P 는 명령 팔레트를 연다: 인쇄를 막고, 팔레트가 열린 동안 .shell 은 inert 다', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    await screen.findByText('보관함: wrong');
+    const button = within(screen.getByRole('banner')).getByRole('button', { name: '명령 팔레트 (Ctrl+P)' }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false)); // 설정을 읽은 뒤 켜진다
+    const e = new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', ctrlKey: true, bubbles: true, composed: true, cancelable: true });
+    act(() => {
+      button.dispatchEvent(e);
+    });
+    expect(e.defaultPrevented).toBe(true);
+    expect(await screen.findByRole('dialog', { name: '명령' })).toBeTruthy();
+    expect(container.querySelector('.shell')!.hasAttribute('inert')).toBe(true);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(container.querySelector('.shell')!.hasAttribute('inert')).toBe(false);
   });
   it('보관함을 고르는 첫 화면에서도 테마를 바꿀 수 있다', async () => {
     tauri.invoke.mockImplementation(async (cmd: string) => {
