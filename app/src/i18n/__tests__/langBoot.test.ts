@@ -5,7 +5,7 @@ import { LANG_KEY } from '../lang';
 /**
  * public/lang-boot.js: index.html 의 <head> 에서 React 보다 먼저, 첫 그림 전에 도는 고전 스크립트.
  * 앱이 고를 언어를 html lang 에 미리 건다(화면 낭독기와 글꼴 선택이 첫 프레임부터 맞는 언어를 본다).
- * 고르는 규칙은 src/i18n/lang.ts 와 같아야 한다: 저장된 ko/en, 없으면 navigator.language 가 ko 로 시작할 때만 ko.
+ * 고르는 규칙은 src/i18n/lang.ts 와 같아야 한다: 저장된 ko/en, 없으면 navigator.language 가 ko 이거나 ko- 로 시작할 때만 ko.
  * 파일을 그대로 읽어 전역(localStorage, navigator, document)에서 돌린다 — 앱이 싣는 바로 그 글자를 검사한다.
  */
 const BOOT = readFileSync('public/lang-boot.js', 'utf-8');
@@ -47,12 +47,13 @@ describe('언어 부트 스크립트', () => {
     expect(boot({ 'labnoteo.other': 'ko' }, 'en-US')).toBe('en');
   });
 
-  it('저장된 선택이 없거나 모르는 값이면 navigator.language 가 ko 로 시작할 때만 ko, 아니면 en', () => {
+  it('저장된 선택이 없거나 모르는 값이면 navigator.language 가 ko 이거나 ko- 로 시작할 때만 ko, 아니면 en', () => {
     for (const stored of [{}, { [LANG_KEY]: 'fr' }, { [LANG_KEY]: 'KO' }] as Array<Record<string, string>>) {
       expect(boot(stored, 'ko-KR'), JSON.stringify(stored)).toBe('ko');
       expect(boot(stored, 'KO'), JSON.stringify(stored)).toBe('ko');
       expect(boot(stored, 'en-US'), JSON.stringify(stored)).toBe('en');
       expect(boot(stored, 'ja'), JSON.stringify(stored)).toBe('en');
+      expect(boot(stored, 'kok-IN'), JSON.stringify(stored)).toBe('en'); // 콘칸어: ko 로 시작하지만 한국어가 아니다
     }
     expect(boot({}, undefined)).toBe('en');
   });

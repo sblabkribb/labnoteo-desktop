@@ -5,7 +5,7 @@
  * 다시 그려질 뿐이라, 편집기(CodeMirror 뷰)와 그 안의 저장 안 된 편집, 열린 대화상자, 입력 중인 글자가 그대로 남는다.
  * 루트의 key 를 바꿔 통째로 다시 그리는 방식은 그 모두를 버린다.
  *
- * 처음 고르기: 저장된 ko/en 이 있으면 그것, 없으면 navigator.language 가 ko 로 시작할 때만 ko, 그 밖에는 en.
+ * 처음 고르기: 저장된 ko/en 이 있으면 그것, 없으면 navigator.language 가 ko 이거나 ko- 로 시작할 때만 ko(kok 콘칸어 같은 것은 아니다), 그 밖에는 en.
  * public/lang-boot.js 가 첫 그림 전에 같은 규칙으로 html lang 을 건다(src/i18n/__tests__/langBoot.test.ts 가 맞춰 본다).
  * 저장소가 없거나 던져도 앱은 뜬다(useTheme 과 같다).
  */
@@ -32,7 +32,7 @@ function stored(): Lang | undefined {
 function browser(): Lang {
   try {
     const l = navigator.language;
-    return typeof l === 'string' && l.toLowerCase().startsWith('ko') ? 'ko' : 'en';
+    return typeof l === 'string' && /^ko(-|$)/i.test(l) ? 'ko' : 'en';
   } catch {
     return 'en';
   }

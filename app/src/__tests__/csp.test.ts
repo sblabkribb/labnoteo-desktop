@@ -90,6 +90,10 @@ describe('index.html', () => {
     expect(statSync('public/theme-boot.js').isFile()).toBe(true);
   });
 
+  it('html 의 처음 lang 은 저장소도 한국어 브라우저도 없을 때의 기본값 en 이다 (부트 스크립트가 못 돌아도 맞는 쪽)', () => {
+    expect(page).toMatch(/<html lang="en">/);
+  });
+
   it('언어 부트 스크립트도 <head> 에서 앱보다 먼저, 막는 고전 스크립트로 돈다 (첫 그림 전에 html lang 이 맞다)', () => {
     const boot = scripts.find((s) => srcOf(s.attrs) === '/lang-boot.js');
     const app = scripts.find((s) => srcOf(s.attrs) === '/src/main.tsx');

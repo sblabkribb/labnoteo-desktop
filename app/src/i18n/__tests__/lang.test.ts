@@ -43,13 +43,15 @@ describe('언어 저장소: 처음 고르기', () => {
     expect(LANG_KEY).toBe(KEY);
   });
 
-  it('저장된 선택이 없으면 navigator.language 가 ko 로 시작할 때만 한국어다', async () => {
+  it('저장된 선택이 없으면 navigator.language 가 ko 이거나 ko- 로 시작할 때만 한국어다', async () => {
     for (const [language, expected] of [
       ['ko-KR', 'ko'],
       ['ko', 'ko'],
       ['KO-kr', 'ko'],
       ['en-US', 'en'],
       ['ja-JP', 'en'],
+      ['kok-IN', 'en'], // 콘칸어: ko 로 시작하지만 한국어가 아니다
+      ['kos', 'en'],
       ['', 'en'],
     ] as const) {
       const { getLang } = await fresh(memoryStorage(), language);
