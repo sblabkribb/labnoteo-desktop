@@ -12,6 +12,7 @@ import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { useLinkIndex } from './links/useLinkIndex';
 import { Editor, type EditorHandle } from './editor/Editor';
+import type { OpenTarget } from './editor/live/links';
 import type { EditorView } from '@codemirror/view';
 import { resolveGithubAnchor } from '@labnoteo/core';
 import { fetchAppVersion } from './appVersion';
@@ -195,7 +196,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     : undefined;
   // 렌더된 링크의 Ctrl+클릭(D12). 앵커가 있으면 열기 전에 대상 노트를 읽어 그 제목 줄을 찾고, 처음 읽은 뒤 그 줄로 커서를 옮긴다.
   // 새 편집기는 열기가 끝난 뒤에야 등록되므로, 열고 나서 openNote(path)?.reveal 을 부르면 대개 놓친다.
-  const onOpenLink = ({ path, anchor }: { path: string; anchor?: string }) =>
+  const legacyOpenLink = ({ path, anchor }: { path: string; anchor?: string }) =>
     void (async () => {
       let at: { line: number } | undefined;
       if (anchor) {
@@ -208,6 +209,10 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       }
       await openFile(path, at);
     })();
+  // 편집기의 링크 열기(SP4 Task 9): 지금은 노트만 연다. 만들기와 바깥 주소, 위키링크의 subpath 는 Task 10 이 잇는다.
+  const onOpenLink = (target: OpenTarget) => {
+    if (target.kind === 'note') legacyOpenLink({ path: target.path, anchor: target.anchor });
+  };
   const onEditorMenu = (e: MouseEvent, view: EditorView) => {
     const path = notes.activePath();
     if (!ctx || !path) return;
