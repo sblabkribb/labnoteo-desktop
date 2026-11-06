@@ -110,6 +110,13 @@ describe('라이브 미리보기: 링크와 유닛 오퍼레이션 제목', () =
     expect(opened).toEqual([]);
   });
 
+  it('an #anchor link to a missing heading toasts instead of doing nothing', () => {
+    const v = view('[go](#nowhere)\n\n## Step 2\nx', 26);
+    ctrlDown(v.contentDOM.querySelector('.lno-link')!);
+    expect(revealed).toEqual([]);
+    expect(toasts).toEqual([t('live.link.anchorMissing')]);
+  });
+
   it('a plain click on a rendered link does nothing special', () => {
     const v = view('[label](./b.labnote.md)\nx', 25);
     const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
@@ -167,4 +174,23 @@ describe('라이브 미리보기: 링크와 유닛 오퍼레이션 제목', () =
     expect(unitOpHeading('## [WT010 x]')).toMatchObject({ codeFrom: 4, codeTo: 9, kind: 'other' });
     expect(unitOpHeading('### plain')).toBeNull();
   });
+
+  it('unitOpHeading puts close on the bracket when the name is only whitespace', () => {
+    expect(unitOpHeading('### [UHW010  ]')).toMatchObject({ open: 4, close: 13 });
+    expect(unitOpHeading('## [WB010  ]')).toMatchObject({ open: 3, close: 11 });
+    expect(unitOpHeading('### [UHW010 　]')).toMatchObject({ open: 4, close: 13 });
+    expect(unitOpHeading('### [UHW010  ]]')).toMatchObject({ close: 14 });
+  });
+
+  it.each(['### [UHW010  ]', '## [WB010  ]', '### [UHW010 　]'])(
+    'whitespace-only name %j does not crash, cursor off the line or moving off it',
+    (head) => {
+      const doc = `${head}\nx`;
+      const v = view(doc, doc.length);
+      expect(lineEl(v, 1).textContent).not.toContain(']');
+      const w = view(doc, 2);
+      expect(() => w.dispatch({ selection: { anchor: doc.length } })).not.toThrow();
+      expect(lineEl(w, 1).textContent).not.toContain(']');
+    },
+  );
 });

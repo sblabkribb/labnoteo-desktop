@@ -49,7 +49,8 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
   const decos: Range<Decoration>[] = [];
   const hides: Range<Decoration>[] = [];
   const conceal = (from: number, to: number) => {
-    if (from >= to) return;
+    // 플러그인의 바꾸기 장식은 줄바꿈을 넘으면 CodeMirror 가 던진다: 줄 끝을 지나는 범위는 아예 숨기지 않는다
+    if (from >= to || to > state.doc.lineAt(from).to) return;
     const r = hide.range(from, to);
     decos.push(r);
     hides.push(r);

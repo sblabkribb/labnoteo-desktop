@@ -59,6 +59,8 @@ export function resolveNoteLink(notePath: string, href: string): NoteLink | null
 
 /** 워크플로 제목 `## [WB010 이름] 별칭`. 유닛 오퍼레이션(`### [UHW010 …]`)은 코어의 UNIT_OP_HEADING_PATTERN 이다. */
 const WORKFLOW_HEADING = /^##\s+\[([A-Z]+\d+)\s+(.+?)\]/;
+/** 코드 뒤 이름과 닫는 대괄호: 위 두 패턴의 꼬리와 같다. */
+const NAME_TAIL = /\s+(.+?)\]/y;
 
 export type UnitOpKind = 'UHW' | 'USW' | 'WB' | 'other';
 
@@ -74,9 +76,12 @@ export function unitOpHeading(
   const open = lineText.indexOf('[');
   const codeFrom = open + 1;
   const codeTo = codeFrom + m[1].length;
-  let nameFrom = codeTo;
-  while (/\s/.test(lineText[nameFrom])) nameFrom++;
-  const close = nameFrom + m[2].length;
+  // 닫는 `]` 는 두 패턴이 같은 꼬리(NAME_TAIL)를 코드 바로 뒤에서 다시 맞춰 찾는다. 이름이 공백뿐이면
+  // (`[UHW010  ]`, IME 의 전각 공백) 이름 길이로 셈하면 `]` 를 지나 줄 끝에 닿는다.
+  NAME_TAIL.lastIndex = codeTo;
+  const tail = NAME_TAIL.exec(lineText);
+  if (!tail) return null;
+  const close = codeTo + tail[0].length - 1;
   const prefix = /^[A-Z]+/.exec(m[1])![0];
   const kind: UnitOpKind = prefix === 'UHW' || prefix === 'USW' || prefix === 'WB' ? prefix : 'other';
   return { codeFrom, codeTo, kind, open, close };
@@ -169,6 +174,7 @@ export function linkClickHandler(deps: LinkOpenDeps): Extension {
       else {
         const line = resolveGithubAnchor(state.doc.toString(), target.anchor);
         if (line !== undefined) deps.reveal(line);
+        else deps.toast(t('live.link.anchorMissing'));
       }
       return true;
     },
