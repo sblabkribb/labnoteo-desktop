@@ -219,6 +219,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   };
   // WAI-ARIA 탭 패턴: 고른 탭만 Tab 순서에 있으니 화살표·Home·End 로 탭을 옮기고 초점도 함께 옮긴다.
   const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    // Alt/Ctrl/Meta+arrow is the app's (Alt+←/→ is back and forward), not tab movement.
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
     const order = TAB_ORDER;
     const at = order.indexOf(tab);
     const next =

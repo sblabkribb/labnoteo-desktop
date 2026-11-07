@@ -102,6 +102,8 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>, index: number) => {
+    // Alt/Ctrl/Meta+arrow belongs to the app (Alt+←/→ is back and forward): never take it as tree movement.
+    if ((e.altKey || e.ctrlKey || e.metaKey) && /^(Arrow|Home$|End$)/.test(e.key)) return;
     const row = rows[index];
     const action = treeKeyAction(rows, index, { key: e.key, shiftKey: e.shiftKey });
     if (!action) return;

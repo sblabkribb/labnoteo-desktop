@@ -116,6 +116,22 @@ describe('노트 트리', () => {
     expect(items()).toHaveLength(4);
   });
 
+  it('Alt, Ctrl or Meta with an arrow is left to the app (history navigation), not taken as tree movement', () => {
+    render(<NoteTree entries={entries} onSelect={() => {}} />);
+    const items = () => screen.getAllByRole('treeitem');
+    const note = screen.getByRole('treeitem', { name: '02.md' });
+    act(() => note.focus());
+    for (const mod of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+      for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
+        const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mod });
+        act(() => void note.dispatchEvent(ev));
+        expect(ev.defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(note);
+      }
+    }
+    expect(items()).toHaveLength(4);
+  });
+
   it('Enter on a note row opens it; folders and notes carry their aria-level', async () => {
     const user = userEvent.setup();
     const picked: string[] = [];

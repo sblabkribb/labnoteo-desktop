@@ -78,6 +78,41 @@ describe('navigation history', () => {
     await docIs('# H');
   });
 
+  it('a note created from an unresolved link is history too: back returns to the source note', async () => {
+    const vault = installFakeVault({ 'exp/A.labnote.md': 'a\nb\n[[New note]]' });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await userEvent.click(await screen.findByText('A.labnote.md'));
+    await docIs('a\nb\n[[New note]]');
+    const v = await editorView();
+    await waitFor(() => expect(linkIndex.ready()).toBe(true));
+    const el = await waitFor(() => {
+      const found = v.contentDOM.querySelector('.lno-wikilink');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    fireEvent.mouseDown(el, { button: 0 });
+    fireEvent.click(el, { button: 0 });
+    await waitFor(() => expect(vault.files()['exp/New note.md']).toBe(''));
+    await docIs('');
+    await vault.emitChange('exp/New note.md', 'created');
+    await new Promise((r) => setTimeout(r, 50));
+    // The note was opened from the file tree and the link click keeps focus where it was (its mousedown is
+    // prevented): the tree row still has focus, and Alt+← must reach the app instead of moving the tree.
+    const row = document.activeElement as HTMLElement;
+    expect(row.getAttribute('role')).toBe('treeitem');
+    fireEvent.keyDown(row, { key: 'ArrowLeft', altKey: true });
+    await docIs('a\nb\n[[New note]]');
+    fireEvent.keyDown(row, { key: 'ArrowRight', altKey: true });
+    await docIs('');
+    // The same from a focused sidebar tab
+    const tab = document.getElementById('sidebar-tab-files')!;
+    tab.focus();
+    fireEvent.keyDown(tab, { key: 'ArrowLeft', altKey: true });
+    await docIs('a\nb\n[[New note]]');
+    expect(document.getElementById('sidebar-tab-files')!.getAttribute('aria-selected')).toBe('true');
+  });
+
   it('Alt+ArrowLeft and Alt+ArrowRight typed in the editor with the caret mid-document navigate', async () => {
     installFakeVault({ 'a.md': 'alpha beta gamma', 'b.md': 'delta epsilon zeta' });
     render(<App />);
