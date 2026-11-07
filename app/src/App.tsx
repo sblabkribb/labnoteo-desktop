@@ -11,6 +11,9 @@ import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { useLinkIndex } from './links/useLinkIndex';
+import { linkIndex } from './links/linkIndex';
+import { linkJournal } from './links/journal';
+import { recoverJournal } from './links/undoRename';
 import { handleOpenLink } from './links/createFromLink';
 import { openExternal, tauriExternalDeps } from './links/openExternal';
 import { Editor, type EditorHandle } from './editor/Editor';
@@ -191,6 +194,22 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   }, [vault.root]);
   // 링크 색인: 보관함이 바뀌면 비우고, 위 재구성이 끝나면 싣고, 보관함 변경을 따라간다.
   useLinkIndex(vault.root, rebuild?.root === vault.root ? rebuild.done : undefined);
+  // 링크 고침 기록(SP4 D15): 보관함마다 한 번, 링크 색인이 준비된 뒤 읽는다. 끊긴 이름 바꾸기는 마칠지 묻고,
+  // 끝난 것은 "마지막 이름 바꾸기 되돌리기"를 위해 남긴다. VaultView 는 보관함마다 새로 마운트된다.
+  const recoverCtx = useRef(ctx);
+  recoverCtx.current = ctx;
+  const hasCtx = ctx !== undefined;
+  useEffect(() => {
+    if (!hasCtx) return;
+    let live = true;
+    void linkIndex
+      .whenReady()
+      .then(() => (live && recoverCtx.current ? recoverJournal(recoverCtx.current, linkJournal) : undefined))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [hasCtx]);
   const flush = async () => !editor.current || (await editor.current.flush());
   // 맥락 메뉴: 항목은 여는 순간 만든다. 명령 맥락이 아직 없으면(설정을 읽는 중) 기본 동작 그대로다.
   const onTreeMenu = ctx

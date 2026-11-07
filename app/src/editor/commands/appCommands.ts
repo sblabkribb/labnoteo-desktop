@@ -3,6 +3,8 @@ import { commands } from '../../labnote/commands/registry';
 import type { EditorView } from '@codemirror/view';
 import { t } from '../../i18n/t';
 import { openNote } from '../../labnote/openNotes';
+import { linkJournal } from '../../links/journal';
+import { undoLastRename } from '../../links/undoRename';
 import { TOGGLE_MODE_KEY, toggleMode } from '../live/mode';
 import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/properties';
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
@@ -61,6 +63,14 @@ const linksShow: AppCommand = {
   run: (ctx) => ctx.showPanel('links'),
 };
 
+/** 마지막 이름 바꾸기 되돌리기(SP4 Task 25, D16). 기록이 끝났고(done) 되돌릴 수 있을 때만 팔레트에 보인다. */
+const undoRename: AppCommand = {
+  id: 'links-undo-rename',
+  nameKey: 'cmd.undoRename',
+  run: (ctx) => undoLastRename(ctx, ctx.links?.journal ?? linkJournal),
+  available: () => linkJournal.current()?.header.status === 'done' && linkJournal.current()!.header.undoable,
+};
+
 /** 서식 명령(formatCommands.ts 의 D10 행). 팔레트에서 돌리면 열린 노트의 뷰(표 칸이면 그 칸)에 쓴다. */
 const formatCommands: AppCommand[] = FORMAT_KEYS.map((f) => ({
   id: f.id,
@@ -100,7 +110,7 @@ const propsEditYaml: AppCommand = {
 };
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, ...formatCommands, propsAdd, propsEditYaml];
+  return [toggleSource, outlineShow, linksShow, undoRename, ...formatCommands, propsAdd, propsEditYaml];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

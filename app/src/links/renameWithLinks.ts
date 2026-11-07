@@ -26,6 +26,8 @@ export interface RenameReport {
   renamed: boolean;
   updated: string[];
   failed: { path: string; reason: FailReason }[];
+  /** Updated notes whose recorded `before` text was written back exactly (Undo's fast path, D16). */
+  restored?: string[];
 }
 
 /** How long a rename waits for the link index before it refuses (D12). */
@@ -109,15 +111,16 @@ async function writeNotes(
   restore?: ReadonlyMap<string, { before: string; after: string }>,
 ): Promise<RenameReport> {
   const rctx: RewriteContext = rewriteContext(plan.files, plan.moves);
-  const report: RenameReport = { renamed: true, updated: [], failed: [] };
+  const report: RenameReport = { renamed: true, updated: [], failed: [], restored: [] };
+  const backs = new Map([...(restore ?? [])].map(([p, v]) => [linkKey(p), v]));
   for (const n of indices) {
     const note = plan.notes[n];
     const path = note.after;
-    const back = restore?.get(note.before);
-    const rewrite = (text: string): { text: string; unsafe: number } => {
-      if (back && text === back.after) return { text: back.before, unsafe: 0 };
+    const back = backs.get(linkKey(note.before));
+    const rewrite = (text: string): { text: string; unsafe: number; restored: boolean } => {
+      if (back && text === back.after) return { text: back.before, unsafe: 0, restored: true };
       const r = rewriteLinks(text, note.before, note.after, rctx);
-      return { text: r.text, unsafe: r.unsafe };
+      return { text: r.text, unsafe: r.unsafe, restored: false };
     };
 
     // The planned texts, from a fresh read (a failed read is reported by processNote below).
@@ -130,11 +133,11 @@ async function writeNotes(
     }
     await journal.note({ n, path, ...planned, status: 'writing' });
 
-    let last: { before: string; after: string; unsafe: number } | undefined;
+    let last: { before: string; after: string; unsafe: number; restored: boolean } | undefined;
     try {
       await processNote(ctx.host.fs, path, (text) => {
         const r = rewrite(text);
-        last = { before: text, after: r.text, unsafe: r.unsafe }; // the last call is the text that was written
+        last = { before: text, after: r.text, unsafe: r.unsafe, restored: r.restored }; // the last call is the text that was written
         return r.text;
       });
     } catch (e) {
@@ -151,6 +154,7 @@ async function writeNotes(
       continue;
     }
     report.updated.push(path);
+    if (last?.restored) report.restored!.push(path);
     await journal.note({ n, path, ...texts, status: 'ok' });
   }
   return report;

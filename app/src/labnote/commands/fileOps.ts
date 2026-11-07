@@ -222,6 +222,11 @@ const REASON_TEXT: Record<FailReason, () => string> = {
   io: () => t('links.reason.io'),
 };
 
+/** 링크를 고치지 못한 노트를 한 줄씩: `경로 (이유)`. */
+export function failureLines(failed: RenameReport['failed']): string {
+  return failed.map((f) => `${f.path} (${REASON_TEXT[f.reason]()})`).join('\n');
+}
+
 /** 이름 바꾸기 실패를 알림으로 바꾼다(이미 있음, 거절된 이름). 다룬 실패면 true, 아니면 호출자가 다시 던진다. */
 function reportRenameFailure(host: CommandContext['host'], e: unknown): boolean {
   if (e instanceof LinkOpsBusyError) {
@@ -282,8 +287,7 @@ async function reportLinkUpdates(
       host.notify('info', t('links.rename.done', String(plan.linkCount), String(plan.notes.length)));
       return;
     }
-    const lines = report.failed.map((f) => `${f.path} (${REASON_TEXT[f.reason]()})`).join('\n');
-    const message = t('links.rename.partial', lines);
+    const message = t('links.rename.partial', failureLines(report.failed));
     const unfixable = report.failed.filter((f) => f.reason === 'unsafeName');
     const retryable = report.failed.filter((f) => f.reason !== 'unsafeName').map((f) => f.path);
     if (retryable.length === 0) {
@@ -297,7 +301,7 @@ async function reportLinkUpdates(
 }
 
 /** 링크 색인이 준비되기를 READY_WAIT_MS 까지 기다린다(D12 1). 준비됐으면 true. */
-async function waitForLinks(ctx: CommandContext, links: LinkDeps): Promise<boolean> {
+export async function waitForLinks(ctx: CommandContext, links: LinkDeps): Promise<boolean> {
   if (links.index.ready()) return true;
   ctx.host.notify('info', t('links.waiting'));
   let timer: ReturnType<typeof setTimeout> | undefined;
