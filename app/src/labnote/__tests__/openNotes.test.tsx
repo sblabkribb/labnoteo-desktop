@@ -67,6 +67,20 @@ describe('processNote', () => {
     m.unmount();
   });
 
+  it('open and composing (Korean IME): rejects with NoteBusyError and leaves the composition alone', async () => {
+    const { vault, fs } = setup({ [P]: 'mine\n' });
+    const m = mountEditor(vault, P);
+    await m.loaded();
+    const view = m.view();
+    Object.defineProperty(view, 'composing', { configurable: true, get: () => true });
+    const dispatch = vi.spyOn(view, 'dispatch');
+    await expect(processNote(fs, P, (t) => `${t}X`)).rejects.toBeInstanceOf(NoteBusyError);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe('mine\n');
+    expect(vault.files()[P]).toBe('mine\n');
+    m.unmount();
+  });
+
   it('open after "Keep my version": busy() is true, so it rejects with NoteBusyError', async () => {
     const user = userEvent.setup();
     const { vault, fs } = setup({ [P]: 'mine\n' });

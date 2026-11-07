@@ -36,6 +36,19 @@ describe('JournalStore', () => {
     expect(JSON.parse(v.journal.header!).undoable).toBe(true);
   });
 
+  it('restore writes a journal back exactly, replacing whatever began since', async () => {
+    const v = createFakeVault({});
+    const j = createJournalStore(v.invoke);
+    await j.begin({ id: '1', from: 'a.md', to: 'b.md', isDir: false, moves: [{ from: 'a.md', to: 'b.md' }], status: 'planned', planned: [{ before: 'n.md', after: 'n.md' }], undoable: true });
+    await j.note({ n: 0, path: 'n.md', before: '[[a]]', after: '[[b]]', status: 'ok' });
+    await j.setStatus('done');
+    const prev = await j.load();
+    await j.begin({ id: '2', from: 'c.md', to: 'd.md', isDir: false, moves: [], status: 'planned', planned: [], undoable: true });
+    await j.restore(prev!);
+    expect(await j.load()).toEqual(prev);
+    expect(j.current()).toEqual(prev);
+  });
+
   it('clear empties the store and the disk', async () => {
     const v = createFakeVault({});
     const j = createJournalStore(v.invoke);

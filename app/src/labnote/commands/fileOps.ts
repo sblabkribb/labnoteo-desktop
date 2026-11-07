@@ -15,7 +15,17 @@ import { NOTE_EXT } from '../../tree/createNote';
 import type { TreeEntry } from '../../tree/useTree';
 import type { JournalStore } from '../../links/journal';
 import { IndexNotReadyError, planRename, type RenamePlan } from '../../links/planRename';
-import { linkOps, READY_WAIT_MS, renameEvents, renameWithLinks, rewritePlanned, type FailReason, type RenameReport } from '../../links/renameWithLinks';
+import {
+  LinkOpsBusyError,
+  linkOps,
+  READY_WAIT_MS,
+  renameEvents,
+  renameWithLinks,
+  rewritePlanned,
+  type FailReason,
+  type LinkSession,
+  type RenameReport,
+} from '../../links/renameWithLinks';
 import { hasUnlinkableChars, linkKey } from '../../links/resolve';
 import { movesFor, type Move } from '../../links/rewrite';
 import { openNote, processNote } from '../openNotes';
@@ -214,6 +224,10 @@ const REASON_TEXT: Record<FailReason, () => string> = {
 
 /** 이름 바꾸기 실패를 알림으로 바꾼다(이미 있음, 거절된 이름). 다룬 실패면 true, 아니면 호출자가 다시 던진다. */
 function reportRenameFailure(host: CommandContext['host'], e: unknown): boolean {
+  if (e instanceof LinkOpsBusyError) {
+    host.notify('warn', t('links.busy'));
+    return true;
+  }
   if (hasErrorKind(e, ERROR_KINDS.exists)) {
     host.notify('warn', t('fileOps.exists'));
     return true;
@@ -254,7 +268,13 @@ async function plainRename(ctx: CommandContext, path: string, to: string, moves:
  * 이름 바꾸기 뒤 링크 고침의 결과를 알린다(D14 7). 실패가 있으면 노트마다 이유를 보이고, "다시 시도"를 고르는 동안
  * 실패한 노트만 지금 글에서 다시 고친다. 새 이름으로 쓸 수 없는 링크(unsafeName)는 다시 해도 고쳐지지 않는다.
  */
-async function reportLinkUpdates(ctx: CommandContext, plan: RenamePlan, first: RenameReport, journal: JournalStore): Promise<void> {
+async function reportLinkUpdates(
+  ctx: CommandContext,
+  plan: RenamePlan,
+  first: RenameReport,
+  journal: JournalStore,
+  session: LinkSession,
+): Promise<void> {
   const { host } = ctx;
   let report = first;
   for (;;) {
@@ -271,7 +291,7 @@ async function reportLinkUpdates(ctx: CommandContext, plan: RenamePlan, first: R
       return;
     }
     if (!(await host.confirm(message, { confirmLabel: t('links.rename.retry') }))) return;
-    const again = await rewritePlanned(ctx, plan, retryable, journal);
+    const again = await rewritePlanned(ctx, plan, retryable, journal, session);
     report = { ...again, failed: [...again.failed, ...unfixable] };
   }
 }
@@ -304,11 +324,28 @@ export async function renameEntry(
   isDir: boolean,
   entries: readonly TreeEntry[],
 ): Promise<string | undefined> {
-  const { host } = ctx;
-  if (linkOps.running()) {
-    host.notify('warn', t('links.busy'));
+  // 이름 바꾸기는 한 번에 하나다(D14): 묻기부터 보고까지 링크 잠금을 쥔다. 색인을 기다리는 동안 시작한 두 번째
+  // 이름 바꾸기가 첫 번째의 기록을 지우지 못하게 한다.
+  const session = linkOps.claim();
+  if (!session) {
+    ctx.host.notify('warn', t('links.busy'));
     return undefined;
   }
+  try {
+    return await renameLocked(ctx, path, isDir, entries, session);
+  } finally {
+    session.release();
+  }
+}
+
+async function renameLocked(
+  ctx: CommandContext,
+  path: string,
+  isDir: boolean,
+  entries: readonly TreeEntry[],
+  session: LinkSession,
+): Promise<string | undefined> {
+  const { host } = ctx;
   const guard = await renameGuardOnDisk(host.fs, path, isDir, entries);
   if (guard) {
     host.notify('warn', t(GUARD_MESSAGE[guard]));
@@ -402,7 +439,7 @@ export async function renameEntry(
 
   let report: RenameReport;
   try {
-    report = await renameWithLinks(ctx, plan, links.journal);
+    report = await renameWithLinks(ctx, plan, links.journal, { session });
   } catch (e) {
     if (reportRenameFailure(host, e)) return undefined;
     throw e;
@@ -412,7 +449,7 @@ export async function renameEntry(
     return undefined;
   }
   const result = finish();
-  await reportLinkUpdates(ctx, plan, report, links.journal);
+  await reportLinkUpdates(ctx, plan, report, links.journal, session);
   return result;
 }
 

@@ -11,7 +11,7 @@ import { registerOpenNote } from '../../labnote/openNotes';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import type { TreeEntry } from '../../tree/useTree';
 import { linkIndex } from '../linkIndex';
-import { linkOps, READY_WAIT_MS, reasonOf, renameEvents } from '../renameWithLinks';
+import { LinkOpsBusyError, linkOps, READY_WAIT_MS, reasonOf, renameEvents, renameWithLinks, rewritePlanned } from '../renameWithLinks';
 
 const entries = (h: TestHost): TreeEntry[] =>
   Object.keys(h.vault.files()).map((p) => ({ path: p, name: p.split('/').pop()!, isDir: false, depth: p.split('/').length - 1 }));
@@ -207,6 +207,88 @@ describe('renameEntry with links', () => {
     await renameEntry(h.ctx, 'Home.md', false, entries(h));
     off();
     expect(seen).toEqual([[{ from: 'Home.md', to: 'Start.md' }]]);
+  });
+
+  it('a second rename while the first waits for the index is refused busy; the first journal is intact', async () => {
+    const h = host({ 'Home.md': '', 'Other.md': '', 'notes/n.md': '[[Home]] [[Other]]' });
+    linkIndex.clear(); // as on vault open: nothing loaded yet
+    h.answer.prompt('Start', 'Next'); h.answer.pick('update', 'update');
+    const first = renameEntry(h.ctx, 'Home.md', false, entries(h));
+    await waitFor(() => expect(h.notes).toContainEqual({ kind: 'info', message: t('links.waiting') }));
+    expect(linkOps.running()).toBe(true);
+    const second = renameEntry(h.ctx, 'Other.md', false, entries(h));
+    primeIndex(h); // the load finishes
+    expect(await second).toBeUndefined();
+    expect(h.notes).toContainEqual({ kind: 'warn', message: t('links.busy') });
+    expect(await first).toBe('Start.md');
+    expect(h.vault.files()['Other.md']).toBe('');
+    expect(h.vault.files()['notes/n.md']).toBe('[[Start]] [[Other]]');
+    expect(h.vault.log.filter((c) => c.cmd === 'link_journal_clear')).toHaveLength(1);
+    expect(journalHeader(h)).toMatchObject({ status: 'done', from: 'Home.md', to: 'Start.md' });
+    expect(journalNotes(h)).toEqual([{ n: 0, path: 'notes/n.md', before: '[[Home]] [[Other]]', after: '[[Start]] [[Other]]', status: 'ok' }]);
+    expect(linkOps.running()).toBe(false);
+  });
+
+  it('renameWithLinks refuses while another rename holds the link lock and leaves the journal alone', async () => {
+    const h = host({ 'Home.md': '', 'notes/n.md': '[[Home]]' });
+    const session = linkOps.claim()!;
+    try {
+      expect(linkOps.claim()).toBeUndefined();
+      const plan = { from: 'Home.md', to: 'Start.md', isDir: false, caseOnly: false, moves: [{ from: 'Home.md', to: 'Start.md' }], files: ['Home.md', 'notes/n.md'], notes: [{ before: 'notes/n.md', after: 'notes/n.md', changed: 1, unsafe: 0 }], linkCount: 1, hasWikiRewrites: true };
+      await expect(renameWithLinks(h.ctx, plan, h.ctx.links!.journal)).rejects.toBeInstanceOf(LinkOpsBusyError);
+      await expect(rewritePlanned(h.ctx, plan, ['notes/n.md'], h.ctx.links!.journal)).rejects.toBeInstanceOf(LinkOpsBusyError);
+      expect(h.vault.log.filter((c) => c.cmd.startsWith('link_journal') || c.cmd === 'vault_rename')).toEqual([]);
+    } finally {
+      session.release();
+    }
+    expect(linkOps.running()).toBe(false);
+  });
+
+  it('a rename aborted before vault_rename keeps the previous rename undoable', async () => {
+    const h = host({ 'Home.md': '', 'Other.md': '', 'Taken.md': '', 'notes/n.md': '[[Home]] [[Other]]' });
+    h.answer.prompt('Start'); h.answer.pick('update');
+    await renameEntry(h.ctx, 'Home.md', false, entries(h));
+    const header = journalHeader(h);
+    const notes = journalNotes(h);
+    h.answer.prompt('Taken'); h.answer.pick('update');
+    expect(await renameEntry(h.ctx, 'Other.md', false, entries(h))).toBeUndefined();
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.exists') });
+    expect(journalHeader(h)).toEqual(header);
+    expect(journalNotes(h)).toEqual(notes);
+    expect(h.ctx.links!.journal.current()).toEqual({ header, notes });
+  });
+
+  it('a dirty open referrer that is not the active note keeps its unsaved typing', async () => {
+    const h = host({ 'Home.md': '', 'notes/n.md': '[[Home]]' });
+    const m = await h.mount('notes/n.md');
+    h.setActive(undefined); // not flushed by renameEntry
+    const v = m.view();
+    v.dispatch({ changes: { from: 8, insert: 'X' } }); // unsaved
+    expect(h.vault.files()['notes/n.md']).toBe('[[Home]]');
+    h.answer.prompt('Start'); h.answer.pick('update');
+    await renameEntry(h.ctx, 'Home.md', false, entries(h));
+    expect(v.state.doc.toString()).toBe('[[Start]]X');
+    expect(h.vault.files()['notes/n.md']).toBe('[[Start]]X');
+    expect(journalNotes(h)).toEqual([{ n: 0, path: 'notes/n.md', before: '[[Home]]X', after: '[[Start]]X', status: 'ok' }]);
+    undo(v);
+    expect(v.state.doc.toString()).toBe('[[Home]]X');
+  });
+
+  it('after a compare-and-swap retry the journal holds the text that was actually written', async () => {
+    let raced = false;
+    const h = host({ 'Home.md': '', 'notes/n.md': '[[Home]]' }, {}, {
+      invoke: (base) => async (cmd, args) => {
+        if (cmd === 'vault_modify' && !raced) {
+          raced = true;
+          await base('vault_write', { path: 'notes/n.md', content: '[[Home]] edited' }); // another writer wins
+        }
+        return base(cmd, args);
+      },
+    });
+    h.answer.prompt('Start'); h.answer.pick('update');
+    await renameEntry(h.ctx, 'Home.md', false, entries(h));
+    expect(h.vault.files()['notes/n.md']).toBe('[[Start]] edited');
+    expect(journalNotes(h)).toEqual([{ n: 0, path: 'notes/n.md', before: '[[Home]] edited', after: '[[Start]] edited', status: 'ok' }]);
   });
 
   it('commands wait while links are being updated', async () => {

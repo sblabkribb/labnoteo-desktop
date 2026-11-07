@@ -68,7 +68,8 @@ export async function processNote(fs: AppFs, path: string, transform: (text: str
   const handle = openNote(path);
   if (handle) {
     const view = handle.view();
-    if (handle.busy() || !view) throw new NoteBusyError(path);
+    // 한글 IME 조합 중에 글을 바꾸면 조합이 깨진다: 바쁜 노트로 다룬다
+    if (handle.busy() || !view || view.composing) throw new NoteBusyError(path);
     const state = view.state;
     const before = state.doc.toString();
     const m = minimalReplacement(before, transform(before));

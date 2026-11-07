@@ -5,7 +5,9 @@
  * - Every note is rewritten from fresh text through `processNote` (one undo step in an open note, compare-and-swap
  *   on disk, never recreating a deleted note) with the pure, round-trip-checked `rewriteLinks`.
  * - One failure never stops the others: each is reported with its reason, and `rewritePlanned` retries them.
- * - While it runs, `linkOps.running()` is true and commands, renames and deletes refuse (`links.busy`).
+ * - A rename holds the single-flight link lock (`linkOps.claim`) from its readiness wait to its report; while it is
+ *   held or links are written, `linkOps.running()` is true and commands, renames and deletes refuse (`links.busy`).
+ *   A writer without the lock throws `LinkOpsBusyError`, so `journal.begin` never clears a live journal.
  */
 import { parseRaw } from '../editor/documentIo';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
@@ -30,13 +32,42 @@ export interface RenameReport {
 export const READY_WAIT_MS = 30000;
 
 let running = 0;
+let holder: LinkSession | undefined;
 
-/** True while links are being rewritten: commands, renames and deletes refuse meanwhile (D14). */
-export const linkOps: { running(): boolean } = {
-  running: () => running > 0,
+/** Another rename (or link rewrite) holds the link lock: nothing was done. */
+export class LinkOpsBusyError extends Error {
+  constructor() {
+    super('links are being updated');
+    this.name = 'LinkOpsBusyError';
+  }
+}
+
+/** The single-flight link lock a rename holds from its readiness wait to its report (D14). */
+export interface LinkSession {
+  release(): void;
+}
+
+/**
+ * True while a rename holds the link lock or links are being rewritten: commands, renames and deletes refuse
+ * meanwhile (D14). `claim` takes the lock (undefined when it is taken); only its holder may then write links.
+ */
+export const linkOps: { running(): boolean; claim(): LinkSession | undefined } = {
+  running: () => running > 0 || holder !== undefined,
+  claim() {
+    if (linkOps.running()) return undefined;
+    const session: LinkSession = {
+      release: () => {
+        if (holder === session) holder = undefined;
+      },
+    };
+    holder = session;
+    return session;
+  },
 };
 
-async function locked<T>(fn: () => Promise<T>): Promise<T> {
+/** Runs `fn` as the only link writer: refuses when another write runs or another session holds the lock. */
+async function locked<T>(session: LinkSession | undefined, fn: () => Promise<T>): Promise<T> {
+  if (running > 0 || (holder !== undefined && holder !== session)) throw new LinkOpsBusyError();
   running++;
   try {
     return await fn();
@@ -126,19 +157,25 @@ async function writeNotes(
 }
 
 /**
- * D14 steps 1-6: journal the plan, close the open note under the renamed path, rename, rewrite every planned note,
- * reopen and mark the journal done. A failed rename reopens the note, clears the journal and rethrows the error
- * (nothing was written). `restore` (old path -> journal texts) writes the recorded `before` text back when the
+ * D14 steps 1-6: close the open note under the renamed path, journal the plan, rename, rewrite every planned note,
+ * reopen and mark the journal done. A failed rename reopens the note, puts the previous journal back (or clears it)
+ * and rethrows the error (nothing was written). `restore` (old path -> journal texts) writes the recorded `before` text back when the
  * note still holds exactly the recorded `after` (Undo, Task 25).
  */
 export async function renameWithLinks(
   ctx: CommandContext,
   plan: RenamePlan,
   journal: JournalStore,
-  opts: { restore?: ReadonlyMap<string, { before: string; after: string }> } = {},
+  opts: { restore?: ReadonlyMap<string, { before: string; after: string }>; session?: LinkSession } = {},
 ): Promise<RenameReport> {
-  return locked(async () => {
+  return locked(opts.session, async () => {
     const { host } = ctx;
+    const active = ctx.activePath();
+    const wasOpen = active !== undefined && isUnder(active, plan.from);
+    if (wasOpen && !(await ctx.closeActive())) return { renamed: false, updated: [], failed: [] };
+
+    // The previous rename's journal stays undoable if this one never renames (written back on failure).
+    const previous = journal.current() ?? (await journal.load());
     await journal.begin({
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       from: plan.from,
@@ -149,18 +186,12 @@ export async function renameWithLinks(
       planned: plan.notes.map((p) => ({ before: p.before, after: p.after })),
       undoable: true,
     });
-
-    const active = ctx.activePath();
-    const wasOpen = active !== undefined && isUnder(active, plan.from);
-    if (wasOpen && !(await ctx.closeActive())) {
-      await journal.clear();
-      return { renamed: false, updated: [], failed: [] };
-    }
     try {
       await host.fs.rename(plan.from, plan.to);
     } catch (e) {
       if (wasOpen) await ctx.openFile(active);
-      await journal.clear();
+      if (previous) await journal.restore(previous);
+      else await journal.clear();
       throw e;
     }
     await journal.setStatus('renamed');
@@ -180,8 +211,9 @@ export async function rewritePlanned(
   plan: RenamePlan,
   paths: readonly string[],
   journal: JournalStore,
+  session?: LinkSession,
 ): Promise<RenameReport> {
   const wanted = new Set(paths.map(linkKey));
   const indices = plan.notes.flatMap((p, i) => (wanted.has(linkKey(p.after)) ? [i] : []));
-  return locked(() => writeNotes(ctx, plan, indices, journal));
+  return locked(session, () => writeNotes(ctx, plan, indices, journal));
 }

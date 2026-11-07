@@ -47,6 +47,8 @@ export interface JournalStore {
   load(): Promise<LinkJournal | null>;
   /** Clears, then writes the header. */
   begin(header: JournalHeader): Promise<void>;
+  /** Clears, then writes `j` back as it was (a rename that never happened keeps the previous one undoable). */
+  restore(j: LinkJournal): Promise<void>;
   setStatus(status: JournalHeader['status']): Promise<void>;
   /** One record file; above the cap the texts are dropped and the header becomes undoable:false. */
   note(rec: JournalNote): Promise<void>;
@@ -96,6 +98,18 @@ export function createJournalStore(invoke: InvokeFn = tauriInvoke): JournalStore
       cur = { header: { ...header }, notes: [] };
       sizes = new Map();
       await writeHeader();
+    },
+    async restore(j) {
+      await clearLinkJournal(invoke);
+      cur = { header: { ...j.header }, notes: [] };
+      sizes = new Map();
+      await writeHeader();
+      for (const rec of [...j.notes].sort((a, b) => a.n - b.n)) {
+        const out = cleanRecord(rec);
+        sizes.set(out.n, textSize(out));
+        await writeLinkJournalNote(out.n, JSON.stringify(out), invoke);
+        cur.notes.push(out);
+      }
     },
     async setStatus(status) {
       if (!cur || cur.header.status === status) return;
