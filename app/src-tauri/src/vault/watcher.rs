@@ -19,10 +19,15 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 use serde::Serialize;
 
 use super::path::{strip_verbatim, to_rel};
-use super::tree::is_listed_path;
+use super::tree::{is_listed_path, is_sample_registry_path};
 
 /// The event the frontend listens for.
 pub const EVENT: &str = "vault://changed";
+/// The event for sample registries (`<…>/labsamples/<name>.json`). They are not
+/// notes, so they are not in the tree or the index and never go out on `EVENT`;
+/// the samples store listens for this one to re-read a registry edited outside
+/// the app. Same `Change` payload.
+pub const LABSAMPLES_EVENT: &str = "vault://labsamples-changed";
 
 /// How long the folder must be quiet before a burst is reported.
 const QUIET: Duration = Duration::from_millis(200);
@@ -61,6 +66,8 @@ pub struct Change {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delta {
     Change(Change),
+    /// A sample registry JSON changed (reported on `LABSAMPLES_EVENT`).
+    Labsamples(Change),
     /// The OS dropped events (buffer overflow on a huge burst) or failed: the
     /// listener cannot trust incremental updates and must rescan.
     Rescan,
@@ -195,7 +202,7 @@ fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnM
         if stopped.load(Ordering::SeqCst) {
             return;
         }
-        out.extend(classify(root, &abs, appeared, &mut links).map(Delta::Change));
+        out.extend(classify(root, &abs, appeared, &mut links));
     }
     // Counted after `classify`: thousands of writes under `.git/` (a git pull)
     // or `node_modules/` are not changes to the vault and must cost nothing.
@@ -215,11 +222,14 @@ fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnM
 /// pointing out cannot make the app index or show anything from outside.
 /// A path that is gone is a removal whatever it was (a note or a folder; the
 /// OS no longer says which, and removing an unknown path is harmless).
-fn classify(root: &Path, abs: &Path, appeared: bool, links: &mut HashMap<String, bool>) -> Option<Change> {
+/// A sample registry (`is_sample_registry_path`) passes the same link rule and
+/// is tagged `Delta::Labsamples` instead, also when it is gone.
+fn classify(root: &Path, abs: &Path, appeared: bool, links: &mut HashMap<String, bool>) -> Option<Delta> {
     let rel = to_rel(root, abs).ok()?;
     if rel.is_empty() || !is_listed_path(&rel, true) {
         return None;
     }
+    let registry = is_sample_registry_path(&rel);
     let mut prefix = String::new();
     for part in rel.split('/') {
         if !prefix.is_empty() {
@@ -234,13 +244,17 @@ fn classify(root: &Path, abs: &Path, appeared: bool, links: &mut HashMap<String,
         }
     }
     match std::fs::symlink_metadata(root.join(&rel)) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Change { path: rel, kind: Kind::Removed }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let c = Change { path: rel, kind: Kind::Removed };
+            Some(if registry { Delta::Labsamples(c) } else { Delta::Change(c) })
+        }
         Err(_) => None,
         // A folder's own timestamp moves whenever something inside it does:
         // only its appearing matters (its notes are reported on their own).
-        Ok(m) if m.is_dir() => appeared.then(|| Change { path: rel, kind: Kind::Created }),
-        Ok(m) if m.is_file() && is_listed_path(&rel, false) => {
-            Some(Change { path: rel, kind: if appeared { Kind::Created } else { Kind::Modified } })
+        Ok(m) if m.is_dir() => appeared.then(|| Delta::Change(Change { path: rel, kind: Kind::Created })),
+        Ok(m) if m.is_file() && (registry || is_listed_path(&rel, false)) => {
+            let c = Change { path: rel, kind: if appeared { Kind::Created } else { Kind::Modified } };
+            Some(if registry { Delta::Labsamples(c) } else { Delta::Change(c) })
         }
         Ok(_) => None,
     }
@@ -287,7 +301,7 @@ fn apply_to_index(ix: &crate::index::Index, root: &Path, deltas: &[Delta]) {
             .iter()
             .filter_map(|d| match d {
                 Delta::Change(c) => Some((c.path.clone(), c.kind == Kind::Removed)),
-                Delta::Rescan => None,
+                Delta::Labsamples(_) | Delta::Rescan => None,
             })
             .collect();
         ix.apply(root, &changes)
@@ -298,13 +312,13 @@ fn apply_to_index(ix: &crate::index::Index, root: &Path, deltas: &[Delta]) {
 }
 
 /// Watch `root`, keep `index` in line when there is one, and hand every change
-/// to `emit`. The index is a cache and is best-effort here: a vault whose index
+/// to `emit` with the event it goes out on (`EVENT` or `LABSAMPLES_EVENT`). The index is a cache and is best-effort here: a vault whose index
 /// would not open still gets its watcher, because the tree refresh and the
 /// editor's external-change check depend on the events, not on the cache.
 fn start_watching(
     root: &Path,
     index: Option<Arc<crate::index::Index>>,
-    emit: impl Fn(Change) + Send + 'static,
+    emit: impl Fn(&'static str, Change) + Send + 'static,
 ) -> Option<Watcher> {
     let root_owned = root.to_path_buf();
     let sink = move |deltas: Vec<Delta>| {
@@ -312,10 +326,11 @@ fn start_watching(
             apply_to_index(ix, &root_owned, &deltas);
         }
         for delta in deltas {
-            emit(match delta {
-                Delta::Change(c) => c,
-                Delta::Rescan => Change { path: String::new(), kind: Kind::Modified },
-            });
+            match delta {
+                Delta::Change(c) => emit(EVENT, c),
+                Delta::Labsamples(c) => emit(LABSAMPLES_EVENT, c),
+                Delta::Rescan => emit(EVENT, Change { path: String::new(), kind: Kind::Modified }),
+            }
         }
     };
     match Watcher::start(root, sink) {
@@ -341,8 +356,8 @@ pub fn app_starter<R: tauri::Runtime>(
             }
         };
         let app = app.clone();
-        start_watching(root, index, move |change| {
-            let _ = app.emit(EVENT, change);
+        start_watching(root, index, move |event, change| {
+            let _ = app.emit(event, change);
         })
     }
 }
@@ -410,6 +425,49 @@ mod tests {
         s.write("a.md", "two");
         assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), change("a.md", Kind::Modified));
         assert!(drain(&rx, Duration::from_millis(500)).is_empty(), "one change, one event");
+    }
+
+    fn labsamples(path: &str, kind: Kind) -> Delta {
+        Delta::Labsamples(Change { path: path.into(), kind })
+    }
+
+    #[test]
+    fn emits_labsamples_changed_when_a_registry_changes() {
+        let s = Scratch::new();
+        s.write("resources/labsamples/DNA.json", "{}");
+        let (_w, rx) = watch(&s.0);
+        std::thread::sleep(Duration::from_millis(100));
+        s.write("resources/labsamples/DNA.json", "{\"a\":1}");
+        s.write("resources/labsamples/DNA.json", "{\"a\":2}");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(3)).unwrap(),
+            labsamples("resources/labsamples/DNA.json", Kind::Modified)
+        );
+        assert!(drain(&rx, Duration::from_millis(500)).is_empty(), "one change, one event, none on vault://changed");
+    }
+
+    #[test]
+    fn a_registry_change_is_emitted_on_the_labsamples_event_only() {
+        let s = Scratch::new();
+        s.write("resources/labsamples/DNA.json", "{}");
+        s.write("a.md", "x");
+        let (tx, rx) = channel();
+        let _w = start_watching(&s.0, None, move |event, c| drop(tx.send((event, c)))).expect("a watcher");
+        std::thread::sleep(Duration::from_millis(100));
+        s.write("resources/labsamples/DNA.json", "{\"a\":1}");
+        s.write("a.md", "y");
+        let mut got = Vec::new();
+        while let Ok(x) = rx.recv_timeout(Duration::from_millis(700)) {
+            got.push(x);
+        }
+        got.sort_by(|a, b| a.1.path.cmp(&b.1.path));
+        assert_eq!(
+            got,
+            [
+                (EVENT, Change { path: "a.md".into(), kind: Kind::Modified }),
+                (LABSAMPLES_EVENT, Change { path: "resources/labsamples/DNA.json".into(), kind: Kind::Modified }),
+            ]
+        );
     }
 
     #[test]
@@ -521,7 +579,7 @@ mod tests {
         // A control through the same function: a real note is reported.
         assert_eq!(
             classify(&s.0, &s.0.join("in.md"), false, &mut links),
-            Some(Change { path: "in.md".into(), kind: Kind::Modified })
+            Some(change("in.md", Kind::Modified))
         );
         // Liveness only, NOT link coverage: ReadDirectoryChangesW does not cross
         // a reparse point, so no event for the write outside is expected whether or
@@ -672,7 +730,7 @@ mod tests {
         let s = Scratch::new();
         s.write("a.md", "one");
         let (tx, rx) = channel();
-        let _w = start_watching(&s.0, None, move |c| drop(tx.send(c))).expect("a watcher without an index");
+        let _w = start_watching(&s.0, None, move |_, c| drop(tx.send(c))).expect("a watcher without an index");
         std::thread::sleep(Duration::from_millis(100));
         s.write("a.md", "two");
         assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Change { path: "a.md".into(), kind: Kind::Modified });

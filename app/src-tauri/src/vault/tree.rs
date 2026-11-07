@@ -56,6 +56,21 @@ pub fn is_listed_path(rel: &str, is_dir: bool) -> bool {
     true
 }
 
+/// Whether `rel` is a sample registry, `<…>/labsamples/<name>.json`: every
+/// ancestor a listed folder (`is_listed_path`), the parent named `labsamples`
+/// (ASCII case-insensitive) and the name a safe, non-hidden `.json` (any case)
+/// after at least one character. Registries are not notes, so the tree never
+/// lists them; the watcher reports them on their own event.
+pub fn is_sample_registry_path(rel: &str) -> bool {
+    let Some((dir, name)) = rel.rsplit_once('/') else { return false };
+    let parent = dir.rsplit('/').next().unwrap_or(dir);
+    parent.eq_ignore_ascii_case("labsamples")
+        && is_listed_path(dir, true)
+        && is_listed_name(name)
+        && name.len() > 5
+        && name.get(name.len() - 5..).is_some_and(|e| e.eq_ignore_ascii_case(".json"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Dir,
@@ -294,6 +309,19 @@ mod tests {
         s.file("a/.x.md");
         for e in walk(&s.0).unwrap() {
             assert!(is_listed_path(&e.path, e.is_dir), "{}", e.path);
+        }
+    }
+
+    #[test]
+    fn sample_registry_paths_are_json_directly_in_labsamples() {
+        for ok in ["resources/labsamples/DNA.json", "labnote/061_PCR/resources/labsamples/Reagent_vendor.json", "a/LabSamples/배지.json"] {
+            assert!(is_sample_registry_path(ok), "{ok}");
+        }
+        for no in [
+            "resources/labsamples/sub/DNA.json", "resources/DNA.json", "resources/labsamples/.DNA.json",
+            "resources/labsamples/DNA.md", ".obsidian/labsamples/DNA.json", "labsamples", "a/labsamples/con.json",
+        ] {
+            assert!(!is_sample_registry_path(no), "{no}");
         }
     }
 

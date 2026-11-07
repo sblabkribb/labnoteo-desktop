@@ -10,6 +10,9 @@ export interface VaultChange {
 
 export const VAULT_CHANGED = 'vault://changed';
 
+/** Rust 의 `LABSAMPLES_EVENT`: 샘플 레지스트리(`<…>/labsamples/<name>.json`)가 밖에서 바뀌었다. 노트가 아니라 트리·색인에는 없다. 페이로드는 `VaultChange` 와 같다. */
+export const VAULT_LABSAMPLES_CHANGED = 'vault://labsamples-changed';
+
 export type ListenFn = (
   event: string,
   handler: (e: { payload: VaultChange }) => void,
@@ -50,13 +53,17 @@ export function createSettler(fire: () => void): { poke(): void; cancel(): void 
 }
 
 /**
- * `vault://changed` 를 구독해 각 변경을 `onEvent` 로 넘긴다. 돌려준 함수가 구독을 거둔다(구독이 늦게 끝나도).
+ * `event`(기본 `vault://changed`)를 구독해 각 변경을 `onEvent` 로 넘긴다. 돌려준 함수가 구독을 거둔다(구독이 늦게 끝나도).
  * 감시가 없어도(구독 실패) 조용히 지나간다: 앱은 쓸 수 있고, 다시 열 때 다시 읽는다.
  */
-export function subscribeVaultChanges(listen: ListenFn, onEvent: (change: VaultChange) => void): () => void {
+export function subscribeVaultChanges(
+  listen: ListenFn,
+  onEvent: (change: VaultChange) => void,
+  event: string = VAULT_CHANGED,
+): () => void {
   let live = true;
   let unlisten: UnlistenFn | undefined;
-  listen(VAULT_CHANGED, (e) => {
+  listen(event, (e) => {
     if (live) onEvent(e.payload);
   }).then(
     (fn) => (live ? (unlisten = fn) : fn()),

@@ -1,18 +1,33 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
-import { MAX_SETTLE_MS, SETTLE_MS, type VaultChange } from '../../../vault/useVaultEvents';
+import {
+  MAX_SETTLE_MS,
+  SETTLE_MS,
+  VAULT_CHANGED,
+  VAULT_LABSAMPLES_CHANGED,
+  type VaultChange,
+} from '../../../vault/useVaultEvents';
 import { touchesDir, useVaultChanges } from '../useVaultChanges';
 
 type Handler = (e: { payload: VaultChange }) => void;
 
 function fakeListen() {
   const handlers = new Set<Handler>();
-  const listen = vi.fn(async (_event: string, h: Handler) => {
+  const byEvent = new Map<string, Set<Handler>>();
+  const listen = vi.fn(async (event: string, h: Handler) => {
     handlers.add(h);
-    return () => void handlers.delete(h);
+    const set = byEvent.get(event) ?? new Set<Handler>();
+    set.add(h);
+    byEvent.set(event, set);
+    return () => {
+      handlers.delete(h);
+      set.delete(h);
+    };
   });
-  const emit = (path: string) => handlers.forEach((h) => h({ payload: { path, kind: 'modified' } }));
-  return { listen, emit, handlers };
+  const emitOn = (event: string, path: string) =>
+    byEvent.get(event)?.forEach((h) => h({ payload: { path, kind: 'modified' } }));
+  const emit = (path: string) => emitOn(VAULT_CHANGED, path);
+  return { listen, emit, emitOn, handlers };
 }
 
 describe('useVaultChanges', () => {
@@ -57,6 +72,25 @@ describe('useVaultChanges', () => {
     expect(onChanges).toHaveBeenCalled();
     unmount();
     expect(f.handlers.size).toBe(0);
+  });
+
+  it('with { labsamples: true } registry JSON changes come through the same batching; without it that event is not subscribed', async () => {
+    const f = fakeListen();
+    const onChanges = vi.fn();
+    const { unmount } = renderHook(() => useVaultChanges(onChanges, f.listen as never, { labsamples: true }));
+    await act(async () => undefined);
+    expect(f.listen.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([VAULT_CHANGED, VAULT_LABSAMPLES_CHANGED]));
+    f.emitOn(VAULT_LABSAMPLES_CHANGED, 'resources/labsamples/DNA.json');
+    await act(async () => void (await vi.advanceTimersByTimeAsync(SETTLE_MS)));
+    expect(onChanges).toHaveBeenCalledTimes(1);
+    expect(onChanges).toHaveBeenCalledWith(['resources/labsamples/DNA.json']);
+    unmount();
+    expect(f.handlers.size).toBe(0);
+
+    const g = fakeListen();
+    renderHook(() => useVaultChanges(vi.fn(), g.listen as never));
+    await act(async () => undefined);
+    expect(g.listen.mock.calls.map((c) => c[0])).toEqual([VAULT_CHANGED]);
   });
 });
 

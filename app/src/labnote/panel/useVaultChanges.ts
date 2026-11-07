@@ -1,12 +1,24 @@
 import { useEffect, useRef } from 'react';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import { createSettler, subscribeVaultChanges, type ListenFn } from '../../vault/useVaultEvents';
+import {
+  createSettler,
+  subscribeVaultChanges,
+  VAULT_LABSAMPLES_CHANGED,
+  type ListenFn,
+  type VaultChange,
+} from '../../vault/useVaultEvents';
 
 /**
  * 보관함 밖의 변경을 `useVaultEvents` 와 같은 간격으로 모아, 바뀐 경로들(한 번씩, 받은 순서)과 함께 부른다.
  * 빈 경로(Rust 가 무엇이 바뀌었는지 놓쳤다)가 하나라도 섞이면 'all' 이다. Workflows 패널이 바뀐 실험만 다시 읽는 데 쓴다.
+ * `opts.labsamples` 면 `vault://labsamples-changed`(샘플 레지스트리 JSON)도 구독해 같은 묶음으로 넘긴다.
  */
-export function useVaultChanges(onChanges: (paths: string[] | 'all') => void, listen: ListenFn = tauriListen as ListenFn): void {
+export function useVaultChanges(
+  onChanges: (paths: string[] | 'all') => void,
+  listen: ListenFn = tauriListen as ListenFn,
+  opts?: { labsamples?: boolean },
+): void {
+  const labsamples = opts?.labsamples === true;
   const latest = useRef(onChanges);
   latest.current = onChanges;
 
@@ -19,16 +31,19 @@ export function useVaultChanges(onChanges: (paths: string[] | 'all') => void, li
       all = false;
       latest.current(out);
     });
-    const unsubscribe = subscribeVaultChanges(listen, (change) => {
+    const onEvent = (change: VaultChange) => {
       if (change.path === '') all = true;
       else paths.add(change.path);
       settler.poke();
-    });
+    };
+    const unsubscribe = subscribeVaultChanges(listen, onEvent);
+    const unsubscribeSamples = labsamples ? subscribeVaultChanges(listen, onEvent, VAULT_LABSAMPLES_CHANGED) : undefined;
     return () => {
       settler.cancel();
       unsubscribe();
+      unsubscribeSamples?.();
     };
-  }, [listen]);
+  }, [listen, labsamples]);
 }
 
 /**
