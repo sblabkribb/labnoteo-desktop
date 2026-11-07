@@ -161,3 +161,37 @@ it('insertAtCursor outside a cell places the reference as the plugin does', asyn
   expect(ok).toBe(true);
   expect(m.view().state.doc.toString()).toBe('# clone\n\nUse DNA-1;pUC here\n');
 });
+
+describe('insertAtCursor outside a cell in a CRLF note', () => {
+  // 한 줄만 LF 인 섞인 CRLF 노트: 에디터가 줄 구분자를 '\r\n' 으로 두는 경우(documentIo.lineSeparatorOf)
+  const CRLF = '---\r\ntags: pcr\r\n---\r\n# clone\r\n\r\nUse here\r\nmore\n';
+
+  it('after a heading puts the cursor right after the reference', async () => {
+    const th = host({ ...SAMPLE_VAULT, [NOTE]: CRLF });
+    const m = await th.mount(NOTE);
+    const v = m.view();
+    expect(v.state.lineBreak).toBe('\r\n');
+    const heading = v.state.doc.line(4);
+    act(() => v.dispatch({ selection: { anchor: heading.from + 3 } }));
+    let ok = false;
+    act(() => void (ok = createSampleEnv(th.ctx).insertAtCursor('DNA-1;pUC')));
+    expect(ok).toBe(true);
+    const s = m.view().state;
+    expect(s.sliceDoc()).toBe('---\r\ntags: pcr\r\n---\r\n# clone\r\nDNA-1;pUC\r\n\r\nUse here\r\nmore\n');
+    expect(s.doc.line(5).text).toBe('DNA-1;pUC');
+    expect(s.selection.main.head).toBe(s.doc.line(6).from);
+  });
+
+  it('from the front matter appends at the end with the cursor after the reference', async () => {
+    const th = host({ ...SAMPLE_VAULT, [NOTE]: CRLF });
+    const m = await th.mount(NOTE);
+    const v = m.view();
+    act(() => v.dispatch({ selection: { anchor: v.state.doc.line(2).from + 2 } }));
+    let ok = false;
+    act(() => void (ok = createSampleEnv(th.ctx).insertAtCursor('DNA-1;pUC')));
+    expect(ok).toBe(true);
+    const s = m.view().state;
+    expect(s.sliceDoc()).toBe(`${CRLF}DNA-1;pUC\r\n`);
+    expect(s.selection.main.head).toBe(s.doc.length);
+  });
+});

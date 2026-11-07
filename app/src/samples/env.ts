@@ -103,7 +103,8 @@ export function trashingFs(fs: AppFs): AppFs {
  * modify/write of a registry JSON throw RegistryUnreadableError and write nothing when its current text is non-empty
  * and not a JSON object. 코어의 로더는 읽지 못한 대장을 `{}` 로 보므로, 그대로 두면 읽고-고치고-쓰기가 충돌한 파일을
  * 새 기록만으로 덮는다. modify 는 갱신 함수 안에서(원자적으로) 지금 글을 보고, write 는 먼저 읽어 본다.
- * 비었거나 없는 파일은 괜찮다.
+ * 비었거나 없는 파일은 괜찮다. write 의 확인은 읽기와 쓰기 사이의 바깥 편집을 다시 보지 못한다(D13 이 받아들인 틈):
+ * 대장을 쓰는 쪽은 되도록 modify 를 쓰고, write 의 확인은 겹 방어로 둔다.
  */
 export function safeRegistryFs(fs: AppFs, globalFolder: () => string): AppFs {
   const unreadable = (p: string, current: string) => isRegistryPath(p, globalFolder()) && current.trim() !== '' && !isJsonObject(current);
@@ -166,6 +167,7 @@ export function createSampleEnv(ctx: CommandContext): SampleEnv {
     localFolder: () => localSampleFolder(ctx.activePath(), globalFolder()),
     hasLocalScope: () => hasLocalScope(ctx.activePath()),
     // README 의 sample_tracking 캐시(Task 4)와 저장소(Task 7)가 들어오기 전까지는 설정만으로 판단한다(D11 의 표시용 답).
+    // TODO(Task 7): samples.trackingFor 에 맡긴다. README 에 `sample_tracking: no` 인 실험(062_Gel)이 지금은 켜짐으로 나온다.
     trackingFor: (path) => isSampleTrackingOn(ctx.settings.sampleTracking, path, () => undefined),
     async markdownFiles() {
       await linkIndex.whenReady();
@@ -191,9 +193,11 @@ export function createSampleEnv(ctx: CommandContext): SampleEnv {
       const plan = planReferenceInsert(state.doc.toString(), from, text, types(), to > from ? to : undefined);
       const insert = toDocBreaks(plan.text, state);
       const end = plan.end ?? plan.offset;
+      // 커서는 바뀐 범위 끝을 옮겨 잡는다. insert.length 는 안 된다: CRLF 줄 구분자 노트에서 줄바꿈은 두 글자지만 한 칸이다.
+      const changes = state.changes({ from: plan.offset, to: end, insert });
       outer.dispatch({
-        changes: { from: plan.offset, to: end, insert },
-        selection: { anchor: plan.offset + insert.length },
+        changes,
+        selection: { anchor: changes.mapPos(end, 1) },
         scrollIntoView: true,
         annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.labnote')],
       });
