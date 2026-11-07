@@ -33,7 +33,8 @@ export function useSampleEditorConfig(settings: AppSettings | undefined): Sample
 }
 
 /**
- * configure + useVaultChanges({labsamples:true}) + window focus → vaultChanged('all') (at most once per SAMPLE_FOCUS_REREAD_MS).
+ * configure (unbind on fs change/unmount) + useVaultChanges({labsamples:true}) + window focus → vaultChanged('all')
+ * (at most once per SAMPLE_FOCUS_REREAD_MS; a focus inside the window re-reads once when it ends).
  * 명령과 동기화의 `sampleEvents` → registryChanged 는 저장소가 configure 때 스스로 구독한다(훅 없이도 같게).
  */
 export function useSampleStoreWiring(fs: LabnoteFs, settings: AppSettings | undefined, listen?: ListenFn): void {
@@ -45,18 +46,34 @@ export function useSampleStoreWiring(fs: LabnoteFs, settings: AppSettings | unde
     if (!loaded) return;
     samples.configure(fs, { sampleTracking: tracking, customSampleTypes: custom ?? [], globalSampleFolder: folder ?? '' });
   }, [fs, loaded, tracking, custom, folder]);
+  // 보관함이 바뀌거나 화면이 내려가면 옛 보관함의 색인과 설정으로 답하지 않게 푼다(새 configure 가 다시 묶는다).
+  useEffect(() => () => samples.unbind(fs), [fs]);
 
   useVaultChanges((paths) => samples.vaultChanged(paths), listen, { labsamples: true });
 
   const lastFocus = useRef<number | undefined>(undefined);
   useEffect(() => {
-    const onFocus = () => {
-      const now = Date.now();
-      if (lastFocus.current !== undefined && now - lastFocus.current < SAMPLE_FOCUS_REREAD_MS) return;
-      lastFocus.current = now;
+    let trailing: ReturnType<typeof setTimeout> | undefined;
+    const reread = () => {
+      lastFocus.current = Date.now();
       samples.vaultChanged('all');
     };
+    const onFocus = () => {
+      const since = lastFocus.current === undefined ? Infinity : Date.now() - lastFocus.current;
+      if (since >= SAMPLE_FOCUS_REREAD_MS) {
+        reread();
+        return;
+      }
+      // 창 안의 초점은 버리지 않고 창이 끝날 때 한 번 다시 읽는다(labsamples 가 아닌 Global 폴더는 감시가 알리지 않는다).
+      trailing ??= setTimeout(() => {
+        trailing = undefined;
+        reread();
+      }, SAMPLE_FOCUS_REREAD_MS - since);
+    };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      if (trailing !== undefined) clearTimeout(trailing);
+    };
   }, []);
 }

@@ -73,16 +73,101 @@ it('sampleEvents from a command invalidate the same way', async () => {
   expect(samples.version).toBe(v + 1);
 });
 
-it('a README change bumps the version (tracking re-evaluated)', async () => {
-  setup();
-  const fn = vi.fn();
-  const off = samples.subscribe(fn);
+it('a README change bumps the version once and keeps the old answer until the re-read', async () => {
+  const th = setup();
   samples.trackingFor(RUN);
   await waitFor(() => expect(samples.trackingFor(RUN)).toBe(false));
-  fn.mockClear();
-  samples.vaultChanged(['labnote/062_Gel/README.labnote.md']);
-  expect(fn).toHaveBeenCalledTimes(1);
+  const seen: boolean[] = [];
+  const off = samples.subscribe(() => seen.push(samples.trackingFor(RUN)));
+  const readme = 'labnote/062_Gel/README.labnote.md';
+  const raw = await th.host.fs.read(readme);
+  await th.host.fs.write(readme, raw.replace('sample_tracking: no', 'sample_tracking: yes'));
+  samples.vaultChanged([readme]);
+  expect(samples.trackingFor(RUN)).toBe(false); // remembered until the README is read again
+  await waitFor(() => expect(seen).toEqual([true]));
+  expect(samples.trackingFor(RUN)).toBe(true);
   off();
+});
+
+it('focus re-read with unchanged READMEs does not bump', async () => {
+  setup();
+  samples.trackingFor(RUN);
+  samples.trackingFor(NOTE);
+  await waitFor(() => expect(samples.trackingFor(RUN)).toBe(false));
+  await knownReady();
+  const v = samples.version;
+  const read = vi.spyOn(SampleIdIndex.prototype as unknown as { read(f: string): Promise<void> }, 'read');
+  const seen: boolean[] = [];
+  const off = samples.subscribe(() => seen.push(samples.trackingFor(RUN)));
+  samples.vaultChanged('all');
+  expect(samples.trackingFor(RUN)).toBe(false);
+  await waitFor(() => expect(read).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 30));
+  expect(samples.trackingFor(RUN)).toBe(false);
+  expect(samples.trackingFor(NOTE)).toBe(true);
+  expect(seen).toEqual([]);
+  expect(samples.version).toBe(v);
+  off();
+});
+
+it('trackingFor stays false for 062_Gel across vaultChanged(all)', async () => {
+  setup();
+  samples.trackingFor(RUN);
+  await waitFor(() => expect(samples.trackingFor(RUN)).toBe(false));
+  for (let i = 0; i < 3; i++) {
+    samples.vaultChanged('all');
+    expect(samples.trackingFor(RUN)).toBe(false);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(samples.trackingFor(RUN)).toBe(false);
+  }
+});
+
+it('toggling sampleTracking in configure bumps', () => {
+  const th = setup();
+  const v = samples.version;
+  samples.configure(th.host.fs, { ...S, sampleTracking: false });
+  expect(samples.version).toBe(v + 1);
+  samples.configure(th.host.fs, { ...S, sampleTracking: false });
+  expect(samples.version).toBe(v + 1);
+});
+
+it('a removed experiment folder re-reads the index', async () => {
+  const th = setup();
+  await knownReady();
+  const invalidate = vi.spyOn(SampleIdIndex.prototype, 'invalidate');
+  samples.vaultChanged(['labnote/061_PCR']);
+  expect(invalidate).toHaveBeenCalledTimes(1);
+  invalidate.mockClear();
+  samples.vaultChanged([RUN]);
+  expect(invalidate).not.toHaveBeenCalled();
+  void th;
+});
+
+it('changing customSampleTypes re-reads with the new types', async () => {
+  const th = setup();
+  await knownReady();
+  await th.host.fs.write(`${LOCAL}/Widget.json`, '{"WID-1":{"type":"Widget","alias":"","descriptions":[],"sources":[]}}');
+  samples.registryChanged([`${LOCAL}/Widget.json`]);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(samples.known(NOTE)?.ids.has('wid-1')).toBe(false);
+  const v = samples.version;
+  samples.configure(th.host.fs, { ...S, customSampleTypes: ['Widget'] });
+  expect(samples.types()).toContain('Widget');
+  await waitFor(() => expect(samples.known(NOTE)?.ids.has('wid-1')).toBe(true));
+  expect(samples.version).toBe(v + 1);
+});
+
+it('unmounting the wiring unbinds the store from that vault', () => {
+  const th = createTestHost(SAMPLE_VAULT);
+  hosts.push(th);
+  samples.resetForTest();
+  const settings = { ...DEFAULT_SETTINGS, ...S } as AppSettings;
+  const { unmount } = renderHook(() => useSampleStoreWiring(th.host.fs, settings));
+  expect(samples.configured).toBe(true);
+  unmount();
+  expect(samples.configured).toBe(false);
+  expect(samples.known(NOTE)).toBeUndefined();
+  expect(samples.trackingFor(NOTE)).toBe(false);
 });
 
 it('the first README read that turns a note off bumps the version', async () => {
@@ -129,7 +214,7 @@ it('editor config follows the store version', async () => {
   expect(result.current.v).toBe(samples.version);
 });
 
-it('window focus re-reads every registry at most once per 5 s', () => {
+it('window focus re-reads every registry at most once per 5 s, with a trailing re-read', () => {
   vi.useFakeTimers();
   const th = createTestHost(SAMPLE_VAULT);
   hosts.push(th);
@@ -139,13 +224,24 @@ it('window focus re-reads every registry at most once per 5 s', () => {
   const { unmount } = renderHook(() => useSampleStoreWiring(th.host.fs, settings));
   invalidate.mockClear();
   window.dispatchEvent(new Event('focus'));
+  expect(invalidate).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(1000);
+  window.dispatchEvent(new Event('focus'));
   vi.advanceTimersByTime(1000);
   window.dispatchEvent(new Event('focus'));
   expect(invalidate).toHaveBeenCalledTimes(1);
-  vi.advanceTimersByTime(SAMPLE_FOCUS_REREAD_MS);
-  window.dispatchEvent(new Event('focus'));
+  // the focus inside the window is deferred, not dropped: one re-read when the window ends
+  vi.advanceTimersByTime(SAMPLE_FOCUS_REREAD_MS - 2000);
   expect(invalidate).toHaveBeenCalledTimes(2);
+  vi.advanceTimersByTime(SAMPLE_FOCUS_REREAD_MS * 2);
+  expect(invalidate).toHaveBeenCalledTimes(2);
+  window.dispatchEvent(new Event('focus'));
+  expect(invalidate).toHaveBeenCalledTimes(3);
+  // a pending trailing re-read is cleared on unmount
+  window.dispatchEvent(new Event('focus'));
   unmount();
+  vi.advanceTimersByTime(SAMPLE_FOCUS_REREAD_MS * 2);
+  expect(invalidate).toHaveBeenCalledTimes(3);
 });
 
 it('SampleEnv.trackingFor follows the store once it is configured', async () => {

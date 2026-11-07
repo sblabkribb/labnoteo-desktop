@@ -4,7 +4,9 @@
  *
  * 판 번호가 오르는 때:
  * - 묶은 fs 나 샘플 설정(추적 스위치, Global 폴더)이 바뀌었다;
- * - README 캐시가 버려졌다(`SampleTracking` 의 onChange), 또는 처음 읽은 README 가 설정만의 답과 다르다;
+ * - 실험 폴더 하나의 README 답이 달라졌다: 처음 읽은 README 가 설정만의 답과 다르거나, README 캐시가 버려진 뒤
+ *   다시 읽은 답이 지난 답과 다르다. 다시 읽는 동안은 지난 답을 그대로 내놓는다(초점 복귀가 깜빡이지 않게).
+ *   여러 폴더를 한꺼번에 다시 읽으면 다 읽은 뒤 한 번만 올린다;
  * - 색인이 다시 읽은 뒤, 지금까지 물어본 노트 하나라도 `KnownSampleIds` 가 ids, aliases, discarded 에서 달라졌다(`sameKnown`).
  *   아무것도 보이게 바뀌지 않은 동기화는 열린 편집기를 다시 구성하지 않는다.
  */
@@ -22,6 +24,7 @@ export type SampleStoreSettings = Pick<AppSettings, 'sampleTracking' | 'customSa
 export const SAMPLE_FOCUS_REREAD_MS = 5000;
 
 const NO_TYPES: string[] = [];
+const README_NAME = 'README.labnote.md';
 
 function sameMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false;
@@ -48,8 +51,13 @@ let tracking: SampleTracking | undefined;
 let version = 0;
 /** 물어본 노트 경로 → 마지막으로 견준 답. 색인이 다시 읽으면 이것과 견준다. */
 let asked = new Map<string, KnownSampleIds | undefined>();
-/** 처음 README 읽기를 기다려 설정만의 답과 견주기 시작한 실험 폴더. README 캐시가 버려지면 비운다. */
-let checkedDirs = new Set<string>();
+/**
+ * 물어본 실험 폴더 → 마지막으로 내놓은 README 답(설정이 켜졌다고 칠 때). README 캐시가 버려져도 지우지 않고,
+ * 다시 읽은 답이 다를 때만 바꾼다.
+ */
+let answers = new Map<string, boolean>();
+/** 실험 폴더 → 지금 진행 중인 읽기의 표. 늦게 끝난 옛 읽기는 답을 바꾸지 않는다. */
+let reading = new Map<string, symbol>();
 const listeners = new Set<() => void>();
 let offEvents: (() => void) | undefined;
 
@@ -86,13 +94,47 @@ function build(nextFs: LabnoteFs): void {
   });
   const ownTracking: SampleTracking = new SampleTracking(nextFs, () => {
     if (ownTracking !== tracking) return;
-    checkedDirs = new Set();
-    bump();
+    // 캐시가 버려졌다: 답은 그대로 두고 물어본 폴더를 모두 다시 읽는다. 답이 달라질 때만 판을 올린다.
+    recheck(ownTracking, [...answers.keys()]);
   });
   index = own;
   tracking = ownTracking;
   asked = new Map();
-  checkedDirs = new Set();
+  answers = new Map();
+  reading = new Map();
+}
+
+/** Reads these experiments' READMEs again and bumps once afterwards if any answer changed. */
+function recheck(own: SampleTracking, dirs: readonly string[]): void {
+  if (dirs.length === 0) return;
+  const tokens = dirs.map((dir) => {
+    const token = Symbol(dir);
+    reading.set(dir, token);
+    return token;
+  });
+  void Promise.all(dirs.map((dir) => own.ready(true, `${dir}/${README_NAME}`))).then((reads) => {
+    if (own !== tracking) return;
+    let changed = false;
+    dirs.forEach((dir, i) => {
+      if (reading.get(dir) !== tokens[i]) return; // 더 새 읽기가 있다
+      reading.delete(dir);
+      if (answers.get(dir) !== reads[i]) {
+        answers.set(dir, reads[i]);
+        changed = true;
+      }
+    });
+    if (changed && settings?.sampleTracking) bump();
+  });
+}
+
+function unbindAll(): void {
+  fs = undefined;
+  settings = undefined;
+  index = undefined;
+  tracking = undefined;
+  asked = new Map();
+  answers = new Map();
+  reading = new Map();
 }
 
 export const samples = {
@@ -127,18 +169,19 @@ export const samples = {
     return index !== undefined;
   },
 
-  /** sampleTracking && README flag. 처음 README 를 읽기 전에는 설정만으로 답하고, 읽은 답이 다르면 판 번호를 올린다. */
+  /**
+   * sampleTracking && README flag. 처음 README 를 읽기 전에는 설정만으로 답하고, 읽은 답이 다르면 판 번호를 올린다.
+   * README 캐시가 버려진 뒤 다시 읽는 동안에는 지난 답을 내놓는다.
+   */
   trackingFor(path: string | undefined): boolean {
     if (!settings || !tracking) return false;
-    const own = tracking;
-    const answer = own.on(settings.sampleTracking, path);
     const dir = path ? getExperimentDir(path) : undefined;
-    if (settings.sampleTracking && dir && !checkedDirs.has(dir)) {
-      checkedDirs.add(dir);
-      void own.ready(true, path).then((read) => {
-        if (own === tracking && settings?.sampleTracking && read !== answer) bump();
-      });
-    }
+    if (!settings.sampleTracking || !dir) return tracking.on(settings.sampleTracking, path);
+    const last = answers.get(dir);
+    if (last !== undefined) return last;
+    const answer = tracking.on(true, path);
+    answers.set(dir, answer);
+    recheck(tracking, [dir]);
     return answer;
   },
 
@@ -199,16 +242,21 @@ export const samples = {
     return () => void listeners.delete(fn);
   },
 
+  /**
+   * Unbinds from `boundFs` (if still bound to it): drops the index, README cache and settings but keeps listeners,
+   * so nothing answers from the old vault until the next configure. Bumps when it unbound.
+   */
+  unbind(boundFs: LabnoteFs): void {
+    if (fs !== boundFs) return;
+    unbindAll();
+    bump();
+  },
+
   resetForTest(): void {
     offEvents?.();
     offEvents = undefined;
-    fs = undefined;
-    settings = undefined;
-    index = undefined;
-    tracking = undefined;
+    unbindAll();
     version = 0;
-    asked = new Map();
-    checkedDirs = new Set();
     listeners.clear();
   },
 };
