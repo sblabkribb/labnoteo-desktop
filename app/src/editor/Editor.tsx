@@ -12,7 +12,7 @@ import { editorTheme } from './theme';
 import { labnoteMarkdown } from './markdownSyntax';
 import { tableExtension } from './table/field';
 import { INSERT_TABLE_KEY, insertTable } from './table/commands';
-import { cellOuterKeys } from './table/cellEditor';
+import { cellExtras, cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview } from './live';
 import { addPropertyCommand, propertiesActions, PROPS_ADD_KEY } from './live/properties';
@@ -526,6 +526,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // (wikiCompletionGuards: 조합 중 Enter/Tab 은 IME 몫, compositionend 뒤 목록을 다시 연다).
       autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }),
       wikiCompletionGuards(),
+      // 표 칸 편집기에도 같은 완성을 싣는다. 칸 안에서는 별칭 구분자 앞에 백슬래시를 붙이고(inTable), 목록이 열린 동안의
+      // Enter·Tab·위아래·Escape 는 칸 이동 대신 완성 목록이 받는다(cellEditor.ts 의 keys()).
+      cellExtras.of([autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }), wikiCompletionGuards()]),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
       // 링크 풀이: 모드 칸 밖에 두어 모드를 바꿔도 남는다. 조합 중에 미룬 값은 resolutionFlusher 가 조합이 끝난 뒤 넣는다.
       resolutionSlot.current.of(linkResolution.of(resolutionRef.current)),

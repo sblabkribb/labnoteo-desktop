@@ -15,6 +15,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { isolateHistory, redo, undo } from '@codemirror/commands';
+import { completionStatus } from '@codemirror/autocomplete';
 import { t } from '../../i18n/t';
 import { markdownHighlighting } from '../theme';
 import { labnoteMarkdown } from '../markdownSyntax';
@@ -231,6 +232,13 @@ function placeRange(place: Place, text: string): { anchor: number; head: number 
   const head = place === 'start' ? 0 : place === 'end' ? text.length : Math.max(0, Math.min(place, text.length));
   return { anchor: head, head };
 }
+
+/**
+ * 셀 편집기에 링크 완성 목록이 열려 있는가(cellExtras 로 실린 autocompletion, Editor.tsx). 열려 있는 동안 Enter·Tab·
+ * Shift-Tab·위아래·Escape 는 칸 이동이 아니라 목록의 몫이다: 이 keymap 도 완성 keymap 도 Prec.highest 인데 이것이 먼저
+ * 실리므로, 여기서 false 를 돌려 완성 keymap 이 받게 한다.
+ */
+const completing = (v: EditorView) => completionStatus(v.state) === 'active';
 
 class Session implements CellHandle {
   dead = false;
@@ -618,8 +626,8 @@ class Session implements CellHandle {
     return [
       { key: 'ContextMenu', run: () => this.menu(), preventDefault: true },
       { key: 'Shift-F10', run: () => this.menu(), preventDefault: true },
-      { key: 'Tab', run: () => this.next(), shift: () => this.prev() },
-      { key: 'Enter', run: () => this.down() },
+      { key: 'Tab', run: (v) => !completing(v) && this.next(), shift: (v) => !completing(v) && this.prev() },
+      { key: 'Enter', run: (v) => !completing(v) && this.down() },
       {
         key: 'Shift-Enter',
         run: (v) => {
@@ -628,11 +636,11 @@ class Session implements CellHandle {
         },
       },
       { key: 'Mod-Enter', run: () => this.exitBelow() },
-      { key: 'Escape', run: () => this.exit(1) },
+      { key: 'Escape', run: (v) => !completing(v) && this.exit(1) },
       { key: 'ArrowLeft', run: () => this.arrow('left') },
       { key: 'ArrowRight', run: () => this.arrow('right') },
-      { key: 'ArrowUp', run: () => this.arrow('up') },
-      { key: 'ArrowDown', run: () => this.arrow('down') },
+      { key: 'ArrowUp', run: (v) => !completing(v) && this.arrow('up') },
+      { key: 'ArrowDown', run: (v) => !completing(v) && this.arrow('down') },
       // 셀 편집기에는 기록이 없다: 바깥 편집기를 되돌린다. 할 것이 없어도 셀 편집기의 기본 동작으로 새지 않게 true.
       { key: 'Mod-z', run: () => (undo(outer), true), preventDefault: true },
       { key: 'Mod-y', run: () => (redo(outer), true), preventDefault: true },
