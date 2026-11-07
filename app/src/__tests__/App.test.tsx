@@ -2,14 +2,18 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App';
+import { linkIndex } from '../links/linkIndex';
+import { installFakeVault } from './fakeVault';
 import { baseInvoke } from './fixtures';
 
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(),
+  /** `vault://changed` subscriptions: none by default; a test can route them to a fake vault. */
+  listen: vi.fn(async () => () => {}),
   dialog: { open: vi.fn(), save: vi.fn() },
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: tauri.invoke }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: (...a: unknown[]) => tauri.listen(...(a as [])) }));
 vi.mock('@tauri-apps/plugin-dialog', () => tauri.dialog);
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: async () => null }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: async () => {} }));
@@ -22,6 +26,8 @@ const vaults = {
 beforeEach(() => {
   tauri.invoke.mockReset();
   tauri.dialog.open.mockReset();
+  tauri.listen.mockReset();
+  tauri.listen.mockImplementation(async () => () => {});
   tauri.invoke.mockImplementation(async (cmd: string, args?: { path?: string }) => {
     if (cmd === 'vault_current') return vaults.first;
     if (cmd === 'vault_open') return args?.path === 'D:/right' ? vaults.second : vaults.first;
@@ -187,5 +193,16 @@ describe('앱', () => {
     render(<App />);
     await screen.findByText('노트를 둘 곳을 정하세요');
     expect(within(screen.getByRole('main')).getByRole('combobox', { name: '테마' })).toBeTruthy();
+  });
+  it('the app follows watcher events into the link index', async () => {
+    const vault = installFakeVault({ 'n.md': '[[New]]' });
+    tauri.invoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => vault.invoke(cmd, args));
+    tauri.listen.mockImplementation(((event: string, handler: Parameters<typeof vault.listen>[1]) => vault.listen(event, handler)) as never);
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await waitFor(() => expect(linkIndex.ready()).toBe(true));
+    await vault.mem.write('New.md', '');
+    await vault.emitChange('New.md', 'created');
+    await waitFor(() => expect(linkIndex.files()).toContain('New.md'));
   });
 });
