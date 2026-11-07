@@ -209,6 +209,17 @@ describe('renameEntry with links', () => {
     expect(seen).toEqual([[{ from: 'Home.md', to: 'Start.md' }]]);
   });
 
+  it('a rename with link updates is announced right after vault_rename, before any other await', async () => {
+    const h = host({ 'Home.md': '', 'notes/n.md': '[[Home]]' });
+    const lastCmd: string[] = [];
+    const off = renameEvents.subscribe(() => void lastCmd.push(h.vault.log.at(-1)!.cmd));
+    h.answer.prompt('Start'); h.answer.pick('update');
+    await renameEntry(h.ctx, 'Home.md', false, entries(h));
+    off();
+    // a watcher 'removed' for the old path that lands in a later await must find the history already mapped
+    expect(lastCmd).toEqual(['vault_rename']);
+  });
+
   it('a second rename while the first waits for the index is refused busy; the first journal is intact', async () => {
     const h = host({ 'Home.md': '', 'Other.md': '', 'notes/n.md': '[[Home]] [[Other]]' });
     linkIndex.clear(); // as on vault open: nothing loaded yet

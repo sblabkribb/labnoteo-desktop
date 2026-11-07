@@ -93,6 +93,81 @@ describe('navigation history', () => {
     await docIs('A');
   });
 
+  /** Properties 격자의 값 입력(title: old). */
+  async function titleInput(): Promise<HTMLInputElement> {
+    let input: HTMLInputElement | undefined;
+    await waitFor(() => {
+      const root = (document.querySelector('.editor-frame') as HTMLElement | null)?.shadowRoot;
+      input = [...(root?.querySelectorAll<HTMLInputElement>('.lno-props input.lno-props-input') ?? [])].find((i) => i.value === 'old');
+      expect(input).toBeTruthy();
+    });
+    return input!;
+  }
+
+  async function openPropsNote() {
+    const vault = installFakeVault({ 'a.md': 'A', 'n.md': '---\ntitle: old\n---\nbody' });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await userEvent.click(await screen.findByText('a.md'));
+    await docIs('A');
+    await userEvent.click(await screen.findByText('n.md'));
+    await docIs('---\ntitle: old\n---\nbody');
+    const input = await titleInput();
+    input.focus();
+    fireEvent.input(input, { target: { value: 'NEW' } });
+    return { vault, input };
+  }
+
+  it('Alt+ArrowLeft from a Properties input commits the typed value before leaving', async () => {
+    const { vault, input } = await openPropsNote();
+    fireEvent.keyDown(input, { key: 'ArrowLeft', altKey: true });
+    await docIs('A');
+    await waitFor(() => expect(vault.files()['n.md']).toBe('---\ntitle: NEW\n---\nbody'));
+  });
+
+  it('the mouse back button from a Properties input commits the typed value before leaving', async () => {
+    const { vault } = await openPropsNote();
+    fireEvent.mouseDown(window, { button: 3 });
+    fireEvent.mouseUp(window, { button: 3 });
+    await docIs('A');
+    await waitFor(() => expect(vault.files()['n.md']).toBe('---\ntitle: NEW\n---\nbody'));
+  });
+
+  it('the mouse back button during an IME composition does not leave the note or lose the composed text', async () => {
+    const { vault, input } = await openPropsNote();
+    fireEvent.compositionStart(input);
+    fireEvent.mouseUp(window, { button: 3 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await editorView()).state.doc.toString()).toBe('---\ntitle: old\n---\nbody');
+    fireEvent.compositionEnd(input);
+    fireEvent.mouseUp(window, { button: 3 });
+    await docIs('A');
+    await waitFor(() => expect(vault.files()['n.md']).toBe('---\ntitle: NEW\n---\nbody'));
+  });
+
+  it('back that cannot save the current note leaves the note and the history unchanged', async () => {
+    const vault = installFakeVault({ 'a.md': 'A', 'b.md': 'B' });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await userEvent.click(await screen.findByText('a.md'));
+    await docIs('A');
+    await userEvent.click(await screen.findByText('b.md'));
+    await docIs('B');
+    const v = await editorView();
+    v.dispatch({ changes: { from: 1, insert: '2' } });
+    vault.failNext('vault_modify', 'io');
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await editorView()).state.doc.toString()).toBe('B2');
+    expect(vault.files()['b.md']).toBe('B');
+    // 기록이 그대로다: 다시 누르면 저장하고 a.md 로, 앞으로 가기는 b.md 로
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    await docIs('A');
+    expect(vault.files()['b.md']).toBe('B2');
+    fireEvent.keyDown(window, { key: 'ArrowRight', altKey: true });
+    await docIs('B2');
+  });
+
   it('the mousedown of the back and forward buttons is prevented, other buttons are not', async () => {
     installFakeVault({});
     render(<App />);

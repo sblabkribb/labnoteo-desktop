@@ -198,8 +198,9 @@ export async function renameWithLinks(
       else await journal.clear();
       throw e;
     }
-    await journal.setStatus('renamed');
+    // Announce before any further await: a watcher 'removed' for the old path must not reach the history first.
     renameEvents.emit(plan.moves);
+    await journal.setStatus('renamed');
 
     const report = await writeNotes(ctx, plan, plan.notes.map((_, i) => i), journal, opts.restore);
 

@@ -121,7 +121,21 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       return { path, line: view ? view.state.doc.lineAt(view.state.selection.main.head).number - 1 : 0 };
     },
     /** 노트를 연다. 다른 노트로 넘어갔으면 떠난 자리를 기록에 쌓는다(저장하지 못해 넘어가지 않았으면 쌓지 않는다). */
+    /** 한글 조합 중(창 전체에서 compositionstart 와 compositionend 사이). 조합 중에는 기록을 따라가지 않는다. */
+    composing: false,
+    /**
+     * 편집기 안의 입력(Properties 격자 등)에 쳐 두고 아직 적지 않은 값을 적는다: 그런 입력은 Enter 나 blur 에서만 적고,
+     * 노트를 바꾸면 떼어 낸 입력의 blur 는 아무것도 적지 않는다. 가장 깊은 초점(그림자 DOM 안까지)을 blur 한다.
+     */
+    commitPending(): void {
+      let el: Element | null = document.activeElement;
+      while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+      const dom = editor.current?.view()?.dom;
+      if (!el || !dom?.contains(el) || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
+      el.blur();
+    },
     async navigate(path: string, at?: { line: number; ch?: number }): Promise<void> {
+      navFns.commitPending();
       const from = navFns.here();
       await notes.openFile(path, at);
       if (from && notes.activePath() !== from.path) nav.current!.push(from);
@@ -129,9 +143,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     busy: false,
     /** 기록을 따라 연다. 지금 노트를 저장하지 못해 넘어가지 않았으면 기록을 되돌린다. */
     async go(dir: 'back' | 'forward'): Promise<void> {
-      if (navFns.busy) return;
+      // 조합 중이면 가지 않는다: 떼어 낸 입력은 조합이 끝난 글을 적지 못한다(Alt+←/→ 는 navKey 가 이미 거른다)
+      if (navFns.busy || navFns.composing) return;
       navFns.busy = true;
       try {
+        navFns.commitPending();
         const history = nav.current!;
         const from = navFns.here();
         const to = dir === 'back' ? history.back(from) : history.forward(from);
@@ -166,6 +182,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       if (currentDialog() !== null) return;
       void navFns.go(e.button === MOUSE_BACK ? 'back' : 'forward');
     };
+    // 조합 사건은 그림자 DOM 을 지나 window 까지 온다. 조합이 끝났다는 알림 없이 초점이 옮겨 가면(입력을 떼어 냈다) 푼다.
+    const onCompositionStart = () => (navFns.composing = true);
+    const onCompositionEnd = () => (navFns.composing = false);
+    window.addEventListener('compositionstart', onCompositionStart, true);
+    window.addEventListener('compositionend', onCompositionEnd, true);
+    window.addEventListener('focusin', onCompositionEnd, true);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
@@ -176,6 +198,9 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       if (change.kind === 'removed' && change.path !== '') nav.current!.drop(change.path);
     });
     return () => {
+      window.removeEventListener('compositionstart', onCompositionStart, true);
+      window.removeEventListener('compositionend', onCompositionEnd, true);
+      window.removeEventListener('focusin', onCompositionEnd, true);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);

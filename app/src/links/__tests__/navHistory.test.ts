@@ -49,6 +49,39 @@ describe('NavHistory', () => {
     expect(n.canForward()).toBe(false);
   });
 
+  it('dropping the note between two entries of one note leaves one step there, not two', () => {
+    const n = new NavHistory();
+    n.push({ path: 'a.md', line: 1 });
+    n.push({ path: 'b.md', line: 0 });
+    n.push({ path: 'a.md', line: 5 });
+    n.drop('b.md');
+    expect(n.back({ path: 'c.md', line: 0 })).toEqual({ path: 'a.md', line: 5 });
+    expect(n.canBack()).toBe(false);
+  });
+
+  it('back and forward skip entries for the note already open', () => {
+    const n = new NavHistory();
+    n.push({ path: 'a.md', line: 0 });
+    n.push({ path: 'c.md', line: 2 });
+    n.push({ path: 'b.md', line: 0 });
+    n.drop('b.md');
+    // c.md is open again (b.md was deleted): back must not stop on c.md itself
+    expect(n.back({ path: 'c.md', line: 7 })).toEqual({ path: 'a.md', line: 0 });
+    expect(n.forward({ path: 'a.md', line: 0 })).toEqual({ path: 'c.md', line: 7 });
+    expect(n.canForward()).toBe(false);
+  });
+
+  it('a rename that joins two adjacent entries keeps one', () => {
+    const n = new NavHistory();
+    n.push({ path: 'dir/a.md', line: 0 });
+    n.push({ path: 'x.md', line: 0 });
+    n.push({ path: 'dir/a.md', line: 3 });
+    n.drop('x.md');
+    n.rename([{ from: 'dir/a.md', to: 'new/a.md' }]);
+    expect(n.back({ path: 'c.md', line: 0 })).toEqual({ path: 'new/a.md', line: 3 });
+    expect(n.canBack()).toBe(false);
+  });
+
   it('caps the stack', () => {
     const n = new NavHistory();
     for (let i = 0; i < NAV_MAX + 5; i++) n.push({ path: `${i}.md`, line: 0 });
