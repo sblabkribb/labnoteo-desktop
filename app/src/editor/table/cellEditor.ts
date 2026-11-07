@@ -234,9 +234,10 @@ function placeRange(place: Place, text: string): { anchor: number; head: number 
 }
 
 /**
- * 셀 편집기에 링크 완성 목록이 열려 있는가(cellExtras 로 실린 autocompletion, Editor.tsx). 열려 있는 동안 Enter·Tab·
- * Shift-Tab·위아래·Escape 는 칸 이동이 아니라 목록의 몫이다: 이 keymap 도 완성 keymap 도 Prec.highest 인데 이것이 먼저
- * 실리므로, 여기서 false 를 돌려 완성 keymap 이 받게 한다.
+ * 셀 편집기에 링크 완성 목록이 열려 있는가(cellExtras 로 실린 autocompletion, Editor.tsx). 열려 있는 동안 Enter·
+ * 위아래·Escape 는 칸 이동이 아니라 목록의 몫이다: 이 keymap 도 완성 keymap 도 Prec.highest 인데 이것이 먼저
+ * 실리므로, 여기서 false 를 돌려 완성 keymap 이 받게 한다. Tab·Shift-Tab 은 막지 않는다: 완성 keymap 에 Tab 이 없어
+ * 막으면 브라우저의 초점 이동으로 칸을 벗어나므로, 목록이 열려 있어도 늘 다음·이전 칸으로 간다(표 키 약속).
  */
 const completing = (v: EditorView) => completionStatus(v.state) === 'active';
 
@@ -626,7 +627,7 @@ class Session implements CellHandle {
     return [
       { key: 'ContextMenu', run: () => this.menu(), preventDefault: true },
       { key: 'Shift-F10', run: () => this.menu(), preventDefault: true },
-      { key: 'Tab', run: (v) => !completing(v) && this.next(), shift: (v) => !completing(v) && this.prev() },
+      { key: 'Tab', run: () => this.next(), shift: () => this.prev() },
       { key: 'Enter', run: (v) => !completing(v) && this.down() },
       {
         key: 'Shift-Enter',
