@@ -27,6 +27,7 @@ import { LanguageToggle } from './i18n/LanguageToggle';
 import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
+import { useSampleStoreWiring } from './samples/useSampleStore';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
@@ -256,6 +257,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+  // 샘플 저장소(알려진 ID, README 의 sample_tracking)를 이 보관함의 fs 와 설정에 묶고, 대장 JSON 변경과 창 초점을 잇는다.
+  useSampleStoreWiring(host.fs, settings);
   const ctx = useCommandContext({
     host,
     vaultRoot: vault.root,

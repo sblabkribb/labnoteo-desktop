@@ -12,6 +12,7 @@ import type { AppHost } from '../labnote/host/createAppHost';
 import { activeEditTarget, processNote } from '../labnote/openNotes';
 import { hasLocalScope, localSampleFolder } from '../labnote/port/sampleFolders';
 import type { AppSettings } from '../labnote/settings';
+import { samples } from './sampleStore';
 import { sampleTypesFor } from './types';
 
 /** 플러그인 settings.ts 의 globalSampleFolder 기본값. */
@@ -166,9 +167,11 @@ export function createSampleEnv(ctx: CommandContext): SampleEnv {
     globalFolder,
     localFolder: () => localSampleFolder(ctx.activePath(), globalFolder()),
     hasLocalScope: () => hasLocalScope(ctx.activePath()),
-    // README 의 sample_tracking 캐시(Task 4)와 저장소(Task 7)가 들어오기 전까지는 설정만으로 판단한다(D11 의 표시용 답).
-    // TODO(Task 7): samples.trackingFor 에 맡긴다. README 에 `sample_tracking: no` 인 실험(062_Gel)이 지금은 켜짐으로 나온다.
-    trackingFor: (path) => isSampleTrackingOn(ctx.settings.sampleTracking, path, () => undefined),
+    // 설정 && README 의 sample_tracking(저장소의 캐시, D11). 저장소가 아직 묶이지 않았으면(설정을 읽기 전, 테스트) 설정만으로.
+    trackingFor: (path) =>
+      samples.configured
+        ? ctx.settings.sampleTracking && samples.trackingFor(path)
+        : isSampleTrackingOn(ctx.settings.sampleTracking, path, () => undefined),
     async markdownFiles() {
       await linkIndex.whenReady();
       return linkIndex.files().filter((p) => p.endsWith('.md'));
