@@ -4,11 +4,17 @@
  *   답이 떨어지면 닫은 것처럼(undefined / false) 답한다. 받은 인자는 `asked` 에 남는다.
  * - notify 는 `notes` 에 남는다.
  * - `mount(path)` 는 진짜 Editor 를 그 경로에 열고 열린 노트로 삼는다(열린 노트 목록이 진짜다).
+ * - `ctx.links` 는 단일 객체 `linkIndex`(비우고 `files` 로 채운 뒤 준비됨)와 가짜 보관함 위의 고침 기록이다.
+ *   `cleanup()` 이 색인을 비운다.
+ * - `opts.invoke` 는 가짜 보관함의 invoke 를 감싼다(앱의 fs 와 링크 의존성이 그것을 거친다).
  */
 import type { NotifyKind, PickItem, PromptOpts } from '@labnoteo/core';
 import { act } from '@testing-library/react';
 import { createFakeVault, type FakeVault } from '../../__tests__/fakeVault';
+import { parseRaw } from '../../editor/documentIo';
 import { TauriLabnoteFs } from '../../fs/tauriLabnoteFs';
+import { createJournalStore } from '../../links/journal';
+import { linkIndex } from '../../links/linkIndex';
 import type { CommandContext } from '../commands/context';
 import { editorAwareFs } from '../editorAwareFs';
 import { coreT } from '../i18n';
@@ -49,9 +55,20 @@ export interface TestHost {
   cleanup(): void;
 }
 
-export function createTestHost(files: Record<string, string> = {}, settings: Partial<AppSettings> = {}): TestHost {
+type InvokeFn = FakeVault['invoke'];
+
+export function createTestHost(
+  files: Record<string, string> = {},
+  settings: Partial<AppSettings> = {},
+  opts: { invoke?: (base: InvokeFn) => InvokeFn } = {},
+): TestHost {
   const vault = createFakeVault(files);
-  const fs = editorAwareFs(new TauriLabnoteFs(vault.invoke));
+  const invoke = opts.invoke?.(vault.invoke) ?? vault.invoke;
+  const fs = editorAwareFs(new TauriLabnoteFs(invoke));
+  linkIndex.clear();
+  linkIndex.setFiles(Object.keys(files));
+  for (const [p, text] of Object.entries(files)) if (p.endsWith('.md')) linkIndex.setNote(p, parseRaw(p, text).text);
+  linkIndex.markReady();
   const notes: TestHost['notes'] = [];
   const asked: Asked = { pick: [], prompt: [], confirm: [], alias: [] };
   const opened: string[] = [];
@@ -114,6 +131,12 @@ export function createTestHost(files: Record<string, string> = {}, settings: Par
     closeActive: async () => true,
     refresh: () => void refreshes++,
     showPanel: () => undefined,
+    links: {
+      index: linkIndex,
+      journal: createJournalStore(invoke),
+      images: () => invoke<string[]>('vault_list_images', {}),
+      search: (q, limit) => invoke<{ hits: { path: string }[]; truncated: boolean }>('search', { query: q, limit }),
+    },
   };
 
   return {
@@ -140,6 +163,7 @@ export function createTestHost(files: Record<string, string> = {}, settings: Par
     },
     cleanup() {
       for (const m of mounted.splice(0)) act(() => m.unmount());
+      linkIndex.clear();
     },
   };
 }

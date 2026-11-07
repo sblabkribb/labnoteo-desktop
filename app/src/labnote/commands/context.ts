@@ -1,6 +1,16 @@
 import type { EditorView } from '@codemirror/view';
 import type { AppHost } from '../host/createAppHost';
 import type { AppSettings } from '../settings';
+import type { JournalStore } from '../../links/journal';
+import type { LinkIndex } from '../../links/linkIndex';
+
+/** 이름 바꾸기가 링크를 고칠 때 쓰는 것(SP4 D11-D15). 없으면 이름 바꾸기는 링크를 고치지 않는다. */
+export interface LinkDeps {
+  index: LinkIndex;
+  journal: JournalStore;
+  images(): Promise<string[]>;
+  search(q: string, limit: number): Promise<{ hits: { path: string }[]; truncated: boolean }>;
+}
 
 /** 명령이 받는 것: 플러그인 명령이 Obsidian 의 App 에서 얻던 것의 앱판. */
 export interface CommandContext {
@@ -21,6 +31,8 @@ export interface CommandContext {
   refresh(): void;
   /** 사이드바 탭을 바꾼다. */
   showPanel(panel: 'files' | 'workflows' | 'outline' | 'links'): void;
+  /** 링크 색인과 고침 기록. 앱은 늘 준다. */
+  links?: LinkDeps;
 }
 
 const listeners = new Set<() => void>();

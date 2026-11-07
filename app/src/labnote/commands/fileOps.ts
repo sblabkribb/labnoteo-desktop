@@ -1,7 +1,7 @@
 /**
  * 파일 트리의 기본 파일 작업: 새 폴더, 이름 바꾸기, 삭제(휴지통).
- * - 이름 바꾸기는 링크를 고치지 않는다(그 기능은 뒤의 하위 프로젝트에서 온다). 그래서 링크가 끊어지면 연구 기록이
- *   흩어지는 것 — 실험 폴더, 실험 폴더를 품은 폴더, labnote 폴더, 워크플로 노트, README — 은 이유를 말하고 거절한다.
+ * - 이름 바꾸기는 다른 노트의 링크를 고친다(SP4: 링크 색인, 계획, 기록, 보고). 실험 구조가 이름에 걸린 것 — 실험 폴더,
+ *   실험 폴더를 품은 폴더, labnote 폴더, 워크플로 노트, README — 은 여전히 이유를 말하고 거절한다.
  * - 삭제는 언제나 Windows 휴지통(vault_trash)으로 간다. 영구 삭제로 물러서지 않는다.
  * - 열린 노트(또는 그것을 품은 폴더)를 바꾸거나 지우면 먼저 저장하고 닫는다: 그래야 편집기에 "노트가 사라졌습니다"
  *   대화상자가 뜨지 않고, 내려가는 편집기의 저장이 옛 파일을 되살리지 않는다. 저장하지 못하면 아무것도 하지 않는다.
@@ -13,10 +13,15 @@ import { ERROR_KINDS, hasErrorKind } from '../../fs/errorKinds';
 import { t } from '../../i18n/t';
 import { NOTE_EXT } from '../../tree/createNote';
 import type { TreeEntry } from '../../tree/useTree';
-import { processNote } from '../openNotes';
+import type { JournalStore } from '../../links/journal';
+import { IndexNotReadyError, planRename, type RenamePlan } from '../../links/planRename';
+import { linkOps, READY_WAIT_MS, renameEvents, renameWithLinks, rewritePlanned, type FailReason, type RenameReport } from '../../links/renameWithLinks';
+import { hasUnlinkableChars, linkKey } from '../../links/resolve';
+import { movesFor, type Move } from '../../links/rewrite';
+import { openNote, processNote } from '../openNotes';
 import { README } from '../paths';
 import { warnIfWindowsPathTooLong } from '../port/experiments';
-import type { CommandContext } from './context';
+import type { CommandContext, LinkDeps } from './context';
 
 export type RenameGuard = 'experimentFolder' | 'experimentParent' | 'labnoteRoot' | 'workflowNote' | 'readme' | undefined;
 
@@ -197,9 +202,101 @@ export async function newFolder(ctx: CommandContext, parentDir: string): Promise
   return path;
 }
 
+/** 링크를 고치지 못한 이유의 문구. */
+const REASON_TEXT: Record<FailReason, () => string> = {
+  busy: () => t('links.reason.busy'),
+  notSaved: () => t('links.reason.notSaved'),
+  conflict: () => t('links.reason.conflict'),
+  gone: () => t('links.reason.gone'),
+  unsafeName: () => t('links.reason.unsafeName'),
+  io: () => t('links.reason.io'),
+};
+
+/** 이름 바꾸기 실패를 알림으로 바꾼다(이미 있음, 거절된 이름). 다룬 실패면 true, 아니면 호출자가 다시 던진다. */
+function reportRenameFailure(host: CommandContext['host'], e: unknown): boolean {
+  if (hasErrorKind(e, ERROR_KINDS.exists)) {
+    host.notify('warn', t('fileOps.exists'));
+    return true;
+  }
+  if (refusedName(e)) {
+    host.notify('warn', t('fileOps.name.invalid'));
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 링크를 고치지 않는 이름 바꾸기(링크가 없거나, "이름만 바꾸기"거나, 대소문자만 바뀌거나, 링크 의존성이 없을 때).
+ * 열린 노트가 그 경로이거나 그 안에 있으면 먼저 저장하고 닫은 뒤 바꾸고, 새 경로에서 다시 연다. 바꿨으면 true.
+ */
+async function plainRename(ctx: CommandContext, path: string, to: string, moves: readonly Move[], done: string): Promise<boolean> {
+  const { host } = ctx;
+  const active = ctx.activePath();
+  const wasOpen = active !== undefined && isUnder(active, path);
+  if (wasOpen && !(await ctx.closeActive())) {
+    host.notify('warn', t('fileOps.unsaved'));
+    return false;
+  }
+  try {
+    await host.fs.rename(path, to);
+  } catch (e) {
+    if (wasOpen) await ctx.openFile(active);
+    if (reportRenameFailure(host, e)) return false;
+    throw e;
+  }
+  renameEvents.emit(moves);
+  if (wasOpen) await ctx.openFile(to + active.slice(path.length));
+  host.notify('info', done);
+  return true;
+}
+
+/**
+ * 이름 바꾸기 뒤 링크 고침의 결과를 알린다(D14 7). 실패가 있으면 노트마다 이유를 보이고, "다시 시도"를 고르는 동안
+ * 실패한 노트만 지금 글에서 다시 고친다. 새 이름으로 쓸 수 없는 링크(unsafeName)는 다시 해도 고쳐지지 않는다.
+ */
+async function reportLinkUpdates(ctx: CommandContext, plan: RenamePlan, first: RenameReport, journal: JournalStore): Promise<void> {
+  const { host } = ctx;
+  let report = first;
+  for (;;) {
+    if (report.failed.length === 0) {
+      host.notify('info', t('links.rename.done', String(plan.linkCount), String(plan.notes.length)));
+      return;
+    }
+    const lines = report.failed.map((f) => `${f.path} (${REASON_TEXT[f.reason]()})`).join('\n');
+    const message = t('links.rename.partial', lines);
+    const unfixable = report.failed.filter((f) => f.reason === 'unsafeName');
+    const retryable = report.failed.filter((f) => f.reason !== 'unsafeName').map((f) => f.path);
+    if (retryable.length === 0) {
+      host.notify('warn', message);
+      return;
+    }
+    if (!(await host.confirm(message, { confirmLabel: t('links.rename.retry') }))) return;
+    const again = await rewritePlanned(ctx, plan, retryable, journal);
+    report = { ...again, failed: [...again.failed, ...unfixable] };
+  }
+}
+
+/** 링크 색인이 준비되기를 READY_WAIT_MS 까지 기다린다(D12 1). 준비됐으면 true. */
+async function waitForLinks(ctx: CommandContext, links: LinkDeps): Promise<boolean> {
+  if (links.index.ready()) return true;
+  ctx.host.notify('info', t('links.waiting'));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, READY_WAIT_MS);
+  });
+  try {
+    await Promise.race([links.index.whenReady(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+  return links.index.ready();
+}
+
 /**
  * 파일이나 폴더의 이름을 바꾼다. 새 경로를 돌려준다(취소, 거절, 저장 실패면 undefined).
  * 열린 노트가 그 경로이거나 그 안에 있으면 먼저 저장하고 닫은 뒤 바꾸고, 새 경로에서 다시 연다.
+ * 링크(SP4 D11, D12): 링크 색인이 준비되기를 기다리고(끝내 안 되면 아무것도 바꾸지 않는다), 바꿀 링크를 먼저 모두
+ * 계산한다. 고칠 링크가 있으면 "링크 N개 고치기"와 "이름만 바꾸기"를 묻고(Esc 는 취소), 고치기면 기록을 남기며 바꾼다.
  */
 export async function renameEntry(
   ctx: CommandContext,
@@ -208,6 +305,10 @@ export async function renameEntry(
   entries: readonly TreeEntry[],
 ): Promise<string | undefined> {
   const { host } = ctx;
+  if (linkOps.running()) {
+    host.notify('warn', t('links.busy'));
+    return undefined;
+  }
   const guard = await renameGuardOnDisk(host.fs, path, isDir, entries);
   if (guard) {
     host.notify('warn', t(GUARD_MESSAGE[guard]));
@@ -231,34 +332,88 @@ export async function renameEntry(
   const to = joinPath(parentOf(path), stem + ext);
   if (to === path) return undefined;
 
+  const finish = (): string => {
+    // 폴더면 그 안에서 가장 긴 경로가 문제다
+    const moved = [to, ...entries.filter((e) => lower(e.path).startsWith(`${lower(path)}/`)).map((e) => to + e.path.slice(path.length))];
+    const longest = moved.reduce((a, b) => (b.length > a.length ? b : a));
+    warnIfWindowsPathTooLong(host, ctx.vaultRoot, longest);
+    ctx.refresh();
+    return to;
+  };
+
+  // 대소문자만 바뀌면 모든 링크가 그대로 풀린다(D11). 링크 의존성이 없으면 예전처럼 링크를 고치지 않는다.
+  const { links } = ctx;
+  if (linkKey(to) === linkKey(path) || !links) {
+    const treeMoves = movesFor(path, to, isDir, entries.filter((e) => !e.isDir).map((e) => e.path));
+    const done = links ? t('fileOps.renamed') : t('fileOps.renamed.linksNotUpdated');
+    return (await plainRename(ctx, path, to, treeMoves, done)) ? finish() : undefined;
+  }
+
+  if (!(await waitForLinks(ctx, links))) {
+    host.notify('warn', t('links.notReady'));
+    return undefined;
+  }
+  // 열린 노트를 저장하고 그 버퍼를 색인에 곧바로 낸다(D12 2)
   const active = ctx.activePath();
-  const wasOpen = active !== undefined && isUnder(active, path);
-  if (wasOpen && !(await ctx.closeActive())) {
+  const handle = active !== undefined ? openNote(active) : undefined;
+  if (handle && !(await handle.flush())) {
     host.notify('warn', t('fileOps.unsaved'));
     return undefined;
   }
+  handle?.publishLinks();
+
+  let plan: RenamePlan;
   try {
-    await host.fs.rename(path, to);
+    plan = await planRename({
+      from: path,
+      to,
+      isDir,
+      index: links.index,
+      images: links.images,
+      read: (p) => host.fs.read(p),
+      search: links.search,
+      activePath: active,
+    });
   } catch (e) {
-    if (wasOpen) await ctx.openFile(active);
-    if (hasErrorKind(e, ERROR_KINDS.exists)) {
-      host.notify('warn', t('fileOps.exists'));
-      return undefined;
-    }
-    if (refusedName(e)) {
-      host.notify('warn', t('fileOps.name.invalid'));
-      return undefined;
-    }
+    if (!(e instanceof IndexNotReadyError)) throw e;
+    host.notify('warn', t('links.notReady'));
+    return undefined;
+  }
+
+  // 색인이 준비된 채로 고칠 링크를 찾지 못했다: 묻지 않고 바꾼다
+  if (plan.notes.length === 0) {
+    return (await plainRename(ctx, path, to, plan.moves, t('fileOps.renamed'))) ? finish() : undefined;
+  }
+  if (plan.hasWikiRewrites && hasUnlinkableChars(baseName(to))) {
+    host.notify('warn', t('links.rename.badName'));
+    return undefined;
+  }
+  const choice = await host.pick<'update' | 'skip'>(
+    [
+      { label: t('links.rename.update', String(plan.linkCount), String(plan.notes.length)), value: 'update' },
+      { label: t('links.rename.skip'), value: 'skip' },
+    ],
+    { title: t('links.rename.title'), selected: 'update' },
+  );
+  if (choice === undefined) return undefined;
+  if (choice === 'skip') {
+    return (await plainRename(ctx, path, to, plan.moves, t('fileOps.renamed.linksNotUpdated'))) ? finish() : undefined;
+  }
+
+  let report: RenameReport;
+  try {
+    report = await renameWithLinks(ctx, plan, links.journal);
+  } catch (e) {
+    if (reportRenameFailure(host, e)) return undefined;
     throw e;
   }
-  if (wasOpen) await ctx.openFile(to + active.slice(path.length));
-  host.notify('info', t('fileOps.renamed.linksNotUpdated'));
-  // 폴더면 그 안에서 가장 긴 경로가 문제다
-  const moved = [to, ...entries.filter((e) => lower(e.path).startsWith(`${lower(path)}/`)).map((e) => to + e.path.slice(path.length))];
-  const longest = moved.reduce((a, b) => (b.length > a.length ? b : a));
-  warnIfWindowsPathTooLong(host, ctx.vaultRoot, longest);
-  ctx.refresh();
-  return to;
+  if (!report.renamed) {
+    host.notify('warn', t('fileOps.unsaved'));
+    return undefined;
+  }
+  const result = finish();
+  await reportLinkUpdates(ctx, plan, report, links.journal);
+  return result;
 }
 
 /** README 체크리스트에서 지운 워크플로 노트의 항목을 뺀다(물어본 뒤). 열린 README 는 버퍼에 들어간다. */
@@ -278,6 +433,10 @@ async function offerReadmeCleanup(ctx: CommandContext, workflowPath: string): Pr
  */
 export async function deleteEntry(ctx: CommandContext, path: string, isDir: boolean): Promise<boolean> {
   const { host } = ctx;
+  if (linkOps.running()) {
+    host.notify('warn', t('links.busy'));
+    return false;
+  }
   const name = baseName(path);
   const ok = await host.confirm(t('fileOps.delete.confirm', name), {
     confirmLabel: t('fileOps.delete.confirmLabel'),

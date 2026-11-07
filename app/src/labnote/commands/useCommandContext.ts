@@ -1,9 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { EditorHandle } from '../../editor/Editor';
+import { listVaultImages } from '../../fs/vaultImage';
+import { linkJournal } from '../../links/journal';
+import { linkIndex } from '../../links/linkIndex';
+import { searchNotes } from '../../search/indexApi';
 import type { AppHost } from '../host/createAppHost';
 import { openNote } from '../openNotes';
 import type { AppSettings } from '../settings';
-import { vaultRefresh, type CommandContext } from './context';
+import { vaultRefresh, type CommandContext, type LinkDeps } from './context';
+
+/** 앱의 링크 의존성: 링크 색인과 고침 기록의 단일 객체, 그리고 Tauri 위의 이미지 목록과 검색. */
+const APP_LINKS: LinkDeps = {
+  index: linkIndex,
+  journal: linkJournal,
+  images: () => listVaultImages(),
+  search: (q, limit) => searchNotes(q, limit),
+};
 
 type At = { line: number; ch?: number };
 
@@ -100,6 +112,7 @@ export function useCommandContext(deps: CommandContextDeps): CommandContext | un
         vaultRefresh.emit();
       },
       showPanel: (p) => latest.current.showPanel?.(p),
+      links: APP_LINKS,
     }),
     [deps.host, deps.vaultRoot],
   );

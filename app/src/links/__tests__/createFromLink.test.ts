@@ -117,7 +117,7 @@ describe('createFromLink', () => {
     await handleOpenLink(undefined, { kind: 'note', path: 'Home.md' }, 'a.md', async () => {}, { openFile, notify });
     expect(openFile).toHaveBeenCalledWith('Home.md');
     await handleOpenLink(undefined, { kind: 'create', linkpath: 'x' }, 'a.md', async () => {}, { openFile, notify });
-    expect(notify).toHaveBeenCalledWith('info', t('links.notReady'));
+    expect(notify).toHaveBeenCalledWith('info', t('links.settingsNotReady'));
     expect(openFile).toHaveBeenCalledTimes(1);
   });
 });

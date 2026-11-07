@@ -168,5 +168,5 @@ export async function handleOpenLink(
     }
     return;
   }
-  fallback.notify('info', t('links.notReady'));
+  fallback.notify('info', t('links.settingsNotReady'));
 }

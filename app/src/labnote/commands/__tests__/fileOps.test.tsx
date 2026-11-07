@@ -16,6 +16,8 @@ import { DialogLayer } from '../../host/DialogLayer';
 import { closeAllDialogs } from '../../host/dialogStore';
 import { editorAwareFs } from '../../editorAwareFs';
 import { activeEditTarget, openNote } from '../../openNotes';
+import { parseRaw } from '../../../editor/documentIo';
+import { linkIndex } from '../../../links/linkIndex';
 import '../../__tests__/editorHarness'; // jsdom 의 CodeMirror 측정 보충
 import type { CommandContext } from '../context';
 import { useCommandContext, useNoteSwitcher } from '../useCommandContext';
@@ -114,6 +116,14 @@ function typeAtEnd(text: string) {
 }
 
 const cmds = (name: string) => vault.log.filter((c) => c.cmd === name);
+/** 앱이 보관함을 열고 링크 색인을 다 읽은 상태: 이름 바꾸기는 준비된 색인에서 계획한다. */
+function primeLinks(): void {
+  linkIndex.clear();
+  const files = vault.files();
+  linkIndex.setFiles(Object.keys(files));
+  for (const [p, text] of Object.entries(files)) if (p.endsWith('.md')) linkIndex.setNote(p, parseRaw(p, text).text);
+  linkIndex.markReady();
+}
 const goneDialog = () => screen.queryByText(t('editor.gone.title'));
 
 function entriesOf(paths: Array<[string, boolean]>): TreeEntry[] {
@@ -155,6 +165,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => closeAllDialogs());
+  linkIndex.clear();
 });
 
 describe('renameGuard', () => {
@@ -254,6 +265,7 @@ describe('renameEntry', () => {
   it('rename of the open note closes it first, keeps unsaved text (flushed), reopens it at the new path, and shows no gone dialog', async () => {
     vault = installFakeVault({ 'notes/a.labnote.md': 'alpha\n' });
     render(<Harness />);
+    primeLinks();
     await openAndLoad('notes/a.labnote.md');
     typeAtEnd('typed\n');
     promptAnswers.push('b');
@@ -268,12 +280,14 @@ describe('renameEntry', () => {
     await act(() => vault.emitChange('notes/a.labnote.md', 'removed'));
     await act(() => vault.emitChange('notes/b.labnote.md', 'created'));
     expect(goneDialog()).toBeNull();
-    expect(notes).toContainEqual({ kind: 'info', message: t('fileOps.renamed.linksNotUpdated') });
+    // 준비된 색인에서 고칠 링크를 찾지 못했다: 묻지 않고 바꾸고 그대로 알린다
+    expect(notes).toContainEqual({ kind: 'info', message: t('fileOps.renamed') });
   });
 
   it('renaming a folder that holds the open note reopens the note under the new folder', async () => {
     vault = installFakeVault({ 'notes/sub/a.labnote.md': 'alpha\n' });
     render(<Harness />);
+    primeLinks();
     await openAndLoad('notes/sub/a.labnote.md');
     promptAnswers.push('moved');
     const out = await settle(renameEntry(C(), 'notes/sub', true, entriesOf([['notes/sub', true]])));
@@ -287,6 +301,7 @@ describe('renameEntry', () => {
     const user = userEvent.setup();
     vault = installFakeVault({ 'notes/a.labnote.md': 'mine\n' });
     render(<Harness />);
+    primeLinks();
     await openAndLoad('notes/a.labnote.md');
     typeAtEnd('!');
     await vault.mem.write('notes/a.labnote.md', 'theirs\n');
@@ -304,6 +319,7 @@ describe('renameEntry', () => {
   it('rename onto an existing name shows the exists message', async () => {
     vault = installFakeVault({ 'notes/a.labnote.md': 'a\n', 'notes/b.labnote.md': 'b\n' });
     render(<Harness />);
+    primeLinks();
     promptAnswers.push('B');
     const out = await settle(renameEntry(C(), 'notes/a.labnote.md', false, []));
     expect(out).toBeUndefined();
@@ -314,6 +330,7 @@ describe('renameEntry', () => {
   it('a case-only rename is allowed (the same file on NTFS)', async () => {
     vault = installFakeVault({ 'notes/a.labnote.md': 'a\n' });
     render(<Harness />);
+    primeLinks();
     promptAnswers.push('A');
     expect(await settle(renameEntry(C(), 'notes/a.labnote.md', false, []))).toBe('notes/A.labnote.md');
     expect(vault.files()).toEqual({ 'notes/A.labnote.md': 'a\n' });
@@ -323,6 +340,7 @@ describe('renameEntry', () => {
     const deep = `deep/${'x'.repeat(100)}/${'y'.repeat(100)}`;
     vault = installFakeVault({ [`${deep}/a.labnote.md`]: 'a\n' });
     render(<Harness />);
+    primeLinks();
     promptAnswers.push('z'.repeat(60));
     const out = await settle(renameEntry(C(), `${deep}/a.labnote.md`, false, []));
     expect(out).toBe(`${deep}/${'z'.repeat(60)}.labnote.md`);
