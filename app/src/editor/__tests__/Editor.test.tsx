@@ -664,7 +664,7 @@ describe('편집기', () => {
 /** 색이 들어갈 수 있는 값에서 var(--…) 참조를 걷어 내고 남는 것(16진수·rgb()·이름 있는 색)을 돌려준다. */
 const bareColours = (value: string) =>
   (value.replace(/var\(--[\w-]+\)/g, '').match(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(|\b[a-z]{3,}\b/gi) ?? []).filter(
-    (w) => !['solid', 'none', 'underline', 'line', 'through', 'italic'].includes(w),
+    (w) => !['solid', 'none', 'underline', 'line', 'through', 'italic', 'wavy', 'dotted', 'dashed', 'double'].includes(w),
   );
 
 /** 마운트된 편집기의 그림자 루트에 들어간 스타일 전체(<style> 이든 adoptedStyleSheets 든). */
@@ -746,6 +746,10 @@ describe('편집기 테마', () => {
     expect(bareColours('underline red')).not.toEqual([]);
     expect(bareColours('1px solid var(--border)')).toEqual([]);
     expect(bareColours('line-through')).toEqual([]);
+    // 선 모양 낱말(샘플 ID 의 물결·점선 밑줄)은 색이 아니다. 그 뒤의 색은 여전히 걸린다
+    expect(bareColours('underline wavy var(--danger)')).toEqual([]);
+    expect(bareColours('line-through underline dotted var(--warning)')).toEqual([]);
+    expect(bareColours('underline dotted red')).not.toEqual([]);
   });
 
   it('CodeMirror 기본 테마가 박아 두는 요소(활성 줄·거터·패널·단추·입력·툴팁)를 토큰으로 덮어 둔다', () => {

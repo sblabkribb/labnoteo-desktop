@@ -20,6 +20,17 @@
   --success: #1f7a3a;
   --shadow: rgba(0, 0, 0, 0.16);
   --scrim: rgba(255, 255, 255, 0.6);
+  /* 샘플 종류 색(@labnoteo 플러그인과 같은 RGB) */
+  --sample-dna-bg: #FFB6C1;
+  --sample-rna-bg: #ADD8E6;
+  --sample-plasmid-bg: #98FB98;
+  --sample-reagent-bg: #FFD700;
+  --sample-primer-bg: #FF69B4;
+  --sample-protein-bg: #DDA0DD;
+  --sample-equip-bg: #FFA07A;
+  --sample-labware-bg: #D8BFD8;
+  --sample-other-bg: #B0BEC5;
+  --sample-custom-bg: #607D8B;
   color-scheme: light;
 
   /* 테마와 무관한 값 */
@@ -64,6 +75,16 @@
     --success: #5cc27a;
     --shadow: rgba(0, 0, 0, 0.5);
     --scrim: rgba(30, 30, 30, 0.6);
+    --sample-dna-bg: rgba(255, 182, 193, 0.35);
+    --sample-rna-bg: rgba(173, 216, 230, 0.35);
+    --sample-plasmid-bg: rgba(152, 251, 152, 0.35);
+    --sample-reagent-bg: rgba(255, 215, 0, 0.35);
+    --sample-primer-bg: rgba(255, 105, 180, 0.35);
+    --sample-protein-bg: rgba(221, 160, 221, 0.35);
+    --sample-equip-bg: rgba(255, 160, 122, 0.35);
+    --sample-labware-bg: rgba(216, 191, 216, 0.35);
+    --sample-other-bg: rgba(176, 190, 197, 0.35);
+    --sample-custom-bg: rgba(96, 125, 139, 0.35);
     color-scheme: dark;
   }
 }
@@ -85,6 +106,16 @@
     --success: #5cc27a;
     --shadow: rgba(0, 0, 0, 0.5);
     --scrim: rgba(30, 30, 30, 0.6);
+    --sample-dna-bg: rgba(255, 182, 193, 0.35);
+    --sample-rna-bg: rgba(173, 216, 230, 0.35);
+    --sample-plasmid-bg: rgba(152, 251, 152, 0.35);
+    --sample-reagent-bg: rgba(255, 215, 0, 0.35);
+    --sample-primer-bg: rgba(255, 105, 180, 0.35);
+    --sample-protein-bg: rgba(221, 160, 221, 0.35);
+    --sample-equip-bg: rgba(255, 160, 122, 0.35);
+    --sample-labware-bg: rgba(216, 191, 216, 0.35);
+    --sample-other-bg: rgba(176, 190, 197, 0.35);
+    --sample-custom-bg: rgba(96, 125, 139, 0.35);
     color-scheme: dark;
 }
 
@@ -105,6 +136,16 @@
     --success: #1f7a3a;
     --shadow: rgba(0, 0, 0, 0.16);
     --scrim: rgba(255, 255, 255, 0.6);
+    --sample-dna-bg: #FFB6C1;
+    --sample-rna-bg: #ADD8E6;
+    --sample-plasmid-bg: #98FB98;
+    --sample-reagent-bg: #FFD700;
+    --sample-primer-bg: #FF69B4;
+    --sample-protein-bg: #DDA0DD;
+    --sample-equip-bg: #FFA07A;
+    --sample-labware-bg: #D8BFD8;
+    --sample-other-bg: #B0BEC5;
+    --sample-custom-bg: #607D8B;
     color-scheme: light;
 }
 
@@ -733,6 +774,16 @@ button.links-target:focus-visible { outline-offset: -2px; }
     --success: #1f7a3a;
     --shadow: rgba(0, 0, 0, 0.16);
     --scrim: rgba(255, 255, 255, 0.6);
+    --sample-dna-bg: #FFB6C1;
+    --sample-rna-bg: #ADD8E6;
+    --sample-plasmid-bg: #98FB98;
+    --sample-reagent-bg: #FFD700;
+    --sample-primer-bg: #FF69B4;
+    --sample-protein-bg: #DDA0DD;
+    --sample-equip-bg: #FFA07A;
+    --sample-labware-bg: #D8BFD8;
+    --sample-other-bg: #B0BEC5;
+    --sample-custom-bg: #607D8B;
     color-scheme: light;
   }
   .topbar,

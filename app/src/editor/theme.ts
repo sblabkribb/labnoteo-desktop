@@ -210,6 +210,25 @@ export const editorThemeSpec = {
   '.lno-uo-uhw': { borderColor: 'var(--accent)' },
   '.lno-uo-usw': { borderColor: 'var(--success)' },
   '.lno-uo-wb': { borderColor: 'var(--warning)' },
+  // 샘플 ID(samples/typeClass.ts): 종류별 옅은 바탕. 레지스트리에 없는 ID 는 위험색 물결 밑줄, 낡은 별칭은 경고색 점선 밑줄,
+  // 폐기된 샘플은 흐리고 취소선. 폐기 + 낡은 별칭은 두 줄을 함께 긋는다. 자동 완성의 샘플 행은 설명을 흐리게, 폐기 행은 흐리게.
+  '.lno-sample-id': { borderRadius: '3px', padding: '0 2px' },
+  '.lno-sample-t-dna': { backgroundColor: 'var(--sample-dna-bg)' },
+  '.lno-sample-t-rna': { backgroundColor: 'var(--sample-rna-bg)' },
+  '.lno-sample-t-plasmid': { backgroundColor: 'var(--sample-plasmid-bg)' },
+  '.lno-sample-t-reagent': { backgroundColor: 'var(--sample-reagent-bg)' },
+  '.lno-sample-t-primer': { backgroundColor: 'var(--sample-primer-bg)' },
+  '.lno-sample-t-protein': { backgroundColor: 'var(--sample-protein-bg)' },
+  '.lno-sample-t-equip': { backgroundColor: 'var(--sample-equip-bg)' },
+  '.lno-sample-t-labware': { backgroundColor: 'var(--sample-labware-bg)' },
+  '.lno-sample-t-other': { backgroundColor: 'var(--sample-other-bg)' },
+  '.lno-sample-t-custom': { backgroundColor: 'var(--sample-custom-bg)' },
+  '.lno-sample-id-missing': { textDecoration: 'underline wavy var(--danger)' },
+  '.lno-sample-alias-stale': { textDecoration: 'underline dotted var(--warning)' },
+  '.lno-sample-discarded': { opacity: 0.6, textDecoration: 'line-through' },
+  '.lno-sample-alias-stale.lno-sample-discarded': { textDecoration: 'line-through underline dotted var(--warning)' },
+  '.lno-sample-option .cm-completionDetail': { color: 'var(--text-muted)' },
+  '.lno-sample-option-discarded': { opacity: 0.6 },
   // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
