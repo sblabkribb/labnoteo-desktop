@@ -173,3 +173,42 @@ describe('moves', () => {
     ]);
   });
 });
+
+describe('rewriteLinks: links that resolve through the .labnote fallback', () => {
+  const files = ['exp/n.labnote.md', 'exp/x.labnote.md', 'b.md', 'z.md', 'plain.md'];
+  const ctx = (from: string, to: string, fs = files) => rewriteContext(fs, movesFor(from, to, false, fs));
+  const text = '[[x]] [[x|X]] [[x#H]] [[exp/x]] [[./x]] [[/exp/x]] [[x.labnote]] [t](x) [t2](./x#s) [t3](x.labnote.md)';
+  it('keeps the short form: [[x]] becomes [[y]] when x.labnote.md is renamed to y.labnote.md', () => {
+    const out = rewriteLinks(text, 'exp/n.labnote.md', 'exp/n.labnote.md', ctx('exp/x.labnote.md', 'exp/y.labnote.md'));
+    expect(out.text).toBe('[[y]] [[y|X]] [[y#H]] [[exp/y]] [[./y]] [[/exp/y]] [[y.labnote]] [t](y) [t2](./y#s) [t3](y.labnote.md)');
+    expect(out.changed).toBe(10);
+    expect(out.unsafe).toBe(0);
+  });
+  it('round-trips: renaming back restores every byte', () => {
+    const there = rewriteLinks(text, 'exp/n.labnote.md', 'exp/n.labnote.md', ctx('exp/x.labnote.md', 'exp/y.labnote.md'));
+    const back = rewriteLinks(
+      there.text,
+      'exp/n.labnote.md',
+      'exp/n.labnote.md',
+      ctx('exp/y.labnote.md', 'exp/x.labnote.md', applyMoves(files, [{ from: 'exp/x.labnote.md', to: 'exp/y.labnote.md' }])),
+    );
+    expect(back.text).toBe(text);
+  });
+  it('a moved note keeps the short form when it still resolves', () => {
+    const out = rewriteLinks('[[x]] [t](x)', 'exp/n.labnote.md', 'exp/n.labnote.md', ctx('exp/x.labnote.md', 'other/x.labnote.md'));
+    expect(out.text).toBe('[[x]] [t](../other/x)');
+  });
+  it('falls back to the Obsidian form when the short name would resolve to another note', () => {
+    const out = rewriteLinks('[[x]] [t](x)', 'exp/n.labnote.md', 'exp/n.labnote.md', ctx('exp/x.labnote.md', 'exp/b.labnote.md'));
+    expect(out.text).toBe('[[b.labnote]] [t](b.labnote)');
+  });
+  it('a link that resolves under Obsidian rules never gets the short form', () => {
+    const out = rewriteLinks('[[plain]] [t](plain)', 'exp/n.labnote.md', 'exp/n.labnote.md', ctx('plain.md', 'exp/p.labnote.md'));
+    expect(out.text).toBe('[[p.labnote]] [t](p.labnote)');
+  });
+  it('pins a fallback link that a new exact name would hijack', () => {
+    const out = rewriteLinks('[[x]] [t](x)', 'exp/n.labnote.md', 'exp/n.labnote.md', ctx('z.md', 'x.md'));
+    expect(out.text).toBe('[[x.labnote]] [t](x.labnote)');
+    expect(out.changed).toBe(2);
+  });
+});

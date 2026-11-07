@@ -15,7 +15,7 @@ import { t } from '../i18n/t';
 import type { CommandContext } from '../labnote/commands/context';
 import { runCommand } from '../labnote/commands/runCommand';
 import { warnIfWindowsPathTooLong } from '../labnote/port/experiments';
-import { ATTACHMENT_EXTS, IMAGE_EXTS } from './resolve';
+import { ATTACHMENT_EXTS, IMAGE_EXTS, labnoteFallback } from './resolve';
 import { subpathLine } from './subpath';
 
 const dirOf = (path: string) => {
@@ -95,6 +95,15 @@ export async function createFromLink(ctx: CommandContext, linkpath: string, sour
       }
       host.notify('warn', t('fileOps.exists'));
       return undefined;
+    }
+    // The `.labnote` fallback (resolve.ts): `[[x]]` names `x.labnote.md` when there is no `x.md`. The resolver
+    // already opens it when the index lists it; this covers an index that has not caught up, so a click never
+    // creates a duplicate `x.md` beside it.
+    const fallback = labnoteFallback(linkpath.trim());
+    const labnotePath = fallback === null ? null : newNotePath(fallback, sourcePath);
+    if (typeof labnotePath === 'string' && (await isNoteAt(ctx, labnotePath))) {
+      await ctx.openFile(labnotePath);
+      return labnotePath;
     }
     await host.fs.modify(path, (current) => {
       if (current !== '') throw new NoteExistsError();

@@ -48,6 +48,22 @@ describe('planRename', () => {
     expect(plan.notes).toEqual([{ before: 'n.md', after: 'n.md', changed: 1, unsafe: 0 }]);
     expect(rewriteLinks('[[b/x]]', 'n.md', 'n.md', rewriteContext(plan.files, plan.moves)).text).toBe('[[other/b/x]]');
   });
+  it('a rename to y.labnote.md pins a [[y]] it would hijack through the .labnote fallback', async () => {
+    const notes = { 'exp/q.labnote.md': '', 'other/y.labnote.md': '', 'exp/n.labnote.md': '[[y]]' };
+    const ix = indexOf(notes);
+    expect(candidates(ix, [{ from: 'exp/q.labnote.md', to: 'exp/y.labnote.md' }])).toContain('exp/n.labnote.md');
+    const plan = await planRename({ from: 'exp/q.labnote.md', to: 'exp/y.labnote.md', isDir: false, index: ix, images: async () => [], read: reader(notes) });
+    expect(plan.notes).toEqual([{ before: 'exp/n.labnote.md', after: 'exp/n.labnote.md', changed: 1, unsafe: 0 }]);
+    expect(rewriteLinks('[[y]]', 'exp/n.labnote.md', 'exp/n.labnote.md', rewriteContext(plan.files, plan.moves)).text).toBe('[[other/y]]');
+  });
+  it('a fallback link [[x]] to a renamed x.labnote.md is a backlink and is planned', async () => {
+    const notes = { 'exp/x.labnote.md': '', 'n.md': '[[x]] [[x#H|h]]' };
+    const ix = indexOf(notes);
+    expect(ix.backlinks('exp/x.labnote.md').map((b) => b.source)).toEqual(['n.md']);
+    const plan = await planRename({ from: 'exp/x.labnote.md', to: 'exp/y.labnote.md', isDir: false, index: ix, images: async () => [], read: reader(notes) });
+    expect(plan.notes).toEqual([{ before: 'n.md', after: 'n.md', changed: 2, unsafe: 0 }]);
+    expect(rewriteLinks(notes['n.md'], 'n.md', 'n.md', rewriteContext(plan.files, plan.moves)).text).toBe('[[y]] [[y#H|h]]');
+  });
   it('always plans the active note, even when the index has not seen its new link', async () => {
     const ix = indexOf({ 'Home.md': '', 'n.md': 'old text' });
     const plan = await planRename({ from: 'Home.md', to: 'Start.md', isDir: false, index: ix, images: async () => [], read: reader({ 'Home.md': '', 'n.md': 'typed [[Home]]' }), activePath: 'n.md' });

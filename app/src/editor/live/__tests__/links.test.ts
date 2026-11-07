@@ -132,6 +132,26 @@ describe('link clicks (SP4 Task 9)', () => {
     expect(opened).toEqual([{ kind: 'create', linkpath: 'New idea' }]);
   });
 
+  it('a plain click on [[a]] opens a.labnote.md (the .labnote fallback) instead of asking to create a.md', () => {
+    const v = view('[[a#Step]] [[a]]\nx', 18, { notePath: 'exp/n.labnote.md', files: ['exp/n.labnote.md', 'exp/a.labnote.md'] });
+    const els = [...v.contentDOM.querySelectorAll('.lno-wikilink')];
+    expect(els.map((e) => e.classList.contains('lno-unresolved'))).toEqual([false, false]);
+    plainClick(els[0]);
+    plainClick(els[1]);
+    expect(opened).toEqual([
+      { kind: 'note', path: 'exp/a.labnote.md', subpath: 'Step' },
+      { kind: 'note', path: 'exp/a.labnote.md' },
+    ]);
+  });
+
+  it('[[a]] in a.labnote.md is a self link even before the note is listed', () => {
+    const v = view('## H\n[[a#H]]\nx', 14, { notePath: 'exp/a.labnote.md', files: ['Home.md'] });
+    expect(v.contentDOM.querySelector('.lno-unresolved')).toBeNull();
+    plainClick(v.contentDOM.querySelector('.lno-wikilink')!);
+    expect(opened).toEqual([]);
+    expect(revealed).toEqual([0]);
+  });
+
   it('a plain click on a revealed link only places the caret', () => {
     const v = view('[[Home]]\nx', 3); // cursor inside: revealed
     const el = v.contentDOM.querySelector('.lno-wikilink')!;

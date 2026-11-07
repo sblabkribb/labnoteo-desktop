@@ -8,7 +8,7 @@
  */
 import { parseRaw, toRaw } from '../editor/documentIo';
 import { extractLinks, type LinkKind } from './extract';
-import { createResolver, hasUnlinkableChars, linkKey, splitLinktext, type Resolver } from './resolve';
+import { createResolver, hasUnlinkableChars, linkKey, splitLinktext, stripLabnote, type Resolver } from './resolve';
 
 export interface Move {
   from: string;
@@ -106,8 +106,13 @@ function encodeMdPath(path: string, orig: string, angled: boolean): string {
 
 const same = (a: string | null, b: string): boolean => a !== null && linkKey(a) === linkKey(b);
 
-/** The new path text for a wikilink in its original style (D13), or null when no safe text exists. */
-function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: RewriteContext): string | null {
+/**
+ * The new path text for a wikilink in its original style (D13), or null when no safe text exists.
+ * A link that resolved only through the `.labnote` fallback (resolve.ts: `[[x]]` -> x.labnote.md) is written in its
+ * short form (`[[y]]`) when that still resolves to the target, else in the Obsidian form (`[[y.labnote]]`). Every
+ * other link keeps the Obsidian form.
+ */
+function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: RewriteContext, viaFallback: boolean): string | null {
   const keepMd = hasMd(oldPath);
   const withMd = (s: string): string => (keepMd && !hasMd(s) ? `${s}.md` : s);
   let first: string | null;
@@ -125,8 +130,10 @@ function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: Rewri
   } else {
     first = withMd(stripMd(want));
   }
-  // Post-condition, then the rooted form as the fallback.
-  for (const c of [first, withMd(`/${stripMd(want)}`)]) {
+  // Post-condition, then the rooted form as the fallback; a fallback link tries its short forms first.
+  const rooted = withMd(`/${stripMd(want)}`);
+  const forms = viaFallback && !keepMd ? [stripLabnote(first), first, stripLabnote(rooted), rooted] : [first, rooted];
+  for (const c of forms) {
     if (hasUnlinkableChars(c)) continue;
     if (same(ctx.after.resolveWiki(c, sourceAfter), want)) return c;
   }
@@ -134,7 +141,7 @@ function wikiText(oldPath: string, want: string, sourceAfter: string, ctx: Rewri
 }
 
 /** The new path text for a Markdown link in its original style (D13), or null when no safe text exists. */
-function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: string, ctx: RewriteContext): string | null {
+function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: string, ctx: RewriteContext, viaFallback: boolean): string | null {
   const styled = (target: string): string[] => {
     if (oldPath.startsWith('/')) return [`/${target}`];
     let path = relativePath(dirOf(sourceAfter), target);
@@ -143,7 +150,16 @@ function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: str
   };
   // Keep '.md' only when the original had it; the post-condition decides whether the bare form still resolves.
   const bare = hasMd(want) && !hasMd(oldPath) ? styled(stripMd(want)) : [];
-  for (const p of [...bare, ...styled(want)]) {
+  // A link that resolved only through the `.labnote` fallback tries its short form first (see `wikiText`).
+  const short = viaFallback && !hasMd(oldPath) && /\.labnote\.md$/i.test(want) ? styled(stripLabnote(stripMd(want))) : [];
+  const full = styled(want);
+  // A fallback link: each style (relative, then rooted) from its short form to its full form, so a rooted short form
+  // never wins over the relative Obsidian form.
+  const forms =
+    short.length > 0
+      ? full.flatMap((_, i) => [short[i], bare[i], full[i]]).filter((p): p is string => p !== undefined)
+      : [...bare, ...full];
+  for (const p of forms) {
     const encoded = encodeMdPath(p, oldPath, angled);
     if (same(ctx.after.resolveMd(encoded, sourceAfter), want)) return encoded;
   }
@@ -185,6 +201,9 @@ export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAf
       isWiki ? r.resolveWiki(linkpath, source) : r.resolveMd(link.target, source);
     const before = resolveAs(ctx.before, sourceBefore);
     if (before === null) continue; // unresolved links are never touched
+    // Resolved only through the `.labnote` fallback (resolve.ts): the rewrite keeps its short form when it can.
+    const viaFallback =
+      (isWiki ? ctx.before.resolveWikiStrict(linkpath, sourceBefore) : ctx.before.resolveMdStrict(link.target, sourceBefore)) === null;
     const movedTo = ctx.moved(before);
     const want = movedTo ?? before;
     // Not moved and still resolving to the same file: leave it. Otherwise rewrite or pin it (the hijack guard).
@@ -196,7 +215,7 @@ export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAf
       const quote = link.inFrontmatter ? text[link.from - 1] : '';
       // In a single-quoted YAML scalar ' is written ''; the resolver sees the unescaped path.
       const oldPath = quote === "'" ? oldSlice.replace(/''/g, "'") : oldSlice;
-      insert = wikiText(oldPath, want, sourceAfter, ctx);
+      insert = wikiText(oldPath, want, sourceAfter, ctx, viaFallback);
       // A '"' or '\' would change a double-quoted YAML scalar: never write one there.
       if (insert !== null && quote === '"' && /["\\]/.test(insert)) insert = null;
       if (insert !== null && quote === "'") insert = insert.replace(/'/g, "''");
@@ -207,7 +226,7 @@ export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAf
         if (risky) insert = null;
       }
     } else {
-      insert = mdText(oldSlice, text[link.pathFrom - 1] === '<', want, sourceAfter, ctx);
+      insert = mdText(oldSlice, text[link.pathFrom - 1] === '<', want, sourceAfter, ctx, viaFallback);
     }
     if (insert === null) {
       unsafe++;

@@ -45,6 +45,13 @@ describe('createFromLink', () => {
     expect(h.vault.files()['Exp 1: PCR.md']).toBeUndefined();
     expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('fileOps.name.invalid') });
   });
+  it('opens x.labnote.md instead of creating a duplicate x.md (the .labnote fallback, index not refreshed yet)', async () => {
+    const h = createTestHost({ 'exp/a.labnote.md': '[[플라스미드 미니프렙]]', 'exp/플라스미드 미니프렙.labnote.md': 'keep' });
+    expect(await createFromLink(h.ctx, '플라스미드 미니프렙', 'exp/a.labnote.md')).toBe('exp/플라스미드 미니프렙.labnote.md');
+    expect(h.vault.files()['exp/플라스미드 미니프렙.md']).toBeUndefined();
+    expect(h.vault.files()['exp/플라스미드 미니프렙.labnote.md']).toBe('keep');
+    expect(h.opened).toEqual(['exp/플라스미드 미니프렙.labnote.md']);
+  });
   it('opens the note when it already exists at exactly that path (index not refreshed yet)', async () => {
     const h = createTestHost({ 'notes/a.md': '', 'notes/x.md': 'keep' });
     expect(await createFromLink(h.ctx, 'x', 'notes/a.md')).toBe('notes/x.md');

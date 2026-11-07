@@ -11,7 +11,7 @@
 import { hasErrorKind } from '../fs/errorKinds';
 import { LinkIndex } from './linkIndex';
 import { MENTION_LIMIT, MENTION_MIN } from './mentions';
-import { basenameKey, linkKey } from './resolve';
+import { basenameKey, linkKey, stripLabnote } from './resolve';
 import { movesFor, rewriteContext, rewriteLinksDetailed, type Move } from './rewrite';
 
 export class IndexNotReadyError extends Error {
@@ -76,14 +76,18 @@ function addAll(into: Map<string, string>, paths: Iterable<string>): void {
 }
 
 /**
- * Backlink sources of every moved path, the notes linking `basenameKey(m.to)` for every move, and the moved notes,
- * sorted by key.
+ * Backlink sources of every moved path, the notes linking `basenameKey(m.to)` (and, for a `.labnote.md`, its short
+ * name) for every move, and the moved notes, sorted by key.
  */
 export function candidates(index: LinkIndex, moves: readonly Move[]): string[] {
   const out = new Map<string, string>();
   for (const m of moves) {
     addAll(out, index.backlinks(m.from).map((b) => b.source));
-    addAll(out, index.sourcesLinkingBasename(basenameKey(m.to)));
+    const key = basenameKey(m.to);
+    addAll(out, index.sourcesLinkingBasename(key));
+    // The `.labnote` fallback (resolve.ts): `[[y]]` can name y.labnote.md, so a new y.labnote.md may take it over too.
+    const short = stripLabnote(key);
+    if (short !== key) addAll(out, index.sourcesLinkingBasename(short));
     if (isNote(m.from)) addAll(out, [m.from]);
   }
   return [...out.values()].sort(cmpKey);

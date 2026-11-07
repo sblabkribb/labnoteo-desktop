@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { basenameKey, createResolver, hasUnlinkableChars, splitLinktext, wikiBasename } from '../resolve';
+import { basenameKey, createResolver, hasUnlinkableChars, isSelfLinkName, labnoteFallback, splitLinktext, wikiBasename } from '../resolve';
 
 const FILES = [
   'Home.md', 'notes/PCR 조건.md', 'notes/sub/PCR 조건.md',
@@ -72,5 +72,67 @@ describe('resolve', () => {
     expect(basenameKey('b.md')).toBe('b');
     expect(basenameKey('x/y.labnote.md')).toBe('y.labnote');
     expect(basenameKey('images/Gel.PNG')).toBe('gel.png');
+  });
+});
+
+describe('the .labnote fallback (a deliberate departure from Obsidian)', () => {
+  const s = createResolver([
+    'exp/a.labnote.md', 'exp/플라스미드 미니프렙.labnote.md', 'dir/a.labnote.md', 'both.md', 'both.labnote.md',
+    'PCR v2.1.labnote.md', 'other/a.labnote.md', 'gel.labnote.md', 'gel.png',
+  ]);
+  it('[[a]] resolves to a.labnote.md with the usual tie-break (same folder first, then depth)', () => {
+    expect(s.resolveWiki('a', 'exp/x.labnote.md')).toBe('exp/a.labnote.md');
+    expect(s.resolveWiki('A', 'dir/x.md')).toBe('dir/a.labnote.md');
+    expect(s.resolveWiki('플라스미드 미니프렙'.normalize('NFD'), 'z.md')).toBe('exp/플라스미드 미니프렙.labnote.md');
+    expect(s.resolveWiki('PCR v2.1', 'z.md')).toBe('PCR v2.1.labnote.md');
+  });
+  it('an exact match wins over the fallback', () => {
+    expect(s.resolveWiki('both', 'z.md')).toBe('both.md');
+    expect(s.resolveWiki('both.labnote', 'z.md')).toBe('both.labnote.md');
+  });
+  it('path forms fall back too', () => {
+    expect(s.resolveWiki('dir/a', 'z.md')).toBe('dir/a.labnote.md');
+    expect(s.resolveWiki('/dir/a', 'z.md')).toBe('dir/a.labnote.md');
+    expect(s.resolveWiki('./a', 'other/x.md')).toBe('other/a.labnote.md');
+    expect(s.resolveWiki('../dir/a', 'other/x.md')).toBe('dir/a.labnote.md');
+  });
+  it('[[a.labnote]] still resolves; .md, .labnote and file extensions get no fallback', () => {
+    expect(s.resolveWiki('a.labnote', 'exp/x.md')).toBe('exp/a.labnote.md');
+    expect(s.resolveWiki('dir/a.labnote', 'z.md')).toBe('dir/a.labnote.md');
+    expect(s.resolveWiki('a.md', 'z.md')).toBeNull();
+    expect(s.resolveWiki('x.labnote', 'z.md')).toBeNull();
+    expect(s.resolveWiki('gel.png', 'z.md')).toBe('gel.png');
+    expect(s.resolveWiki('spec.pdf', 'z.md')).toBeNull();
+    expect(s.resolveWiki('missing', 'z.md')).toBeNull();
+  });
+  it('markdown links without an extension fall back the same way', () => {
+    expect(s.resolveMd('a', 'exp/x.md')).toBe('exp/a.labnote.md');
+    expect(s.resolveMd('./a#step', 'dir/x.md')).toBe('dir/a.labnote.md');
+    expect(s.resolveMd('%ED%94%8C%EB%9D%BC%EC%8A%A4%EB%AF%B8%EB%93%9C%20%EB%AF%B8%EB%8B%88%ED%94%84%EB%A0%99', 'exp/x.md')).toBe(
+      'exp/플라스미드 미니프렙.labnote.md',
+    );
+    expect(s.resolveMd('both', 'z.md')).toBe('both.md');
+    expect(s.resolveMd('a.md', 'exp/x.md')).toBeNull();
+  });
+  it('the strict resolvers follow Obsidian only', () => {
+    expect(s.resolveWikiStrict('a', 'exp/x.md')).toBeNull();
+    expect(s.resolveWikiStrict('a.labnote', 'exp/x.md')).toBe('exp/a.labnote.md');
+    expect(s.resolveMdStrict('a', 'exp/x.md')).toBeNull();
+  });
+  it('linktextFor keeps writing the Obsidian-compatible form', () => {
+    expect(s.linktextFor('exp/a.labnote.md', 'exp/x.md')).toBe('a.labnote');
+  });
+  it('labnoteFallback and isSelfLinkName', () => {
+    expect(labnoteFallback('a')).toBe('a.labnote');
+    expect(labnoteFallback('dir/a')).toBe('dir/a.labnote');
+    expect(labnoteFallback('a.LABNOTE')).toBeNull();
+    expect(labnoteFallback('a.md')).toBeNull();
+    expect(labnoteFallback('gel.png')).toBeNull();
+    expect(labnoteFallback('dir/')).toBeNull();
+    expect(isSelfLinkName('a', 'exp/a.labnote.md')).toBe(true);
+    expect(isSelfLinkName('A.labnote', 'exp/a.labnote.md')).toBe(true);
+    expect(isSelfLinkName('a', 'exp/a.md')).toBe(true);
+    expect(isSelfLinkName('b', 'exp/a.labnote.md')).toBe(false);
+    expect(isSelfLinkName('exp/a', 'exp/a.labnote.md')).toBe(false);
   });
 });

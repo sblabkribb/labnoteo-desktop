@@ -113,6 +113,27 @@ describe('navigation history', () => {
     expect(document.getElementById('sidebar-tab-files')!.getAttribute('aria-selected')).toBe('true');
   });
 
+  it('clicking [[a]] opens a.labnote.md (the .labnote fallback) and creates no a.md', async () => {
+    const vault = installFakeVault({ 'exp/n.labnote.md': 'x\n[[a]]', 'exp/a.labnote.md': 'AAA' });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await userEvent.click(await screen.findByText('n.labnote.md'));
+    await docIs('x\n[[a]]');
+    const v = await editorView();
+    await waitFor(() => expect(linkIndex.ready()).toBe(true));
+    const el = await waitFor(() => {
+      const found = v.contentDOM.querySelector('.lno-wikilink:not(.lno-unresolved)');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    fireEvent.mouseDown(el, { button: 0 });
+    fireEvent.click(el, { button: 0 });
+    await docIs('AAA');
+    expect(Object.keys(vault.files()).sort()).toEqual(['exp/a.labnote.md', 'exp/n.labnote.md']);
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    await docIs('x\n[[a]]');
+  });
+
   it('Alt+ArrowLeft and Alt+ArrowRight typed in the editor with the caret mid-document navigate', async () => {
     installFakeVault({ 'a.md': 'alpha beta gamma', 'b.md': 'delta epsilon zeta' });
     render(<App />);

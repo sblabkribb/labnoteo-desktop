@@ -1,6 +1,6 @@
 import { Facet, type Compartment, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { basenameKey, linkKey, splitLinktext } from '../../links/resolve';
+import { isSelfLinkName, splitLinktext } from '../../links/resolve';
 
 /**
  * Link resolution for live preview (plan SP4 Task 8, decisions D1 and D2).
@@ -52,7 +52,7 @@ export function linkStateOf(res: LinkResolution | null, kind: 'wiki' | 'md', tar
     if (path === '') return 'resolved';
     if (res.resolveWiki(path, notePath) !== null) return 'resolved';
     // A self link resolves even before the note is in the file list (a note just created)
-    if (notePath !== '' && !path.includes('/') && linkKey(path) === basenameKey(notePath)) return 'resolved';
+    if (isSelfLinkName(path, notePath)) return 'resolved';
     return res.isUnknownTarget(path) ? 'unknown' : 'unresolved';
   }
   let h = target.trim();

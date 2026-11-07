@@ -62,6 +62,16 @@ describe('linkStateOf', () => {
   });
   it('a self link is resolved even when the note is not listed yet', () => {
     expect(linkStateOf(res(['Home.md']), 'wiki', 'new', 'dir/new.md')).toBe('resolved');
+    expect(linkStateOf(res(['Home.md']), 'wiki', 'new', 'dir/new.labnote.md')).toBe('resolved');
+    expect(linkStateOf(res(['Home.md']), 'wiki', 'new.labnote', 'dir/new.labnote.md')).toBe('resolved');
+  });
+  it('the .labnote fallback: [[a]] and [x](a) are resolved when only a.labnote.md exists', () => {
+    const l = res(['exp/a.labnote.md', 'n.md']);
+    expect(linkStateOf(l, 'wiki', 'a', 'n.md')).toBe('resolved');
+    expect(linkStateOf(l, 'wiki', 'a#Step', 'n.md')).toBe('resolved');
+    expect(linkStateOf(l, 'wiki', 'exp/a', 'n.md')).toBe('resolved');
+    expect(linkStateOf(l, 'md', './exp/a', 'n.md')).toBe('resolved');
+    expect(linkStateOf(l, 'wiki', 'a.md', 'n.md')).toBe('unresolved');
   });
   it('markdown links', () => {
     expect(linkStateOf(r, 'md', './Home.md', 'n.md')).toBe('resolved');

@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { t } from '../../i18n/t';
-import { basenameKey, linkKey, splitLinktext } from '../../links/resolve';
+import { isSelfLinkName, splitLinktext } from '../../links/resolve';
 import { subpathLine } from '../../links/subpath';
 import { isImageTarget } from './imagePath';
 import { linkResolution } from './linkResolution';
@@ -218,7 +218,7 @@ export function targetOf(
     const found = res?.resolveWiki(linkpath, notePath) ?? null;
     if (found !== null) return subpath ? { kind: 'note', path: found, subpath } : { kind: 'note', path: found };
     // A self link before this note is in the file list (a note just created): stay here
-    if (notePath !== '' && !linkpath.includes('/') && linkKey(linkpath) === basenameKey(notePath))
+    if (isSelfLinkName(linkpath, notePath))
       return { kind: 'self', line: subpath ? subpathLine(doc(), { subpath }) : 0 };
     if (!res || res.isUnknownTarget(linkpath)) return null;
     return { kind: 'create', linkpath };

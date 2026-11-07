@@ -3,6 +3,16 @@
  * Pure: a resolver is built once from the file universe (vault-relative paths with '/'),
  * and answers which file a wikilink or Markdown link names from a given source note.
  * Every key comparison uses `linkKey` (NFC + lower case).
+ *
+ * The `.labnote` fallback (a deliberate departure from Obsidian): the app names its notes `x.labnote.md`, whose
+ * Obsidian basename is `x.labnote`, so a hand-typed `[[x]]` would be unresolved under Obsidian's rules and a click
+ * would create a duplicate `x.md`. When a wikilink, or a Markdown link, does not resolve under the normal rules and
+ * the last segment of its path neither ends in `.labnote` or `.md` nor names an image or attachment
+ * (`labnoteFallback`), the same lookup runs again with `.labnote` appended, with the same tie-break rules. An exact
+ * match therefore always wins (`[[a]]` with both a.md and a.labnote.md is a.md). `linktextFor` still writes the
+ * Obsidian-compatible `x.labnote`, so every link the app writes keeps resolving in Obsidian and in the plugin.
+ * `resolveWikiStrict` and `resolveMdStrict` answer by Obsidian's rules alone (the rename rewriter uses them to tell
+ * a link that resolves only through the fallback apart, and keeps it in its short form).
  */
 import { IMAGE_EXTS as IMAGE_EXT_LIST } from '../editor/live/imagePath';
 
@@ -62,6 +72,37 @@ export function basenameKey(path: string): string {
   return linkKey(wikiBasename(path));
 }
 
+const LABNOTE_SUFFIX = /\.labnote$/i;
+
+/**
+ * The link path with `.labnote` appended, or null when the fallback does not apply: an empty last segment, one that
+ * already ends in `.labnote` or `.md`, or one with an image or attachment extension.
+ */
+export function labnoteFallback(linkpath: string): string | null {
+  const seg = lastSegment(linkpath);
+  if (seg.trim() === '' || seg === '.' || seg === '..' || LABNOTE_SUFFIX.test(seg) || /\.md$/i.test(seg)) return null;
+  const ext = extOf(seg);
+  if (IMAGE_EXTS.has(ext) || ATTACHMENT_EXTS.has(ext)) return null;
+  return `${linkpath}.labnote`;
+}
+
+/** `x.labnote` -> `x` (case-insensitive); anything else unchanged. For display and for the short link form. */
+export function stripLabnote(name: string): string {
+  return LABNOTE_SUFFIX.test(name) ? name.slice(0, -'.labnote'.length) : name;
+}
+
+/**
+ * True when a folderless link path names the note at `notePath` itself: its basename, or its basename through the
+ * `.labnote` fallback. For self links before the note is in the file list.
+ */
+export function isSelfLinkName(linkpath: string, notePath: string): boolean {
+  if (notePath === '' || linkpath.includes('/')) return false;
+  const key = basenameKey(notePath);
+  if (linkKey(linkpath) === key) return true;
+  const fb = labnoteFallback(linkpath);
+  return fb !== null && linkKey(fb) === key;
+}
+
 /** Characters Obsidian forbids in linkable names. */
 export function hasUnlinkableChars(name: string): boolean {
   return /[#|^[\]]/.test(name);
@@ -71,8 +112,14 @@ export interface Resolver {
   readonly files: readonly string[];
   has(path: string): boolean;
   canonical(path: string): string | undefined;
+  /** Obsidian's rules, then the `.labnote` fallback. */
   resolveWiki(linkpath: string, sourcePath: string): string | null;
+  /** Obsidian's rules, then the `.labnote` fallback. */
   resolveMd(href: string, sourcePath: string): string | null;
+  /** Obsidian's rules only. */
+  resolveWikiStrict(linkpath: string, sourcePath: string): string | null;
+  /** Obsidian's rules only. */
+  resolveMdStrict(href: string, sourcePath: string): string | null;
   linktextFor(target: string, sourcePath: string): string | null;
   isUnknownTarget(linkpath: string): boolean;
 }
@@ -159,7 +206,7 @@ export function createResolver(files: readonly string[]): Resolver {
     return null;
   };
 
-  const resolveWiki = (linkpath: string, sourcePath: string): string | null => {
+  const resolveWikiStrict = (linkpath: string, sourcePath: string): string | null => {
     const lp = linkpath.trim().normalize('NFC');
     if (lp === '') return byKey.get(linkKey(sourcePath)) ?? null;
     if (lp.includes('\\') || lp.includes(':')) return null;
@@ -177,7 +224,15 @@ export function createResolver(files: readonly string[]): Resolver {
     return byBasename(lp, sourcePath);
   };
 
-  const resolveMd = (href: string, sourcePath: string): string | null => {
+  const resolveWiki = (linkpath: string, sourcePath: string): string | null => {
+    const hit = resolveWikiStrict(linkpath, sourcePath);
+    if (hit !== null) return hit;
+    const fb = labnoteFallback(linkpath.trim());
+    return fb === null ? null : resolveWikiStrict(fb, sourcePath);
+  };
+
+  /** The decoded, NFC-normalised path of a Markdown href (no '#…', no '<>'), or null when it names no file. */
+  const mdPath = (href: string): string | null => {
     let h = href.trim();
     if (h.startsWith('<') && h.endsWith('>')) h = h.slice(1, -1).trim();
     if (h === '' || h.startsWith('#')) return null;
@@ -192,6 +247,10 @@ export function createResolver(files: readonly string[]): Resolver {
     }
     decoded = decoded.normalize('NFC');
     if (decoded === '' || decoded.includes('\\')) return null;
+    return decoded;
+  };
+
+  const resolveDecoded = (decoded: string, sourcePath: string): string | null => {
     const joined = decoded.startsWith('/')
       ? joinPath('', decoded)
       : joinPath(dirOf(sourcePath), decoded);
@@ -201,6 +260,20 @@ export function createResolver(files: readonly string[]): Resolver {
     }
     if (!decoded.includes('/')) return byBasename(decoded, sourcePath);
     return null;
+  };
+
+  const resolveMdStrict = (href: string, sourcePath: string): string | null => {
+    const decoded = mdPath(href);
+    return decoded === null ? null : resolveDecoded(decoded, sourcePath);
+  };
+
+  const resolveMd = (href: string, sourcePath: string): string | null => {
+    const decoded = mdPath(href);
+    if (decoded === null) return null;
+    const hit = resolveDecoded(decoded, sourcePath);
+    if (hit !== null) return hit;
+    const fb = labnoteFallback(decoded);
+    return fb === null ? null : resolveDecoded(fb, sourcePath);
   };
 
   const linktextFor = (target: string, sourcePath: string): string | null => {
@@ -228,6 +301,8 @@ export function createResolver(files: readonly string[]): Resolver {
     canonical: (path) => byKey.get(linkKey(path)),
     resolveWiki,
     resolveMd,
+    resolveWikiStrict,
+    resolveMdStrict,
     linktextFor,
     isUnknownTarget,
   };
