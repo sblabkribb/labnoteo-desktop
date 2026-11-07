@@ -302,6 +302,22 @@ describe('renameEntry with links', () => {
     expect(journalNotes(h)).toEqual([{ n: 0, path: 'notes/n.md', before: '[[Home]] edited', after: '[[Start]] edited', status: 'ok' }]);
   });
 
+  it('Retry after a failed save of an open referrer does not rewrite its hijack-pinned links again', async () => {
+    // a.md -> b.md while other/b.md exists: [[a]] becomes [[b]] and the old [[b]] is pinned to [[other/b]].
+    const h = host({ 'a.md': '', 'other/b.md': '', 'x.md': '[[a]] [[b]]' });
+    const m = await h.mount('x.md');
+    h.setActive(undefined);
+    const v = m.view();
+    h.answer.prompt('b'); h.answer.pick('update');
+    h.answer.confirm(true); // Retry
+    h.vault.failNext('vault_modify', 'io'); // the open note's flush after the rewrite
+    await renameEntry(h.ctx, 'a.md', false, entries(h));
+    expect(h.asked.confirm[0].message).toBe(t('links.rename.partial', `x.md (${t('links.reason.notSaved')})`));
+    expect(v.state.doc.toString()).toBe('[[b]] [[other/b]]');
+    expect(h.vault.files()['x.md']).toBe('[[b]] [[other/b]]');
+    expect(journalNotes(h)).toEqual([{ n: 0, path: 'x.md', before: '[[a]] [[b]]', after: '[[b]] [[other/b]]', status: 'ok' }]);
+  });
+
   it('commands wait while links are being updated', async () => {
     const gate = deferred<void>();
     const h = host({ 'Home.md': '', 'notes/n.md': '[[Home]]' }, {}, {

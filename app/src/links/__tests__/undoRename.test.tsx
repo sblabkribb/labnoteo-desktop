@@ -113,6 +113,35 @@ describe('recoverJournal', () => {
     expect(h.vault.files()['notes/n.md']).toBe('[[Start]]');
     expect(journalNotes(h)).toEqual([{ n: 0, path: 'notes/n.md', before: '[[Home]]', after: '[[Start]]', status: 'ok' }]);
   });
+  it("recovery leaves an edited note that already holds a hijack rewrite alone and reports it", async () => {
+    // a.md -> b.md with other/b.md present; x.md was rewritten, then edited, then the app died before 'ok'.
+    const h = createHost({ 'b.md': '', 'other/b.md': '', 'x.md': '[[b]] [[other/b]] more' });
+    await seed(h, { id: '1', from: 'a.md', to: 'b.md', isDir: false, moves: [{ from: 'a.md', to: 'b.md' }], status: 'renamed', planned: [{ before: 'x.md', after: 'x.md' }], undoable: true }, [
+      { n: 0, path: 'x.md', before: '[[a]] [[b]]', after: '[[b]] [[other/b]]', status: 'writing' },
+    ]);
+    h.answer.confirm(true);
+    await recoverJournal(h.ctx, h.ctx.links!.journal);
+    expect(h.vault.files()['x.md']).toBe('[[b]] [[other/b]] more');
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('links.rename.partial', `x.md (${t('links.reason.ambiguous')})`) });
+  });
+  it("recovery of a 'writing' record without texts leaves an ambiguous note alone and reports it", async () => {
+    const h = createHost({ 'b.md': '', 'other/b.md': '', 'x.md': '[[b]] [[other/b]]' });
+    await seed(h, { ...{ id: '1', from: 'a.md', to: 'b.md', isDir: false, moves: [{ from: 'a.md', to: 'b.md' }], status: 'renamed', planned: [{ before: 'x.md', after: 'x.md' }], undoable: true }, undoable: false }, [{ n: 0, path: 'x.md', status: 'writing' }]);
+    h.answer.confirm(true);
+    await recoverJournal(h.ctx, h.ctx.links!.journal);
+    expect(h.vault.files()['x.md']).toBe('[[b]] [[other/b]]');
+    expect(h.notes.at(-1)).toEqual({ kind: 'warn', message: t('links.rename.partial', `x.md (${t('links.reason.ambiguous')})`) });
+  });
+  it("recovery of a 'writing' record still holding its before text rewrites it, hijack pins included", async () => {
+    const h = createHost({ 'b.md': '', 'other/b.md': '', 'x.md': '[[a]] [[b]]' });
+    await seed(h, { id: '1', from: 'a.md', to: 'b.md', isDir: false, moves: [{ from: 'a.md', to: 'b.md' }], status: 'renamed', planned: [{ before: 'x.md', after: 'x.md' }], undoable: true }, [
+      { n: 0, path: 'x.md', before: '[[a]] [[b]]', after: '[[b]] [[other/b]]', status: 'writing' },
+    ]);
+    h.answer.confirm(true);
+    await recoverJournal(h.ctx, h.ctx.links!.journal);
+    expect(h.vault.files()['x.md']).toBe('[[b]] [[other/b]]');
+    expect(journalNotes(h)).toEqual([{ n: 0, path: 'x.md', before: '[[a]] [[b]]', after: '[[b]] [[other/b]]', status: 'ok' }]);
+  });
   it('recovery clears a plan whose rename never happened', async () => {
     const h = createHost({ 'Home.md': '', 'notes/n.md': '[[Home]]' });
     await seed(h, { id: '1', from: 'Home.md', to: 'Start.md', isDir: false, moves: [{ from: 'Home.md', to: 'Start.md' }], status: 'planned', planned: [{ before: 'notes/n.md', after: 'notes/n.md' }], undoable: true });

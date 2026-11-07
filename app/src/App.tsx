@@ -165,7 +165,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   }).current;
   const openFile = navFns.navigate;
   // Alt+←/→ 는 편집기 밖에서도 듣는다(편집기의 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 기본 keymap 은
-  // Alt+←/→ 를 쓰지 않는다). 마우스 단추는 mousedown 의 기본 동작(브라우저의 뒤로 가기)을 막고 mouseup 에서 간다.
+  // Alt+←/→ 를 cursorSyntaxLeft/Right 에 묶지만 Editor.tsx 가 그 둘을 뺀다). 마우스 단추는 mousedown 의 기본 동작(브라우저의 뒤로 가기)을 막고 mouseup 에서 간다.
   useEffect(() => {
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       const dir = navKey(e);

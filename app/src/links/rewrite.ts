@@ -158,13 +158,19 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
 export interface DetailedRewriteResult extends RewriteResult {
   /** Wikilinks and embeds among the changed and the unsafe links (D11: a bad new name refuses only these). */
   wiki: number;
+  /**
+   * Changed links whose target did not move but would be taken over by the new name (the hijack guard pins them).
+   * Only these make a second pass over already rewritten text harmful: a rewritten link that names the moved note
+   * reads, in the before-universe, as a link to the note it would hijack, and would be pinned there.
+   */
+  pinned: number;
 }
 
 /** `rewriteLinks`, also counting the wikilinks and embeds it changed or could not write. */
 export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAfter: string, ctx: RewriteContext): DetailedRewriteResult {
   const doc = parseRaw(sourceBefore, raw);
   const text = doc.text;
-  let edits: { from: number; to: number; insert: string; kind: LinkKind }[] = [];
+  let edits: { from: number; to: number; insert: string; kind: LinkKind; pin: boolean }[] = [];
   let unsafe = 0;
   let wikiUnsafe = 0;
   const isWikiKind = (k: LinkKind): boolean => k === 'wiki' || k === 'embed';
@@ -208,7 +214,7 @@ export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAf
       if (isWiki) wikiUnsafe++;
       continue;
     }
-    if (insert !== oldSlice) edits.push({ from: link.pathFrom, to: link.pathTo, insert, kind: link.kind });
+    if (insert !== oldSlice) edits.push({ from: link.pathFrom, to: link.pathTo, insert, kind: link.kind, pin: movedTo === undefined });
   }
 
   // Parse check: every edited range must still be a link of the same kind (a '`' can open a code span, for
@@ -216,7 +222,7 @@ export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAf
   // then the rest is checked again.
   edits.sort((x, y) => x.from - y.from);
   for (;;) {
-    if (edits.length === 0) return { text: raw, changed: 0, unsafe, wiki: wikiUnsafe };
+    if (edits.length === 0) return { text: raw, changed: 0, unsafe, wiki: wikiUnsafe, pinned: 0 };
     const out = applyEdits(text, edits);
     const found = new Set(extractLinks(out).map((l) => `${l.kind}:${l.pathFrom}:${l.pathTo}`));
     let shift = 0;
@@ -228,8 +234,9 @@ export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAf
     if (bad < 0) {
       // Backstop: an edit must never make an untouched link disappear. If one did, write nothing.
       const wikiEdits = edits.filter((e) => isWikiKind(e.kind)).length;
-      if (found.size !== links.length) return { text: raw, changed: 0, unsafe: unsafe + edits.length, wiki: wikiUnsafe + wikiEdits };
-      return { text: toRaw(doc, out), changed: edits.length, unsafe, wiki: wikiUnsafe + wikiEdits };
+      if (found.size !== links.length) return { text: raw, changed: 0, unsafe: unsafe + edits.length, wiki: wikiUnsafe + wikiEdits, pinned: 0 };
+      const pinned = edits.filter((e) => e.pin).length;
+      return { text: toRaw(doc, out), changed: edits.length, unsafe, wiki: wikiUnsafe + wikiEdits, pinned };
     }
     unsafe++;
     if (isWikiKind(edits[bad].kind)) wikiUnsafe++;

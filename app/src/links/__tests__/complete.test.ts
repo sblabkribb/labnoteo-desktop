@@ -92,6 +92,27 @@ describe('wikilink completion', () => {
     expect(out.split('\n')[2].split(/(?<!\\)\|/).slice(1)).toEqual([' x ', ' [[pcr\\|중합]]']);
   });
 
+  it('a title or alias holding a pipe or ]] is not written as the alias', async () => {
+    const odd = wikiCompletionSource({
+      ...deps,
+      snapshot: () => ({
+        files,
+        aliases,
+        titles: new Map([['labnote/061_a/README.labnote.md', 'PCR | 최적화'], ['labnote/062_b/README.labnote.md', '062 ]] 전기영동']]),
+        resolver: createResolver(files),
+      }),
+    });
+    const run = async (doc: string) => {
+      const state = EditorState.create({ doc, extensions: [labnoteMarkdown()] });
+      return (await odd(new CompletionContext(state, doc.length, false, { composing: false } as unknown as EditorView))) as CompletionResult;
+    };
+    const t1 = await run('[[최적화');
+    expect(applied('[[최적화', t1.options[0]).doc).toBe('[[README.labnote]]');
+    const doc = '| a |\n|---|\n| [[최적화';
+    expect(applied(doc, (await run(doc)).options[0]).doc).toBe('| a |\n|---|\n| [[README.labnote]]');
+    expect(applied('[[전기영동', (await run('[[전기영동')).options[0]).doc).toBe('[[labnote/062_b/README.labnote]]');
+  });
+
   it('images only after ![[', async () => {
     expect((await complete('[[gel'))!.options.map((o) => o.label)).not.toContain('gel.png');
     const r = (await complete('![[gel'))!;

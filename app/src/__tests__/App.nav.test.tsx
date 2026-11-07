@@ -78,6 +78,24 @@ describe('navigation history', () => {
     await docIs('# H');
   });
 
+  it('Alt+ArrowLeft and Alt+ArrowRight typed in the editor with the caret mid-document navigate', async () => {
+    installFakeVault({ 'a.md': 'alpha beta gamma', 'b.md': 'delta epsilon zeta' });
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await userEvent.click(await screen.findByText('a.md'));
+    await docIs('alpha beta gamma');
+    await userEvent.click(await screen.findByText('b.md'));
+    await docIs('delta epsilon zeta');
+    const v = await editorView();
+    v.dispatch({ selection: { anchor: 8 } });
+    fireEvent.keyDown(v.contentDOM, { key: 'ArrowLeft', altKey: true });
+    await docIs('alpha beta gamma');
+    const a = await editorView();
+    a.dispatch({ selection: { anchor: 8 } });
+    fireEvent.keyDown(a.contentDOM, { key: 'ArrowRight', altKey: true });
+    await docIs('delta epsilon zeta');
+  });
+
   it('a tree open is history too, and a note the watcher reports removed is skipped by back', async () => {
     const vault = installFakeVault({ 'a.md': 'A', 'b.md': 'B', 'c.md': 'C' });
     render(<App />);

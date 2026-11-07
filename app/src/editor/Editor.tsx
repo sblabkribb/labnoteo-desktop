@@ -35,6 +35,9 @@ import { captureFocus } from '../ui/returnFocus';
 import { extractOutline, type OutlineItem } from './outline/extract';
 import { clearOutline, publishCursor, publishOutline } from './outline/outlineStore';
 
+/** 앱의 뒤로·앞으로 가기 키. CodeMirror 기본 keymap 에서 뺀다. */
+const NAV_KEYS = new Set(['Alt-ArrowLeft', 'Alt-ArrowRight']);
+
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 /** 마지막 입력 뒤 이만큼 조용하면 저장한다. */
@@ -519,7 +522,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 목록 키(Enter 이어 쓰기, Backspace, Tab/Shift+Tab 들이기·내밀기): 두 모드 모두에서 듣도록 모드 칸 밖에 둔다.
       // 마크다운 언어의 자체 keymap 은 꺼 두었다(markdownSyntax.ts): Enter 처리기는 이것 하나다. 조합 중에는 모두 쉰다.
       Prec.high(keymap.of(LIST_KEYS)),
-      keymap.of([...defaultKeymap, ...historyKeymap]),
+      // 기본 keymap 의 Alt+←/→(cursorSyntaxLeft/Right)는 뺀다: 그 키는 앱의 뒤로·앞으로 가기다(App.tsx 의 navKey).
+      // 남겨 두면 커서를 옮기며 preventDefault 해 window 의 탐색 처리기가 건너뛴다.
+      keymap.of([...defaultKeymap.filter((b) => !NAV_KEYS.has(b.key ?? '')), ...historyKeymap]),
       labnoteMarkdown(),
       // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었다(markdownSyntax.ts).
       // `[[` 뒤의 노트·별칭·제목·(`![[` 뒤) 이미지 완성. 조합 중에도 목록은 열려 거르지만, 받아들이기는 조합이 끝난 뒤에만 한다

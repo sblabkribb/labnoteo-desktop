@@ -102,7 +102,10 @@ function applyRow(row: Row): Completion['apply'] {
     const { state } = view;
     const end = to + (state.doc.sliceString(to, to + 2) === ']]' ? 2 : 0);
     const sep = inTable(state, from, view) ? '\\|' : '|';
-    const insert = `${row.linktext}${row.alias !== undefined ? `${sep}${row.alias}` : ''}]]`;
+    // A title or alias is free text: one holding a pipe (a table cell edge), `]]` (the link's end) or a line break would
+    // break the link, so the link is written without it.
+    const alias = row.alias !== undefined && !/[|\r\n]|\]\]/.test(row.alias) ? row.alias : undefined;
+    const insert = `${row.linktext}${alias !== undefined ? `${sep}${alias}` : ''}]]`;
     view.dispatch({
       changes: { from, to: end, insert },
       selection: { anchor: from + insert.length },

@@ -14,13 +14,14 @@ import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { ModifyConflictError } from '../fs/tauriLabnoteFs';
 import type { CommandContext } from '../labnote/commands/context';
 import { NoteBusyError, NoteGoneError, NoteSaveError } from '../labnote/noteErrors';
-import { processNote } from '../labnote/openNotes';
+import { openNote, processNote } from '../labnote/openNotes';
 import type { JournalStore } from './journal';
 import type { RenamePlan } from './planRename';
 import { linkKey } from './resolve';
-import { rewriteContext, rewriteLinks, type Move, type RewriteContext } from './rewrite';
+import { rewriteContext, rewriteLinksDetailed, type Move, type RewriteContext } from './rewrite';
 
-export type FailReason = 'busy' | 'notSaved' | 'conflict' | 'gone' | 'unsafeName' | 'io';
+/** `ambiguous`: a replayed note that may already hold the rewrite and whose rewrite would pin a link (left alone). */
+export type FailReason = 'busy' | 'notSaved' | 'conflict' | 'gone' | 'unsafeName' | 'ambiguous' | 'io';
 
 export interface RenameReport {
   renamed: boolean;
@@ -102,51 +103,89 @@ export function reasonOf(e: unknown): FailReason {
 const lower = (p: string) => p.toLowerCase();
 const isUnder = (p: string, base: string) => lower(p) === lower(base) || lower(p).startsWith(`${lower(base)}/`);
 
-/** Rewrites the plan's notes with the given indices, journalling each one; never stops at a failure. */
+/**
+ * Rewrites the plan's notes with the given indices, journalling each one; never stops at a failure.
+ * `replay` (Retry and recovery) means a note may already hold this rename's rewrite: the rewrite is not idempotent
+ * for hijack-pinned links (D3), so a replayed note is rewritten only from text that provably predates the rename
+ * (its recorded `before`). A note that still holds its recorded `after` is only saved; a note whose text is neither
+ * and whose rewrite would pin a link is left alone and reported `ambiguous`.
+ */
 async function writeNotes(
   ctx: CommandContext,
   plan: RenamePlan,
   indices: readonly number[],
   journal: JournalStore,
-  restore?: ReadonlyMap<string, { before: string; after: string }>,
+  opts: { restore?: ReadonlyMap<string, { before: string; after: string }>; replay?: boolean } = {},
 ): Promise<RenameReport> {
   const rctx: RewriteContext = rewriteContext(plan.files, plan.moves);
   const report: RenameReport = { renamed: true, updated: [], failed: [], restored: [] };
-  const backs = new Map([...(restore ?? [])].map(([p, v]) => [linkKey(p), v]));
+  const backs = new Map([...(opts.restore ?? [])].map(([p, v]) => [linkKey(p), v]));
   for (const n of indices) {
     const note = plan.notes[n];
     const path = note.after;
     const back = backs.get(linkKey(note.before));
-    const rewrite = (text: string): { text: string; unsafe: number; restored: boolean } => {
-      if (back && text === back.after) return { text: back.before, unsafe: 0, restored: true };
-      const r = rewriteLinks(text, note.before, note.after, rctx);
-      return { text: r.text, unsafe: r.unsafe, restored: false };
+    // What an earlier attempt of this same rename recorded for the note (Retry, recovery).
+    const prior = opts.replay ? journal.current()?.notes.find((r) => r.n === n) : undefined;
+    const known = prior?.before !== undefined && prior.after !== undefined ? { before: prior.before, after: prior.after } : undefined;
+    interface Step {
+      text: string;
+      unsafe: number;
+      restored: boolean;
+      /** The note already holds this rename's rewrite: only save it. */
+      already: boolean;
+      ambiguous: boolean;
+      /** The text before this rename's rewrite, when it is known. */
+      origin?: string;
+    }
+    const rewrite = (text: string): Step => {
+      const step = { unsafe: 0, restored: false, already: false, ambiguous: false };
+      if (back && text === back.after) return { ...step, text: back.before, restored: true, origin: text };
+      if (known && text === known.after && known.after !== known.before) return { ...step, text, already: true, origin: known.before };
+      const r = rewriteLinksDetailed(text, note.before, note.after, rctx);
+      const provable = !opts.replay || text === known?.before;
+      if (!provable && r.pinned > 0) return { ...step, text, ambiguous: true };
+      return { ...step, text: r.text, unsafe: r.unsafe, origin: provable ? text : undefined };
     };
 
-    // The planned texts, from a fresh read (a failed read is reported by processNote below).
+    // The planned texts, from a fresh read (a failed read is reported by processNote below). A replay keeps the
+    // texts an earlier attempt recorded: its `before` is the one known to predate the rename.
     let planned: { before?: string; after?: string } = {};
-    try {
-      const text = parseRaw(path, await ctx.host.fs.read(path)).text;
-      planned = { before: text, after: rewrite(text).text };
-    } catch {
-      // processNote reads again and reports why
+    if (known) planned = known;
+    else {
+      try {
+        const text = parseRaw(path, await ctx.host.fs.read(path)).text;
+        const step = rewrite(text);
+        if (step.origin !== undefined) planned = { before: text, after: step.text };
+      } catch {
+        // processNote reads again and reports why
+      }
     }
     await journal.note({ n, path, ...planned, status: 'writing' });
 
-    let last: { before: string; after: string; unsafe: number; restored: boolean } | undefined;
+    let last: (Step & { before: string }) | undefined;
     try {
       await processNote(ctx.host.fs, path, (text) => {
-        const r = rewrite(text);
-        last = { before: text, after: r.text, unsafe: r.unsafe, restored: r.restored }; // the last call is the text that was written
-        return r.text;
+        last = { ...rewrite(text), before: text }; // the last call is the text that was written
+        return last.text;
       });
+      // Already rewritten in an open note whose save failed: save it now (processNote writes nothing unchanged).
+      const handle = last?.already ? openNote(path) : undefined;
+      if (handle && !(await handle.flush())) throw new NoteSaveError(path);
     } catch (e) {
       const reason = reasonOf(e);
       report.failed.push({ path, reason });
-      await journal.note({ n, path, ...planned, status: 'failed', reason });
+      // The texts of what this attempt left in an open note's buffer, so a Retry recognises it (D15).
+      const texts = last && last.origin !== undefined ? { before: last.origin, after: last.text } : planned;
+      await journal.note({ n, path, ...texts, status: 'failed', reason });
       continue;
     }
-    const texts = last ? { before: last.before, after: last.after } : {};
+    if (last?.ambiguous) {
+      report.failed.push({ path, reason: 'ambiguous' });
+      await journal.note({ n, path, ...planned, status: 'failed', reason: 'ambiguous' });
+      continue;
+    }
+    // Texts only when the before text is known to predate the rename: Undo writes it back verbatim.
+    const texts = last && last.origin !== undefined ? { before: last.origin, after: last.text } : {};
     if (last && last.unsafe > 0) {
       // the safe links in it were written; Retry cannot fix the others
       report.failed.push({ path, reason: 'unsafeName' });
@@ -202,7 +241,7 @@ export async function renameWithLinks(
     renameEvents.emit(plan.moves);
     await journal.setStatus('renamed');
 
-    const report = await writeNotes(ctx, plan, plan.notes.map((_, i) => i), journal, opts.restore);
+    const report = await writeNotes(ctx, plan, plan.notes.map((_, i) => i), journal, { restore: opts.restore });
 
     if (wasOpen) await ctx.openFile(plan.to + active.slice(plan.from.length));
     await journal.setStatus('done');
@@ -210,7 +249,7 @@ export async function renameWithLinks(
   });
 }
 
-/** Rewrites only the planned notes at `paths` (their post-rename paths) from fresh text: Retry and recovery. */
+/** Rewrites only the planned notes at `paths` (their post-rename paths) from fresh text: Retry and recovery (a replay). */
 export async function rewritePlanned(
   ctx: CommandContext,
   plan: RenamePlan,
@@ -220,5 +259,5 @@ export async function rewritePlanned(
 ): Promise<RenameReport> {
   const wanted = new Set(paths.map(linkKey));
   const indices = plan.notes.flatMap((p, i) => (wanted.has(linkKey(p.after)) ? [i] : []));
-  return locked(session, () => writeNotes(ctx, plan, indices, journal));
+  return locked(session, () => writeNotes(ctx, plan, indices, journal, { replay: true }));
 }

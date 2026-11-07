@@ -219,6 +219,7 @@ const REASON_TEXT: Record<FailReason, () => string> = {
   conflict: () => t('links.reason.conflict'),
   gone: () => t('links.reason.gone'),
   unsafeName: () => t('links.reason.unsafeName'),
+  ambiguous: () => t('links.reason.ambiguous'),
   io: () => t('links.reason.io'),
 };
 
@@ -271,7 +272,8 @@ async function plainRename(ctx: CommandContext, path: string, to: string, moves:
 
 /**
  * 이름 바꾸기 뒤 링크 고침의 결과를 알린다(D14 7). 실패가 있으면 노트마다 이유를 보이고, "다시 시도"를 고르는 동안
- * 실패한 노트만 지금 글에서 다시 고친다. 새 이름으로 쓸 수 없는 링크(unsafeName)는 다시 해도 고쳐지지 않는다.
+ * 실패한 노트만 지금 글에서 다시 고친다. 새 이름으로 쓸 수 없는 링크(unsafeName)와 이미 고쳤는지 알 수 없는 노트(ambiguous)는
+ * 다시 해도 고쳐지지 않는다.
  */
 async function reportLinkUpdates(
   ctx: CommandContext,
@@ -288,8 +290,9 @@ async function reportLinkUpdates(
       return;
     }
     const message = t('links.rename.partial', failureLines(report.failed));
-    const unfixable = report.failed.filter((f) => f.reason === 'unsafeName');
-    const retryable = report.failed.filter((f) => f.reason !== 'unsafeName').map((f) => f.path);
+    const fixable = (f: RenameReport['failed'][number]) => f.reason !== 'unsafeName' && f.reason !== 'ambiguous';
+    const unfixable = report.failed.filter((f) => !fixable(f));
+    const retryable = report.failed.filter(fixable).map((f) => f.path);
     if (retryable.length === 0) {
       host.notify('warn', message);
       return;

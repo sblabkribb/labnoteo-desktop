@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyMoves, invertMoves, movesFor, rewriteContext, rewriteLinks } from '../rewrite';
+import { applyMoves, invertMoves, movesFor, rewriteContext, rewriteLinks, rewriteLinksDetailed } from '../rewrite';
 
 const FILES = ['Home.md', 'notes/PCR 조건.md', 'notes/sub/PCR 조건.md', 'labnote/061_a/README.labnote.md', 'labnote/061_a/001_prep.labnote.md', 'labnote/062_b/README.labnote.md', 'images/gel.png', 'other/b.md', 'a.md', 'notes/n.md'];
 const ctxFor = (from: string, to: string, isDir = false, files = FILES) => rewriteContext(files, movesFor(from, to, isDir, files));
@@ -44,6 +44,15 @@ describe('rewriteLinks', () => {
     const out = rewriteLinks('[[a]] [[b]]', 'x.md', 'x.md', ctxFor('a.md', 'b.md'));
     expect(out.text).toBe('[[b]] [[other/b]]');
     expect(out.changed).toBe(2);
+  });
+  it('counts the hijack pins: a second pass over rewritten text would pin again (not idempotent)', () => {
+    const ctx = ctxFor('a.md', 'b.md');
+    const first = rewriteLinksDetailed('[[a]] [[b]]', 'x.md', 'x.md', ctx);
+    expect(first.pinned).toBe(1);
+    // The rewritten [[b]] now names the moved note, but the before-universe reads it as other/b: the pass is ambiguous.
+    const second = rewriteLinksDetailed(first.text, 'x.md', 'x.md', ctx);
+    expect(second.pinned).toBe(1);
+    expect(rewriteLinksDetailed('[[a]] [[x]]', 'x.md', 'x.md', ctx).pinned).toBe(0);
   });
   it('a root target shadowed in the source folder gets the rooted form', () => {
     const files = ['Home.md', 'notes/Start.md', 'notes/x.md'];
