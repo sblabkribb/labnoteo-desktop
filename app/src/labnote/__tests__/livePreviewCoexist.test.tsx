@@ -14,6 +14,13 @@ import { runCommand } from '../commands/runCommand';
 import { syncWorkflowChecklist } from '../commands/syncChecklist';
 import { insertUnitOp } from '../commands/unitOp';
 import { createTestHost, type TestHost } from './testHost';
+import { completionStatus } from '@codemirror/autocomplete';
+import { toggleMode } from '../../editor/live/mode';
+import type { OpenTarget } from '../../editor/live/links';
+import { setComposing } from '../../editor/__tests__/composing';
+import { linkIndex } from '../../links/linkIndex';
+import { createFakeVault } from '../../__tests__/fakeVault';
+import { mountEditor } from './editorHarness';
 
 // Node 의 자체 localStorage 가 jsdom 의 것을 가리므로 메모리 저장소를 꽂는다(mode.test.tsx 와 같다).
 function memoryStorage(): Storage {
@@ -168,5 +175,67 @@ describe('라이브 미리보기와 표, 노트 명령의 공존', () => {
     await act(() => Promise.resolve());
     expect(getMode()).toBe('source');
     expect(m.shadow.activeElement).toBe(m.view().contentDOM);
+  });
+});
+
+describe('links coexist with IME, the Properties grid and source mode (SP4 Task 27)', () => {
+  afterEach(() => linkIndex.clear());
+
+  it('composition over a wikilink survives an index refresh', async () => {
+    linkIndex.clear(); linkIndex.setFiles(['n.md']); linkIndex.markReady();
+    const m = mountEditor(createFakeVault({ 'n.md': '[[Ho\nx' }), 'n.md');
+    await m.loaded();
+    const v = m.view();
+    v.dispatch({ selection: { anchor: 4 } });
+    const spy = vi.spyOn(v, 'dispatch');
+    setComposing(v, true);
+    v.dispatch({ changes: { from: 4, insert: 'm' }, selection: { anchor: 5 }, userEvent: 'input.type.compose' });
+    linkIndex.addFiles(['Hom.md']); // a refresh lands mid-composition
+    await Promise.resolve();
+    expect(spy.mock.calls.filter(([s]) => s && 'effects' in (s as object)).length).toBe(0); // no reconfigure while composing
+    setComposing(v, false);
+    v.dispatch({ changes: { from: 5, insert: ']]' }, selection: { anchor: 7 } });
+    await Promise.resolve();
+    expect(v.state.doc.toString()).toBe('[[Hom]]\nx');
+    expect(spy.mock.calls.filter(([s]) => s && 'effects' in (s as object)).length).toBe(1); // reconfigured exactly once, after compositionend
+    expect(v.contentDOM.querySelector('.lno-unresolved')).toBeNull();
+    m.unmount();
+  });
+
+  it('Properties grid Escape still reverts with autocompletion installed', async () => {
+    linkIndex.clear(); linkIndex.markReady();
+    const doc = '---\ntitle: a\nstatus: Planned\n---\nx';
+    const m = mountEditor(createFakeVault({ 'n.md': doc }), 'n.md');
+    await m.loaded();
+    const v = m.view();
+    const row = [...v.contentDOM.querySelectorAll<HTMLElement>('.lno-props-row')].find((r) => r.dataset.key === 'title')!;
+    const input = row.querySelector<HTMLInputElement>('input.lno-props-value')!;
+    input.value = '[[zz';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(input.value).toBe('a');
+    expect(completionStatus(v.state)).toBeNull();
+    expect(v.state.doc.toString()).toBe(doc);
+    m.unmount();
+  });
+
+  it('source mode: a plain click places the caret, Ctrl+click opens', async () => {
+    linkIndex.clear(); linkIndex.setFiles(['n.md', 'Home.md']); linkIndex.markReady();
+    const opened: OpenTarget[] = [];
+    const m = mountEditor(createFakeVault({ 'n.md': 'ab [[Home]]\nx', 'Home.md': '' }), 'n.md', { onOpenLink: (t) => opened.push(t) });
+    await m.loaded();
+    toggleMode(); // Ctrl+E
+    const v = m.view();
+    // jsdom has no layout, so posAtCoords cannot map clientX 30 into the line. Stand in for the browser: the
+    // pointer is over "[[Home]]" (document position 5).
+    vi.spyOn(v, 'posAtCoords').mockReturnValue(5);
+    const line = v.contentDOM.querySelector('.cm-line')!;
+    line.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientX: 30 }));
+    expect(opened).toEqual([]);
+    // the link handler did not consume the plain mousedown: CodeMirror started its own caret placement
+    expect(!!(v as unknown as { inputState: { mouseSelection: unknown } }).inputState.mouseSelection).toBe(true);
+    line.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ctrlKey: true, clientX: 30 }));
+    expect(opened).toEqual([{ kind: 'note', path: 'Home.md' }]);
+    toggleMode();
+    m.unmount();
   });
 });

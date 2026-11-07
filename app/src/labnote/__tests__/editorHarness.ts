@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { Editor, type EditorHandle } from '../../editor/Editor';
 import type { FakeVault } from '../../__tests__/fakeVault';
 import type { ListenFn } from '../../vault/useVaultEvents';
+import type { OpenTarget } from '../../editor/live/links';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -21,6 +22,7 @@ export function mountEditor(
     autosaveMs?: number;
     onContextMenu?: (e: MouseEvent, view: EditorView) => void;
     headerActions?: (busy: boolean) => ReactNode;
+    onOpenLink?: (t: OpenTarget) => void;
   } = {},
 ) {
   const ref = createRef<EditorHandle>();
@@ -36,6 +38,7 @@ export function mountEditor(
       initialReveal: extra.initialReveal,
       onContextMenu: extra.onContextMenu,
       headerActions: extra.headerActions,
+      onOpenLink: extra.onOpenLink,
     }),
   );
   const view = () => {
