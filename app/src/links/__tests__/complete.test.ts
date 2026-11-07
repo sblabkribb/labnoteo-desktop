@@ -10,7 +10,7 @@ import { subpathLine } from '../subpath';
 import type { OutlineItem } from '../../editor/outline/extract';
 import { COMPLETION_MAX, wikiCompletionSource, wikiContext, type WikiCompletionDeps } from '../complete';
 
-const files = ['Home.md', 'notes/PCR 조건.md', 'notes/sub/PCR 조건.md', 'notes/pcr.md', 'images/gel.png', 'labnote/061_a/README.labnote.md', 'labnote/062_b/README.labnote.md'];
+const files = ['Home.md', 'notes/PCR 조건.md', 'notes/sub/PCR 조건.md', 'notes/pcr.md', 'images/gel.png', 'labnote/061_a/README.labnote.md', 'labnote/062_b/README.labnote.md', 'labnote/061_a/001_prep.labnote.md'];
 const aliases = [{ path: 'notes/pcr.md', alias: '중합' }];
 const titles = new Map([['labnote/061_a/README.labnote.md', '061 PCR 최적화'], ['labnote/062_b/README.labnote.md', '062 전기영동']]);
 
@@ -79,8 +79,25 @@ describe('wikilink completion', () => {
 
   it('labnote titles are searchable, shown, and written as the alias', async () => {
     const r = (await complete('[[전기영동'))!;
-    expect(r.options[0]).toMatchObject({ label: 'README.labnote', detail: '062 전기영동 · labnote/062_b' });
+    expect(r.options[0]).toMatchObject({ label: 'README', detail: '062 전기영동 · labnote/062_b' });
     expect(applied('[[전기영동', r.options[0]).doc).toBe('[[labnote/062_b/README.labnote|062 전기영동]]');
+  });
+
+  it('labnote notes are listed without .labnote and inserted in the Obsidian form', async () => {
+    const r = (await complete('[[001_pr'))!;
+    expect(r.options[0]).toMatchObject({ label: '001_prep', detail: 'labnote/061_a' });
+    expect(applied('[[001_pr', r.options[0]).doc).toBe('[[001_prep.labnote]]');
+    // the full name still finds it
+    expect((await complete('[[001_prep.labnote'))!.options[0].label).toBe('001_prep');
+    // an alias row names its note without .labnote too
+    const withAlias = wikiCompletionSource({
+      ...deps,
+      snapshot: () => ({ files, aliases: [{ path: 'labnote/061_a/001_prep.labnote.md', alias: '미니프렙' }], titles, resolver: createResolver(files) }),
+    });
+    const state = EditorState.create({ doc: '[[미니', extensions: [labnoteMarkdown()] });
+    const a = (await withAlias(new CompletionContext(state, 4, false, { composing: false } as unknown as EditorView))) as CompletionResult;
+    expect(a.options[0]).toMatchObject({ label: '미니프렙', detail: '001_prep' });
+    expect(applied('[[미니', a.options[0]).doc).toBe('[[001_prep.labnote|미니프렙]]');
   });
 
   it('inside a table row the alias separator is escaped', async () => {

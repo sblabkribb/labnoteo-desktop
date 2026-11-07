@@ -98,6 +98,23 @@ describe('LinksPanel outgoing links', () => {
     expect(onOpen).toHaveBeenCalledWith('Home.md', undefined);
   });
 
+  it('names labnote notes without .labnote: fallback and Obsidian-form links, backlinks, and an unresolved x.labnote', async () => {
+    linkIndex.setFiles(['exp/n.labnote.md', 'exp/콜로니 PCR.labnote.md', 'exp/src.labnote.md']);
+    linkIndex.setNote('exp/n.labnote.md', '[[콜로니 PCR]] [[콜로니 PCR.labnote#H]] [[없는 노트.labnote]] [[dir/Gone.LABNOTE#x]]');
+    linkIndex.setNote('exp/src.labnote.md', '[[n]]');
+    linkIndex.markReady();
+    render(<LinksPanel activePath="exp/n.labnote.md" onOpen={onOpen} onCreate={onCreate} ctx={undefined} />);
+    const rows = [...document.querySelectorAll('.links-outgoing li')].map((li) => li.textContent);
+    expect(rows).toEqual(['콜로니 PCR', `없는 노트${t('links.unresolved')}`, `dir/Gone${t('links.unresolved')}`]);
+    // the create path is the link path itself
+    await userEvent.click(screen.getByText('없는 노트', { exact: false }));
+    expect(onCreate).toHaveBeenCalledWith('없는 노트.labnote');
+    await userEvent.click(screen.getByText('콜로니 PCR'));
+    expect(onOpen).toHaveBeenCalledWith('exp/콜로니 PCR.labnote.md', undefined);
+    // [[n]] reaches n.labnote.md through the fallback: a backlink headed "src"
+    expect([...document.querySelectorAll('.links-source-name')].map((e) => e.textContent)).toEqual(['src']);
+  });
+
   it('shows the outgoing count and none', () => {
     linkIndex.setFiles(['n.md']);
     linkIndex.setNote('n.md', 'no links');

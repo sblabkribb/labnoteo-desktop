@@ -40,6 +40,20 @@ import { linkResolution, linkStateOf } from './linkResolution';
  * 조합이 끝난 뒤 첫 갱신(pending)에서 다시 만든다.
  */
 
+const LABNOTE = '.labnote';
+
+/**
+ * Where a wikilink target's path (before the first '#') ends in `.labnote` (any case), or -1. A path that is only
+ * `.labnote` keeps it: hiding it would leave nothing to read.
+ */
+function labnoteSuffixAt(target: string): number {
+  const hash = target.indexOf('#');
+  const path = hash < 0 ? target : target.slice(0, hash);
+  const at = path.length - LABNOTE.length;
+  if (at <= 0 || path.slice(at).toLowerCase() !== LABNOTE || path[at - 1] === '/') return -1;
+  return at;
+}
+
 /** 숨김 표시 하나를 모든 곳에서 같이 쓴다. */
 const hide = Decoration.replace({});
 const headingLine = [1, 2, 3, 4, 5, 6].map((n) => Decoration.line({ class: `lno-h${n}` }));
@@ -194,6 +208,12 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     decos.push(mark.range(shown.from, shown.to));
     conceal(node.from, shown.from);
     conceal(shown.to, node.to);
+    // Without an alias, `[[x.labnote]]` reads `x` and `[[x.labnote#H]]` reads `x#H`: the app's notes are all
+    // `.labnote.md`, so the suffix says nothing. Only the drawing changes; the revealed link shows its source.
+    if (shown === target) {
+      const at = labnoteSuffixAt(state.sliceDoc(target.from, target.to));
+      if (at >= 0) conceal(target.from + at, target.from + at + LABNOTE.length);
+    }
   };
 
   /** 노트 경로(이미지 경로를 노트 기준으로 푼다). 이미지 로더가 없으면 보관함 맨 위의 노트로 친다. */

@@ -20,7 +20,7 @@ import { searchNotes } from '../search/indexApi';
 import type { ExtractedLink } from './extract';
 import { linkIndex, linkPathOf, type Backlink, type ResolvedLink } from './linkIndex';
 import { linkMention, MENTION_LIMIT, unlinkedMentions, type Mention, type MentionResult } from './mentions';
-import { linkKey } from './resolve';
+import { linkKey, stripLabnote } from './resolve';
 import { useLinkIndexState } from './useLinkIndexState';
 
 export interface LinksPanelProps {
@@ -47,7 +47,10 @@ function sourceName(path: string): string {
   return base.replace(/\.labnote\.md$/i, '').replace(/\.md$/i, '');
 }
 
-/** One outgoing row; a resolved target is labelled by its title or basename, as in the backlink headers. */
+/**
+ * One outgoing row; a resolved target is labelled by its title or basename, as in the backlink headers. An unresolved
+ * link is labelled by its link path without a trailing `.labnote` (`[[x.labnote]]` reads `x`).
+ */
 interface OutgoingRow {
   key: string;
   label: string;
@@ -66,7 +69,7 @@ function outgoingRows(resolved: readonly ResolvedLink[]): OutgoingRow[] {
     if (target === null && !linkpath) continue;
     if (seen.has(key)) continue;
     seen.add(key);
-    rows.push({ key, label: target !== null ? sourceName(target) : linkpath, target, linkpath, unknown });
+    rows.push({ key, label: target !== null ? sourceName(target) : stripLabnote(linkpath), target, linkpath, unknown });
   }
   return rows;
 }

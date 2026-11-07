@@ -16,7 +16,7 @@ import { rankPickItems } from '../labnote/port/rankPickItems';
 import { outerOf } from '../editor/table/cellEditor';
 import { extractOutline, type OutlineItem } from '../editor/outline/extract';
 import { sanitizeHeading } from './subpath';
-import { IMAGE_EXTS, wikiBasename, type Resolver } from './resolve';
+import { IMAGE_EXTS, stripLabnote, wikiBasename, type Resolver } from './resolve';
 
 export const COMPLETION_MAX = 50;
 
@@ -191,10 +191,15 @@ export function wikiCompletionSource(deps: WikiCompletionDeps): CompletionSource
       if (linktext === null) continue;
       const folder = folderOf(path);
       const title = isNote ? snap.titles.get(path) : undefined;
+      // Shown without `.labnote` (`x.labnote.md` reads `x`); the inserted text stays the Obsidian-compatible
+      // `x.labnote` (linktextFor), so the link resolves in Obsidian and the plugin too. The full name stays searchable.
+      const base = wikiBasename(path);
+      const label = stripLabnote(base);
+      const keywords = [...(title !== undefined ? [title] : []), ...(label !== base ? [base] : [])];
       items.push({
-        label: wikiBasename(path),
+        label,
         description: folder,
-        keywords: title !== undefined ? [title] : undefined,
+        keywords: keywords.length > 0 ? keywords : undefined,
         value: { linktext, alias: title },
       });
       details.push(title !== undefined ? `${title} · ${folder}` : folder);
@@ -202,8 +207,9 @@ export function wikiCompletionSource(deps: WikiCompletionDeps): CompletionSource
     for (const { path, alias } of snap.aliases) {
       const linktext = snap.resolver.linktextFor(path, source);
       if (linktext === null) continue;
-      items.push({ label: alias, description: wikiBasename(path), value: { linktext, alias } });
-      details.push(wikiBasename(path));
+      const name = stripLabnote(wikiBasename(path));
+      items.push({ label: alias, description: name, value: { linktext, alias } });
+      details.push(name);
     }
     const detailOf = new Map(items.map((item, i) => [item, details[i]]));
     const ranked = rankPickItems(items, ctx.query).slice(0, COMPLETION_MAX);

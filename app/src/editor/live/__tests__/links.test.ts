@@ -357,6 +357,21 @@ describe('라이브 미리보기: 링크와 유닛 오퍼레이션 제목', () =
     expect(opened).toEqual([{ kind: 'note', path: 'exp/b.labnote.md' }]);
   });
 
+  it('[[x.labnote]] reads x, [[a.labnote#H]] reads a#H; an alias, other names and a revealed link are unchanged', () => {
+    const doc = '[[콜로니 PCR.labnote]] [[a.labnote#H]] [[b.LabNote]] [[a.labnote|별칭]] [[c.labnote.md]] [[x.labnoteZ]]';
+    const v = view(`${doc}\nx`, doc.length + 2, { notePath: 'exp/n.labnote.md', files: ['exp/콜로니 PCR.labnote.md', 'exp/a.labnote.md'] });
+    expect(visibleText(v, 1)).toBe('콜로니 PCR a#H b 별칭 c.labnote.md x.labnoteZ');
+    expect(v.state.doc.line(1).text).toBe(doc);
+    const els = [...v.contentDOM.querySelectorAll('.lno-wikilink')];
+    expect(els[0].textContent).toBe('콜로니 PCR');
+    expect(els[0].classList.contains('lno-unresolved')).toBe(false);
+    plainClick(els[0]);
+    expect(opened).toEqual([{ kind: 'note', path: 'exp/콜로니 PCR.labnote.md' }]);
+    // the cursor touching a link reveals its whole source
+    v.dispatch({ selection: { anchor: 3 } });
+    expect(visibleText(v, 1)).toBe('[[콜로니 PCR.labnote]] a#H b 별칭 c.labnote.md x.labnoteZ');
+  });
+
   it('[[target]] shows the target, and the cursor touching it shows the source', () => {
     const v = view('a [[target]] b\nx', 16, exp);
     expect(visibleText(v, 1)).toBe('a target b');
