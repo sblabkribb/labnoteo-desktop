@@ -151,10 +151,23 @@ function mdText(oldPath: string, angled: boolean, want: string, sourceAfter: str
 }
 
 export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: string, ctx: RewriteContext): RewriteResult {
+  const { text, changed, unsafe } = rewriteLinksDetailed(raw, sourceBefore, sourceAfter, ctx);
+  return { text, changed, unsafe };
+}
+
+export interface DetailedRewriteResult extends RewriteResult {
+  /** Wikilinks and embeds among the changed and the unsafe links (D11: a bad new name refuses only these). */
+  wiki: number;
+}
+
+/** `rewriteLinks`, also counting the wikilinks and embeds it changed or could not write. */
+export function rewriteLinksDetailed(raw: string, sourceBefore: string, sourceAfter: string, ctx: RewriteContext): DetailedRewriteResult {
   const doc = parseRaw(sourceBefore, raw);
   const text = doc.text;
   let edits: { from: number; to: number; insert: string; kind: LinkKind }[] = [];
   let unsafe = 0;
+  let wikiUnsafe = 0;
+  const isWikiKind = (k: LinkKind): boolean => k === 'wiki' || k === 'embed';
 
   const links = extractLinks(text);
   for (const link of links) {
@@ -192,6 +205,7 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
     }
     if (insert === null) {
       unsafe++;
+      if (isWiki) wikiUnsafe++;
       continue;
     }
     if (insert !== oldSlice) edits.push({ from: link.pathFrom, to: link.pathTo, insert, kind: link.kind });
@@ -202,7 +216,7 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
   // then the rest is checked again.
   edits.sort((x, y) => x.from - y.from);
   for (;;) {
-    if (edits.length === 0) return { text: raw, changed: 0, unsafe };
+    if (edits.length === 0) return { text: raw, changed: 0, unsafe, wiki: wikiUnsafe };
     const out = applyEdits(text, edits);
     const found = new Set(extractLinks(out).map((l) => `${l.kind}:${l.pathFrom}:${l.pathTo}`));
     let shift = 0;
@@ -213,10 +227,12 @@ export function rewriteLinks(raw: string, sourceBefore: string, sourceAfter: str
     });
     if (bad < 0) {
       // Backstop: an edit must never make an untouched link disappear. If one did, write nothing.
-      if (found.size !== links.length) return { text: raw, changed: 0, unsafe: unsafe + edits.length };
-      return { text: toRaw(doc, out), changed: edits.length, unsafe };
+      const wikiEdits = edits.filter((e) => isWikiKind(e.kind)).length;
+      if (found.size !== links.length) return { text: raw, changed: 0, unsafe: unsafe + edits.length, wiki: wikiUnsafe + wikiEdits };
+      return { text: toRaw(doc, out), changed: edits.length, unsafe, wiki: wikiUnsafe + wikiEdits };
     }
     unsafe++;
+    if (isWikiKind(edits[bad].kind)) wikiUnsafe++;
     edits = edits.filter((_, i) => i !== bad);
   }
 }
