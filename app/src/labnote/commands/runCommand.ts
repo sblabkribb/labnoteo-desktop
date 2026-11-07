@@ -2,6 +2,7 @@ import { WINDOWS_PATH_MAX, isPathTooLongError } from '@labnoteo/core/lib/regexUt
 import { t } from '../../i18n/t';
 import { ERROR_KINDS, hasErrorKind } from '../../fs/errorKinds';
 import { linkOps } from '../../links/renameWithLinks';
+import { RegistryUnreadableError } from '../../samples/env';
 import { coreT } from '../i18n';
 import { NoteBusyError, NoteChangedError, NoteGoneError, NoteSaveError } from '../noteErrors';
 import type { CommandContext } from './context';
@@ -46,6 +47,8 @@ export async function runCommand(ctx: CommandContext, c: Command | (() => Promis
       host.notify('warn', t('command.noteChanged'));
     } else if (err instanceof NoteGoneError) {
       host.notify('warn', t('command.noteGone'));
+    } else if (err instanceof RegistryUnreadableError) {
+      host.notify('warn', t('samples.registryUnreadable', err.path));
     } else {
       host.notify('error', coreT('Command failed: {0}', messageOf(err)));
     }
