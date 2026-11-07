@@ -21,7 +21,7 @@ import { linkIndex } from '../../../links/linkIndex';
 import '../../__tests__/editorHarness'; // jsdom 의 CodeMirror 측정 보충
 import type { CommandContext } from '../context';
 import { useCommandContext, useNoteSwitcher } from '../useCommandContext';
-import { deleteEntry, newFolder, renameEntry, renameGuard } from '../fileOps';
+import { deleteEntry, deleteEvents, newFolder, renameEntry, renameGuard } from '../fileOps';
 
 vi.mock('@tauri-apps/api/core', async () => (await import('../../../__tests__/fakeVault')).mockTauri().core);
 vi.mock('@tauri-apps/api/event', async () => (await import('../../../__tests__/fakeVault')).mockTauri().event);
@@ -354,7 +354,11 @@ describe('deleteEntry', () => {
     vault = installFakeVault({ 'notes/a.labnote.md': 'a\n', 'notes/b.labnote.md': 'b\n' });
     render(<Harness />);
     confirmAnswers.push(true);
+    const deleted: string[] = [];
+    const off = deleteEvents.subscribe((p) => deleted.push(p));
     expect(await settle(deleteEntry(C(), 'notes/a.labnote.md', false))).toBe(true);
+    off();
+    expect(deleted).toEqual(['notes/a.labnote.md']);
     expect(confirms[0]).toEqual({
       message: t('fileOps.delete.confirm', 'a.labnote.md'),
       opts: { confirmLabel: t('fileOps.delete.confirmLabel'), destructive: true },
@@ -371,6 +375,8 @@ describe('deleteEntry', () => {
     vault = installFakeVault({ 'notes/a.labnote.md': 'a\n' });
     render(<Harness />);
     confirmAnswers.push(REAL);
+    const deleted: string[] = [];
+    const off = deleteEvents.subscribe((path) => deleted.push(path));
     let p!: Promise<boolean>;
     act(() => {
       p = deleteEntry(C(), 'notes/a.labnote.md', false);
@@ -379,6 +385,8 @@ describe('deleteEntry', () => {
     expect(screen.getByRole('alertdialog').textContent).toContain('휴지통');
     await user.keyboard('{Enter}');
     expect(await settle(p)).toBe(false);
+    off();
+    expect(deleted).toEqual([]);
     expect(cmds('vault_trash')).toHaveLength(0);
     expect(vault.files()).toEqual({ 'notes/a.labnote.md': 'a\n' });
   });

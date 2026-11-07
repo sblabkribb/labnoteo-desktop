@@ -33,6 +33,8 @@ export interface CommandContext {
   showPanel(panel: 'files' | 'workflows' | 'outline' | 'links'): void;
   /** 링크 색인과 고침 기록. 앱은 늘 준다. */
   links?: LinkDeps;
+  /** 뒤로·앞으로 가기(SP4 Task 28). 앱은 늘 준다. */
+  navigate?(dir: 'back' | 'forward'): void;
 }
 
 const listeners = new Set<() => void>();

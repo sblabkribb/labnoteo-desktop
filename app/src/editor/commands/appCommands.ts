@@ -63,6 +63,21 @@ const linksShow: AppCommand = {
   run: (ctx) => ctx.showPanel('links'),
 };
 
+/** 뒤로·앞으로 가기(SP4 Task 28). 키는 보여 주기만 한다: App 의 window keydown 이 Alt+←/→ 를 듣는다. */
+const navBack: AppCommand = {
+  id: 'nav-back',
+  nameKey: 'cmd.navBack',
+  key: 'Alt-ArrowLeft',
+  run: (ctx) => ctx.navigate?.('back'),
+};
+
+const navForward: AppCommand = {
+  id: 'nav-forward',
+  nameKey: 'cmd.navForward',
+  key: 'Alt-ArrowRight',
+  run: (ctx) => ctx.navigate?.('forward'),
+};
+
 /** 마지막 이름 바꾸기 되돌리기(SP4 Task 25, D16). 기록이 끝났고(done) 되돌릴 수 있을 때만 팔레트에 보인다. */
 const undoRename: AppCommand = {
   id: 'links-undo-rename',
@@ -110,7 +125,7 @@ const propsEditYaml: AppCommand = {
 };
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, undoRename, ...formatCommands, propsAdd, propsEditYaml];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

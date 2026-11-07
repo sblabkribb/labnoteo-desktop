@@ -468,6 +468,19 @@ async function offerReadmeCleanup(ctx: CommandContext, workflowPath: string): Pr
   await processNote(host.fs, readmePath, (text) => removeWorkflowFromReadme(text, fileName).content);
 }
 
+const deleteListeners = new Set<(path: string) => void>();
+
+/** 앱에서 휴지통으로 옮긴 파일이나 폴더(뒤로·앞으로 가기 기록이 그 항목을 뺀다, SP4 Task 28). */
+export const deleteEvents = {
+  emit(path: string): void {
+    [...deleteListeners].forEach((l) => l(path));
+  },
+  subscribe(fn: (path: string) => void): () => void {
+    deleteListeners.add(fn);
+    return () => void deleteListeners.delete(fn);
+  },
+};
+
 /**
  * 파일이나 폴더를 휴지통으로 옮긴다. 옮겼으면 true. 위험한 확인(Enter 는 취소)을 먼저 묻는다.
  * 워크플로 노트를 지웠으면 README 체크리스트의 그 항목도 뺄지 묻는다.
@@ -490,6 +503,7 @@ export async function deleteEntry(ctx: CommandContext, path: string, isDir: bool
     return false;
   }
   await host.fs.trash(path);
+  deleteEvents.emit(path);
   host.notify('info', t('fileOps.deleted', name));
   if (!isDir && isValidWorkflowPath(path)) await offerReadmeCleanup(ctx, path);
   ctx.refresh();

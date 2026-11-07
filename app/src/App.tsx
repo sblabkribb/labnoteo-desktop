@@ -49,10 +49,26 @@ import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
 import { OutlinePanel } from './editor/outline/OutlinePanel';
 import { LinksPanel } from './links/LinksPanel';
 import { createFromLink } from './links/createFromLink';
+import { NavHistory, type NavEntry } from './links/navHistory';
+import { renameEvents } from './links/renameWithLinks';
+import { deleteEvents } from './labnote/commands/fileOps';
+import { currentDialog } from './labnote/host/dialogStore';
+import { subscribeVaultChanges, type ListenFn } from './vault/useVaultEvents';
+import { listen as tauriListen } from '@tauri-apps/api/event';
 
 type SidebarTab = 'files' | 'workflows' | 'outline' | 'links';
 
 const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'outline', 'links'];
+
+/** 마우스의 뒤로(3)·앞으로(4) 단추. */
+const MOUSE_BACK = 3;
+const MOUSE_FORWARD = 4;
+
+/** Alt+←/→ 만(다른 수식 키 없이, 한글 조합 중이 아닐 때). 뒤로면 'back', 앞으로면 'forward'. */
+function navKey(e: globalThis.KeyboardEvent): 'back' | 'forward' | undefined {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing || e.keyCode === 229) return undefined;
+  return e.key === 'ArrowLeft' ? 'back' : e.key === 'ArrowRight' ? 'forward' : undefined;
+}
 
 /** 보관함마다 기억하는 사이드바 탭(이 PC 의 브라우저 저장소). 읽거나 쓰지 못하면 기억하지 않는다. */
 const tabKey = (root: string) => `labnoteo-sidebar-tab:${root}`;
@@ -91,7 +107,83 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   const shell = useRef<HTMLDivElement>(null);
   // 저장 안 된 편집이 있으면 먼저 저장한다. 저장하지 못하면(충돌 등) 노트를 바꾸지 않는다 — 편집이 사라지지 않게.
   const notes = useNoteSwitcher(editor);
-  const { selected, openFile, closeActive } = notes;
+  const { selected, closeActive } = notes;
+  // 뒤로·앞으로 가기(SP4 Task 28, D4): 보관함마다 하나(VaultView 는 보관함마다 새로 마운트된다).
+  // 링크, 링크 탭, 팔레트의 명령, 파일 트리, 검색이 여는 노트는 모두 아래 openFile(=navigate)을 지난다.
+  const nav = useRef<NavHistory>();
+  nav.current ??= new NavHistory();
+  const navFns = useRef({
+    /** 지금 노트와 커서 줄. 열린 노트가 없으면 undefined. */
+    here(): NavEntry | undefined {
+      const path = notes.activePath();
+      if (path === undefined) return undefined;
+      const view = editor.current?.view();
+      return { path, line: view ? view.state.doc.lineAt(view.state.selection.main.head).number - 1 : 0 };
+    },
+    /** 노트를 연다. 다른 노트로 넘어갔으면 떠난 자리를 기록에 쌓는다(저장하지 못해 넘어가지 않았으면 쌓지 않는다). */
+    async navigate(path: string, at?: { line: number; ch?: number }): Promise<void> {
+      const from = navFns.here();
+      await notes.openFile(path, at);
+      if (from && notes.activePath() !== from.path) nav.current!.push(from);
+    },
+    busy: false,
+    /** 기록을 따라 연다. 지금 노트를 저장하지 못해 넘어가지 않았으면 기록을 되돌린다. */
+    async go(dir: 'back' | 'forward'): Promise<void> {
+      if (navFns.busy) return;
+      navFns.busy = true;
+      try {
+        const history = nav.current!;
+        const from = navFns.here();
+        const to = dir === 'back' ? history.back(from) : history.forward(from);
+        if (!to) return;
+        const same = from !== undefined && (to.path === from.path || (editor.current !== null && openEditor(to.path) === editor.current));
+        await notes.openFile(to.path, { line: to.line });
+        if (from && !same && notes.activePath() === from.path) {
+          if (dir === 'back') history.forward(to);
+          else history.back(to);
+        }
+      } finally {
+        navFns.busy = false;
+      }
+    },
+  }).current;
+  const openFile = navFns.navigate;
+  // Alt+←/→ 는 편집기 밖에서도 듣는다(편집기의 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 기본 keymap 은
+  // Alt+←/→ 를 쓰지 않는다). 마우스 단추는 mousedown 의 기본 동작(브라우저의 뒤로 가기)을 막고 mouseup 에서 간다.
+  useEffect(() => {
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      const dir = navKey(e);
+      if (!dir || e.defaultPrevented || currentDialog() !== null) return;
+      e.preventDefault();
+      void navFns.go(dir);
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === MOUSE_BACK || e.button === MOUSE_FORWARD) e.preventDefault();
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== MOUSE_BACK && e.button !== MOUSE_FORWARD) return;
+      e.preventDefault();
+      if (currentDialog() !== null) return;
+      void navFns.go(e.button === MOUSE_BACK ? 'back' : 'forward');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    // 이름 바꾸기는 기록의 경로를 옮기고, 지운 파일·폴더(앱에서든 감시자가 알린 것이든)는 기록에서 뺀다.
+    const offRename = renameEvents.subscribe((moves) => nav.current!.rename(moves));
+    const offDelete = deleteEvents.subscribe((path) => nav.current!.drop(path));
+    const offWatch = subscribeVaultChanges(tauriListen as ListenFn, (change) => {
+      if (change.kind === 'removed' && change.path !== '') nav.current!.drop(change.path);
+    });
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+      offRename();
+      offDelete();
+      offWatch();
+    };
+  }, [navFns]);
   // 사이드바 탭: 고른 적이 없으면 labnote/ 폴더가 있는 보관함은 Workflows, 아니면 Files.
   const [chosenTab, setChosenTab] = useState<SidebarTab | undefined>(() => storedTab(vault.root));
   const hasLabnote = entries.some((e) => e.isDir && e.depth === 0 && e.path.toLowerCase() === 'labnote');
@@ -149,6 +241,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     openFile,
     closeActive,
     showPanel,
+    navigate: (dir) => void navFns.go(dir),
   });
   usePaletteHotkey(ctx);
   // 설정을 읽은 뒤 보관함마다 한 번: 번들 카탈로그가 바뀌었으면 알린다. 여는 것을 막지 않는다(기다리지 않고, 던지지 않는다).

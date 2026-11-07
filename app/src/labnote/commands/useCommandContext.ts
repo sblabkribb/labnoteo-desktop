@@ -83,6 +83,8 @@ export interface CommandContextDeps {
   openFile(path: string, at?: At): Promise<void>;
   closeActive(): Promise<boolean>;
   showPanel?: (p: 'files' | 'workflows' | 'outline' | 'links') => void;
+  /** 뒤로·앞으로 가기(SP4 Task 28). */
+  navigate?: (dir: 'back' | 'forward') => void;
 }
 
 /**
@@ -113,6 +115,7 @@ export function useCommandContext(deps: CommandContextDeps): CommandContext | un
       },
       showPanel: (p) => latest.current.showPanel?.(p),
       links: APP_LINKS,
+      navigate: (dir) => latest.current.navigate?.(dir),
     }),
     [deps.host, deps.vaultRoot],
   );
