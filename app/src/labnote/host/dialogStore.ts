@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { PickItem, PromptOpts } from '@labnoteo/core';
 import type { AliasOpts } from './AliasDialog';
+import type { SampleDefinitionModel, SampleDefinitionResult, UsageGroup } from '../port/sampleDefinitionModel';
 import { deepActiveElement } from '../../ui/returnFocus';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
@@ -20,7 +21,8 @@ export type DialogSpec =
   | { kind: 'pickMany'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string }
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
-  | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean };
+  | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
+  | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> };
 
 export interface DialogEntry {
   readonly id: number;
@@ -141,4 +143,12 @@ export function confirmDialog(
   opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean } = {},
 ): Promise<boolean> {
   return openDialog<boolean>({ kind: 'confirm', message, ...opts }, false);
+}
+
+/**
+ * 샘플 정의 창(plan SP5 Task 23, D16). 고른 동작이나 열 사용처만 돌려주고 흐름은 부른 쪽이 돌린다. 닫으면 undefined.
+ * `usages` 는 창이 열린 뒤에 채워진다(범위의 모든 노트를 읽으므로).
+ */
+export function openSampleDefinitionDialog(model: SampleDefinitionModel, usages: Promise<UsageGroup[]>): Promise<SampleDefinitionResult> {
+  return openDialog<SampleDefinitionResult>({ kind: 'sampleDefinition', model, usages }, undefined);
 }

@@ -5,6 +5,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { settleDialog, takeReturnFocus, useCurrentDialog, type DialogEntry } from './dialogStore';
 import { PickManyDialog, Picker } from './Picker';
 import { PromptDialog } from './PromptDialog';
+import { SampleDefinitionDialog } from '../../samples/SampleDefinitionDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -21,6 +22,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <AliasDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'confirm':
       return <ConfirmDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'sampleDefinition':
+      return <SampleDefinitionDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 
@@ -29,14 +32,14 @@ function Body({ entry }: { entry: DialogEntry }) {
  * inert 를 걸어 편집기·트리·상단 바가 초점도 클릭도 받지 않게 한다. 마지막 대화상자가 닫히면 inert 를 푼 뒤 열기 전 초점 자리
  * (편집기의 그림자 루트 안 포함)로 초점을 돌려준다. 언어를 바꾸면 열린 채로 글자만 바뀐다.
  */
-export function DialogLayer({ blockRef }: { blockRef: RefObject<HTMLElement> }) {
+export function DialogLayer({ blockRef }: { blockRef?: RefObject<HTMLElement> }) {
   useLang();
   const current = useCurrentDialog();
   const open = current !== null;
 
   useLayoutEffect(() => {
     if (!open) return;
-    const shell = blockRef.current;
+    const shell = blockRef?.current;
     shell?.setAttribute('inert', '');
     return () => {
       shell?.removeAttribute('inert');
