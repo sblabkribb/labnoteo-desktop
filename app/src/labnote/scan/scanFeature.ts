@@ -44,6 +44,8 @@ export interface ScanFeatureDeps {
   /** IPC for the scan folder watcher (default: Tauri's). */
   invoke: InvokeFn;
   listen: ListenFn;
+  /** The decode client to use instead of a new one over the real worker; the feature terminates it on dispose. */
+  decodeClient: DecodeClient;
 }
 
 export class ScanFeature {
@@ -64,7 +66,7 @@ export class ScanFeature {
     if (deps.decoder) {
       this.decoder = deps.decoder;
     } else {
-      const client = createDecodeClient();
+      const client = deps.decodeClient ?? createDecodeClient();
       this.client = client;
       this.decoder = createPageDecoder(
         () => ({ maxEdge: ctx.settings.scanMaxImageEdge, quality: ctx.settings.scanJpegQuality }),
