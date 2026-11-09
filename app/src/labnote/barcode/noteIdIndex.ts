@@ -265,7 +265,12 @@ export function noteIds(): NoteIdIndex {
   return current;
 }
 
-/** 보관함을 열 때 색인을 놓고, 닫을 때 `undefined` 로 치운다(연결은 Task 12 의 App.tsx). */
+/** 지금 놓인 색인. 없으면 undefined(던지지 않는다: 보관함을 닫을 때 제 색인인지 보는 데 쓴다). */
+export function currentNoteIdIndex(): NoteIdIndex | undefined {
+  return current;
+}
+
+/** 보관함을 열 때 색인을 놓고, 닫을 때 `undefined` 로 치운다(App.tsx 의 SP7 Part A 블록). */
 export function setNoteIdIndex(index: NoteIdIndex | undefined): void {
   current = index;
 }

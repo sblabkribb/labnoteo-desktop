@@ -1,4 +1,5 @@
-import { useId, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { UNSOLICITED_ARM_MS } from './whenNotComposing';
 import { t } from '../../i18n/t';
 
 /** 한글 조합 중의 키(조합을 끝내는 Enter, 조합을 취소하는 Escape): 대화상자가 처리하지 않는다. */
@@ -18,9 +19,26 @@ export function DialogFrame(props: {
   className?: string;
   describedBy?: string;
   onCancel: () => void;
+  /** 사용자가 부르지 않은 질문(A9): 열린 뒤 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다(Escape 는 닫는다). */
+  unsolicited?: boolean;
   children: ReactNode;
 }) {
   const titleId = useId();
+  // 처음 그릴 때의 값으로 정한다: 열린 뒤에 바뀌지 않는다.
+  const armed = useRef(!!props.unsolicited);
+  useEffect(() => {
+    if (!armed.current) return;
+    const timer = setTimeout(() => {
+      armed.current = false;
+    }, UNSOLICITED_ARM_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  // 캡처 단계에서 막는다: 단추의 기본 동작(누르기)도, 안쪽 요소의 처리기(고르기의 Enter)도 받지 못한다.
+  const swallowArmed = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!armed.current || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') {
       if (isComposing(e)) return;
@@ -51,6 +69,8 @@ export function DialogFrame(props: {
       aria-describedby={props.describedBy}
       className={props.className ? `dialog ${props.className}` : 'dialog'}
       onKeyDown={onKeyDown}
+      onKeyDownCapture={swallowArmed}
+      onKeyUpCapture={swallowArmed}
     >
       <div className="dialog-head">
         {props.title ? <h2 id={titleId}>{props.title}</h2> : <span />}

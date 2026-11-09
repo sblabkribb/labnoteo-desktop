@@ -66,6 +66,12 @@ import { currentDialog } from './labnote/host/dialogStore';
 import { subscribeVaultChanges, type ListenFn } from './vault/useVaultEvents';
 import { useVaultChanges } from './labnote/panel/useVaultChanges';
 import { listen as tauriListen } from '@tauri-apps/api/event';
+import { vaultCreatedTimes } from './fs/vaultImage';
+import { NoteIdIndex, currentNoteIdIndex, setNoteIdIndex } from './labnote/barcode/noteIdIndex';
+import { appNoteIdSource } from './labnote/barcode/noteIdSource';
+import { cancelNoteIdTouches, notifyingRun, startIdWatch } from './labnote/barcode/idWatch';
+import { NoteIdService } from './labnote/port/noteIdService';
+import { unsolicitedHost } from './labnote/host/whenNotComposing';
 
 type SidebarTab = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
 
@@ -372,6 +378,39 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       live = false;
     };
   }, [hasCtx]);
+  // SP7 Part A: 노트 ID 색인과 감시(A5, Task 12). 링크 색인이 준비된 뒤(파일 목록이 찬 뒤) 색인을 놓고 첫 빌드를 기다린 다음
+  // 중복·바뀐·서식 ID 감시를 시작한다. 감시가 묻는 대화상자는 사용자가 부르지 않은 것이라(A9) 활성 편집기의 조합이 끝나기를
+  // 기다리고 처음 500 ms 동안 Enter 와 Space 를 무시한다. 보관함을 바꾸면(VaultView 가 내려가면) 감시를 끊고 색인을 치운다.
+  useEffect(() => {
+    if (!hasCtx) return;
+    let live = true;
+    let stop: (() => void) | undefined;
+    const index = new NoteIdIndex({
+      files: async () => linkIndex.files().filter((p) => p.endsWith('.md')),
+      read: (p) => host.fs.read(p),
+      ctimes: (paths) => vaultCreatedTimes(paths),
+    });
+    void linkIndex
+      .whenReady()
+      .then(async () => {
+        if (!live) return;
+        setNoteIdIndex(index);
+        await index.ready();
+        if (!live) return;
+        const service = new NoteIdService(
+          appNoteIdSource(index, host.fs),
+          unsolicitedHost(host, () => recoverCtx.current?.activeView()),
+        );
+        stop = startIdWatch({ index, service, listen: tauriListen as ListenFn, run: notifyingRun(host) });
+      })
+      .catch((e: unknown) => console.error('[labnoteo] note-ID index failed:', e));
+    return () => {
+      live = false;
+      stop?.();
+      cancelNoteIdTouches();
+      if (currentNoteIdIndex() === index) setNoteIdIndex(undefined);
+    };
+  }, [hasCtx, host]);
   const flush = async () => !editor.current || (await editor.current.flush());
   // 맥락 메뉴: 항목은 여는 순간 만든다. 명령 맥락이 아직 없으면(설정을 읽는 중) 기본 동작 그대로다.
   const onTreeMenu = ctx

@@ -22,12 +22,28 @@ export { deepActiveElement };
  * 마지막 대화상자가 닫히면 DialogLayer 가 .shell 의 inert 를 푼 뒤 그 요소로 초점을 돌려준다.
  */
 export type DialogSpec =
-  | { kind: 'pick'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string; selected?: unknown }
+  | {
+      kind: 'pick';
+      items: readonly PickItem<unknown>[];
+      title?: string;
+      placeholder?: string;
+      selected?: unknown;
+      /** 사용자가 부르지 않은 질문(A9): 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
+      unsolicited?: boolean;
+    }
   | { kind: 'pickMany'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string }
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
-  | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
-  | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[] }
+  | {
+      kind: 'confirm';
+      message: string;
+      confirmLabel?: string;
+      signal?: AbortSignal;
+      destructive?: boolean;
+      /** 사용자가 부르지 않은 질문(A9): 취소 단추에 초점, 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
+      unsolicited?: boolean;
+    }
+  | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[]; unsolicited?: boolean }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'sampleSettings'; value: SampleSettingsValue }
   | { kind: 'worksheet'; unitOps: readonly WorksheetUnitOp[]; paper: WorksheetPaperSize }
@@ -135,7 +151,7 @@ export function useDialogOpen(): boolean {
 
 export function pickDialog<T>(
   items: readonly PickItem<T>[],
-  opts: { title?: string; placeholder?: string; selected?: T } = {},
+  opts: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean } = {},
 ): Promise<T | undefined> {
   return openDialog<T | undefined>({ kind: 'pick', items, ...opts }, undefined);
 }
@@ -155,7 +171,7 @@ export function aliasDialog(opts: AliasOpts): Promise<string | undefined> {
 
 export function confirmDialog(
   message: string,
-  opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean } = {},
+  opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean } = {},
 ): Promise<boolean> {
   return openDialog<boolean>({ kind: 'confirm', message, ...opts }, false);
 }
@@ -164,7 +180,7 @@ export function confirmDialog(
 export function choiceDialog<T>(
   message: string,
   choices: readonly ChoiceItem<T>[],
-  opts: { title?: string } = {},
+  opts: { title?: string; unsolicited?: boolean } = {},
 ): Promise<T | undefined> {
   return openDialog<T | undefined>({ kind: 'choice', message, choices, ...opts }, undefined);
 }
