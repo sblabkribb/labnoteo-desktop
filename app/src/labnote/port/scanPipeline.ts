@@ -1,4 +1,5 @@
 // Ported from app/vendor/labnoteo/src/scan/scanPipeline.ts:1-400 sha256:eeb595308882c946
+// Ported from app/vendor/labnoteo/src/scan/scanPipeline.ts:402-498 sha256:0d254e8da2ecdfcd
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: PipelineDeps drops the Obsidian App and takes noteIds (NoteIdService over the note-ID index), fs (the
 // editor-aware AppFs: read, trash), processNote(path, fn) (refuses a composing or busy open note with NoteBusyError),
@@ -14,7 +15,13 @@
 // through the vanished-block path with the new reason 'note-busy' (read the stored image, queue it, fs.trash it);
 // vault.getAbstractFileByPath/readBinary there become images.readBinary, fileManager.trashFile becomes fs.trash;
 // ZIP_LIMITS is exported; saveBinary returns { path, name }; a DecodedPage may carry `error` (a page the decoder
-// could not read), which filePage records as an `error` result in the page's place.
+// could not read), which filePage records as an `error` result in the page's place. fileManually(image, note,
+// unitOpIndex, page, printedOn) becomes fileManually(item, target) with the queue image as { path, name } and the
+// note as a NoteRef; app.vault.readBinary/read become images.readBinary and fs.read; every
+// fileManager.trashFile becomes fs.trash (Recycle Bin), only for a path still there (images.exists, the plugin's
+// instanceof TFile); undo and removePrevious write through processNote (waiting out a busy note like flush) and
+// markUserEdit becomes the in-transform stampNote, applied only when an entry was removed (B9);
+// metadataCache.getFirstLinkpathDest becomes the editor's image resolution (resolveImagePath, pickByName).
 /**
  * The one path every scan takes, whatever brought it in (scan folder, drag and
  * drop, Slack): split PDFs and zips into pages, read each page's QR code, find
@@ -27,10 +34,11 @@ import type { LabnoteHost, Translator } from '@labnoteo/core';
 import { insertScanEntries, listFiledScans, listUnitOpBlocks, removeScanEntry, resolveScanTarget, type ScanEntry } from '@labnoteo/core';
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
-import { isPagePayload, type PagePayload, type ScanPayload } from '@labnoteo/core/lib/scanPayload';
+import { isPagePayload, unitOpFingerprint, type PagePayload, type ScanPayload } from '@labnoteo/core/lib/scanPayload';
 import * as posix from '@labnoteo/core/posix';
 import { pickByName, resolveImagePath } from '../../editor/live/imagePath';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
+import type { NoteRef } from '../barcode/noteIdIndex';
 import { NoteBusyError } from '../noteErrors';
 import type { NoteIdService } from './noteIdService';
 import {
@@ -38,7 +46,11 @@ import {
   UNMATCHED_FOLDER,
   saveBinary,
   scanFileName,
+  sha256Hex,
+  shortHash,
+  sourceNameFromUnmatched,
   timestamp,
+  unmatchedInfoFromName,
   unmatchedFileName,
   type ImageStoreDeps,
 } from './imageStore';
@@ -133,6 +145,21 @@ export interface PipelineDeps {
   stampNote(path: string): (text: string) => string;
   /** Resolves once note lookups are ready (the note-ID index's first build). */
   ready?(): Promise<void>;
+}
+
+/** An image in the unmatched queue: its vault path and file name. */
+export interface UnmatchedItem {
+  path: string;
+  name: string;
+}
+
+/** Where a queued image is filed by hand: the note, its unit operation (0: the note-level section), the page and, if known, the print date. */
+export interface ManualTarget {
+  note: NoteRef;
+  unitOpIndex: number;
+  page: { page: number; pageCount: number };
+  /** `YYYY-MM-DD`, when the user gave it. */
+  printedOn?: string;
 }
 
 export interface RunOptions {
@@ -339,22 +366,27 @@ export class ScanPipeline {
 
   /** Whether the image a filed scan embeds is still in the vault, found the way the editor finds it. */
   private async imageExists(embed: string, notePath: string): Promise<boolean> {
+    return (await this.resolveEmbed(embed, notePath)) !== null;
+  }
+
+  /** The vault path of the image an embed shows, found the way the editor finds it; null when it is not there. */
+  private async resolveEmbed(embed: string, notePath: string): Promise<string | null> {
     const wiki = /^!\[\[([^\]|#]+)/.exec(embed);
     const md = wiki ? null : /^!\[[^\]]*\]\(([^)]+)\)/.exec(embed);
     const target = wiki?.[1] ?? md?.[1];
-    if (!target) return false;
+    if (!target) return null;
     const ref = resolveImagePath(notePath, target, wiki ? 'wiki' : 'md');
-    if (!ref) return false;
+    if (!ref) return null;
     try {
       if (ref.kind === 'paths') {
-        for (const candidate of ref.candidates) if (await this.deps.images.exists(candidate)) return true;
-        return false;
+        for (const candidate of ref.candidates) if (await this.deps.images.exists(candidate)) return candidate;
+        return null;
       }
       const list = await this.deps.listImages();
       const found = pickByName(notePath, ref.name, list) ?? (ref.fallback ? pickByName(notePath, ref.fallback, list) : null);
-      return found !== null && (await this.deps.images.exists(found));
+      return found !== null && (await this.deps.images.exists(found)) ? found : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -489,5 +521,100 @@ export class ScanPipeline {
         }
       }
     }
+  }
+
+  /**
+   * File an image from the unmatched queue by hand into `target.note`'s
+   * `target.unitOpIndex`-th unit operation (0: the note-level section). Without the
+   * QR code the print date is known only if the user gave it (`printedOn`,
+   * `YYYY-MM-DD`); otherwise the caption leaves it out (#234). The chosen
+   * block's fingerprint goes along, so the scan is not taken for an old
+   * printout (#341) and goes back to the queue if that block changed
+   * meanwhile rather than to its neighbour.
+   */
+  async fileManually(item: UnmatchedItem, target: ManualTarget): Promise<ScanResult> {
+    const { note, unitOpIndex, page, printedOn } = target;
+    const ensured = await this.deps.noteIds.ensureIdResult(note);
+    if (ensured.reason === 'cancelled') return { source: item.name, status: 'skipped', reason: 'cancelled' };
+    const noteId = ensured.id;
+    if (!noteId) return { source: item.name, status: 'error', message: 'front matter could not be read' };
+    const bytes = await this.deps.images.readBinary(item.path);
+    // The queue keeps the page as JPEG; the hash of the scan as imported is in its name (#495).
+    const hash = unmatchedInfoFromName(item.name).hash ?? shortHash(await sha256Hex(bytes));
+    const block = unitOpIndex > 0 ? listUnitOpBlocks(await this.deps.fs.read(note.path))[unitOpIndex - 1] : undefined;
+    const payload: PagePayload = {
+      noteId,
+      unitOpIndex: block?.index ?? 0,
+      opId: block?.opId ?? '',
+      ...page,
+      // Never encoded into a QR code, so '' may stand for "not known".
+      printedOn: printedOn ?? '',
+      ...(block ? { fingerprint: unitOpFingerprint(block.opName, block.alias) } : {}),
+    };
+    const decoded: DecodedPage = {
+      source: sourceNameFromUnmatched(item.name),
+      hash,
+      blank: false,
+      payload,
+      render: async () => bytes,
+    };
+    const pending: Pending[] = [];
+    const result = await this.filePage(decoded, {}, pending, new Set(), new Map(), new Set());
+    await this.flush(pending);
+    if (result.status === 'filed' || result.status === 'duplicate') await this.trashIfThere(item.path);
+    if (result.status === 'unmatched' && result.unmatchedPath) {
+      // The image is still in the queue; the copy filePage made there is not needed.
+      if (result.unmatchedPath !== item.path) await this.trashIfThere(result.unmatchedPath);
+      result.unmatchedPath = item.path;
+    }
+    return result;
+  }
+
+  /** Take a filed scan out of its note again and trash its image. */
+  async undo(result: ScanResult): Promise<boolean> {
+    if (result.status !== 'filed' || !result.notePath || !result.hash) return false;
+    const hash = result.hash;
+    const stamp = this.deps.stampNote(result.notePath);
+    let removed = false;
+    await this.processWhenFree(result.notePath, (content) => {
+      const out = removeScanEntry(content, hash);
+      removed = out.removed;
+      return out.removed ? stamp(out.md) : out.md;
+    });
+    if (result.imagePath) await this.trashIfThere(result.imagePath);
+    return removed;
+  }
+
+  /** Remove the earlier scans of the page `result` filed (and trash their images). */
+  async removePrevious(result: ScanResult): Promise<number> {
+    if (!result.notePath || !result.previous?.length) return 0;
+    const notePath = result.notePath;
+    const previous = result.previous;
+    const images: string[] = [];
+    for (const p of previous) {
+      const path = await this.resolveEmbed(p.embed, notePath);
+      // An earlier entry may link the name this scan's image took (#433).
+      if (path !== null && path !== result.imagePath && !images.includes(path)) images.push(path);
+    }
+    const stamp = this.deps.stampNote(notePath);
+    let count = 0;
+    await this.processWhenFree(notePath, (content) => {
+      count = 0;
+      let out = content;
+      for (const p of previous) {
+        const r = removeScanEntry(out, p.hash);
+        if (r.removed) count++;
+        out = r.md;
+      }
+      return count > 0 ? stamp(out) : out;
+    });
+    for (const image of images) await this.trashIfThere(image);
+    result.previous = [];
+    return count;
+  }
+
+  /** Send `path` to the Recycle Bin when it is still there (the plugin's `instanceof TFile` check). */
+  private async trashIfThere(path: string): Promise<void> {
+    if (await this.deps.images.exists(path)) await this.deps.fs.trash(path);
   }
 }

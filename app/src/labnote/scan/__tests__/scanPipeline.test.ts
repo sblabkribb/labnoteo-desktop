@@ -17,6 +17,7 @@ import {
   type DecodedPage,
   type PageDecoder,
   type ScanInput,
+  type ScanResult,
 } from '../../port/scanPipeline';
 import { noteStamp } from '../pipelineDeps';
 
@@ -508,6 +509,215 @@ describe('ScanPipeline.run (vendor scanPipeline.test.ts)', () => {
     expect(safeSourceName('dir\\sub/a\n## X [[b]] -->.jpg')).not.toMatch(/[\n[\]|<>#^`\\/]/);
     expect(safeSourceName('dir\\sub/a\n## X [[b]] -->.jpg')).toBe('a__ X __b__ --_.jpg');
     expect(safeSourceName('x'.repeat(200) + '.jpg')).toHaveLength(120);
+  });
+});
+
+describe('ScanPipeline.undo and removePrevious (vendor scanPipeline.test.ts)', () => {
+  const pp = (over: Partial<PagePayload> = {}): PagePayload => ({
+    noteId: ID,
+    unitOpIndex: 2,
+    opId: 'UHW020',
+    page: 1,
+    pageCount: 1,
+    printedOn: '2026-10-15',
+    ...over,
+  });
+
+  it('undoes a filed scan: removes its lines and trashes its image', async () => {
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'a.jpg': [page(pp(), 'aaaaaaaaaaaa')] });
+    const [result] = await s.pipeline.run([input('a.jpg')]);
+    s.processNote.mockClear();
+    expect(await s.pipeline.undo(result)).toBe(true);
+    expect(s.text.get(NOTE)).not.toContain('aaaaaaaaaaaa');
+    expect(s.fs.trash).toHaveBeenCalledWith(result.imagePath);
+    expect(s.images.has(result.imagePath!)).toBe(false);
+    expect(s.processNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('undo removes the entry and trashes the image; a second undo is false', async () => {
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'a.jpg': [page(pp(), 'aaaaaaaaaaaa')] });
+    const [result] = await s.pipeline.run([input('a.jpg')]);
+    expect(await s.pipeline.undo(result)).toBe(true);
+    expect(s.text.get(NOTE)).toBe(NOTE_TEXT);
+    expect(s.fs.trash).toHaveBeenCalledTimes(1);
+    expect(s.fs.trash).toHaveBeenCalledWith(result.imagePath);
+    expect(await s.pipeline.undo(result)).toBe(false);
+    expect(s.fs.trash).toHaveBeenCalledTimes(1);
+    expect(s.text.get(NOTE)).toBe(NOTE_TEXT);
+  });
+
+  it('undo of a result that was not filed does nothing', async () => {
+    const s = setup({ [NOTE]: NOTE_TEXT }, {});
+    const r: ScanResult = { source: 'x.jpg', status: 'duplicate', notePath: NOTE, hash: 'aaaaaaaaaaaa' };
+    expect(await s.pipeline.undo(r)).toBe(false);
+    expect(s.processNote).not.toHaveBeenCalled();
+    expect(s.fs.trash).not.toHaveBeenCalled();
+  });
+
+  it('undo and Delete earlier scan stamp last_updated_date only when the setting is on', async () => {
+    const dated = NOTE_TEXT.replace('---\n###', 'last_updated_date: 2026-01-01\n---\n###');
+    const pages = { 'old.jpg': [page(pp(), 'aaaaaaaaaaaa')], 'new.jpg': [page(pp(), 'bbbbbbbbbbbb')] };
+    const back = (s: ReturnType<typeof setup>) =>
+      s.text.set(NOTE, s.text.get(NOTE)!.replace(/^last_updated_date: .*$/m, 'last_updated_date: 2026-01-01'));
+
+    for (const on of [true, false]) {
+      const s = setup({ [NOTE]: dated }, pages, { autoUpdateLastUpdated: on });
+      await s.pipeline.run([input('old.jpg')]);
+      const [next] = await s.pipeline.run([input('new.jpg')]);
+      expect(next.previous).toHaveLength(1);
+
+      back(s);
+      s.processNote.mockClear();
+      expect(await s.pipeline.removePrevious(next)).toBe(1);
+      expect(s.processNote).toHaveBeenCalledTimes(1);
+      expect(s.text.get(NOTE)).toContain(`last_updated_date: ${on ? getSeoulDateString() : '2026-01-01'}`);
+
+      back(s);
+      s.processNote.mockClear();
+      expect(await s.pipeline.undo(next)).toBe(true);
+      expect(s.processNote).toHaveBeenCalledTimes(1);
+      expect(s.text.get(NOTE)).toContain(`last_updated_date: ${on ? getSeoulDateString() : '2026-01-01'}`);
+      expect(listFiledScans(s.text.get(NOTE)!)).toEqual([]);
+    }
+  });
+
+  it('Delete earlier scan removes the earlier entries of the page and trashes their images', async () => {
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'old.jpg': [page(pp(), 'aaaaaaaaaaaa')], 'new.jpg': [page(pp(), 'bbbbbbbbbbbb')] });
+    const [old] = await s.pipeline.run([input('old.jpg')]);
+    const [next] = await s.pipeline.run([input('new.jpg')]);
+    expect(await s.pipeline.removePrevious(next)).toBe(1);
+    expect(next.previous).toEqual([]);
+    expect(s.fs.trash).toHaveBeenCalledWith(old.imagePath);
+    expect(s.images.has(old.imagePath!)).toBe(false);
+    expect(s.images.has(next.imagePath!)).toBe(true);
+    expect(listFiledScans(s.text.get(NOTE)!).map((f) => f.hash)).toEqual(['bbbbbbbbbbbb']);
+    expect(await s.pipeline.removePrevious(next)).toBe(0);
+  });
+
+  // #433: a new image must not take the name an earlier entry still links.
+  it('keeps the new image when the earlier scan of the page lost its own', async () => {
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'old.jpg': [page(pp(), 'aaaaaaaaaaaa')], 'new.jpg': [page(pp(), 'bbbbbbbbbbbb')] });
+    const [old] = await s.pipeline.run([input('old.jpg')]);
+    s.images.delete(old.imagePath!);
+    const [next] = await s.pipeline.run([input('new.jpg')]);
+    expect(next.imagePath).toMatch(/_2\.jpg$/);
+    expect(await s.pipeline.removePrevious(next)).toBe(1);
+    expect(s.images.has(next.imagePath!)).toBe(true);
+    expect(s.fs.trash).not.toHaveBeenCalled();
+    expect(listFiledScans(s.text.get(NOTE)!).map((f) => f.hash)).toEqual(['bbbbbbbbbbbb']);
+  });
+});
+
+// #234: a page filed by hand has no QR code to tell when it was printed.
+describe('ScanPipeline.fileManually (vendor scanPipeline.test.ts)', () => {
+  const QUEUED = '_labnote-scans/unmatched/20261021-021738_unknown_photo1.jpg';
+  const item = (path: string) => ({ path, name: path.slice(path.lastIndexOf('/') + 1) });
+  const ref = (path: string) => ({ path, basename: path.slice(path.lastIndexOf('/') + 1, -3), ctime: 1 });
+  const target = (unitOpIndex: number, printedOn?: string) => ({
+    note: ref(NOTE),
+    unitOpIndex,
+    page: { page: 1, pageCount: 1 },
+    ...(printedOn ? { printedOn } : {}),
+  });
+
+  function manualSetup(notes: Record<string, string> = { [NOTE]: NOTE_TEXT }) {
+    const s = setup(notes, {});
+    s.images.set(QUEUED, new Uint8Array([9, 9, 9]));
+    return s;
+  }
+
+  it('leaves the print date out of the caption when it is not known', async () => {
+    const s = manualSetup();
+    const result = await s.pipeline.fileManually(item(QUEUED), target(1));
+    expect(result.status).toBe('filed');
+    const text = s.text.get(NOTE)!;
+    // #396: the caption names the photo, not the queue's stamped name.
+    expect(text).toMatch(/\*Printout 1\/1 · imported \d{4}-\d{2}-\d{2} · photo1\.jpg · /);
+    expect(text).not.toContain('printed');
+  });
+
+  // #341: a page filed by hand was always taken for a printout from before 0.123.0.
+  it('carries the chosen block, so it is neither an old printout nor moved', async () => {
+    const s = manualSetup();
+    const result = await s.pipeline.fileManually(item(QUEUED), target(2));
+    expect(result).toMatchObject({ status: 'filed', block: '[UHW020 Gel] run', matchedBy: 'index', legacy: false });
+  });
+
+  it.each(['before filing', 'during rendering'])(
+    'leaves the image in the queue, with no second copy, when the block changes %s',
+    async (timing) => {
+      const s = manualSetup();
+      const pipeline = s.pipeline as unknown as { filePage: (...args: unknown[]) => Promise<unknown> };
+      const filePage = pipeline.filePage.bind(s.pipeline);
+      pipeline.filePage = async (...args: unknown[]) => {
+        const rename = () => s.text.set(NOTE, s.text.get(NOTE)!.replace('### [UHW020 Gel] run', '### [UHW020 Gel] 바뀜'));
+        if (timing === 'before filing') rename();
+        else {
+          const decoded = args[0] as DecodedPage;
+          const render = decoded.render;
+          decoded.render = async () => {
+            rename();
+            return render();
+          };
+        }
+        return filePage(...args);
+      };
+      const result = await s.pipeline.fileManually(item(QUEUED), target(2));
+      expect(result).toMatchObject({ status: 'unmatched', reason: 'renamed', unmatchedPath: QUEUED });
+      expect([...s.images.keys()]).toEqual([QUEUED]);
+    },
+  );
+
+  // #495: the page filed by hand got the hash of the queue's JPEG, so importing the scan again missed it.
+  it('records the hash and the name the scan was imported with, and knows the page when it comes again', async () => {
+    const renamed: PagePayload = { noteId: ID, unitOpIndex: 2, opId: 'UHW020', page: 1, pageCount: 1, printedOn: '2026-10-15', fingerprint: 'ZZZZ' };
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'scan_1-1.png': [page(renamed, '953d461ec519')] });
+    const [first] = await s.pipeline.run([input('scan_1-1.png')]);
+    expect(first).toMatchObject({ status: 'unmatched', reason: 'renamed' });
+    expect(first.unmatchedPath).toContain('_renamed_h953d461ec519-png_scan_1-1.jpg');
+
+    const result = await s.pipeline.fileManually(item(first.unmatchedPath!), target(2));
+    expect(result).toMatchObject({ status: 'filed', hash: '953d461ec519' });
+    expect(s.text.get(NOTE)!).toMatch(/· scan_1-1\.png · /);
+    expect(s.images.has(first.unmatchedPath!)).toBe(false);
+
+    const again = await s.pipeline.run([input('scan_1-1.png')]);
+    expect(again.map((r) => r.status)).toEqual(['duplicate']);
+  });
+
+  it('writes the print date the user gave', async () => {
+    const s = manualSetup();
+    await s.pipeline.fileManually(item(QUEUED), target(1, '2026-09-30'));
+    expect(s.text.get(NOTE)!).toContain('*Printout 1/1 · printed 2026-09-30 · imported ');
+  });
+
+  it('fileManually assigns an ID first and trashes the queue image when filed', async () => {
+    const bare = NOTE_TEXT.replace(`labnote_id: ${ID}\n`, 'title: x\n');
+    const s = manualSetup({ [NOTE]: bare });
+    const result = await s.pipeline.fileManually(item(QUEUED), target(1));
+    expect(result.status).toBe('filed');
+    const id = readNoteId(frontMatterText(s.text.get(NOTE)!));
+    expect(id).toMatch(/^LN-[0-9A-Z]{8}$/);
+    expect(result.payload).toMatchObject({ noteId: id, unitOpIndex: 1, opId: 'UHW010' });
+    expect(listFiledScans(s.text.get(NOTE)!)).toHaveLength(1);
+    expect(s.fs.trash).toHaveBeenCalledWith(QUEUED);
+    expect(s.images.has(QUEUED)).toBe(false);
+    expect(s.images.has(result.imagePath!)).toBe(true);
+  });
+
+  // #267: cancelling the "restore the old ID?" question is not a failure and must not give the note a new ID.
+  it('leaves the note and the queued image alone when the ID question is cancelled', async () => {
+    const s = manualSetup();
+    await s.pipeline.fileManually(item(QUEUED), target(1));
+    const lost = s.text.get(NOTE)!.replace(/^labnote_id: .*\n/m, '');
+    s.text.set(NOTE, lost);
+    const SECOND = '_labnote-scans/unmatched/20261021-021800_unknown_photo2.jpg';
+    s.images.set(SECOND, new Uint8Array([7, 7, 7]));
+    // The host's pick closes without a choice (undefined): cancelled.
+    const result = await s.pipeline.fileManually(item(SECOND), target(1));
+    expect(result).toEqual({ source: '20261021-021800_unknown_photo2.jpg', status: 'skipped', reason: 'cancelled' });
+    expect(s.text.get(NOTE)).toBe(lost);
+    expect(s.images.has(SECOND)).toBe(true);
   });
 });
 
