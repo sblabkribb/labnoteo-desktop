@@ -36,6 +36,17 @@ export interface TreeViewProps {
   nodeClass?(node: TreeNode): string | undefined;
 }
 
+/**
+ * 줄의 title. 이름은 좁은 사이드바에서 말줄임으로 잘리므로 title 이 늘 전체 이름을 담는다:
+ * tooltip 이 없으면 이름, 이름이 든 tooltip 은 그대로, 설명뿐인 tooltip 이면 이름 줄을 앞에 붙인다.
+ */
+export function rowTitle(node: TreeNode): string {
+  const tip = node.tooltip;
+  if (!tip) return node.label;
+  return tip.includes(node.label) ? tip : `${node.label}
+${tip}`;
+}
+
 function flatten(nodes: readonly TreeNode[], expanded: ReadonlySet<string>): Row[] {
   const rows: Row[] = [];
   const walk = (list: readonly TreeNode[], depth: number, parent: number, prefix: string) => {
@@ -157,7 +168,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             aria-current={(scrollCurrent ? row.key === currentKey : isCurrent?.(row.node)) ? 'true' : undefined}
             {...depth}
             tabIndex={row.key === tabStop ? 0 : -1}
-            title={row.node.tooltip}
+            title={rowTitle(row.node)}
             className={rowClass}
             onClick={() => activate(row)}
             onKeyDown={(e) => onKeyDown(e, i)}
