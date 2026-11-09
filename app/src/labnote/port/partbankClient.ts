@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/partbank/client.ts:25-366 sha256:b134c4a0c1eecc51
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: requestUrl becomes netIpc.partbankRequest, so Rust builds `<url>/api/v1<path>` from the stored settings and adds X-API-Key from the keychain; the webview never holds the address it calls or the key. PartbankConnectionConfig loses url and apiKey and keeps { kind, origin }; origin is for display and matching only. The constructor takes (kind, origin, invoke?). withTimeout/TIMEOUT_MS are dropped (Rust enforces 15 s) and waitForWebSlot/WEB_CALL_GAP_MS are dropped (Rust paces web calls through one shared gate). The query goes as [key, value] pairs. Every NetError kind maps to a PartbankErrorKind through toPartbankError (cancelled is rethrown as is); PartbankErrorKind gains notConfigured, redirected, insecure, keychain, tooLarge and badRequest, and PartbankError gains location. statusKind and LIST_PAGE_SIZE are exported. connectionForSource/connectionForOrigin match on origin instead of url.
+// Changes: requestUrl becomes netIpc.partbankRequest, so Rust builds `<url>/api/v1<path>` from the stored settings and adds X-API-Key from the keychain; the webview never holds the address it calls or the key. PartbankConnectionConfig loses url and apiKey and keeps { kind, origin }; origin is for display and matching only. The constructor takes (kind, origin, invoke?). withTimeout/TIMEOUT_MS are dropped (Rust enforces 15 s) and waitForWebSlot/WEB_CALL_GAP_MS are dropped (Rust paces web calls through one shared gate). The query goes as [key, value] pairs. Every NetError kind maps to a PartbankErrorKind through toPartbankError (cancelled is rethrown as is); PartbankErrorKind gains notConfigured, redirected, insecure, keychain, tooLarge and badRequest, and PartbankError gains location. statusKind and LIST_PAGE_SIZE are exported. connectionForSource/connectionForOrigin match on origin instead of url. vaultGuard() is new: a VaultGuard over the client's invoke, for the register flow (D11).
 /**
  * Talking to partbank: the desktop app on this PC, or a web server.
  *
@@ -23,7 +23,7 @@ import {
   type SampleSource,
 } from '@labnoteo/core';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { NetError, partbankRequest, toNetError, type InvokeFn } from '../../integrations/netIpc';
+import { NetError, partbankRequest, toNetError, vaultGuard, type InvokeFn, type VaultGuard } from '../../integrations/netIpc';
 
 /** A configured connection: which one it is and where it points (for display and matching). */
 export interface PartbankConnectionConfig {
@@ -122,6 +122,11 @@ export class PartbankClient {
     invoke: InvokeFn = tauriInvoke,
   ) {
     this.invoke = invoke;
+  }
+
+  /** A vault guard over this client's invoke, for flows that write after waiting on it (D11). */
+  vaultGuard(): Promise<VaultGuard> {
+    return vaultGuard(this.invoke);
   }
 
   /** The signed-in user's name, which is what "test connection" reports. */

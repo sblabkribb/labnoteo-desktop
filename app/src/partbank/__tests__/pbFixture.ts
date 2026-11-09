@@ -13,6 +13,8 @@ import { createSampleEnv, type SampleEnv } from '../../samples/env';
 
 export const PB_WEB = 'https://partbank.kbiofoundry.kr';
 export const PB_DESKTOP = 'http://127.0.0.1:47830';
+/** 가짜 `vault_current` 가 답하는 보관함 뿌리. */
+export const PB_VAULT_ROOT = 'C:/vaults/lab';
 
 export interface PbEnv {
   th: TestHost;
@@ -40,7 +42,8 @@ export function pbEnv(
     ...opts.settings,
   });
   const status = opts.status ?? secretStatusOf({ partbankWeb: true });
-  const f = fakeInvoke({ secret_status: () => status, ...opts.routes });
+  // vaultGuard() 가 묻는 현재 보관함. 바꾸는 테스트는 routes 로 덮어쓴다.
+  const f = fakeInvoke({ secret_status: () => status, vault_current: () => ({ root: PB_VAULT_ROOT }), ...opts.routes });
   const feature = new PartbankFeature({ settings: () => th.ctx.settings, host: th.host, invoke: f.invoke });
   feature.setStatus(status);
   return { th, env: createSampleEnv(th.ctx), feature, client: feature.defaultClient(), invoke: f.invoke, calls: f.calls };

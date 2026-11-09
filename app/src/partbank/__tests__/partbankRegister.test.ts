@@ -21,8 +21,10 @@ import {
   strainTypeOf,
   type RegisteredPartbankSample,
 } from '../../labnote/port/partbankRegister';
-import { sampleEvents } from '../../samples/env';
+import { RegistryUnreadableError, sampleEvents } from '../../samples/env';
 import { secretStatusOf } from '../../integrations/__tests__/fakeNet';
+import { cancelAllRequests } from '../../integrations/netIpc';
+import { CONFLICTED } from '../../samples/__tests__/fixtures';
 import { searchPartbankDialog } from '../PartbankSearchDialog';
 import { PB_WEB, partbankRoutes, pbEnv, type PbEnv } from './pbFixture';
 
@@ -54,9 +56,13 @@ let off: () => void;
 function setup(
   answers: Record<string, unknown> = { [STOCKS]: { items: [] } },
   settings: NonNullable<Parameters<typeof pbEnv>[1]>['settings'] = {},
+  routes: Record<string, (args: Record<string, unknown>) => unknown> = {},
 ): PbEnv {
   pb?.th.cleanup();
-  pb = pbEnv({ [NOTE]: '# A\n' }, { routes: partbankRoutes(answers), settings: { globalSampleFolder: GLOBAL, ...settings } });
+  pb = pbEnv(
+    { [NOTE]: '# A\n' },
+    { routes: { ...partbankRoutes(answers), ...routes }, settings: { globalSampleFolder: GLOBAL, ...settings } },
+  );
   pb.th.setActive(NOTE);
   return pb;
 }
@@ -221,6 +227,93 @@ describe('a new sample', () => {
     expect(result?.reused).toBe(false);
     expect((await loadSamplesByType(fs(), LOCAL, 'DNA'))[result!.id].location).toBeNull();
     expect(messages().join(' ')).not.toContain('raw-rust-text');
+  });
+});
+
+// D11: a vault switch while partbank is answering must not write into the vault switched to.
+describe('a vault switch during registration', () => {
+  const STRAIN_ID = '507f1f77bcf86cd799439012';
+  const strainHit: PartbankSearchHit = { type: 'strain', id: STRAIN_ID, kid: 'KBs_1', name: 'DH5a', ownedByMe: true, sharingLevel: 'private' };
+  const writes = () => pb.th.vault.log.filter((l) => l.cmd.startsWith('vault_write'));
+  /** The vault is switched while partbank answers, and Rust gives the request up as cancelled. */
+  const switchVault = () => {
+    void cancelAllRequests(pb.invoke);
+    throw { kind: 'cancelled', message: 'cancelled' };
+  };
+  let root: string;
+  const rootRoute = { vault_current: () => ({ root }) };
+  beforeEach(() => {
+    root = 'C:/vaults/lab';
+  });
+
+  it('a vault switch during the stock lookup writes nothing', async () => {
+    setup({ [STOCKS]: switchVault });
+    const result = await registerPartbankItem(pb.env, client(), ITEM, { folder: LOCAL, type: 'DNA' });
+    expect(result).toBeUndefined();
+    expect(writes()).toEqual([]);
+    expect(await loadSamplesByType(fs(), LOCAL, 'DNA')).toEqual({});
+    expect(events).toEqual([]);
+  });
+
+  it('another vault opened before the write writes nothing', async () => {
+    setup(
+      {
+        [STOCKS]: () => {
+          root = 'C:/vaults/other';
+          return { items: [] };
+        },
+      },
+      {},
+      rootRoute,
+    );
+    const result = await registerPartbankItem(pb.env, client(), ITEM, { folder: LOCAL, type: 'DNA' });
+    expect(result).toBeUndefined();
+    expect(writes()).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('a vault switch during the item refetch registers nothing and asks nothing', async () => {
+    setup({ [`/strains/${STRAIN_ID}`]: switchVault });
+    search.mockResolvedValueOnce(strainHit);
+    const update = vi.spyOn(pb.th.ctx, 'updateSettings');
+    expect(await pickPartbankReference(pb.env, pb.feature, { type: null, initialQuery: 'DH' })).toBeUndefined();
+    expect(pb.th.asked.confirm).toEqual([]);
+    expect(update).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
+    expect(pb.th.notes).toEqual([]);
+  });
+
+  it('the strain type is not added to the settings after another vault opened', async () => {
+    setup(
+      {
+        [`/strains/${STRAIN_ID}`]: () => {
+          root = 'C:/vaults/other';
+          return { id: STRAIN_ID, kid: 'KBs_1', name: 'DH5a' };
+        },
+      },
+      {},
+      rootRoute,
+    );
+    search.mockResolvedValueOnce(strainHit);
+    pb.th.answer.confirm(true);
+    const update = vi.spyOn(pb.th.ctx, 'updateSettings');
+    expect(await pickPartbankReference(pb.env, pb.feature, { type: null, initialQuery: 'DH' })).toBeUndefined();
+    expect(update).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
+    expect(pb.th.notes).toEqual([]);
+  });
+});
+
+describe('a conflicted target registry', () => {
+  it('is refused before the alias question and the stock lookup', async () => {
+    await upsertSampleRecord(fs(), GLOBAL, 'DNA', 'DNA-2', { alias: 'sfGFP', description: null, source: null });
+    await fs().write(`${LOCAL}/DNA.json`, CONFLICTED);
+    await expect(registerPartbankItem(pb.env, client(), ITEM, { folder: LOCAL, type: 'DNA' })).rejects.toBeInstanceOf(
+      RegistryUnreadableError,
+    );
+    expect(pb.th.asked.pick).toEqual([]);
+    expect(pb.calls.filter((c) => c[0] === 'partbank_request')).toEqual([]);
+    expect(pb.th.vault.files()[`${LOCAL}/DNA.json`]).toBe(CONFLICTED);
   });
 });
 

@@ -1,7 +1,7 @@
 // Ported from app/vendor/labnoteo/src/partbank/partbankRegister.ts:50-432 sha256:a529a74c9b309e25
 // Ported from app/vendor/labnoteo/src/partbank/partbankLocation.ts:117-141 sha256:6c0312941ecd7f68
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin becomes SampleEnv plus PartbankFeature: registerPartbankItem, resolveSampleType, addStrainType, collectLinkedCandidates, catalogSeedNote and noticeForRegistration take env in place of plugin, and pickPartbankReference takes (env, feature, opts) (registerPartbankItem needs no feature: its client is passed in). plugin.t → env.t; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; confirmModal(app, message, label) → env.host.confirm(message, { confirmLabel: label }); new Notice(m) → env.host.notify('info', m), and 'warn' for the alias clash; searchPartbankModal(app, client, entities, {…}) → searchPartbankDialog({ type, initialQuery, client, entities, onError }), whose placeholder and empty text the dialog builds itself; plugin.partbank.notifyError(err, client.kind) → feature.notifyError(err, client); addStrainType's settings write + saveSettings → env.updateSettings({ customSampleTypes: [...] }), and refreshSampleViews → env.changed(); plugin.samplesChanged() → env.changed([the written registry]); plugin.localSampleFolder() → env.localFolder(); plugin.sampleTrackingFor → env.trackingFor; plugin.host.editTarget()?.path → env.editTarget()?.path, falling back to env.activePath(); loadCatalogSamples and pickAliasSibling come from the sample ports (sampleScope, sampleCreate). vaultSampleFolders and linkedSamplesIn (partbankLocation.ts:117-141) are ported here as private helpers ahead of the storage-location port (Task 22), which register-or-reuse needs for #446.
+// Changes: LabnotePlugin becomes SampleEnv plus PartbankFeature: registerPartbankItem, resolveSampleType, addStrainType, collectLinkedCandidates, catalogSeedNote and noticeForRegistration take env in place of plugin, and pickPartbankReference takes (env, feature, opts) (registerPartbankItem needs no feature: its client is passed in). plugin.t → env.t; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; confirmModal(app, message, label) → env.host.confirm(message, { confirmLabel: label }); new Notice(m) → env.host.notify('info', m), and 'warn' for the alias clash; searchPartbankModal(app, client, entities, {…}) → searchPartbankDialog({ type, initialQuery, client, entities, onError }), whose placeholder and empty text the dialog builds itself; plugin.partbank.notifyError(err, client.kind) → feature.notifyError(err, client); addStrainType's settings write + saveSettings → env.updateSettings({ customSampleTypes: [...] }), and refreshSampleViews → env.changed(); plugin.samplesChanged() → env.changed([the written registry]); plugin.localSampleFolder() → env.localFolder(); plugin.sampleTrackingFor → env.trackingFor; plugin.host.editTarget()?.path → env.editTarget()?.path, falling back to env.activePath(); loadCatalogSamples and pickAliasSibling come from the sample ports (sampleScope, sampleCreate). A vault switch is checked for (D11): pickPartbankReference and registerPartbankItem take a VaultGuard at the start (client.vaultGuard(), or opts.guard), guard.check() runs before upsertSampleRecord and before addStrainType's settings write, a cancelled item refetch or stock lookup is not taken for an item without detail or stock, and a cancelled registration returns undefined and writes nothing; resolveSampleType takes opts.guard for that. registerPartbankItem refuses an unreadable (conflicted) target registry with RegistryUnreadableError (assertRegistryReadable) before the alias-sibling question and the stock lookup, as sampleCreate does; the caller routes it through runCommand-style handling. vaultSampleFolders and linkedSamplesIn (partbankLocation.ts:117-141) are ported here as private helpers ahead of the storage-location port (Task 22), which register-or-reuse needs for #446.
 /**
  * Registering a partbank item as a sample: deciding its type, finding the
  * sample that already stands for it, and writing the record.
@@ -41,8 +41,9 @@ import {
 } from '@labnoteo/core/lib/sampleStorage';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
 import * as posix from '@labnoteo/core/posix';
+import { NetError, type VaultGuard } from '../../integrations/netIpc';
 import { searchPartbankDialog } from '../../partbank/PartbankSearchDialog';
-import type { SampleEnv } from '../../samples/env';
+import { assertRegistryReadable, type SampleEnv } from '../../samples/env';
 import type { PartbankClient } from './partbankClient';
 import type { PartbankFeature } from './partbankFeature';
 import { pickAliasSibling } from './sampleCreate';
@@ -73,6 +74,9 @@ export interface RegisteredPartbankSample {
 /** The registry file a write of `type` into `folder` touched, for {@link SampleEnv.changed}. */
 const registryOf = (folder: string, type: string) => [`${folder}/${type}.json`];
 
+/** A request or guard check given up because the vault was switched (D11). */
+const isCancelled = (err: unknown): boolean => err instanceof NetError && err.kind === 'cancelled';
+
 /** The vault's strain type, when it has one: partbank strains need it. */
 export function strainTypeOf(env: SampleEnv): string | undefined {
   return canonicalSampleType(STRAIN_SAMPLE_TYPE, getSampleDisplayMeta(env.settings().customSampleTypes).types);
@@ -86,7 +90,7 @@ export function strainTypeOf(env: SampleEnv): string | undefined {
 export async function resolveSampleType(
   env: SampleEnv,
   item: PartbankItem,
-  opts: { silent?: boolean } = {},
+  opts: { silent?: boolean; guard?: VaultGuard } = {},
 ): Promise<string | undefined> {
   const strainType = strainTypeOf(env);
   const type = sampleTypeForItem(item, { strainType });
@@ -98,6 +102,8 @@ export async function resolveSampleType(
     { confirmLabel: env.t('Add {0}', STRAIN_SAMPLE_TYPE) },
   );
   if (!ok) return undefined;
+  // The settings belong to the vault the item was fetched for (D11).
+  await opts.guard?.check();
   await addStrainType(env);
   return STRAIN_SAMPLE_TYPE;
 }
@@ -150,9 +156,26 @@ export async function registerPartbankItem(
   env: SampleEnv,
   client: PartbankClient,
   item: PartbankItem,
-  opts: { folder: string; type?: string; lookIn?: string } = { folder: '' },
+  opts: { folder: string; type?: string; lookIn?: string; guard?: VaultGuard } = { folder: '' },
 ): Promise<RegisteredPartbankSample | undefined> {
-  const type = opts.type ?? (await resolveSampleType(env, item));
+  const guard = opts.guard ?? (await client.vaultGuard());
+  try {
+    return await registerWithGuard(env, client, item, opts, guard);
+  } catch (err) {
+    // The vault was switched while partbank answered: nothing was written (D11).
+    if (isCancelled(err)) return undefined;
+    throw err;
+  }
+}
+
+async function registerWithGuard(
+  env: SampleEnv,
+  client: PartbankClient,
+  item: PartbankItem,
+  opts: { folder: string; type?: string; lookIn?: string },
+  guard: VaultGuard,
+): Promise<RegisteredPartbankSample | undefined> {
+  const type = opts.type ?? (await resolveSampleType(env, item, { guard }));
   if (!type) return undefined;
   const folder = opts.folder;
   const lookIn = opts.lookIn ?? folder;
@@ -173,6 +196,8 @@ export async function registerPartbankItem(
     };
   }
 
+  // A conflicted registry would refuse the write only after the questions; refuse it before them instead.
+  await assertRegistryReadable(env.fs, registryOf(folder, type)[0]);
   const alias = aliasForItem(item);
   const sibling = alias ? await pickAliasSibling(env, folder, type, alias) : null;
   if (sibling === undefined) return undefined;
@@ -192,15 +217,18 @@ export async function registerPartbankItem(
   }
   const id = generateSampleId(type);
   // Best-effort: an item with no visible stock, or a lookup that fails, simply
-  // leaves the location empty rather than failing the registration.
+  // leaves the location empty rather than failing the registration. A lookup
+  // cancelled by a vault switch is not one of those: it ends the registration.
   let location: string | null = null;
   try {
     location = formatStockLocation(await client.getStocks(item.type, item.id)) || null;
-  } catch {
+  } catch (err) {
+    if (isCancelled(err) || guard.signal.aborted) throw err;
     location = null;
   }
   const others = await samplesInOtherExperiments(env, source, [folder, lookIn]);
   if (!location) location = await offerLocationFrom(env, others);
+  await guard.check();
   await upsertSampleRecord(env.fs, folder, type, id, {
     alias,
     description: descriptionForItem(item),
@@ -294,13 +322,30 @@ function experimentOf(folder: string): string {
 export async function pickPartbankReference(
   env: SampleEnv,
   feature: PartbankFeature,
-  opts: { type: string | null; initialQuery: string },
+  opts: { type: string | null; initialQuery: string; guard?: VaultGuard },
 ): Promise<string | undefined> {
   const client = feature.defaultClient();
   if (!client) {
     feature.notifyNotConfigured();
     return undefined;
   }
+  const guard = opts.guard ?? (await client.vaultGuard());
+  try {
+    return await pickWithGuard(env, feature, client, opts, guard);
+  } catch (err) {
+    // The vault was switched while partbank answered: nothing was written (D11).
+    if (isCancelled(err)) return undefined;
+    throw err;
+  }
+}
+
+async function pickWithGuard(
+  env: SampleEnv,
+  feature: PartbankFeature,
+  client: PartbankClient,
+  opts: { type: string | null; initialQuery: string },
+  guard: VaultGuard,
+): Promise<string | undefined> {
   const entities = searchEntitiesForSampleType(opts.type, { strainType: strainTypeOf(env) });
   if (entities.length === 0) return undefined;
 
@@ -319,16 +364,17 @@ export async function pickPartbankReference(
   try {
     item = await client.getItem(hit.type, hit.id);
   } catch (err) {
+    if (isCancelled(err) || guard.signal.aborted) return undefined;
     if (hit.type === 'molecule' && opts.type === null) {
       feature.notifyError(err, client);
       return undefined;
     }
   }
 
-  const type = opts.type ?? (await resolveSampleType(env, item));
+  const type = opts.type ?? (await resolveSampleType(env, item, { guard }));
   if (!type) return undefined;
   const folder = env.localFolder();
-  const result = await registerPartbankItem(env, client, item, { folder, type });
+  const result = await registerPartbankItem(env, client, item, { folder, type, guard });
   if (!result) return undefined;
   // Only a new sample can clash; a reused one is the very sample (#387).
   if (!result.reused && result.alias) await warnOnAliasClash(env, type, folder, result.alias, result.id);
