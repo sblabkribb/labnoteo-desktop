@@ -140,7 +140,10 @@ describe('createSampleInteractive', () => {
 
       expect(await add(th)).toBeUndefined();
 
-      expect(th.asked.confirm[0].message).toContain('RNA-9 (Local RNA sample) is already stored at -80 / p1 / a1. Save RNA-');
+      // #553: the sample in the slot, and the one being saved, by alias first.
+      expect(th.asked.confirm[0].message).toMatch(
+        /^kept \(RNA-9, Local RNA sample\) is already stored at -80 \/ p1 \/ a1\. Save R1 \(RNA-[^)]+\) anyway\?$/,
+      );
       expect(th.asked.confirm[0].opts).toEqual({ confirmLabel: 'Save anyway' });
       expect(Object.keys(json(th, REGISTRY))).toEqual(['RNA-9']);
     });
@@ -182,7 +185,19 @@ describe('createSampleInteractive', () => {
 
       expect(await add(th)).toBeUndefined();
 
-      expect(th.asked.confirm[0].message).toContain('DNA-3 (Global DNA sample) is already stored at -80 / P1 / C3. Save RNA-');
+      expect(th.asked.confirm[0].message).toContain('DNA-3 (Global DNA sample) is already stored at -80 / P1 / C3. Save R1 (RNA-');
+    });
+
+    it('names a sample without an alias by its ID alone (#553)', async () => {
+      const th = host({
+        [`${GLOBAL}/DNA.json`]: JSON.stringify({ 'DNA-3': { type: 'DNA', descriptions: [], sources: [], location: '-80 / P1 / C3' } }),
+      });
+      th.answer.confirm(false);
+      th.answer.prompt('', '', '-80 / P1 / C3');
+
+      expect(await add(th)).toBeUndefined();
+
+      expect(th.asked.confirm[0].message).toMatch(/^DNA-3 \(Global DNA sample\) is already stored at -80 \/ P1 \/ C3\. Save RNA-[^ ]+ anyway\?$/);
     });
   });
 

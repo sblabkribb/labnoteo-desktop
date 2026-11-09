@@ -1,6 +1,6 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:415-897 sha256:851b8d2ce7b19901
-// labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); Notice → host.notify; modals → host dialogs. In detail: plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info' | 'warn', m) without the duration (warn for the refused folder, the alias twins and the discarded notices); promptModal/pickModal/confirmModal(app, …, label) → env.host.prompt/pick/confirm(…, { confirmLabel: label }); pickModal's initialQuery is dropped because the app's pick dialog has no initial query (it still pre-fills the create fallback); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.refreshSampleViews() → env.changed([written registry]); an unreadable (conflicted) target registry is refused with RegistryUnreadableError before the first prompt; validateAlias/validateDescription/loadCatalogSamples take env. confirmAliasClash, confirmLocationClash, aliasSiblingLabel, globalSamplesWithAlias and findRegisteredSample are exported for the edit and move ports.
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:429-916 sha256:a456f3b861dc7411
+// labnoteO 0.140.2, Apache-2.0.
+// Changes: App/LabnotePlugin → SampleEnv (D5); Notice → host.notify; modals → host dialogs. In detail: plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info' | 'warn', m) without the duration (warn for the refused folder, the alias twins and the discarded notices); promptModal/pickModal/confirmModal(app, …, label) → env.host.prompt/pick/confirm(…, { confirmLabel: label }); pickModal's initialQuery is dropped because the app's pick dialog has no initial query (it still pre-fills the create fallback); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.refreshSampleViews() → env.changed([written registry]); an unreadable (conflicted) target registry is refused with RegistryUnreadableError before the first prompt; validateAlias/validateDescription/loadCatalogSamples take env. confirmAliasClash, confirmLocationClash, aliasSiblingLabel, globalSamplesWithAlias and findRegisteredSample are exported for the edit and move ports. The 0.140.2 alias naming of the slot question (#553) is taken as is; confirmLocationClash's alias stays optional so the edit port, which does not pass one yet, names the saved sample by its ID.
 import type { PickItem } from '@labnoteo/core';
 import { invalidVaultFolderReason } from '@labnoteo/core/lib/regexUtils';
 import {
@@ -237,6 +237,7 @@ export async function createSampleInteractive(
     !(await confirmLocationClash(env, {
       folder: existing?.folder ?? folder,
       id,
+      alias: alias ?? existing?.record.alias,
       location,
       before: existing?.record.location,
     }))
@@ -370,7 +371,7 @@ export async function confirmAliasClash(
  */
 export async function confirmLocationClash(
   env: SampleEnv,
-  opts: { folder: string; id: string; location: string | null; before?: string | null },
+  opts: { folder: string; id: string; alias?: string | null; location: string | null; before?: string | null },
 ): Promise<boolean> {
   const { folder, id, location } = opts;
   if (!location || !isStorageSlot(location)) return true;
@@ -389,7 +390,10 @@ export async function confirmLocationClash(
       for (const other of samplesAtLocation(entries, location)) {
         if (other === id && scope.folder === folder) continue;
         const where = scope.global ? env.t('Global {0} sample', type) : env.t('Local {0} sample', type);
-        taken.push(`${other} (${where})`);
+        // The alias first, since that is what the tube is labelled with: an
+        // ID alone said nothing about which sample is in the slot (#553).
+        const alias = entries[other].alias;
+        taken.push(alias ? `${alias} (${other}, ${where})` : `${other} (${where})`);
       }
     }
   }
@@ -398,7 +402,8 @@ export async function confirmLocationClash(
     taken.length === 1
       ? env.t('{0} is already stored at {1}.', taken[0], location)
       : env.t('{0} samples are already stored at {1}: {2}.', String(taken.length), location, taken.join(', '));
-  return env.host.confirm(`${held} ${env.t('Save {0} anyway?', id)}`, { confirmLabel: env.t('Save anyway') });
+  const saving = opts.alias ? `${opts.alias} (${id})` : id;
+  return env.host.confirm(`${held} ${env.t('Save {0} anyway?', saving)}`, { confirmLabel: env.t('Save anyway') });
 }
 
 /** A sample sharing an alias, as an alias question names it: its ID, marked when discarded (#419). */
