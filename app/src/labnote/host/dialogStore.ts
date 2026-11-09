@@ -4,6 +4,9 @@ import type { AliasOpts } from './AliasDialog';
 import type { SampleDefinitionModel, SampleDefinitionResult, UsageGroup } from '../port/sampleDefinitionModel';
 import { deepActiveElement } from '../../ui/returnFocus';
 import type { SampleSettingsValue } from '../../samples/SampleSettingsDialog';
+import type { WorksheetUnitOp } from '@labnoteo/core/lib/worksheet';
+import type { WorksheetPaperSize } from '../../../vendor/labnoteo/src/settings';
+import type { WorksheetChoice } from '../port/worksheetPrint';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -25,7 +28,8 @@ export type DialogSpec =
   | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
   | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[] }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
-  | { kind: 'sampleSettings'; value: SampleSettingsValue };
+  | { kind: 'sampleSettings'; value: SampleSettingsValue }
+  | { kind: 'worksheet'; unitOps: readonly WorksheetUnitOp[]; paper: WorksheetPaperSize };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {
@@ -169,4 +173,9 @@ export function choiceDialog<T>(
  */
 export function openSampleDefinitionDialog(model: SampleDefinitionModel, usages: Promise<UsageGroup[]>): Promise<SampleDefinitionResult> {
   return openDialog<SampleDefinitionResult>({ kind: 'sampleDefinition', model, usages }, undefined);
+}
+
+/** 실험 워크시트 창(SP7 Task 8): 찍을 유닛 오퍼레이션, 용지, 출력 또는 브라우저. 닫으면 undefined. */
+export function worksheetDialog(unitOps: readonly WorksheetUnitOp[], paper: WorksheetPaperSize): Promise<WorksheetChoice | undefined> {
+  return openDialog<WorksheetChoice | undefined>({ kind: 'worksheet', unitOps, paper }, undefined);
 }

@@ -837,3 +837,13 @@ button.links-target:focus-visible { outline-offset: -2px; }
   .editor-frame { border: none; }
   .editor-frame:focus-within { outline: none; }
 }
+
+/* SP7 Part A: print and barcode */
+/* 실험 워크시트 창(Task 8): 유닛 오퍼레이션 체크박스 목록(길면 이 목록만 스크롤), 줄마다 실험실/소프트웨어 표시, 용지 고르기 */
+.dialog.worksheet { width: min(40rem, 100%); }
+.worksheet-body { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.worksheet-ops { display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; max-height: 40vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.worksheet-ops li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.worksheet-ops label { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.worksheet-kind { flex: none; color: var(--text-muted); font-size: 0.93em; }
+.worksheet-paper { display: flex; align-items: center; gap: var(--space-2); }
