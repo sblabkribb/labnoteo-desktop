@@ -2,15 +2,17 @@
  * 샘플 정의 창을 열고 고른 동작을 옮겨 온 흐름(plan SP5 Task 20-22)으로 돌린다(Task 24, D16). 창은 동작만 돌려주는
  * 순수한 보기이고, 흐름과 그 뒤의 알림(`env.changed`)은 여기서 한다.
  * - 플러그인 창은 흐름이 끝나야(true) 닫히고, 취소하거나 거절되면(false) 그대로 남는다. 앱의 창은 고르는 순간 닫히므로
- *   흐름이 false 면 같은 정의로 창을 다시 연다.
+ *   흐름이 false 면 대장에서 정의를 다시 읽어 창을 다시 연다(거절된 흐름도 기록을 바꿨을 수 있다). 기록이 없어졌으면 멈춘다.
  * - "Open JSON file" 과 사용처는 앱 안에서 그 파일을 연다.
  */
+import { loadSamplesByType } from '@labnoteo/core/lib/sampleStorage';
 import { openSampleDefinitionDialog } from '../labnote/host/dialogStore';
 import { definitionModel, groupUsages, type SampleDefinitionAction } from '../labnote/port/sampleDefinitionModel';
 import { deleteSampleInteractive } from '../labnote/port/sampleDelete';
 import { editSampleInteractive, setSampleDiscardedInteractive } from '../labnote/port/sampleEdit';
 import { changeSampleTypeInteractive, moveSampleInteractive } from '../labnote/port/sampleMove';
 import { sampleUsageSpots, type ResolvedSampleDefinition } from '../labnote/port/sampleQuery';
+import { loadCatalogSamples } from '../labnote/port/sampleScope';
 import type { SampleEnv } from './env';
 
 type Definition = ResolvedSampleDefinition & { type: string; id: string };
@@ -69,5 +71,22 @@ export async function runSampleDefinition(env: SampleEnv, def: Definition, where
       env.changed([def.folder]);
       return;
     }
+    // A refused flow can still have written the record (Delete refused -> Mark as discarded):
+    // reopen on what the registry holds now, and stop when the record is gone.
+    const fresh = await reloadDefinition(env, def);
+    if (!fresh) return;
+    def = fresh;
   }
+}
+
+/** The definition as its registry (or catalog) holds it now; undefined when the record is gone. */
+async function reloadDefinition(env: SampleEnv, def: Definition): Promise<Definition | undefined> {
+  const { scope, folder, type, id } = def;
+  if (scope === 'catalog') {
+    const fileOf: Record<string, string> = {};
+    const record = (await loadCatalogSamples(env, folder, type, fileOf))[id];
+    return record ? { ...def, record, file: fileOf[id] ?? def.file } : undefined;
+  }
+  const record = (await loadSamplesByType(env.fs, folder, type))[id];
+  return record ? { ...def, record } : undefined;
 }

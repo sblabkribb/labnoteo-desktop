@@ -158,6 +158,38 @@ describe('runSampleDefinition', () => {
     expect(JSON.parse(th.vault.files()[`${LOCAL}/DNA.json`])['DNA-1'].discarded).toBeTruthy();
     expect(changed).toHaveBeenCalledWith([LOCAL]);
   });
+
+  it('a refused flow that still changed the record reopens the window on the fresh record', async () => {
+    const th = host(SAMPLE_VAULT);
+    await th.mount(NOTE);
+    const env = createSampleEnv(th.ctx);
+    openDialog.mockResolvedValueOnce({ action: 'delete' }).mockResolvedValueOnce(undefined);
+    // Delete is refused (DNA-1 is used) → Mark as discarded → keep the location
+    th.answer.confirm(true);
+    th.answer.pick(() => false);
+    await act(() => runSampleDefinition(env, def(), { docPath: NOTE }));
+    expect(openDialog).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(th.vault.files()[`${LOCAL}/DNA.json`])['DNA-1'].discarded).toBeTruthy();
+    const reopened = openDialog.mock.calls[1][0];
+    expect(reopened.actions).toContain('undiscard');
+    expect(reopened.actions).not.toContain('discard');
+    expect(reopened.rows.some((r) => r.label === coreT('Discarded'))).toBe(true);
+  });
+
+  it('a refused flow whose record is gone does not reopen the window', async () => {
+    const th = host(SAMPLE_VAULT);
+    await th.mount(NOTE);
+    const env = createSampleEnv(th.ctx);
+    openDialog.mockImplementationOnce(async () => {
+      const db = JSON.parse(th.vault.files()[`${LOCAL}/DNA.json`]);
+      delete db['DNA-1'];
+      await env.fs.write(`${LOCAL}/DNA.json`, JSON.stringify(db));
+      return { action: 'edit' };
+    });
+    th.answer.prompt(undefined);
+    await act(() => runSampleDefinition(env, def(), { docPath: NOTE }));
+    expect(openDialog).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('editor menu', () => {
