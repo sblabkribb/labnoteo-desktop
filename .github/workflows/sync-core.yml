@@ -1,19 +1,40 @@
-# Keeps the app on the newest labnoteO release.
+# Keeps the app on the newest labnoteO release, and ships each passing core update to installed apps.
 #
 # Every 6 hours (or on demand) this checks sblabkribb/labnoteo for a newer release tag (x.y.z).
 # If the vendored core is older, it moves app/vendor/labnoteo to that tag and runs install, a clean
 # `npm ci`, the tests and the build:
-#   - all green: the update is committed straight to main;
+#   - all green: the update is committed to main;
 #   - anything red: nothing is committed, and an issue labelled `core-sync` says which release broke
 #     the app, with a link to the log. Later runs retry; a passing release goes in and closes the issue.
+#
+# The release chain (runs also when the core was already current, so every run is a retry):
+#   1. Readiness: the TAURI_SIGNING_PRIVATE_KEY secret is set (only its presence is read here) and the
+#      committed updater pubkey is not the placeholder. Not ready: the core update still goes to main,
+#      but nothing is bumped or tagged; a warning and one `release-blocked` issue say why.
+#   2. Decision (app/scripts/releaseChain.mjs decide), computed fresh each run, nothing remembered:
+#      - the core at main differs from the core at the newest vX.Y.Z tag -> bump the app patch version
+#        in all six version sites, commit, and push main and the new tag together (one atomic push);
+#      - the core is the same but that tag has no GitHub Release (a failed or skipped build) -> release
+#        that tag again, without a new version;
+#      - otherwise, or with no vX.Y.Z tag at all (the first release is cut by hand), nothing.
+#   3. Job `release` CALLS release.yml with that tag and commit. A tag pushed with GITHUB_TOKEN starts
+#      no push-triggered workflow, so the tag push alone would release nothing (and never twice);
+#      the call puts the build in this run. release.yml refuses a missing or mismatched signing key and
+#      skips a tag that is already released.
+#   4. A failed release opens one `core-sync` issue "Release vX.Y.Z failed"; the next run retries it
+#      (step 2) and the issue closes once that tag has a release.
 #
 # Notes for maintainers:
 #   - GitHub disables scheduled workflows in a public repo after 60 days without activity. Each run
 #     re-enables this workflow through the API, which resets that timer. If it was disabled anyway,
 #     enable it again under Actions.
-#   - If main gets branch protection or a ruleset, let github-actions[bot] bypass it, or this push fails
-#     (that failure is reported as a core-sync issue).
+#   - If main gets branch protection or a ruleset, let github-actions[bot] bypass it for main and for
+#     v* tags, or this push fails (that failure is reported as a core-sync issue).
 #   - Pushes made with GITHUB_TOKEN do not trigger ci.yml; this job runs the same checks itself.
+#   - The token is given only to the steps that call GitHub, never job-wide: install, tests and build
+#     run upstream code.
+#   - A v* tag left without a release on purpose would be released by step 2; delete the tag or
+#     publish its release to stop that.
 name: sync-core
 
 on:
@@ -36,15 +57,18 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      tag: ${{ steps.tagit.outputs.tag || steps.decide.outputs.tag }}
+      sha: ${{ steps.tagit.outputs.sha || steps.decide.outputs.sha }}
     steps:
       - name: Keep the schedule alive
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/sync-core.yml/enable"
 
       # No credentials stay in .git/config while upstream code is installed and tested;
-      # the token is used only by the push step.
+      # the token is passed only to the steps that talk to GitHub.
       - uses: actions/checkout@v4
         with:
           ref: main
@@ -62,8 +86,8 @@ jobs:
           LATEST: ${{ steps.find.outputs.latest }}
         run: git -C app/vendor/labnoteo checkout --quiet "$LATEST"
 
+      # Also when the core is current: the release decision runs node.
       - uses: actions/setup-node@v4
-        if: steps.find.outputs.behind == 'true'
         with:
           node-version: 22
 
@@ -90,7 +114,9 @@ jobs:
         working-directory: app
         run: npm run build
 
+      # Committed here, pushed by the push step below (together with a version bump when one follows).
       - name: Commit the update to main
+        id: commit
         if: steps.find.outputs.behind == 'true' && steps.build.outcome == 'success'
         env:
           LATEST: ${{ steps.find.outputs.latest }}
@@ -100,22 +126,163 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/vendor/labnoteo app/package-lock.json
           git commit -m "chore(core): follow labnoteO $LATEST" -m "Moves app/vendor/labnoteo from $CURRENT to $LATEST. Install, npm ci, tests and build passed in sync-core."
+
+      - name: Can a release be published?
+        id: ready
+        if: steps.find.outputs.behind == 'false' || steps.commit.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          ready=true
+          reason=''
+          if [ "$HAS_KEY" != 'true' ]; then
+            ready=false
+            reason='the repository secret TAURI_SIGNING_PRIVATE_KEY is not set'
+          elif ! out=$(node app/scripts/releaseChain.mjs pubkey-check 2>&1); then
+            ready=false
+            reason=$(tail -n 1 <<<"$out")
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [ "$ready" = true ]; then
+            for n in $(gh issue list --label release-blocked --state open --json number --jq '.[].number' 2>/dev/null); do
+              gh issue close "$n" --comment "Resolved: the signing key and the updater pubkey are in place; sync-core releases again."
+            done
+            exit 0
+          fi
+          echo "::warning::Automatic release skipped: $reason"
+          gh label create release-blocked --color FBCA04 --description 'Automatic app releases are waiting for setup' 2>/dev/null || true
+          existing="$(gh issue list --label release-blocked --state open --json number --jq '.[0].number')"
+          if [ -z "$existing" ]; then
+            gh issue create --label release-blocked \
+              --title "Automatic releases are waiting for the updater signing key" \
+              --body "sync-core keeps the core current but does not bump, tag or release the app: $reason.
+
+          One-time setup (maintainer, see docs/RELEASING.md on the maintainer's machine):
+          1. Generate the updater key pair once: \`npx tauri signer generate -w <path outside the repo>\`; keep the private key safe.
+          2. Put the private key into the repository secret \`TAURI_SIGNING_PRIVATE_KEY\` (and its password, if any, into \`TAURI_SIGNING_PRIVATE_KEY_PASSWORD\`).
+          3. Commit the public key as \`plugins.updater.pubkey\` in \`app/src-tauri/tauri.conf.json\`.
+          4. Cut the first release by hand (push a \`vX.Y.Z\` tag); installed copies older than that release must be reinstalled once.
+
+          This issue closes by itself on the first run that finds the key and the pubkey in place."
+          fi
+
+      - name: Decide whether to release
+        id: decide
+        if: steps.find.outputs.behind == 'false' || steps.commit.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          READY: ${{ steps.ready.outputs.ready }}
+        run: |
           remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --quiet --force --tags "$remote"
+          NEWEST_TAG=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+          CORE_AT_MAIN=$(git rev-parse HEAD:app/vendor/labnoteo)
+          CORE_AT_TAG=''
+          TAG_RELEASED=false
+          if [ -n "$NEWEST_TAG" ]; then
+            # Empty when the tag predates the submodule: counts as "core moved".
+            CORE_AT_TAG=$(git rev-parse --verify --quiet "$NEWEST_TAG:app/vendor/labnoteo" || true)
+            if out=$(gh release view "$NEWEST_TAG" --json tagName 2>&1); then
+              TAG_RELEASED=true
+            elif grep -qi 'release not found' <<<"$out"; then
+              TAG_RELEASED=false
+            else
+              echo "::error::Could not check whether $NEWEST_TAG is released: $out"
+              exit 1
+            fi
+          fi
+          export READY NEWEST_TAG CORE_AT_MAIN CORE_AT_TAG TAG_RELEASED
+          decision=$(node app/scripts/releaseChain.mjs decide)
+          echo "newest tag: ${NEWEST_TAG:-none}, core at main: $CORE_AT_MAIN, core at tag: ${CORE_AT_TAG:-none}, released: $TAG_RELEASED"
+          echo "$decision"
+          echo "$decision" >> "$GITHUB_OUTPUT"
+          action=$(sed -n 's/^action=//p' <<<"$decision")
+          reason=$(sed -n 's/^reason=//p' <<<"$decision")
+          if [ "$action" = retag ]; then
+            echo "sha=$(git rev-list -n 1 "$NEWEST_TAG")" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$reason" = no-first-release ]; then
+            echo "::notice::No vX.Y.Z release yet; cut the first release by hand (docs/RELEASING.md). Automatic releases start after it."
+          fi
+
+      - name: Bump the app version and tag it
+        id: bump
+        if: steps.decide.outputs.action == 'bump'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.find.outputs.latest }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Bump from the newest main, so a version set by hand in between is respected.
           git pull --rebase --quiet "$remote" main
-          git push --quiet "$remote" HEAD:main
+          new=$(node app/scripts/releaseChain.mjs bump | sed -n 's/^new=//p')
+          if [ -z "$new" ]; then
+            echo "::error::the version bump printed no version"
+            exit 1
+          fi
+          git add app/package.json app/package-lock.json app/src-tauri/tauri.conf.json app/src-tauri/Cargo.toml app/src-tauri/Cargo.lock
+          git commit -m "chore(release): v$new for labnoteO $LATEST" -m "Core: labnoteO $LATEST (app/vendor/labnoteo at $(git rev-parse --short HEAD:app/vendor/labnoteo)). Released by sync-core."
+          git tag "v$new" HEAD
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Push main (and the new tag, in one atomic push)
+        id: tagit
+        if: steps.commit.outcome == 'success' || steps.bump.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.bump.outputs.new }}
+        run: |
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if [ -n "$NEW" ]; then
+            TAG="v$NEW"
+            sha=$(git rev-parse HEAD)
+            # Both refs land or neither does: no tag without its bump commit, no bump without its tag.
+            # If main moved since the bump, the push is refused and the next run starts over.
+            git push --quiet --atomic "$remote" HEAD:main "refs/tags/$TAG"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            echo "Pushed $TAG at $sha"
+          else
+            git pull --rebase --quiet "$remote" main
+            git push --quiet "$remote" HEAD:main
+          fi
+
+      - name: Close release-failure issues whose tag is now released
+        if: steps.decide.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh issue list --label core-sync --state open --json number,title \
+            --jq '.[] | select(.title | test("^Release v[0-9]+\\.[0-9]+\\.[0-9]+ failed$")) | "\(.number) \(.title)"' |
+          while read -r n _ tag _; do
+            if gh release view "$tag" --json tagName > /dev/null 2>&1; then
+              gh issue close "$n" --comment "Resolved: $tag is released."
+            fi
+          done
 
       - name: Close core-sync issues once the core is current
         if: steps.find.outputs.behind == 'false' || steps.build.outcome == 'success'
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           LATEST: ${{ steps.find.outputs.latest }}
         run: |
-          for n in $(gh issue list --label core-sync --state open --json number --jq '.[].number' 2>/dev/null); do
+          # "Release vX.Y.Z failed" issues are closed by the release, not by the core being current.
+          for n in $(gh issue list --label core-sync --state open --json number,title --jq '.[] | select(.title | startswith("Release ") | not) | .number' 2>/dev/null); do
             gh issue close "$n" --comment "Resolved: the app is on labnoteO $LATEST and its checks pass."
           done
 
       - name: Report a release that breaks the app
         if: steps.find.outputs.behind == 'true' && steps.build.outcome != 'success'
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           LATEST: ${{ steps.find.outputs.latest }}
           CURRENT: ${{ steps.find.outputs.current }}
           FAILED: ${{ steps.install.outcome != 'success' && 'npm install / npm ci' || steps.test.outcome != 'success' && 'npm test' || 'npm run build' }}
@@ -134,14 +301,68 @@ jobs:
           fi
           exit 1
 
+      # Any other failure: checkout, finding the release, readiness, the release decision, the bump,
+      # or the push of main and the tag. A red core has its own report above.
       - name: Report that the sync itself could not run
-        if: failure() && steps.build.outcome == 'success' || failure() && steps.find.outcome == 'failure'
+        if: failure() && !(steps.find.outputs.behind == 'true' && steps.build.outcome != 'success')
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh label create core-sync --color D93F0B --description 'labnoteO core update needs attention' 2>/dev/null || true
           existing="$(gh issue list --label core-sync --state open --search 'in:title "sync-core could not complete"' --json number --jq '.[0].number')"
           if [ -z "$existing" ]; then
             gh issue create --label core-sync --title "sync-core could not complete" \
-              --body "The core update was checked but could not be finished (for example the push to main was refused, or upstream could not be read). Log: $RUN_URL"
+              --body "The core update or the release step could not be finished (for example upstream could not be read, the release decision failed, or the push of main or the version tag was refused). Nothing half-done is left behind: main and the tag are pushed together or not at all, and the next run starts over. Log: $RUN_URL"
           fi
+
+  # Runs the release build in this same run. A tag pushed with GITHUB_TOKEN starts no workflow,
+  # so release.yml is called, with the tag and the exact commit (inputs, not the caller's github.sha).
+  release:
+    needs: sync
+    if: needs.sync.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.sync.outputs.tag }}
+      sha: ${{ needs.sync.outputs.sha }}
+    secrets: inherit
+    permissions:
+      contents: write
+
+  report-release:
+    needs: [sync, release]
+    if: always() && needs.sync.outputs.tag != '' && needs.release.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or close the release issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.sync.outputs.tag }}
+          RESULT: ${{ needs.release.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Release $TAG failed"
+          numbers() {
+            gh issue list --label core-sync --state open --search "in:title \"$title\"" --json number,title \
+              --jq ".[] | select(.title == \"$title\") | .number"
+          }
+          if [ "$RESULT" = success ]; then
+            for n in $(numbers); do
+              gh issue close "$n" --comment "Resolved: $TAG is released. Log: $RUN_URL"
+            done
+            exit 0
+          fi
+          gh label create core-sync --color D93F0B --description 'labnoteO core update needs attention' 2>/dev/null || true
+          if [ -z "$(numbers)" ]; then
+            gh issue create --label core-sync --title "Release $TAG failed" \
+              --body "The release build for $TAG ended with \`$RESULT\`. Nothing was published unless the log shows the publish step finished.
+
+          Log: $RUN_URL
+
+          sync-core retries this tag automatically every 6 hours, without a new version, as long as $TAG has no GitHub Release (a missing or wrong signing key fails before the build; fix the secret and wait, or re-run). This issue closes once $TAG is released."
+          fi
+          exit 1
