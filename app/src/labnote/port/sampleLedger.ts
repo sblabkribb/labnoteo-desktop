@@ -3,12 +3,13 @@
 // Ported from app/vendor/labnoteo/src/main.ts:1435-1454 sha256:f4d5b0f86ecc98f6
 // Ported from app/vendor/labnoteo/src/main.ts:1487-1514 sha256:491a4a1fe0e0e491
 // labnoteO 0.138.0, Apache-2.0.
-// Changes: LabnotePlugin methods → functions taking SampleEnv (D5); TFile/TFolder arguments → their new paths (newPath, newFolder); plugin.t → env.t; this.host → env.host; this.fs → env.fs (safeRegistryFs over the recycle bin, D13); getSampleDisplayMeta(settings.customSampleTypes).types → env.types(); refreshSampleViews()/sampleSuggest.clearCache() → env.changed(paths); app.vault.read(file) → env.fs.read; vault.getAbstractFileByPath(p) (TFile or TFolder) and `file.path !== movedPath` → env.fs.exists; app.fileManager.renameFile → env.fs.rename (no links point at a registry JSON or a labsamples folder); waitForNoModal() removed: the caller (samples/followUps.ts) awaits the entry event's `settled`, which resolves after the rename flow and its link rewrite are done, so `settled` is always true here; this.unloaded removed (wireSampleFollowUps unsubscribes); readmeSyncHolds removed (the app has no README sync hold: renumber-workflows is DEFERRED and must call queueSampleSourceRenames itself after its hold, #149); the per-experiment queue sampleSourceRenames is module state; window.setTimeout → setTimeout.
+// Changes: LabnotePlugin methods → functions taking SampleEnv (D5); TFile/TFolder arguments → their new paths (newPath, newFolder); plugin.t → env.t; this.host → env.host; this.fs → env.fs (safeRegistryFs over the recycle bin, D13); getSampleDisplayMeta(settings.customSampleTypes).types → env.types(); refreshSampleViews()/sampleSuggest.clearCache() → env.changed(paths); app.vault.read(file) → env.fs.read; vault.getAbstractFileByPath(p) (TFile or TFolder) and `file.path !== movedPath` → env.fs.exists; app.fileManager.renameFile → env.fs.rename (no links point at a registry JSON or a labsamples folder); waitForNoModal() removed: the caller (samples/followUps.ts) awaits the entry event's `settled`, which resolves after the rename flow and its link rewrite are done, so `settled` is always true here; this.unloaded removed (wireSampleFollowUps unsubscribes); readmeSyncHolds removed (the app has no README sync hold: renumber-workflows is DEFERRED and must call queueSampleSourceRenames itself after its hold, #149); the per-experiment queue sampleSourceRenames is module state; window.setTimeout → setTimeout; noticeSampleLedgerDeleted's plugin sentence (restore from Obsidian's .trash folder or the system trash) → appT('samples.registryDeletedRecycleBin'), which names the Recycle Bin: the app deletes to it, not to .trash.
 import * as posix from '@labnoteo/core/posix';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
 import { renameSampleSourcesInFolder } from '@labnoteo/core/lib/sampleStorage';
 import { isCatalogSampleType } from '@labnoteo/core/lib/sampleUtils';
 import type { SampleEnv } from '../../samples/env';
+import { t as appT } from '../../i18n/t';
 
 /** 실험마다 이어 붙이는 sources 이름 바꾸기(플러그인의 this.sampleSourceRenames). */
 const sampleSourceRenames = new Map<string, Promise<void>>();
@@ -100,14 +101,8 @@ export async function noticeSampleLedgerDeleted(env: SampleEnv, filePath: string
   await new Promise((resolve) => setTimeout(resolve, 500));
   if (!(await env.fs.exists(folder))) return;
   if (await env.fs.exists(filePath)) return;
-  env.host.notify(
-    'warn',
-    env.t(
-      "The sample registry {0} was deleted: its {1} samples now show as unregistered, and the next {1} sample added starts a new, empty registry. Restore it from the trash (Obsidian's .trash folder or the system trash) before adding samples.",
-      filePath,
-      type,
-    ),
-  );
+  // Plugin key: "The sample registry {0} was deleted: … Restore it from the trash (Obsidian's .trash folder or the system trash) before adding samples."
+  env.host.notify('warn', appT('samples.registryDeletedRecycleBin', filePath, type));
 }
 
 /**

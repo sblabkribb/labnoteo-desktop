@@ -14,6 +14,7 @@ import { queueSampleSourceRenames } from '../../labnote/port/sampleLedger';
 import { planRename } from '../../links/planRename';
 import { renameWithLinks } from '../../links/renameWithLinks';
 import { getLang, setLang } from '../../i18n/lang';
+import { t } from '../../i18n/t';
 import { createSampleEnv } from '../env';
 import { wireSampleFollowUps } from '../followUps';
 import { samples } from '../sampleStore';
@@ -51,8 +52,6 @@ const VAULT: Record<string, string> = {
   }),
 };
 
-const LEDGER_DELETED =
-  "The sample registry {0} was deleted: its {1} samples now show as unregistered, and the next {1} sample added starts a new, empty registry. Restore it from the trash (Obsidian's .trash folder or the system trash) before adding samples.";
 const FOLDER_GONE =
   '"{0}" no longer has resources/labsamples: its Local samples will show as unregistered, and new ones go to a new, empty registry.';
 const LEDGER_RENAMED =
@@ -207,12 +206,14 @@ describe('wireSampleFollowUps: renames', () => {
 });
 
 describe('wireSampleFollowUps: deletes', () => {
-  it('a deleted registry gives the plugin notice', async () => {
+  it('a deleted registry gives a notice that names the Recycle Bin (the app deletes to it, not to .trash)', async () => {
     // 가짜 보관함은 마지막 파일이 빠진 폴더를 없는 것으로 본다(디스크에는 빈 폴더가 남는다): 대장을 하나 더 둔다
     const th = setup({ ...VAULT, [`${LOCAL}/Plasmid.json`]: '{}' });
     th.answer.confirm(true);
     expect(await deleteEntry(th.ctx, `${LOCAL}/DNA.json`, false)).toBe(true);
-    const notice = coreT(LEDGER_DELETED, `${LOCAL}/DNA.json`, 'DNA');
+    const notice = t('samples.registryDeletedRecycleBin', `${LOCAL}/DNA.json`, 'DNA');
+    expect(notice).toContain('Recycle Bin');
+    expect(notice).not.toContain('.trash');
     await vi.waitFor(() => expect(th.notes).toContainEqual({ kind: 'warn', message: notice }), { timeout: 2000 });
   });
 
