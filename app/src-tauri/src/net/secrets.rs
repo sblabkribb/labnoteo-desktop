@@ -222,6 +222,19 @@ pub fn store_at_account(store: &dyn SecretStore, account: &str, value: &str) -> 
     store_valid(store, account, &key)
 }
 
+/// Validates the key with the slot's rule and stores it under the origin of
+/// `url` (not the origin the stored settings name), then bumps its epoch.
+/// Used by the connection-file import, which saves the URL and the key
+/// together. Only for slots bound to a URL; the fixed-origin slots are
+/// `badInput`. A refused key stores nothing, and no error names the value.
+pub fn store_secret_at_url(store: &dyn SecretStore, slot: Slot, url: &Url, value: &str) -> Result<(), NetError> {
+    if matches!(slot, Slot::BfwDesktop | Slot::SlackBot) {
+        return Err(NetError::new(NetErrorKind::BadInput, "this slot is not bound to a URL"));
+    }
+    let key = validate_secret_for(slot, value)?;
+    store_valid(store, &format!("{}|{}", slot.name(), origin(url)), &key)
+}
+
 /// Stores an already validated key, then bumps `"epoch|<account>"`.
 fn store_valid(store: &dyn SecretStore, account: &str, key: &str) -> Result<(), NetError> {
     store.set(account, key)?;
@@ -383,6 +396,15 @@ mod tests {
         let st = status_of(&store, &c);
         assert_eq!((st.set.partbank_web, st.epoch.partbank_web), (false, 3));
         assert_eq!(store.get("epoch|partbankWeb|https://a.example").unwrap().as_deref(), Some("3"));
+    }
+    #[test] fn store_secret_at_url_binds_the_key_to_that_url() {
+        let store = MemoryStore::default();
+        let url = super::super::config::parse_origin_url("https://PB.example/").unwrap();
+        store_secret_at_url(&store, Slot::PartbankWeb, &url, " pbk_u ").unwrap();
+        assert_eq!(store.get("partbankWeb|https://pb.example").unwrap().as_deref(), Some("pbk_u"));
+        assert_eq!(store.get("epoch|partbankWeb|https://pb.example").unwrap().as_deref(), Some("1"));
+        assert_eq!(store_secret_at_url(&store, Slot::SlackBot, &url, "xoxb-1").unwrap_err().kind, NetErrorKind::BadInput);
+        assert_eq!(store_secret_at_url(&store, Slot::PartbankWeb, &url, "").unwrap_err().kind, NetErrorKind::BadInput);
     }
     #[test] #[ignore = "touches the real Credential Manager; run by hand"] fn keyring_roundtrip() {
         let s = KeyringStore; let acc = "test|labnoteo-sp6";

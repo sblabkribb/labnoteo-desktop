@@ -56,6 +56,8 @@ macro_rules! register_commands {
             $crate::net::secrets::secret_set,
             $crate::net::secrets::secret_clear,
             $crate::net::secrets::secret_status,
+            $crate::net::import::integration_import_file,
+            $crate::net::import::integration_import_delete,
             $crate::net::net_cancel,
             $crate::net::partbank::partbank_request,
             $crate::net::partbank::partbank_probe,

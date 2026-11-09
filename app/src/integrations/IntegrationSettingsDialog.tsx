@@ -14,6 +14,16 @@ import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus,
 import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
 import { ScanSettingsSection } from '../labnote/scan/ScanSettingsSection';
+import {
+  deleteImportedFile,
+  importConnectionsFile,
+  pickConnectionsFile,
+  type DeleteOutcome,
+  type ImportOutcome,
+  type ImportPart,
+  type ImportProblem,
+  type ImportRefusal,
+} from './importFile';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -28,6 +38,15 @@ export interface IntegrationDeps {
   clearSecret(slot: Slot): Promise<void>;
   /** MCP 묶음(SP7 Part C)이 알림을 띄우고 Rust 를 부를 때. 없으면 MCP 묶음을 그리지 않는다. */
   mcp?: { notify: Notify; invoke?: InvokeFn };
+  /**
+   * "파일에서 가져오기". 경로를 고르고(`pick`), Rust 가 읽고 키를 저장한 뒤 요약과 설정을 돌려준다(`run`).
+   * `remove` 는 Rust 가 기억한 마지막 가져온 파일만 지운다. 없으면 단추를 그리지 않는다.
+   */
+  importFile?: {
+    pick(): Promise<string | null>;
+    run(path: string): Promise<ImportOutcome>;
+    remove(permanent: boolean): Promise<DeleteOutcome>;
+  };
 }
 
 function pickIntegration(s: AppSettings): IntegrationSettingsValue {
@@ -72,6 +91,11 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
     setSecret: (slot, value) => setSecret(slot, value, invoke),
     clearSecret: (slot) => clearSecret(slot, invoke),
     mcp: { notify: (kind, message) => ctx.host.notify(kind, message), invoke },
+    importFile: {
+      pick: () => pickConnectionsFile(t('integrations.import.pickTitle')),
+      run: (path) => importConnectionsFile(path, invoke),
+      remove: (permanent) => deleteImportedFile(permanent, invoke),
+    },
   };
 }
 
@@ -104,6 +128,62 @@ const CLEARTEXT = 'This address is not encrypted, so the API key is sent in the 
 const FULL_ADDRESS = 'Enter a full address starting with http:// or https://.';
 
 const originOf = (raw: string): URL | undefined => (isOriginUrl(raw) ? new URL(raw.trim()) : undefined);
+
+/** 가져오기 결과 줄. `warn` 이면 경고로 보인다. */
+interface ImportLine {
+  text: string;
+  warn: boolean;
+}
+
+/** 번역 키는 글자 그대로 둔다(카탈로그 검사가 키를 찾는다). */
+const PART_LABEL: Record<ImportPart, () => string> = {
+  llm: () => t('integrations.import.part.llm'),
+  partbank: () => t('integrations.import.part.partbank'),
+  bfworkflow: () => t('integrations.import.part.bfworkflow'),
+};
+
+const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
+  insideVault: () => t('integrations.import.refused.insideVault'),
+  tooLarge: () => t('integrations.import.refused.tooLarge'),
+  unreadable: () => t('integrations.import.refused.unreadable'),
+  notText: () => t('integrations.import.refused.notText'),
+  unrecognized: () => t('integrations.import.refused.unrecognized'),
+};
+
+const PROBLEM_TEXT: Record<ImportProblem, () => string> = {
+  badUrl: () => t('integrations.import.reason.badUrl'),
+  badKey: () => t('integrations.import.reason.badKey'),
+  badModel: () => t('integrations.import.reason.badModel'),
+  badProvider: () => t('integrations.import.reason.badProvider'),
+  badConnection: () => t('integrations.import.reason.badConnection'),
+  notText: () => t('integrations.import.reason.notText'),
+  noUrl: () => t('integrations.import.reason.noUrl'),
+  keyNotUsed: () => t('integrations.import.reason.keyNotUsed'),
+  keychain: () => t('integrations.import.reason.keychain'),
+};
+
+const DELETED_TEXT: Record<Exclude<DeleteOutcome, 'trashUnavailable'>, () => string> = {
+  trashed: () => t('integrations.import.trashed'),
+  deleted: () => t('integrations.import.deleted'),
+  gone: () => t('integrations.import.gone'),
+};
+
+/** Rust 요약을 화면 줄로. 파일 내용은 들어 있지 않다(부분, 필드 이름, 까닭은 고정된 코드다). */
+function summaryLines(out: ImportOutcome): ImportLine[] {
+  if (out.status === 'refused') return [{ text: REFUSAL_TEXT[out.reason](), warn: true }];
+  const lines: ImportLine[] = out.imported.map((i) => ({
+    text: t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
+    warn: false,
+  }));
+  if (out.imported.length === 0) lines.push({ text: t('integrations.import.nothing'), warn: true });
+  for (const i of out.invalid) {
+    lines.push({
+      text: t('integrations.import.invalid', PART_LABEL[i.part](), i.field, PROBLEM_TEXT[i.reason]()),
+      warn: true,
+    });
+  }
+  return lines;
+}
 
 /** "연결 시험" 단추와 그 결과 줄. 등록된 시험이 없으면 아무것도 그리지 않는다. */
 /**
@@ -174,6 +254,10 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
     bfw: useRef<HTMLInputElement>(null),
   };
   const first = useRef<HTMLDivElement>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importLines, setImportLines] = useState<ImportLine[]>([]);
+  /** 가져온 파일 지우기를 묻는 중: 휴지통으로(trash), 휴지통이 안 되면 영구히(permanent). */
+  const [deleteAsk, setDeleteAsk] = useState<'trash' | 'permanent' | undefined>(undefined);
   /** 섹션이 맡긴, 아직 떠나지 않은 칸의 저장(플러그인 ctx.onHide). 닫기 전에 부른다. */
   const hideCommits = useRef<Array<() => Promise<void>>>([]);
 
@@ -271,6 +355,72 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
     return keyed ? cleartext(originOf(raw)) : { warnings: [] as string[], box: null };
   };
 
+  /** 파일에서 가져오기: 고르기 → Rust 가 읽고 키 저장 → 설정 저장(늘 쓰는 흐름) → 키 상태 다시 읽기 → 지우기 제안. */
+  const runImport = async () => {
+    const io = deps.importFile;
+    if (!io || importBusy) return;
+    setImportBusy(true);
+    try {
+      const path = await io.pick();
+      if (!path) return;
+      setDeleteAsk(undefined);
+      let out: ImportOutcome;
+      try {
+        out = await io.run(path);
+      } catch {
+        setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
+        return;
+      }
+      setImportLines(summaryLines(out));
+      if (out.status !== 'done') return;
+      const patch = out.settings;
+      for (const [k, v] of Object.entries(patch)) {
+        if (k in draftRef.current && typeof v === 'string') setDraft(k as DraftKey, v);
+      }
+      setNotice({});
+      if (Object.keys(patch).length > 0) await save(patch);
+      // Rust 가 키를 저장했다: 주소가 그대로여도 '설정됨'과 epoch 가 바뀌었을 수 있다.
+      try {
+        const s = await deps.status();
+        setStatus(s);
+        notifySecretsChange(s);
+      } catch {
+        // 상태를 읽지 못해도 가져오기는 끝났다. 다음에 열면 새 상태를 읽는다.
+      }
+      if (out.imported.length > 0) setDeleteAsk('trash');
+    } catch {
+      setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const addImportLine = (line: ImportLine) => setImportLines((lines) => [...lines, line]);
+
+  /** 가져온 파일을 지운다. 휴지통이 안 되면 영구 삭제를 한 번 더 묻는다. */
+  const removeImported = async (permanent: boolean) => {
+    const io = deps.importFile;
+    if (!io) return;
+    setDeleteAsk(undefined);
+    try {
+      const r = await io.remove(permanent);
+      if (r === 'trashUnavailable') {
+        setDeleteAsk('permanent');
+        return;
+      }
+      addImportLine({ text: DELETED_TEXT[r](), warn: false });
+    } catch {
+      addImportLine({ text: t('integrations.import.deleteFailed'), warn: true });
+    }
+  };
+
+  const asksTrash = deleteAsk === 'trash';
+
+  const keepImported = () => {
+    setDeleteAsk(undefined);
+    addImportLine({ text: t('integrations.import.kept'), warn: true });
+  };
+
   const keyValue = (ref: { current: HTMLInputElement | null }) => ref.current?.value.trim() || undefined;
   const onSaved = (s?: SecretStatus) => {
     if (s) setStatus(s);
@@ -342,6 +492,40 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
   return (
     <DialogFrame title={t('cmd.integrationSettings')} className="prompt integration-settings" onCancel={() => void cancel()}>
       <div className="integration-body" ref={first}>
+        {deps.importFile ? (
+          <section className="integration-section">
+            <div className="integration-test">
+              <button type="button" disabled={importBusy} onClick={() => void runImport()}>
+                {t('integrations.import.button')}
+              </button>
+            </div>
+            <p className="prompt-hint">{t('integrations.import.hint')}</p>
+            {importLines.length > 0 ? (
+              <div role="status" className="integration-field">
+                {importLines.map((line, i) => (
+                  <p key={i} className={line.warn ? 'prompt-hint warn' : 'prompt-hint'}>
+                    {line.text}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {deleteAsk ? (
+              <div className="integration-field">
+                <p className="prompt-hint warn">
+                  {t(asksTrash ? 'integrations.import.deleteAsk' : 'integrations.import.permanentAsk')}
+                </p>
+                <div className="integration-test">
+                  <button type="button" onClick={() => void removeImported(!asksTrash)}>
+                    {t(asksTrash ? 'integrations.import.deleteYes' : 'integrations.import.permanentYes')}
+                  </button>
+                  <button type="button" onClick={keepImported}>
+                    {t('integrations.import.keep')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
         <section className="integration-section">
           <h3>{coreT('partbank')}</h3>
           <p className="prompt-hint">{overrideOr('integrations.partbankIntro')}</p>

@@ -4,6 +4,7 @@
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod import;
 pub mod bfw;
 pub mod llm;
 pub mod partbank;
@@ -34,6 +35,9 @@ pub struct NetState {
     pending: Mutex<HashMap<String, Arc<Notify>>>,
     cancelled_early: Mutex<VecDeque<String>>,
     web_gate: tokio::sync::Mutex<Option<Instant>>,
+    /// The connection file last imported (`import::integration_import_file`):
+    /// the only file `integration_import_delete` may delete.
+    pub(crate) last_import: Mutex<Option<std::path::PathBuf>>,
 }
 
 impl NetState {
