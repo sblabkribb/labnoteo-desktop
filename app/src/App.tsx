@@ -39,6 +39,7 @@ import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
+import { cancelAllRequests } from './integrations/netIpc';
 import { editorAwareFs } from './labnote/editorAwareFs';
 import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
@@ -317,9 +318,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     registerSampleSources();
     installSampleActionRunners();
     registerAllAppCommands();
-    // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다
+    // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다.
+    // 이 보관함을 위해 기다리던 네트워크 요청도 모두 취소한다(D11: 보관함 신호가 끊겨 쓰기 전 확인이 멈춘다).
     return () => {
       closeAllDialogs();
+      void cancelAllRequests();
       closeMenu();
     };
   }, []);

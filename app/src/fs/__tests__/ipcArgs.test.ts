@@ -8,6 +8,7 @@ import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
 import { listVaultImages, readVaultImage, writeVaultImage } from '../vaultImage';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
+import * as net from '../../integrations/netIpc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -15,29 +16,10 @@ const fixture: Record<string, string[]> = JSON.parse(
 );
 
 /**
- * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 3·4·5·6·7·8·9 가 Rust 쪽 secret_*·net_cancel·partbank_*·llm_*·bfw_*·integration_state_* 를 먼저 넣었고,
- * Task 11 이 netIpc.ts 래퍼를 만들어 아래 테스트에서 호출하면서 이 목록을 비운다.
- * secret_status 는 Task 10 의 플러그인 LLM 키 가져오기(offerPluginLlmKey)가 이미 보낸다.
+ * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 11 이 netIpc.ts 래퍼로 비웠다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [
-  'secret_set',
-  'secret_clear',
-  'net_cancel',
-  'partbank_request',
-  'partbank_probe',
-  'llm_chat',
-  'llm_probe',
-  'bfw_request',
-  'bfw_probe',
-  'bfw_base',
-  'bfw_generate_notes',
-  'partbank_catalog_list',
-  'partbank_catalog_read',
-  'partbank_catalog_write',
-  'integration_state_read',
-  'integration_state_write',
-];
+const PENDING_TS_WRAPPERS: readonly string[] = [];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
@@ -107,6 +89,27 @@ describe('IPC 인자 이름 계약', () => {
     await writeLinkJournalHeader('{}', r.invoke);
     await writeLinkJournalNote(0, '{}', r.invoke);
     await clearLinkJournal(r.invoke);
+    // SP6 net 커맨드: 래퍼마다 한 번씩
+    await net.secretStatus(r.invoke);
+    await net.setSecret('partbankWeb', 'v', r.invoke);
+    await net.clearSecret('partbankWeb', r.invoke);
+    await net.partbankRequest({ connection: 'web', method: 'GET', path: '/auth/me' }, r.invoke);
+    await net.partbankProbe({ connection: 'desktop', url: 'http://127.0.0.1:47830' }, r.invoke);
+    const pending = new AbortController();
+    const chat = net.llmChat({ provider: 'openai', body: {}, signal: pending.signal }, r.invoke);
+    pending.abort(); // 아직 끝나지 않은 요청을 취소하면 net_cancel 이 간다
+    await chat.catch(() => undefined);
+    await net.llmProbe({ provider: 'ollama', endpoint: 'http://127.0.0.1:11434', model: 'm' }, r.invoke);
+    await net.bfwRequest({ path: '/api/auth/me' }, r.invoke);
+    await net.bfwProbe({ connection: 'server' }, r.invoke);
+    await net.bfwBase(r.invoke);
+    const listen = (async () => () => undefined) as unknown as net.ListenFn;
+    await net.bfwGenerateNotes({ design: {}, language: 'ko', perWorkflow: false, onProgress: () => undefined }, r.invoke, listen);
+    await net.partbankCatalogList(r.invoke);
+    await net.partbankCatalogRead('a.json', r.invoke);
+    await net.partbankCatalogWrite('a.json', '{}', r.invoke);
+    await net.integrationStateRead('partbankUsage', r.invoke);
+    await net.integrationStateWrite('partbankUsage', '{}', r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)
