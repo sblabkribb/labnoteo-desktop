@@ -1,8 +1,8 @@
-// Ported from app/vendor/labnoteo/src/settings.ts:160-282 sha256:099bf36883043c7c
-// labnoteO 0.138.0, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/settings.ts:160-300 sha256:b078fd284371eb96
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: none beyond imports from @labnoteo/core, and invalidFolderText's parameter `t` is renamed `translate` (as in bilingualName.ts) so the app's i18n catalog test does not take the plugin's l10n keys for app catalog keys.
 import type { Translator } from '@labnoteo/core';
-import type { InvalidFolderReason } from '@labnoteo/core/lib/regexUtils';
+import { isWindowsReservedName, type InvalidFolderReason } from '@labnoteo/core/lib/regexUtils';
 import {
   isValidSampleTypeName,
   SAMPLE_TYPES,
@@ -44,6 +44,10 @@ export interface CustomSampleTypesInput {
   legacyCaseDuplicates: { name: string; clashesWith: string }[];
   /** Stored names typed again in another letter case; the stored spelling is kept (#497). */
   caseRenamed: { name: string; stored: string }[];
+  /** Newly typed names Windows keeps for devices (`CON`), whose `{Type}.json` cannot exist there (#560). */
+  reserved: string[];
+  /** Such names kept from before, so their samples can still be moved to another type. */
+  legacyReserved: string[];
 }
 
 /**
@@ -57,7 +61,10 @@ export interface CustomSampleTypesInput {
  * read and write the one `dna.json`, and their samples mix. So is a name
  * whose `_` the reading view turns into italics (#252). A stored name typed in
  * another case (`CellLine` → `cellline`) keeps its stored spelling (#497): its
- * samples and the ids already written in notes carry that spelling.
+ * samples and the ids already written in notes carry that spelling. So is a
+ * name Windows keeps for a device (`CON`, #560): its `{Type}.json` cannot be
+ * made or checked out there. A stored one is kept, so its samples can still be
+ * moved to another type.
  */
 export function partitionCustomSampleTypes(
   input: string,
@@ -72,6 +79,8 @@ export function partitionCustomSampleTypes(
     caseDuplicates: [],
     legacyCaseDuplicates: [],
     caseRenamed: [],
+    reserved: [],
+    legacyReserved: [],
   };
   const taken = new Map<string, string>(SAMPLE_TYPES.map(t => [t.toLowerCase(), t]));
   const names = input
@@ -97,6 +106,15 @@ export function partitionCustomSampleTypes(
       continue;
     }
     taken.set(name.toLowerCase(), name);
+    if (isWindowsReservedName(name)) {
+      if (previouslySaved.includes(name)) {
+        out.save.push(name);
+        out.legacyReserved.push(name);
+      } else {
+        out.reserved.push(name);
+      }
+      continue;
+    }
     const readable = isValidSampleTypeName(name);
     if (readable && !underscoreTurnsItalic(name)) {
       out.save.push(name);

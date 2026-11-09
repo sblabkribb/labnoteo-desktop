@@ -141,6 +141,33 @@ describe('SampleSettingsDialog', () => {
     await expect(result).resolves.toEqual({ ...BASE, customSampleTypes: ['CellLine'] });
   });
 
+  // #560 (0.140.2): CON.json cannot exist on Windows. A new device name is refused; a stored one stays with a warning.
+  it('custom types: a Windows device name is refused, and one stored before is kept with a warning', () => {
+    render(<DialogLayer />);
+    act(() => void openSampleSettings({ ...BASE, customSampleTypes: ['AUX'] }));
+    expect(
+      screen.getByText(
+        coreT(
+          '{0} is a name Windows keeps for devices: its {Type}.json cannot be made or checked out on Windows, and git stops there. Move its samples to another type with Change type, then remove the name.',
+          'AUX',
+        ),
+      ),
+    ).toBeTruthy();
+    const input = screen.getByLabelText(coreT('Custom sample types')) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'AUX, CON, Strain' } });
+    fireEvent.blur(input);
+    expect(
+      screen.getByText(
+        coreT(
+          '{0}: Windows keeps this name for a device, so its {Type}.json cannot be made there. It was not saved. Use another name, such as {1}.',
+          'CON',
+          'CONSample',
+        ),
+      ),
+    ).toBeTruthy();
+    expect(input.value).toBe('AUX, Strain');
+  });
+
   it('labels and descriptions are the plugin keys', () => {
     render(<DialogLayer />);
     act(() => void openSampleSettings({ ...BASE, customSampleTypes: ['Cell Line'] }));

@@ -79,8 +79,17 @@ export async function runSampleSettings(ctx: CommandContext): Promise<void> {
 
 /** renderCustomTypes 의 blur 문장들(settingsTab.ts:233-530): 저장하지 않은 이름마다 그 까닭. */
 function typeNotices(input: string, stored: readonly string[]): string[] {
-  const { rejected, italic, caseDuplicates, caseRenamed } = partitionCustomSampleTypes(input, stored);
+  const { rejected, italic, caseDuplicates, caseRenamed, reserved } = partitionCustomSampleTypes(input, stored);
   const out: string[] = [];
+  if (reserved.length > 0) {
+    out.push(
+      coreT(
+        '{0}: Windows keeps this name for a device, so its {Type}.json cannot be made there. It was not saved. Use another name, such as {1}.',
+        reserved.join(', '),
+        reserved.map((r) => `${r}Sample`).join(', '),
+      ),
+    );
+  }
   if (rejected.length > 0) {
     out.push(
       coreT(
@@ -122,8 +131,16 @@ function typeNotices(input: string, stored: readonly string[]): string[] {
 
 /** renderCustomTypes 가 설명 밑에 다는 경고(예전 판이 저장한 이름). */
 function legacyWarnings(stored: readonly string[]): string[] {
-  const { legacyInvalid, legacyItalic, legacyCaseDuplicates } = partitionCustomSampleTypes(stored.join(','), stored);
+  const { legacyInvalid, legacyItalic, legacyCaseDuplicates, legacyReserved } = partitionCustomSampleTypes(stored.join(','), stored);
   const out: string[] = [];
+  if (legacyReserved.length > 0) {
+    out.push(
+      coreT(
+        '{0} is a name Windows keeps for devices: its {Type}.json cannot be made or checked out on Windows, and git stops there. Move its samples to another type with Change type, then remove the name.',
+        legacyReserved.join(', '),
+      ),
+    );
+  }
   if (legacyInvalid.length > 0) {
     out.push(
       coreT(
