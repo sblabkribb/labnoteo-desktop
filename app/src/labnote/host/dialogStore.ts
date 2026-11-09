@@ -28,7 +28,8 @@ export type DialogSpec =
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'sampleSettings'; value: SampleSettingsValue }
   | { kind: 'progress'; id: number }
-  | { kind: 'integrationSettings'; deps: IntegrationDeps };
+  | { kind: 'integrationSettings'; deps: IntegrationDeps }
+  | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {

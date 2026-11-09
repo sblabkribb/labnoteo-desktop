@@ -10,6 +10,7 @@ import { SampleDefinitionDialog } from '../../samples/SampleDefinitionDialog';
 import { SampleSettingsDialog } from '../../samples/SampleSettingsDialog';
 import { ProgressDialog } from '../../integrations/ProgressDialog';
 import { IntegrationSettingsDialog } from '../../integrations/IntegrationSettingsDialog';
+import { AiAnswerDialog } from '../port/aiAnswerDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -36,6 +37,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <ProgressDialog spec={spec} onCancel={onCancel} />;
     case 'integrationSettings':
       return <IntegrationSettingsDialog deps={spec.deps} onDone={onDone} onCancel={onCancel} />;
+    case 'aiAnswer':
+      return <AiAnswerDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 
