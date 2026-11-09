@@ -8,6 +8,7 @@ import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/d
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { createSampleEnv } from '../samples/env';
 import { FORMAT_KEYS, runFormatCommand } from '../editor/commands/formatCommands';
+import { activeCellView } from '../editor/table/cellEditor';
 import type { LinkHit } from '../editor/live/links';
 import { copyText, noteLinkText } from '../links/clipboard';
 import type { TreeEntry } from '../tree/useTree';
@@ -92,10 +93,16 @@ function formatItems(ctx: CommandContext): MenuItem[] {
 export function editorMenu(ctx: CommandContext, path: string, link?: { hit: LinkHit; text: string; open(): void }): MenuItem[] {
   return [
     ...(link ? linkItems(ctx, link) : []),
-    ...sampleEditorMenuItems(createSampleEnv(ctx), path, ctx.activeView()?.state),
+    ...sampleEditorMenuItems(createSampleEnv(ctx), path, cursorState(ctx)),
     ...noteItems(ctx, path),
     ...formatItems(ctx),
   ];
+}
+
+/** 커서가 있는 편집기의 상태: 표 칸을 편집 중이면 그 셀 편집기(바깥 커서는 칸 안 커서를 늘 따라가지 않는다). */
+function cursorState(ctx: CommandContext) {
+  const outer = ctx.activeView();
+  return outer ? (activeCellView(outer) ?? outer).state : undefined;
 }
 
 /** 커서 아래 링크의 항목(SP4 Task 12): 열기, 그리고 복사(위키링크는 원문 그대로, Markdown 링크는 주소). */

@@ -215,6 +215,25 @@ describe('editor menu', () => {
     expect(gelKeys).not.toContain('samples.menu.goToDefinition');
   });
 
+  it('Go to definition follows the cursor in the table cell being edited', async () => {
+    const table = '| a | b |\n|---|---|\n| see DNA-1 | y |';
+    const text = `x\n\n${table}\n`;
+    const th = host({ ...SAMPLE_VAULT, [NOTE]: text });
+    const m = await th.mount(NOTE);
+    const outer = m.view();
+    const tableFrom = text.indexOf(table);
+    act(() => void focusCell(outer, tableFrom, 1, 0, 'start'));
+    // 이미 열린 칸 안에서 커서만 옮긴다(칸을 클릭한 것과 같은 길): 바깥 커서는 칸 처음("see")에 남는다
+    act(() => void focusCell(outer, tableFrom, 1, 0, 6));
+    const cell = activeCellView(outer)!;
+    expect(cell.state.selection.main.head).toBe(6);
+    expect(outer.state.selection.main.head).toBe(text.indexOf('see DNA-1'));
+    const items = editorMenu(th.ctx, NOTE);
+    expect(keys(items).slice(0, 2)).toEqual(['samples.menu.goToDefinition', 'samples.menu.addSample']);
+    await act(async () => void (await runCommand(th.ctx, (items[0] as MenuAction).run)));
+    expect(openDialog.mock.calls[0][0].title).toContain('DNA-1');
+  });
+
   it('Korean labels are the plugin text', () => {
     setLang('ko');
     expect(t('samples.menu.goToDefinition')).toBe(coreT('Go to definition'));
