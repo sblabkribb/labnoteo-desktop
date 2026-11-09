@@ -6,6 +6,7 @@ import { settleDialog, takeReturnFocus, useCurrentDialog, type DialogEntry } fro
 import { PickManyDialog, Picker } from './Picker';
 import { PromptDialog } from './PromptDialog';
 import { SampleDefinitionDialog } from '../../samples/SampleDefinitionDialog';
+import { SampleSettingsDialog } from '../../samples/SampleSettingsDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -24,6 +25,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <ConfirmDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'sampleDefinition':
       return <SampleDefinitionDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'sampleSettings':
+      return <SampleSettingsDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

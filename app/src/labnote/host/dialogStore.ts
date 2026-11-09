@@ -3,6 +3,7 @@ import type { PickItem, PromptOpts } from '@labnoteo/core';
 import type { AliasOpts } from './AliasDialog';
 import type { SampleDefinitionModel, SampleDefinitionResult, UsageGroup } from '../port/sampleDefinitionModel';
 import { deepActiveElement } from '../../ui/returnFocus';
+import type { SampleSettingsValue } from '../../samples/SampleSettingsDialog';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -22,7 +23,8 @@ export type DialogSpec =
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
   | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
-  | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> };
+  | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
+  | { kind: 'sampleSettings'; value: SampleSettingsValue };
 
 export interface DialogEntry {
   readonly id: number;

@@ -8,6 +8,7 @@ import { undoLastRename } from '../../links/undoRename';
 import { TOGGLE_MODE_KEY, toggleMode } from '../live/mode';
 import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/properties';
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
+import { runSampleSettings } from '../../samples/SampleSettingsDialog';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -124,8 +125,15 @@ const propsEditYaml: AppCommand = {
   run: (ctx) => runOnNote(ctx, editYamlCommand),
 };
 
+/** 샘플 설정(SP5 Task 28, D17): 앱에는 설정 화면이 없어 이 명령이 플러그인 설정 탭의 샘플 칸을 대신한다. */
+const sampleSettings: AppCommand = {
+  id: 'app.sample-settings',
+  nameKey: 'cmd.sampleSettings',
+  run: (ctx) => runSampleSettings(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
