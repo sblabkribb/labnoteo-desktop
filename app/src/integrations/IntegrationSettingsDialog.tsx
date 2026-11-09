@@ -7,6 +7,7 @@ import { DialogFrame } from '../labnote/host/DialogFrame';
 import { openDialog } from '../labnote/host/dialogStore';
 import { BFW_DEFAULT_URL, fromPluginData, isOriginUrl, type AppSettings } from '../labnote/settings';
 import { KeyField } from './KeyField';
+import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
 import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
@@ -78,6 +79,9 @@ const EMPTY_STATUS: SecretStatus = {
   set: { partbankDesktop: false, partbankWeb: false, llmOpenai: false, bfwServer: false, bfwDesktop: false },
   epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0 },
 };
+
+/** 키가 묶이는 주소 설정. 이 값이 바뀌면 키 상태를 다시 읽는다. */
+const KEYED_ADDRESS_KEYS = ['partbankDesktopUrl', 'partbankWebUrl', 'bfwUrl', 'llmEndpointOpenai'] as const;
 
 type OriginKey = 'partbankDesktopUrl' | 'partbankWebUrl' | 'bfwUrl';
 type EndpointKey = 'llmEndpointOllama' | 'llmEndpointOpenai';
@@ -166,6 +170,13 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
     setVal(valRef.current);
     try {
       await deps.commit(patch);
+      // Rust 는 키를 주소(origin)에 묶는다(D6). 주소가 바뀌면 칸의 '설정됨' 여부도 바뀌므로 다시 읽어
+      // 배지와 구독자(partbank 기능, bfworkflow 준비 상태)를 새 주소에 맞춘다.
+      if (KEYED_ADDRESS_KEYS.some((k) => k in patch)) {
+        const s = await deps.status();
+        setStatus(s);
+        notifySecretsChange(s);
+      }
     } catch {
       // 저장 실패는 앱의 설정 저장이 따로 다룬다. 대화상자는 열린 채로 둔다.
     }

@@ -228,6 +228,38 @@ describe('IntegrationSettingsDialog', () => {
     off();
   });
 
+  it('changing a keyed address re-reads the key status, so the badge follows the new origin', async () => {
+    // Rust 는 키를 주소(origin)에 묶는다(D6): 주소가 바뀌면 그 칸은 새 주소에서 '설정 안 됨'이다.
+    const deps = fakeDeps({ partbankWebUrl: 'https://pb.lab.kr' });
+    const status = vi.fn(async () => secretStatusOf({ partbankWeb: deps.value().partbankWebUrl === 'https://pb.lab.kr' }));
+    deps.status = status;
+    const seen: SecretStatus[] = [];
+    const off = onSecretsChange((st) => seen.push(st));
+    show(deps);
+    const input = (await screen.findByLabelText('partbank server API key')) as HTMLInputElement;
+    await waitFor(() => expect(keyRow(input).getByText('Set')).toBeTruthy());
+    const reads = status.mock.calls.length;
+    const url = screen.getByLabelText('partbank server address') as HTMLInputElement;
+    fireEvent.change(url, { target: { value: 'https://pb2.lab.kr' } });
+    fireEvent.blur(url);
+    await waitFor(() => expect(keyRow(input).getByText('Not set')).toBeTruthy());
+    expect(status.mock.calls.length).toBeGreaterThan(reads);
+    expect(seen.at(-1)?.set.partbankWeb).toBe(false);
+    off();
+  });
+
+  it('a non-address setting does not re-read the key status', async () => {
+    const deps = fakeDeps();
+    const status = vi.fn(deps.status);
+    deps.status = status;
+    show(deps);
+    await screen.findByLabelText('partbank server API key');
+    await waitFor(() => expect(status).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByLabelText(coreT('Send note usages to partbank')));
+    await act(async () => {});
+    expect(status).toHaveBeenCalledTimes(1);
+  });
+
   it('an invalid URL shows the full-address warning and is not committed', async () => {
     const deps = fakeDeps();
     show(deps);
