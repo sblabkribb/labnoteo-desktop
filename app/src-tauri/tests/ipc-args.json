@@ -31,5 +31,6 @@
   "link_journal_clear": [],
   "secret_set": ["slot", "value"],
   "secret_clear": ["slot"],
-  "secret_status": []
+  "secret_status": [],
+  "net_cancel": ["requestId"]
 }

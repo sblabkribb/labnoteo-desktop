@@ -41,6 +41,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(LinkJournalDir(dir.join("data").join("link-journal")))
         .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
+        .manage(labnoteo_app_lib::net::NetState::default())
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -126,6 +127,10 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("partbankWeb")])), Value::Null);
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));
+
+    // Cancelling an id that is not in flight answers false (it is remembered,
+    // so a request registered later with it answers `cancelled` unsent).
+    assert_eq!(ok("net_cancel", args("net_cancel", vec![json!("none")])), json!(false));
 
     // The link journal: kept in the app data dir, never in the vault.
     assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);

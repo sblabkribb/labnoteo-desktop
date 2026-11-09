@@ -50,6 +50,7 @@ macro_rules! register_commands {
             $crate::net::secrets::secret_set,
             $crate::net::secrets::secret_clear,
             $crate::net::secrets::secret_status,
+            $crate::net::net_cancel,
         ])
     };
 }
@@ -73,6 +74,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .manage(vault::VaultState::default())
+        // Requests in flight (cancellable by id) and the PartBank web pacing gate.
+        .manage(net::NetState::default())
         .setup(|app| {
             // Never abort startup over where the last vault is remembered: fall
             // back to the temp dir (the choice is then just not kept long-term).

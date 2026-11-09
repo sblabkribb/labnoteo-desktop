@@ -14,11 +14,11 @@ const fixture: Record<string, string[]> = JSON.parse(
 );
 
 /**
- * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 3 이 Rust 쪽 secret_* 를 먼저 넣었고,
+ * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 3·4 가 Rust 쪽 secret_*·net_cancel 을 먼저 넣었고,
  * Task 11 이 netIpc.ts 래퍼를 만들어 아래 테스트에서 호출하면서 이 목록을 비운다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = ['secret_set', 'secret_clear', 'secret_status'];
+const PENDING_TS_WRAPPERS: readonly string[] = ['secret_set', 'secret_clear', 'secret_status', 'net_cancel'];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
