@@ -13,8 +13,8 @@ import { coreT } from '../i18n';
 const CALLEE = /(?<![\w$]|function\s+)(?:coreT|paletteName|host\.t)\(/g;
 
 const QUOTED = new RegExp(String.raw`'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"`, 'g');
-/** 글자 안의 \' 같은 이스케이프를 풀어 키 원문으로 만든다. */
-const unescape = (s: string) => s.replace(/\\(.)/g, '$1');
+/** 글자 안의 \' 같은 이스케이프를 풀어 키 원문으로 만든다. \n 은 줄바꿈이다(CSV 내보내기의 확인 문장). */
+const unescape = (s: string) => s.replace(/\\(.)/g, (_, c: string) => (c === 'n' ? '\n' : c));
 const literals = (code: string) => [...code.matchAll(QUOTED)].map((m) => unescape(m[1] ?? m[2]));
 
 /**
