@@ -10,11 +10,13 @@ type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 /** `modify` 가 낙관적 재시도를 소진할 때까지 시도하는 최대 횟수(첫 시도 포함). */
 export const MAX_MODIFY_ATTEMPTS = 5;
 
-/** Node 식 오류 코드. 코어는 이 코드로 오류를 가린다(`ENOENT`, `isPathTooLongError` 의 `ENAMETOOLONG`). */
+/** Node 식 오류 코드. 코어는 이 코드로 오류를 가린다(`ENOENT`, `isPathTooLongError` 의 `ENAMETOOLONG`, 잠긴 파일의 `EBUSY`). */
 const NODE_CODES: Partial<Record<string, string>> = {
   [ERROR_KINDS.notFound]: 'ENOENT',
   [ERROR_KINDS.pathTooLong]: 'ENAMETOOLONG',
   [ERROR_KINDS.exists]: 'EEXIST',
+  // 포트한 isFileLocked 는 EBUSY/EPERM/EACCES 로 "다른 프로그램이 연 파일"을 가린다.
+  [ERROR_KINDS.locked]: 'EBUSY',
 };
 
 /**

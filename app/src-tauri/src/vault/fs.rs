@@ -51,6 +51,10 @@ pub enum FsError {
     /// A malformed argument (too many paths, a value out of range). The
     /// message says which; callers branch on the kind `badInput` only.
     BadInput(String),
+    /// Another program holds the file open without sharing (Excel with the CSV
+    /// open): `ERROR_SHARING_VIOLATION` (32), `ERROR_LOCK_VIOLATION` (33), or an
+    /// access-denied replace of an existing file that outlasts `write_atomic`'s retries.
+    Locked(std::io::Error),
 }
 
 /// `ERROR_FILENAME_EXCED_RANGE`: a component over 255 characters, or a long path
@@ -59,6 +63,15 @@ const ERROR_FILENAME_EXCED_RANGE: i32 = 206;
 
 fn is_too_long(e: &std::io::Error) -> bool {
     e.raw_os_error() == Some(ERROR_FILENAME_EXCED_RANGE)
+}
+
+/// `ERROR_SHARING_VIOLATION` and `ERROR_LOCK_VIOLATION`.
+const ERROR_SHARING_VIOLATION: i32 = 32;
+const ERROR_LOCK_VIOLATION: i32 = 33;
+
+/// The file is held open by another process in a way that refuses this access.
+pub(crate) fn is_locked(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION))
 }
 
 impl fmt::Display for FsError {
@@ -73,6 +86,7 @@ impl fmt::Display for FsError {
             FsError::NotImage => write!(f, "not an image file"),
             FsError::TooLarge => write!(f, "the image is larger than {} bytes", MAX_IMAGE_BYTES),
             FsError::BadInput(m) => write!(f, "{m}"),
+            FsError::Locked(e) => write!(f, "the file is open in another program: {e}"),
         }
     }
 }
@@ -80,7 +94,7 @@ impl fmt::Display for FsError {
 impl std::error::Error for FsError {}
 
 /// Wire shape of errors: `{kind: "forbidden" | "escape" | "vaultNotFound" |
-/// "noVault" | "notFound" | "pathTooLong" | "exists" | "notImage" | "tooLarge" | "badInput" | "io", message}`. `notFound` is a missing file or
+/// "noVault" | "notFound" | "pathTooLong" | "exists" | "notImage" | "tooLarge" | "badInput" | "locked" | "io", message}`. `notFound` is a missing file or
 /// directory; `vaultNotFound` is a missing vault root. `message` is for
 /// display only; callers branch on `kind`.
 impl Serialize for FsError {
@@ -96,9 +110,12 @@ impl Serialize for FsError {
             FsError::NotImage => "notImage",
             FsError::TooLarge => "tooLarge",
             FsError::BadInput(_) => "badInput",
+            FsError::Locked(_) => "locked",
             FsError::Vault(VaultError::Io(e)) | FsError::Io(e) => {
                 if is_too_long(e) {
                     "pathTooLong"
+                } else if is_locked(e) {
+                    "locked"
                 } else if e.kind() == ErrorKind::NotFound {
                     "notFound"
                 } else {
@@ -120,11 +137,14 @@ impl From<VaultError> for FsError {
 }
 
 /// Every `?` on an `io::Error` in this module goes through here, so error 206
-/// becomes `PathTooLong` wherever it comes from. `NotFound` stays `Io`.
+/// becomes `PathTooLong` and errors 32/33 become `Locked` wherever they come
+/// from. `NotFound` stays `Io`.
 impl From<std::io::Error> for FsError {
     fn from(e: std::io::Error) -> Self {
         if is_too_long(&e) {
             FsError::PathTooLong(e)
+        } else if is_locked(&e) {
+            FsError::Locked(e)
         } else {
             FsError::Io(e)
         }
@@ -276,10 +296,19 @@ pub(crate) fn write_atomic(abs: &Path, content: &str) -> Result<(), FsError> {
             }
         }
     })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            // Access denied on every retry while the target exists: another
+            // program holds it open (Excel keeps an open CSV this way).
+            if e.kind() == ErrorKind::PermissionDenied && abs.is_file() {
+                Err(FsError::Locked(e))
+            } else {
+                Err(e.into())
+            }
+        }
     }
-    Ok(result?)
 }
 
 fn read_or_empty(abs: &Path) -> Result<String, FsError> {
@@ -1839,5 +1868,56 @@ mod tests {
         let v = serde_json::to_value(FsError::BadInput("too many paths".into())).unwrap();
         assert_eq!(v["kind"], "badInput");
         assert_eq!(v["message"], "too many paths");
+    }
+
+    /// Opens `abs` with no sharing at all, the way Excel holds an open workbook.
+    #[cfg(windows)]
+    fn hold_exclusively(abs: &Path) -> std::fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).write(true).share_mode(0).open(abs).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_file_write_is_reported_as_locked() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        std::fs::write(t.0.join("a.csv"), "old").unwrap();
+        let held = hold_exclusively(&t.0.join("a.csv"));
+        let err = write(&l, &t.0, "a.csv", "new").unwrap_err();
+        assert!(matches!(err, FsError::Locked(_)), "expected Locked, got {err:?}");
+        assert_eq!(kind_of(err), "locked");
+        drop(held);
+        assert_eq!(std::fs::read_to_string(t.0.join("a.csv")).unwrap(), "old");
+        let leftovers: Vec<_> = std::fs::read_dir(&t.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| is_tmp_name(n))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_file_read_is_reported_as_locked() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        std::fs::write(t.0.join("a.csv"), "x").unwrap();
+        let held = hold_exclusively(&t.0.join("a.csv"));
+        let err = read(&l, &t.0, "a.csv").unwrap_err();
+        assert!(matches!(err, FsError::Locked(_)), "expected Locked, got {err:?}");
+        assert_eq!(kind_of(err), "locked");
+        drop(held);
+    }
+
+    #[test]
+    fn locked_kind_comes_from_sharing_and_lock_violations_only() {
+        assert!(matches!(FsError::from(std::io::Error::from_raw_os_error(32)), FsError::Locked(_)));
+        assert!(matches!(FsError::from(std::io::Error::from_raw_os_error(33)), FsError::Locked(_)));
+        assert_eq!(kind_of(FsError::from(std::io::Error::from_raw_os_error(32))), "locked");
+        // A plain access-denied (e.g. a read-only folder) stays `io`.
+        assert_eq!(kind_of(FsError::from(std::io::Error::from(ErrorKind::PermissionDenied))), "io");
+        // Wrapped by the vault layer, a lock is still `locked`.
+        assert_eq!(kind_of(FsError::Vault(VaultError::Io(std::io::Error::from_raw_os_error(33)))), "locked");
     }
 }

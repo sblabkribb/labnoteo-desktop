@@ -9,5 +9,6 @@
   "notImage": "notImage",
   "tooLarge": "tooLarge",
   "badInput": "badInput",
+  "locked": "locked",
   "io": "io"
 }

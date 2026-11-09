@@ -18,6 +18,8 @@ export const ERROR_KINDS = {
   tooLarge: 'tooLarge',
   /** 인자가 잘못됐다(예: `vault_created_times` 에 경로가 `MAX_CREATED_TIMES` 보다 많다). */
   badInput: 'badInput',
+  /** 다른 프로그램(예: CSV 를 연 Excel)이 파일을 공유 없이 잡고 있다. code 는 EBUSY. */
+  locked: 'locked',
   io: 'io',
 } as const;
 

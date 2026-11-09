@@ -661,7 +661,8 @@ fn error_kinds_match_the_typescript_side() {
         | FsError::Exists
         | FsError::NotImage
         | FsError::TooLarge
-        | FsError::BadInput(_) => (),
+        | FsError::BadInput(_)
+        | FsError::Locked(_) => (),
     };
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(ERRORS).unwrap();
     let actual: std::collections::BTreeMap<String, String> = [
@@ -676,6 +677,7 @@ fn error_kinds_match_the_typescript_side() {
         ("notImage", kind(FsError::NotImage)),
         ("tooLarge", kind(FsError::TooLarge)),
         ("badInput", kind(FsError::BadInput("x".into()))),
+        ("locked", kind(FsError::Locked(Error::from_raw_os_error(32)))),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -686,6 +688,9 @@ fn error_kinds_match_the_typescript_side() {
     // Error 206 is `pathTooLong` however it is wrapped, and `From` routes it there.
     assert_eq!(kind(FsError::Vault(VaultError::Io(Error::from_raw_os_error(206)))), fixture["pathTooLong"]);
     assert_eq!(kind(FsError::from(Error::from_raw_os_error(206))), fixture["pathTooLong"]);
+    // Sharing (32) and lock (33) violations are `locked` however they are wrapped.
+    assert_eq!(kind(FsError::from(Error::from_raw_os_error(33))), fixture["locked"]);
+    assert_eq!(kind(FsError::Vault(VaultError::Io(Error::from_raw_os_error(32)))), fixture["locked"]);
     assert!(message(FsError::NoVault), "every error carries a display message");
 }
 

@@ -271,3 +271,17 @@ describe('TauriLabnoteFs 경로 길이 오류', () => {
     expect(seen).toEqual(['']);
   });
 });
+
+describe('TauriLabnoteFs 잠긴 파일', () => {
+  it('locked 는 code EBUSY 가 되어 포트한 isFileLocked 가 알아본다', async () => {
+    const f = fake({ vault_write: { reject: { kind: ERROR_KINDS_FIXTURE.locked, message: 'open elsewhere' } } });
+    const err = await new TauriLabnoteFs(f.invoke).write('a.csv', 'x').catch((e) => e);
+    expect(err).toBeInstanceOf(FsCommandError);
+    expect(err.kind).toBe('locked');
+    expect(err.code).toBe('EBUSY');
+  });
+
+  it('io 는 여전히 code 가 없다', () => {
+    expect(new FsCommandError(ERROR_KINDS_FIXTURE.io, 'x').code).toBeUndefined();
+  });
+});
