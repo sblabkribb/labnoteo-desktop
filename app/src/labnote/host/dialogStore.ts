@@ -25,7 +25,8 @@ export type DialogSpec =
   | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
   | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[] }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
-  | { kind: 'sampleSettings'; value: SampleSettingsValue };
+  | { kind: 'sampleSettings'; value: SampleSettingsValue }
+  | { kind: 'progress'; id: number };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {
@@ -53,10 +54,18 @@ const emit = () => listeners.forEach((l) => l());
 
 /** `spec` 을 줄에 넣는다. 사용자가 답하면 그 값으로, 닫히면 `cancelValue` 로 끝난다. */
 export function openDialog<R>(spec: DialogSpec, cancelValue: R): Promise<R> {
+  return openDialogEntry(spec, cancelValue).result;
+}
+
+/**
+ * `openDialog` 와 같지만 대화상자 id 도 돌려준다. 부른 쪽이 나중에 `settleDialog(id, …)` 로 직접 닫을 때 쓴다(진행 창).
+ * 이미 끊긴 signal 이면 줄에 넣지 않고 id 는 -1 이다.
+ */
+export function openDialogEntry<R>(spec: DialogSpec, cancelValue: R): { id: number; result: Promise<R> } {
   const signal = spec.kind === 'confirm' ? spec.signal : undefined;
-  if (signal?.aborted) return Promise.resolve(cancelValue);
-  return new Promise<R>((resolve) => {
-    const id = nextId++;
+  if (signal?.aborted) return { id: -1, result: Promise.resolve(cancelValue) };
+  const id = nextId++;
+  const result = new Promise<R>((resolve) => {
     const onAbort = () => settleDialog(id, cancelValue);
     // 이어 연 대화상자: 명령의 다음 줄은 앞 대화상자의 닫힘이 그려지기 전에 돈다. 그때 줄은 비었지만 초점은 아직 앞 대화상자
     // 안이다. 아직 꺼내지 않은(그리고 아직 문서에 있는) 복귀 자리는 덮어쓰지 않고, 대화상자 층 안의 요소는 복귀 자리로 적지 않는다.
@@ -79,6 +88,7 @@ export function openDialog<R>(spec: DialogSpec, cancelValue: R): Promise<R> {
     signal?.addEventListener('abort', onAbort);
     emit();
   });
+  return { id, result };
 }
 
 /** 대화상자 `id` 를 `value` 로 끝낸다. 이미 끝난 id 는 무시한다. 보이는 것이든 기다리는 것이든 줄에서 뺀다. */

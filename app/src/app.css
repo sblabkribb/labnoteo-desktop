@@ -508,6 +508,10 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 .prompt-error { margin: 0; }
 .confirm-message p { margin: 0 0 var(--space-2); white-space: pre-line; }
 
+/* 진행 창(SP6 Task 12): 줄 목록만 스크롤한다. 긴 줄은 감싼다 */
+.progress-lines { margin: 0; padding: 0; list-style: none; min-height: 0; max-height: 40vh; overflow-y: auto; color: var(--text-muted); font-size: 0.93em; }
+.progress-line { padding: 1px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+
 /* 샘플 정의 창(SP5 Task 23): 짧은 이름 칸과 넓은 값 칸(JSON 경로가 길다). 본문만 스크롤하고 단추 줄은 감싼다(#283) */
 .dialog.sample-def { width: min(44rem, 100%); }
 .sample-def-body { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; overflow-y: auto; }
