@@ -78,6 +78,7 @@ describe('noteTreeMenu', () => {
     expect(labels(noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES))).toEqual([
       'menu.open',
       'menu.copyLink',
+      coreT('Export tables to CSV'),
       'menu.rename',
       'menu.delete',
     ]);
@@ -127,6 +128,48 @@ describe('noteTreeMenu', () => {
     await runCommand(h.ctx, noteTreeMenu(h.ctx, entry('notes', true), ENTRIES)[0].run);
     expect(h.notes.at(-1)?.kind).toBe('warn');
     expect(h.opened).toEqual(['notes/b.labnote.md']);
+  });
+});
+
+describe('noteTreeMenu CSV export', () => {
+  const EXP = 'exp/labnote/001_A';
+  const ONE = coreT('Export tables to CSV');
+  const ALL = coreT('Export all tables of this experiment to CSV');
+  const csvNote = '# X\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n';
+
+  it('an experiment folder offers the experiment export; other folders do not', () => {
+    h = createTestHost();
+    expect(labels(noteTreeMenu(h.ctx, entry(EXP, true), []))).toContain(ALL);
+    expect(labels(noteTreeMenu(h.ctx, entry(EXP, true), []))).not.toContain(ONE);
+    for (const dir of ['notes', 'exp/labnote', `${EXP}/data`]) {
+      expect(labels(noteTreeMenu(h.ctx, entry(dir, true), []))).not.toContain(ALL);
+    }
+  });
+
+  it('an experiment README offers both; other notes only the one-note export; a .csv neither', () => {
+    h = createTestHost();
+    const readmeItems = labels(noteTreeMenu(h.ctx, entry(`${EXP}/README.labnote.md`, false), []));
+    expect(readmeItems).toContain(ONE);
+    expect(readmeItems).toContain(ALL);
+    const wf = labels(noteTreeMenu(h.ctx, entry(`${EXP}/001_X.labnote.md`, false), []));
+    expect(wf).toContain(ONE);
+    expect(wf).not.toContain(ALL);
+    expect(labels(noteTreeMenu(h.ctx, entry('notes/plain.md', false), []))).toContain(ONE);
+    const csv = labels(noteTreeMenu(h.ctx, entry(`${EXP}/001_X.labnote_table1.csv`, false), []));
+    expect(csv).not.toContain(ONE);
+    expect(csv).not.toContain(ALL);
+  });
+
+  it('the items export the clicked note or experiment folder', async () => {
+    const x = `${EXP}/001_X.labnote.md`;
+    const y = `${EXP}/002_Y.labnote.md`;
+    h = createTestHost({ [`${EXP}/README.labnote.md`]: '# R\n', [x]: csvNote, [y]: csvNote, 'notes/b.md': csvNote });
+    await runCommand(h.ctx, byLabel(noteTreeMenu(h.ctx, entry(x, false), []), ONE).run);
+    expect(h.vault.files()[`${EXP}/001_X.labnote_table1.csv`]).toBe('\uFEFFa,b\n1,2\n');
+    expect(h.vault.files()[`${EXP}/002_Y.labnote_table1.csv`]).toBeUndefined();
+    await runCommand(h.ctx, byLabel(noteTreeMenu(h.ctx, entry(EXP, true), []), ALL).run);
+    expect(h.vault.files()[`${EXP}/002_Y.labnote_table1.csv`]).toBe('\uFEFFa,b\n1,2\n');
+    expect(h.vault.files()['notes/b_table1.csv']).toBeUndefined();
   });
 });
 

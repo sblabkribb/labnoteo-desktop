@@ -3,7 +3,7 @@
  * 플러그인 명령 이름은 coreT 로 그 순간의 언어다. 항목은 모두 ContextMenu 가 runCommand 로 돌린다.
  */
 import * as posix from '@labnoteo/core/posix';
-import { diagnoseExperimentPath } from '@labnoteo/core/lib/labnoteStructure';
+import { diagnoseExperimentPath, getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
 import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { createSampleEnv } from '../samples/env';
@@ -20,6 +20,7 @@ import { syncWorkflowChecklist } from './commands/syncChecklist';
 import { insertUnitOp } from './commands/unitOp';
 import { createWorkflowIn, insertWorkflowOnReadme, isExperimentReadme } from './commands/workflow';
 import { coreT } from './i18n';
+import { exportExperimentTablesToCsv, exportTablesToCsv } from './port/exportCsv';
 import { sampleEditorMenuItems } from './port/sampleCommands';
 import { README } from './paths';
 import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
@@ -34,6 +35,8 @@ function experimentOf(dir: string): string | undefined {
  * 파일 트리 줄의 메뉴.
  * - 파일: 열기, 위키링크 복사, 이름 바꾸기, 삭제. 실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다.
  * - 폴더: 여기에 새 노트, 새 폴더, 이름 바꾸기, 삭제. 실험 안의 폴더면 워크플로 생성(그 실험에)을 더한다.
+ * - CSV 내보내기(플러그인 main.ts registerFileMenu): 실험 폴더 자체와 실험 README 에는 "이 실험의 모든 표", .md 파일에는
+ *   "이 노트의 표". 열린 노트가 아니라 누른 노트나 폴더를 내보낸다.
  */
 export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: readonly TreeEntry[]): MenuAction[] {
   const { path, isDir } = entry;
@@ -47,6 +50,7 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
       { labelKey: 'menu.newNoteHere', run: () => newNoteIn(ctx, path) },
       { labelKey: 'menu.newFolder', run: () => newFolder(ctx, path) },
       ...(experiment ? [{ label: coreT('Create workflow'), run: () => createWorkflowIn(ctx, experiment) }] : []),
+      ...csvItems(ctx, getExperimentDir(path) === path ? path : undefined),
       ...tail,
     ];
   }
@@ -60,7 +64,25 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
           { label: coreT('Toggle discussion flag'), run: () => toggleDiscussionFlag(ctx, experiment) },
         ]
       : []),
+    ...csvItems(ctx, csvExperimentOfFile(path), path),
     ...tail,
+  ];
+}
+
+/** 실험 README 면 그 실험 폴더(플러그인처럼 이름은 대소문자를 가리지 않고, 실험은 getExperimentDir 로). */
+function csvExperimentOfFile(path: string): string | undefined {
+  return posix.basename(path).toLowerCase() === README.toLowerCase() ? getExperimentDir(path) : undefined;
+}
+
+/** CSV 내보내기 항목: 실험 폴더가 있으면 실험 전체, .md 노트면 그 노트(플러그인 순서). */
+function csvItems(ctx: CommandContext, experimentDir: string | undefined, notePath?: string): MenuAction[] {
+  return [
+    ...(experimentDir
+      ? [{ label: coreT('Export all tables of this experiment to CSV'), run: () => exportExperimentTablesToCsv(ctx, experimentDir) }]
+      : []),
+    ...(notePath !== undefined && posix.extname(notePath) === '.md'
+      ? [{ label: coreT('Export tables to CSV'), run: () => exportTablesToCsv(ctx, notePath) }]
+      : []),
   ];
 }
 

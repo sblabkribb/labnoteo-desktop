@@ -7,6 +7,7 @@ import { mcpCommands } from '../mcp/commands';
 import { catalogCommands } from './catalogs';
 import { editorInsertCommands } from './editorInserts';
 import { experimentCommands } from './experiment';
+import { exportCsvCommands } from './exportCsv';
 import { registerCommand, type Command } from './registry';
 import { syncChecklistCommands } from './syncChecklist';
 import { unitOpCommands } from './unitOp';
@@ -24,6 +25,7 @@ function allCommands(): Command[] {
     ...catalogCommands,
     ...unitOpCommands,
     ...editorInsertCommands,
+    ...exportCsvCommands,
     ...sampleCommands,
     ...partbankCommands,
     ...panelCommands,
