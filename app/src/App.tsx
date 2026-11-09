@@ -34,6 +34,7 @@ import { wireSampleFollowUps } from './samples/followUps';
 import { installSampleActionRunners } from './samples/actionRunners';
 import { registerSampleSources } from './samples/sources';
 import { samplesSync, setSampleSyncEnv } from './samples/sync';
+import { noteSyncEnv, startPartbank } from './partbank/partbankApp';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
@@ -296,11 +297,14 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   usePaletteHotkey(ctx);
   // 저장 때의 샘플 동기화(D12)가 쓸 SampleEnv. 맥락이 바뀌거나 보관함 화면이 내려가면, 기다리던 동기화를 그 맥락으로 먼저 돌린다.
   useEffect(() => {
-    setSampleSyncEnv(() => ctx && createSampleEnv(ctx));
+    // 노트 동기화가 쓴 대장은 partbank 사용처의 재대조를 부르지 않는다(노트는 제 변경으로 간다).
+    setSampleSyncEnv(() => ctx && noteSyncEnv(createSampleEnv(ctx)));
     return ctx ? () => void samplesSync.flush() : undefined;
   }, [ctx]);
   // 앱에서 한 이름 바꾸기와 삭제 뒤의 샘플 후속 처리(D14): sources 이름, 대장과 labsamples 되돌리기, 지운 대장 알림.
   useEffect(() => (ctx ? wireSampleFollowUps(() => createSampleEnv(ctx)) : undefined), [ctx]);
+  // PartBank(SP6 Task 26): 기능, 카탈로그 저장소, `@` 출처, 연결 시험, 노트 사용처 동기화. 보관함을 바꾸면 모두 거둔다.
+  useEffect(() => (ctx ? startPartbank(ctx) : undefined), [ctx]);
   // 앱 밖에서 고친 노트(감시자의 변경)도 동기화한다. 지워진 노트는 읽지 못해 아무것도 하지 않는다.
   useVaultChanges((paths) => {
     if (paths === 'all') return;
