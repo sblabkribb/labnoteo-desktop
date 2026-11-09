@@ -400,6 +400,7 @@ const ko: Record<string, string> = {
   'scan.heicAdvice': 'HEIC 사진이라 열 수 없습니다. iPhone 설정 → 카메라 → 포맷 → "높은 호환성"으로 바꾸거나 JPEG로 공유하세요.',
   'scan.tiffAdvice': 'TIFF 스캔이라 열 수 없습니다. 복합기 저장 형식을 PDF나 JPEG로 바꾸세요.',
   'scan.noteBusy': '노트를 30초 동안 편집하고 있어서 붙이지 못했습니다.',
+  'scan.setFolderFirst': '먼저 스캔 폴더를 고르세요: 연동 설정 → 바코드와 스캔.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -801,6 +802,7 @@ const en: Record<string, string> = {
   'scan.heicAdvice': 'HEIC photo, which the app cannot open. On iPhone set Settings → Camera → Formats → Most Compatible, or share the photo as JPEG.',
   'scan.tiffAdvice': 'TIFF scan, which the app cannot open. Set the scanner to save PDF or JPEG.',
   'scan.noteBusy': 'The note was being edited for 30 seconds, so the scan was not filed.',
+  'scan.setFolderFirst': 'Set a scan folder first: Integration settings → Barcode & scans.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

@@ -50,7 +50,9 @@ export type OverrideKey =
   | 'print.openedInBrowser'
   // 스캔 결과의 HEIC·TIFF 안내: 플러그인 문장의 "which Obsidian cannot open" 대신(SP7 B11)
   | 'scan.heicAdvice'
-  | 'scan.tiffAdvice';
+  | 'scan.tiffAdvice'
+  // 스캔 폴더가 없을 때: 플러그인 문장의 "Settings → Labnote Assistant → Barcode & scans" 대신 연동 설정(SP7 B11)
+  | 'scan.setFolderFirst';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

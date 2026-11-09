@@ -6,9 +6,12 @@
  *   배경 실행(폴더 감시, Slack)은 대화상자를 열지 않고 초점도 옮기지 않는다(B8).
  * - 미분류 대기열(openUnmatched, Task 26): 창에서 Assign 을 누르면 창을 닫고 노트 → 유닛 오퍼레이션 → 페이지 → 날짜를 물어 넣은 뒤
  *   창을 다시 연다(플러그인은 모달을 다시 그린다). 대화상자는 한 번에 하나만 보이므로 고르기 창은 대기열 창을 닫은 뒤에 연다.
- * - Task 27 이 `watcher`(processFolderNow), Task 28 이 `slack` 을 더한다.
+ * - 스캔 폴더 감시(port/scanFolderWatcher.ts): `watcher`. 보관함을 열면 start(), 폴더나 방식을 바꾸면 restart(), 닫으면 dispose 가 stop().
+ *   지금 처리(processFolderNow)는 사용자가 부른 실행이라 진행 창과 결과 창을 연다. 30초 폴링과 폴더 변경 이벤트는 배경 실행이다.
+ * - Task 28 이 `slack` 을 더한다.
  */
 import { listVaultImages, readVaultImage } from '../../fs/vaultImage';
+import type { InvokeFn, ListenFn } from '../../integrations/netIpc';
 import { withProgress } from '../../integrations/progressStore';
 import { appNoteIdSource } from '../barcode/noteIdSource';
 import { noteIds } from '../barcode/noteIdIndex';
@@ -18,6 +21,7 @@ import { coreT } from '../i18n';
 import { NoteIdService } from '../port/noteIdService';
 import { createPageDecoder } from '../port/pageDecoder';
 import { ScanRuns } from '../port/scanFeatureRuns';
+import { ScanFolderWatcher } from '../port/scanFolderWatcher';
 import { ScanPipeline, unzipScans, type PageDecoder, type PipelineDeps, type ScanInput, type ScanResult } from '../port/scanPipeline';
 import { assignUnmatched, listUnmatched, type AssignDeps } from '../port/unmatchedScans';
 import { createDecodeClient, type DecodeClient } from './decodeClient';
@@ -34,11 +38,16 @@ export interface ScanFeatureDeps {
   notify: typeof notify;
   /** The vault's images for the unmatched queue (default: vault_list_images and vault_read_image). */
   images: { list(): Promise<string[]>; read(path: string): Promise<ArrayBuffer> };
+  /** IPC for the scan folder watcher (default: Tauri's). */
+  invoke: InvokeFn;
+  listen: ListenFn;
 }
 
 export class ScanFeature {
   readonly pipeline: ScanPipeline;
   readonly decoder: PageDecoder;
+  /** The scan folder watcher: the settings section calls restart() after choosing, clearing or changing the mode. */
+  readonly watcher: ScanFolderWatcher;
   private readonly runs: ScanRuns;
   private readonly notify: typeof notify;
   /** The decode worker this feature started (none when the decoder was handed in). */
@@ -69,6 +78,13 @@ export class ScanFeature {
       openFile: (path, at) => ctx.openFile(path, at),
       openResults: (results, actions) => void openResultsDialog(results, this.pipeline, actions),
       openUnmatched: () => void this.openUnmatched(),
+    });
+    this.watcher = new ScanFolderWatcher({
+      run: (inputs, opts, manual) => this.runWithProgress(inputs, opts.skipNoQr ?? false, manual),
+      report: (results, manual) => this.report(results, manual),
+      notify: (message) => this.notify('info', message),
+      invoke: deps.invoke,
+      listen: deps.listen,
     });
     const images = deps.images ?? { list: () => listVaultImages(), read: (path: string) => readVaultImage(path) };
     this.unmatchedIo = {
@@ -105,9 +121,13 @@ export class ScanFeature {
     }
   }
 
-  /** "Process scan folder now". Task 27 makes it `watcher.tick({ manual: true, includeExisting })`; until then it does nothing. */
+  /** "Process scan folder now" (and "Process existing files too" with `includeExisting`): one manual look at the folder. */
   async processFolderNow(includeExisting = false): Promise<void> {
-    void includeExisting;
+    try {
+      await this.watcher.tick({ manual: true, includeExisting });
+    } catch (err) {
+      this.notify('error', coreT('Command failed: {0}', err instanceof Error ? err.message : String(err)));
+    }
   }
 
   /**
@@ -136,8 +156,9 @@ export class ScanFeature {
     this.runs.report(results, manual);
   }
 
-  /** Stops the decode worker. */
+  /** Stops the folder watcher and the decode worker. */
   dispose(): void {
+    this.watcher.stop();
     this.client?.terminate();
   }
 }

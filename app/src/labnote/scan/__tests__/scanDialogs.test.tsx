@@ -5,6 +5,7 @@ import { createTranslator } from '@labnoteo/core';
 import type { PagePayload } from '@labnoteo/core/lib/scanPayload';
 import { setLang } from '../../../i18n/lang';
 import { t as appT } from '../../../i18n/t';
+import { fakeInvoke } from '../../../integrations/__tests__/fakeNet';
 import type { ProgressHandle } from '../../../integrations/progressStore';
 import { createTestHost } from '../../__tests__/testHost';
 import type { CommandContext } from '../../commands/context';
@@ -426,6 +427,56 @@ describe('runs and reports', () => {
     await Promise.all([one, two]);
     expect(pipeline.run).toHaveBeenCalledTimes(2);
     expect((pipeline.run.mock.calls[1][0] as ScanInput[])[0].name).toBe('b.jpg');
+  });
+
+  it('Process now is a manual folder run: progress dialog, results dialog, and the existing files only when asked', async () => {
+    renderLayer();
+    const files: Record<string, { size: number; mtimeMs: number }> = {
+      'old.jpg': { size: 3, mtimeMs: 500 },
+      'new.jpg': { size: 7, mtimeMs: 2000 },
+    };
+    const moves: unknown[] = [];
+    const { invoke } = fakeInvoke({
+      scan_folder_status: () => ({ path: 'D:\\scans', mode: 'dedicated', exists: true, insideVault: false, since: 1000, baseline: ['old.jpg|3|500'] }),
+      scan_folder_list: () => Object.entries(files).map(([name, f]) => ({ name, ...f, birthtimeMs: null })),
+      scan_folder_prune_baseline: () => ['old.jpg|3|500'],
+      scan_folder_read: () => new ArrayBuffer(2),
+      scan_folder_move: (a) => {
+        moves.push([a.name, a.outcome]);
+        delete files[a.name as string];
+        return 'labnote-processed/x';
+      },
+      integration_state_read: () => null,
+      integration_state_write: () => null,
+    });
+    const notifyStatus = vi.fn();
+    const feature = makeFeature({ invoke, notifyStatus });
+    await act(async () => {
+      await feature.processFolderNow();
+    });
+    expect(withProgressSpy).toHaveBeenCalledWith(coreT('Processing scans…'), expect.any(Function));
+    expect(notifyStatus).not.toHaveBeenCalled();
+    expect((pipeline.run.mock.calls[0][0] as ScanInput[]).map((i) => i.name)).toEqual(['new.jpg']);
+    expect(moves).toEqual([['new.jpg', 'processed']]);
+    expect(currentDialog()?.spec.kind).toBe('scanResults');
+    act(() => cleanupDialogs());
+
+    await act(async () => {
+      await feature.processFolderNow(true);
+    });
+    expect((pipeline.run.mock.calls[1][0] as ScanInput[]).map((i) => i.name)).toEqual(['old.jpg']);
+    feature.dispose();
+  });
+
+  it('Process now without a folder says where to choose one', async () => {
+    const notify = vi.fn();
+    const { invoke } = fakeInvoke({
+      scan_folder_status: () => ({ path: null, mode: 'dedicated', exists: false, insideVault: false, since: null, baseline: null }),
+    });
+    const feature = makeFeature({ invoke, notify });
+    await feature.processFolderNow();
+    expect(notify).toHaveBeenCalledWith('info', overrideOr('scan.setFolderFirst'));
+    expect(pipeline.run).not.toHaveBeenCalled();
   });
 
   it('scanFeature() is the one set for the vault', () => {
