@@ -7,6 +7,8 @@
  *   - 실험의 `resources/labsamples`(또는 `resources`)가 이름을 잃었으면 되돌릴지 묻는다(#338, experimentLosingLabsamples).
  * - 삭제: 대장 파일이면 알린다(그 폴더째 지웠으면 알리지 않는다). 워크플로 노트면 sources 에서만 빠진다(기록은 남는다,
  *   플러그인 syncReadmeAndSamplesOnDelete 의 샘플 부분. README 체크리스트 정리는 fileOps 가 따로 묻는다).
+ * - 다른 실험으로 옮겨 간 노트는(이름 바꾸기 하나가 폴더째 옮긴 것도 노트마다) (옛, 새) 실험 짝마다 SAMPLE_MOVE_BATCH_MS
+ *   모은 뒤 한 번, 쓰던 Local 샘플을 가져올지 묻는다(#97, Task 27, offerLocalSamplesMoved). 새 실험의 추적을 본다.
  * 모든 쓰기 경로처럼 먼저 samples.ready(path) 를 기다린다(D11): 샘플 추적이 꺼진 실험과 설정에는 아무것도 하지 않는다.
  */
 import * as posix from '@labnoteo/core/posix';
@@ -20,13 +22,24 @@ import {
   offerSampleLedgerBack,
   renameLocalSampleSources,
 } from '../labnote/port/sampleLedger';
-import { isRegistryPath, type SampleEnv } from './env';
+import { cancelPendingSampleMoves, offerLocalSamplesMoved } from '../labnote/port/sampleRelocation';
+import { sampleListHeaders } from '../labnote/port/sampleListTable';
+import { t } from '../i18n/t';
+import { isRegistryPath, RegistryUnreadableError, type SampleEnv } from './env';
 import { samples } from './sampleStore';
 
 type Renamed = Extract<EntryEvent, { kind: 'renamed' }>;
 type Deleted = Extract<EntryEvent, { kind: 'deleted' }>;
 
 const report = (err: unknown) => console.error('[samples] follow-up failed', err);
+
+/** 묶어 둔 가져오기 제안을 돌린다(플러그인의 this.run): 읽을 수 없는 대장은 runCommand 처럼 경고로 알린다(D13). */
+const runOffer = (env: SampleEnv) => (job: () => Promise<void>) => {
+  void job().catch((err: unknown) => {
+    if (err instanceof RegistryUnreadableError) env.host.notify('warn', t('samples.registryUnreadable', err.path));
+    else report(err);
+  });
+};
 
 /** 이름 바꾸기 하나의 후속 처리. 대화상자는 함께 띄운다(플러그인의 this.run 처럼 서로 기다리지 않는다). */
 async function afterRename(env: SampleEnv, e: Renamed): Promise<void> {
@@ -44,6 +57,10 @@ async function afterRename(env: SampleEnv, e: Renamed): Promise<void> {
     }
   }
   for (const f of e.files) {
+    // 다른 실험으로 옮겨 갔으면: 새 실험이 샘플을 추적할 때만 묻는다(main.ts offerLocalSamplesMoved, D11 의 기다림)
+    if (await samples.ready(f.to)) {
+      jobs.push(offerLocalSamplesMoved(env, f.from, f.to, sampleListHeaders(env), runOffer(env)));
+    }
     // sampleLedgerLosing 의 추적 검사(main.ts:1345-1349)와 D11 의 쓰기 전 기다림
     if (!(await samples.ready(f.from))) continue;
     const ledger = sampleLedgerLosing(f.from, f.to, env.types(), env.globalFolder());
@@ -97,5 +114,6 @@ export function wireSampleFollowUps(env: () => SampleEnv | undefined): () => voi
   return () => {
     live = false;
     off();
+    cancelPendingSampleMoves();
   };
 }

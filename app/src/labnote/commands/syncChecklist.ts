@@ -6,6 +6,8 @@
  *   앱 문장 syncChecklist.partial 로 알린다(이름 바꾸기 하위 프로젝트의 전체 명령이 고친다).
  * - README 쓰기는 processNote 변환이다: 계획은 쓰는 순간의 README(열려 있으면 그 버퍼)로 다시 세운다.
  * - 더했으면 last_updated_date 를 찍는다(readmeStamp).
+ * - 샘플 추적이 켜진 실험이면 다른 실험에 두고 온 Local 샘플을 가져올지 묻는다(플러그인 main.ts:762-768 의 adoptSamples,
+ *   offerSamplesLeftBehind, SP5 Task 27). 앱에서는 체크리스트를 더한 뒤에 묻는다.
  */
 import * as posix from '@labnoteo/core/posix';
 import { parseWorkflowFileName, planWorkflowChecklistSync, workflowLabelFor } from '@labnoteo/core/lib/workflowStructure';
@@ -13,6 +15,10 @@ import { t } from '../../i18n/t';
 import { processNote } from '../openNotes';
 import { README } from '../paths';
 import { resolveLabnoteDir } from '../port/experiments';
+import { sampleListHeaders } from '../port/sampleListTable';
+import { offerSamplesLeftBehind } from '../port/sampleRelocation';
+import { createSampleEnv } from '../../samples/env';
+import { samples } from '../../samples/sampleStore';
 import type { CommandContext } from './context';
 import type { Command } from './registry';
 import { readmeStamp } from './stamp';
@@ -60,13 +66,24 @@ export async function syncWorkflowChecklist(ctx: CommandContext): Promise<void> 
     return;
   }
 
+  // adoptSamples (main.ts:762-768): 설정과 README 의 sample_tracking 이 모두 켜졌을 때만(D11: README 읽기를 기다린다)
+  const samplesBrought = (await samples.ready(readmePath))
+    ? await (async () => {
+        const env = createSampleEnv(ctx);
+        return offerSamplesLeftBehind({ env, sampleListHeaders: sampleListHeaders(env) }, labnoteDir, names);
+      })()
+    : 0;
+
   const unfixed = plan.stale.length > 0 || plan.relabel.length > 0 || plan.duplicates.length > 0;
   let message =
-    plan.added.length > 0
+    plan.added.length > 0 || samplesBrought > 0
       ? host.t('Workflow checklist updated: {0} added, {1} removed.', String(plan.added.length), '0')
       : unfixed
         ? host.t('No changes made.')
         : host.t('The workflow checklist already matches the folder.');
+  if (samplesBrought > 0) {
+    message += ` ${host.t('Brought {0} local sample(s) into {1}.', String(samplesBrought), posix.basename(labnoteDir))}`;
+  }
   if (unfixed) message += ` ${t('syncChecklist.partial')}`;
   host.notify('info', message);
 }
