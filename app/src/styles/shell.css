@@ -219,7 +219,7 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* 왼쪽 독(.sidebar.dock)과 오른쪽 자리(.sidebar.right-slot): 위에 탭 줄, 가운데 패널(여기만 스크롤), 아래 보관함 줄 */
+/* 왼쪽 독(.sidebar.dock)과 오른쪽 사이드바(.sidebar.right-dock): 위에 탭 줄, 가운데 패널(여기만 스크롤), 아래 보관함 줄 */
 .sidebar {
   position: relative;
   display: flex;
@@ -301,8 +301,27 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
 .resizer:hover::after, .resizer:focus-visible::after, :root[data-resizing] .resizer::after { background: var(--accent); }
 .resizer:focus-visible { outline: none; }
 
-/* 오른쪽 자리(개요 / 링크). Task 6 에서 RightDock 이 이 자리를 맡는다 */
-.right-slot { grid-area: right; width: var(--right-w); border-left: 1px solid var(--border); }
+/* 오른쪽 사이드바(RightDock: 개요 / 링크). 닫혀 있으면 그리지 않아 auto 칸이 0 이 된다. 너비는 --right-w(layoutStore) */
+.right-dock {
+  grid-area: right;
+  /* 창이 좁으면 본문(편집기)에 360px 를 남기도록 줄인다. 그래도 220px(최소 너비) 아래로는 줄이지 않는다 */
+  width: min(var(--right-w), max(220px, calc(100vw - var(--ribbon-w) - var(--side-w) - 360px)));
+  border-left: 1px solid var(--border);
+}
+:root[data-left-hidden="true"] .right-dock { width: min(var(--right-w), max(220px, calc(100vw - var(--ribbon-w) - 360px))); }
+/* 패널 머리: 고른 보기의 아이콘과 이름(Obsidian 의 보기 머리처럼 작고 흐리게) */
+.right-dock-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-4) var(--space-5) 0;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.right-dock-head svg { flex: none; }
 
 /* 독 뒤의 깔개: 좁은 창(아래 미디어 쿼리)에서 독이 본문 위에 뜰 때만 보인다 */
 .dock-scrim { display: none; }
@@ -381,5 +400,6 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
     background: var(--scrim);
   }
   :root[data-left-hidden="true"] .dock-scrim { display: none; }
-  .right-slot { width: min(var(--right-w), 40vw); }
+  .right-dock,
+  :root[data-left-hidden="true"] .right-dock { width: min(var(--right-w), 40vw); }
 }

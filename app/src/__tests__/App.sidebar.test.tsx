@@ -204,6 +204,20 @@ describe('사이드바 탭', () => {
     await waitFor(() => expect(rightTabs().getByRole('tab', { name: t('sidebar.outline') }).getAttribute('aria-selected')).toBe('true'));
   });
 
+  it('the Outline in the right sidebar follows the open note', async () => {
+    const user = userEvent.setup();
+    installFakeVault({ 'A.labnote.md': '# Alpha heading\nx\n', 'B.labnote.md': '# Beta heading\ny\n' });
+    render(<App />);
+    await vaultShown();
+    await user.click(within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '오른쪽 사이드바 보이기/숨기기' }));
+    const right = () => within(screen.getByRole('complementary', { name: '오른쪽 사이드바' }));
+    await user.click(await screen.findByText('A.labnote.md'));
+    expect(await right().findByRole('treeitem', { name: /Alpha heading/ })).toBeTruthy();
+    await user.click(screen.getByText('B.labnote.md'));
+    expect(await right().findByRole('treeitem', { name: /Beta heading/ })).toBeTruthy();
+    expect(right().queryByRole('treeitem', { name: /Alpha heading/ })).toBeNull();
+  });
+
   it("clicking an outline heading moves the open note's cursor to that heading line", async () => {
     const user = userEvent.setup();
     installFakeVault({ 'Day 1.labnote.md': '# Top\nx\ny\n## Deep\nz\n' });

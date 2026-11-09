@@ -39,8 +39,10 @@ describe('Ribbon', () => {
       '새 실험',
       '새 노트 (Ctrl+N)',
       '스캔 가져오기',
-      '오른쪽 사이드바 보이기/숨기기',
+      '오른쪽 사이드바 보이기/숨기기 (Ctrl+Shift+\\)',
     ]);
+    expect(buttons[buttons.length - 1].getAttribute('aria-keyshortcuts')).toBe('Control+Shift+\\');
+    expect(buttons[buttons.length - 1].getAttribute('aria-controls')).toBe('right-dock');
     // 아이콘만: 글자 없이 svg 하나, style 속성 없음(CSP)
     for (const b of buttons) {
       expect(b.textContent).toBe('');

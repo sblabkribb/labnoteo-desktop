@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { t } from './i18n/t';
 import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
@@ -80,19 +80,14 @@ import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
 import { Ribbon, type RibbonActions } from './ui/Ribbon';
 import { Dock } from './ui/Dock';
+import { RightDock } from './ui/RightDock';
 import { VaultBar } from './ui/VaultBar';
-import { Icon } from './ui/Icon';
 import { layoutStore, useLayout, type LeftTab, type RightTab } from './ui/layoutStore';
 import { setWindowTitle } from './ui/windowTitle';
 import { runQuickSwitcher } from './ui/quickSwitcher';
 
 /** 명령(showPanel)이 부르는 이름. 'workflows' 는 플러그인의 워크플로 뷰라 왼쪽 독의 실험 탭으로 간다. */
 type PanelName = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
-
-const RIGHT_TABS: readonly { id: RightTab; icon: 'list-tree' | 'link'; labelKey: string }[] = [
-  { id: 'outline', icon: 'list-tree', labelKey: 'sidebar.outline' },
-  { id: 'links', icon: 'link', labelKey: 'sidebar.tab.links' },
-];
 
 /** 마우스의 뒤로(3)·앞으로(4) 단추. */
 const MOUSE_BACK = 3;
@@ -129,6 +124,11 @@ function markTabChosen(root: string, tab: string): void {
 /** Ctrl 만(Shift·Alt·Meta 없이), 한글 조합 중이 아닐 때. */
 function plainCtrl(e: globalThis.KeyboardEvent): boolean {
   return e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && !e.isComposing && e.keyCode !== 229;
+}
+
+/** Ctrl+Shift 만(Alt·Meta 없이), 한글 조합 중이 아닐 때. */
+function ctrlShift(e: globalThis.KeyboardEvent): boolean {
+  return e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && !e.isComposing && e.keyCode !== 229;
 }
 
 interface ViewProps {
@@ -265,21 +265,6 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
   const showPanel = (next: PanelName) => {
     if (next === 'outline' || next === 'links') showRight(next);
     else showLeft(next === 'workflows' ? 'experiments' : next);
-  };
-  // 오른쪽 사이드바의 탭(개요 / 링크): 왼쪽 독과 같은 탭 패턴. 오른쪽 사이드바는 Task 6 에서 제 자리(RightDock)를 얻는다.
-  const onRightTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const order = RIGHT_TABS.map((x) => x.id);
-    const at = order.indexOf(layout.rightTab);
-    const next =
-      e.key === 'ArrowRight' || e.key === 'ArrowLeft' ? order[(at + 1) % order.length]
-      : e.key === 'Home' ? order[0]
-      : e.key === 'End' ? order[order.length - 1]
-      : undefined;
-    if (!next) return;
-    e.preventDefault();
-    showRight(next);
-    document.getElementById(`sidebar-tab-${next}`)?.focus();
   };
   const openNote = (path: string) => openFile(path);
   // 개요에서 제목을 고르면: 열린 편집기면 그 줄로 커서를 옮기고 초점을 편집기로 돌려준다(reveal 이 focus 한다).
@@ -497,15 +482,18 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
       if (ctx && c) void runCommand(ctx, c);
     },
   };
-  // 셸 단축키: Ctrl+\ 왼쪽 독(code 로 맞춘다: 한국어 자판의 ₩ 키도 Backslash 다), Ctrl+N 새 노트, Ctrl+O 빠른 이동.
-  // 편집기 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 는 셋 다 묶지 않는다. 대화상자가 열려 있으면 듣지 않는다.
+  // 셸 단축키: Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바(둘 다 code 로 맞춘다: 한국어 자판의 ₩ 키도 Backslash 다),
+  // Ctrl+N 새 노트, Ctrl+O 빠른 이동. 편집기 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 는 넷 다 묶지 않는다
+  // (기본 keymap 의 Shift-Mod-\ 는 Editor.tsx 가 뺀다). 대화상자가 열려 있으면 듣지 않는다.
   const shortcuts = useRef(ribbonActions);
   shortcuts.current = ribbonActions;
   useEffect(() => {
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (e.defaultPrevented || !plainCtrl(e)) return;
+      if (e.defaultPrevented) return;
       const run =
-        e.code === 'Backslash' ? shortcuts.current.toggleLeft
+        ctrlShift(e) ? (e.code === 'Backslash' ? shortcuts.current.toggleRight : undefined)
+        : !plainCtrl(e) ? undefined
+        : e.code === 'Backslash' ? shortcuts.current.toggleLeft
         : e.code === 'KeyN' ? shortcuts.current.newNote
         : e.code === 'KeyO' ? shortcuts.current.quickSwitcher
         : undefined;
@@ -606,38 +594,10 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
             <p className="empty-state">{t('editor.empty')}</p>
           )}
         </main>
-        {layout.rightOpen && (
-          <aside className="sidebar right-slot" aria-label={t('right.label')}>
-            <div className="dock-tabs" role="tablist" aria-label={t('right.tabs')} onKeyDown={onRightTabKeyDown}>
-              {RIGHT_TABS.map((x) => (
-                <button
-                  key={x.id}
-                  type="button"
-                  role="tab"
-                  id={`sidebar-tab-${x.id}`}
-                  aria-controls={`sidebar-panel-${x.id}`}
-                  aria-selected={layout.rightTab === x.id}
-                  aria-label={t(x.labelKey)}
-                  title={t(x.labelKey)}
-                  tabIndex={layout.rightTab === x.id ? 0 : -1}
-                  className="ibtn dock-tab"
-                  onClick={() => showRight(x.id)}
-                >
-                  <Icon name={x.icon} size={18} />
-                </button>
-              ))}
-            </div>
-            {layout.rightTab === 'outline' ? (
-              <div role="tabpanel" id="sidebar-panel-outline" className="sidebar-panel" aria-labelledby="sidebar-tab-outline">
-                <OutlinePanel onReveal={onOutlineReveal} />
-              </div>
-            ) : (
-              <div role="tabpanel" id="sidebar-panel-links" className="sidebar-panel" aria-labelledby="sidebar-tab-links">
-                <LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />
-              </div>
-            )}
-          </aside>
-        )}
+        <RightDock
+          outline={<OutlinePanel onReveal={onOutlineReveal} />}
+          links={<LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />}
+        />
         <footer className="statusbar">
           <div className="status-notes">
             {indexing && <span>{t('search.indexing')}</span>}

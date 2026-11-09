@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { EditorView } from '@codemirror/view';
 import { App } from '../App';
 import { clearToasts } from '../labnote/host/toastStore';
 import { DEFAULT_PREFS, layoutStore } from '../ui/layoutStore';
@@ -36,6 +37,12 @@ function memoryStorage(): Storage {
     },
   };
 }
+
+// 편집기를 여는 테스트가 있다: jsdom 에 없는 API 를 App.sidebar.test.tsx 처럼 채운다.
+const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
+Range.prototype.getClientRects ??= emptyRects;
+Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+document.execCommand ??= () => false;
 
 const html = () => document.documentElement;
 
@@ -205,5 +212,39 @@ describe('셸: 리본, 왼쪽 독, 보관함 줄 (상단 바 없음)', () => {
     const right = await screen.findByRole('complementary', { name: '오른쪽 사이드바' });
     expect(within(right).getByRole('tab', { name: '개요' }).getAttribute('aria-selected')).toBe('true');
     expect(html().getAttribute('data-right-open')).toBe('true');
+  });
+
+  it('Ctrl+Shift+\\ toggles the right sidebar (also as | or ₩ on code Backslash); Ctrl+\\ leaves it alone', async () => {
+    await openVault();
+    expect(html().getAttribute('data-right-open')).toBe('false');
+    expect(ctrlBackslash('|', { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(html().getAttribute('data-right-open')).toBe('true');
+    const right = screen.getByRole('complementary', { name: '오른쪽 사이드바' });
+    expect(right.id).toBe('right-dock');
+    const button = ribbon().getByRole('button', { name: '오른쪽 사이드바 보이기/숨기기' });
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getAttribute('aria-controls')).toBe('right-dock');
+    ctrlBackslash('\\');
+    expect(html().getAttribute('data-right-open')).toBe('true');
+    ctrlBackslash('₩', { shiftKey: true });
+    expect(html().getAttribute('data-right-open')).toBe('false');
+    expect(screen.queryByRole('complementary', { name: '오른쪽 사이드바' })).toBeNull();
+    // Alt 가 함께면 아니다
+    ctrlBackslash('|', { shiftKey: true, altKey: true });
+    expect(html().getAttribute('data-right-open')).toBe('false');
+  });
+
+  it('Ctrl+Shift+\\ in the editor toggles the right sidebar even with the cursor on a bracket (no CodeMirror binding shadows it)', async () => {
+    const user = userEvent.setup();
+    await openVault({ 'Day 1.labnote.md': '(a) [b]\n' });
+    await user.click(await screen.findByText('Day 1.labnote.md'));
+    const root = await waitFor(() => (document.querySelector('.editor-frame') as HTMLElement).shadowRoot!);
+    const content = await waitFor(() => root.querySelector('.cm-content') as HTMLElement);
+    const view = EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
+    act(() => view.dispatch({ selection: { anchor: 0 } }));
+    const e = new KeyboardEvent('keydown', { key: '|', code: 'Backslash', keyCode: 220, ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true, composed: true });
+    act(() => void content.dispatchEvent(e));
+    expect(html().getAttribute('data-right-open')).toBe('true');
+    expect(view.state.selection.main.head).toBe(0);
   });
 });

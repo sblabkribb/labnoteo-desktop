@@ -47,8 +47,11 @@ import { captureFocus } from '../ui/returnFocus';
 import { extractOutline, type OutlineItem } from './outline/extract';
 import { clearOutline, publishCursor, publishOutline } from './outline/outlineStore';
 
-/** 앱의 뒤로·앞으로 가기 키. CodeMirror 기본 keymap 에서 뺀다. */
-const NAV_KEYS = new Set(['Alt-ArrowLeft', 'Alt-ArrowRight']);
+/**
+ * 앱이 쓰는 키. CodeMirror 기본 keymap 에서 뺀다: 뒤로·앞으로 가기(Alt+←/→, cursorSyntaxLeft/Right)와 오른쪽 사이드바
+ * (Ctrl+Shift+\, cursorMatchingBracket — 괄호 위에서 커서를 옮기며 preventDefault 해 App 의 처리기가 건너뛴다).
+ */
+const NAV_KEYS = new Set(['Alt-ArrowLeft', 'Alt-ArrowRight', 'Shift-Mod-\\']);
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -552,7 +555,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 목록 키(Enter 이어 쓰기, Backspace, Tab/Shift+Tab 들이기·내밀기): 두 모드 모두에서 듣도록 모드 칸 밖에 둔다.
       // 마크다운 언어의 자체 keymap 은 꺼 두었다(markdownSyntax.ts): Enter 처리기는 이것 하나다. 조합 중에는 모두 쉰다.
       Prec.high(keymap.of(LIST_KEYS)),
-      // 기본 keymap 의 Alt+←/→(cursorSyntaxLeft/Right)는 뺀다: 그 키는 앱의 뒤로·앞으로 가기다(App.tsx 의 navKey).
+      // 기본 keymap 의 Alt+←/→(cursorSyntaxLeft/Right)와 Ctrl+Shift+\ 는 뺀다: 앱의 뒤로·앞으로 가기와 오른쪽 사이드바다(App.tsx).
       // 남겨 두면 커서를 옮기며 preventDefault 해 window 의 탐색 처리기가 건너뛴다.
       keymap.of([...defaultKeymap.filter((b) => !NAV_KEYS.has(b.key ?? '')), ...historyKeymap]),
       labnoteMarkdown(),

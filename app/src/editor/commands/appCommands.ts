@@ -224,10 +224,11 @@ const toggleLeft: AppCommand = {
   run: () => layoutStore.toggleLeft(),
 };
 
-/** 오른쪽 사이드바(개요·링크) 열기·닫기. */
+/** 오른쪽 사이드바(개요·링크) 열기·닫기(Task 6). 키는 보여 주기만 한다: App 의 window keydown 이 Ctrl+Shift 와 code === 'Backslash' 로 듣는다. */
 const toggleRight: AppCommand = {
   id: 'app.toggle-right-sidebar',
   nameKey: 'cmd.toggleRight',
+  key: 'Mod-Shift-\\',
   run: () => layoutStore.toggleRight(),
 };
 

@@ -36,7 +36,9 @@ const MIDDLE: readonly Item[] = [
   { action: 'newNote', icon: 'file-plus', labelKey: 'ribbon.newNote', key: 'Ctrl+N' },
   { action: 'scan', icon: 'scan-barcode', labelKey: 'ribbon.scan', needsCtx: true },
 ];
-const BOTTOM: readonly Item[] = [{ action: 'toggleRight', icon: 'panel-right', labelKey: 'ribbon.toggleRight', expands: 'right' }];
+const BOTTOM: readonly Item[] = [
+  { action: 'toggleRight', icon: 'panel-right', labelKey: 'ribbon.toggleRight', key: 'Ctrl+Shift+\\', expands: 'right' },
+];
 
 /**
  * 왼쪽 끝의 리본(44px, 늘 보인다): 18px 아이콘 단추와 그 툴팁(단축키 포함). 세로 toolbar 라 ↑/↓ 로 단추 사이를 옮긴다.
@@ -56,7 +58,7 @@ export function Ribbon(p: { actions: RibbonActions; leftHidden: boolean; rightOp
         title={item.key ? t('ribbon.withKey', label, item.key) : label}
         aria-keyshortcuts={item.key ? item.key.replace('Ctrl', 'Control') : undefined}
         aria-expanded={expanded}
-        aria-controls={item.expands === 'left' ? 'dock' : undefined}
+        aria-controls={item.expands === 'left' ? 'dock' : item.expands === 'right' ? 'right-dock' : undefined}
         disabled={item.needsCtx && !p.ready}
         onClick={() => p.actions[item.action]()}
       >
