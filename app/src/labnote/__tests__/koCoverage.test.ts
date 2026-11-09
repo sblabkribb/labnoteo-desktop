@@ -1,8 +1,8 @@
 /**
  * 코어와 옮겨 온 플러그인 코드의 문장은 coreT(플러그인의 l10n.ko.ts)로 번역된다. 그 목록에 없는 키는 한국어 화면에서
- * 영어로 나온다. src/labnote 의 coreT( / host.t( / paletteName( 첫 인자에 적힌 글자는 모두 obsidianKo 에 있어야 한다.
+ * 영어로 나온다. KO_ROOTS 의 coreT( / host.t( / paletteName( 첫 인자에 적힌 글자는 모두 obsidianKo 에 있어야 한다.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import obsidianKo from '../../../vendor/labnoteo/src/l10n.ko';
 import { firstArgsOf } from '../../i18n/__tests__/callArgs';
@@ -22,7 +22,18 @@ const literals = (code: string) => [...code.matchAll(QUOTED)].map((m) => unescap
 const DYNAMIC_ARGS: Record<string, string[]> = {
   // 등록된 명령의 nameKey. commands/__tests__/registry.test.ts 가 registerAllCommands 뒤 모든 nameKey 가 obsidianKo 에 있는지 본다.
   'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'],
+  // 같은 파일 위쪽의 `const NAME = '...'` 상수. 아래 '상수 인자의 글자도 obsidianKo 에 있다' 가 그 글자를 확인한다.
+  'src/integrations/IntegrationSettingsDialog.tsx': ['CLEARTEXT', 'FULL_ADDRESS'],
 };
+
+/** DYNAMIC_ARGS 의 대문자 이름 인자: 같은 파일의 `const NAME = '글자'` 에서 글자를 찾는다(없으면 undefined). */
+function constantLiteral(code: string, name: string): string | undefined {
+  const line = code.split('\n').find((l) => l.startsWith(`const ${name} = `));
+  return line === undefined ? undefined : literals(line.slice(`const ${name} = `.length))[0];
+}
+
+/** 검사하는 폴더. SP6 의 연동 폴더도 본다. 아직 없는 폴더는 건너뛴다. */
+const KO_ROOTS = ['src/labnote', 'src/integrations', 'src/partbank', 'src/ai', 'src/bfworkflow'];
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -44,8 +55,14 @@ function scan(f: string, code: string) {
   return { keys, dynamic };
 }
 
-describe('src/labnote 가 코어 번역에 넘기는 키', () => {
-  const files = sources('src/labnote').map((f) => ({ f, code: readFileSync(f, 'utf-8') }));
+describe('KO_ROOTS 가 코어 번역에 넘기는 키', () => {
+  const files = KO_ROOTS.filter((root) => existsSync(root))
+    .flatMap(sources)
+    .map((f) => ({ f, code: readFileSync(f, 'utf-8') }));
+
+  it('scans every SP6 folder, not only src/labnote', () => {
+    expect(KO_ROOTS).toEqual(['src/labnote', 'src/integrations', 'src/partbank', 'src/ai', 'src/bfworkflow']);
+  });
 
   it('글자 키는 모두 obsidianKo 에 있다', () => {
     const missing = files.flatMap(({ f, code }) =>
@@ -59,6 +76,18 @@ describe('src/labnote 가 코어 번역에 넘기는 키', () => {
 
   it('글자가 없는 첫 인자는 DYNAMIC_ARGS 에 이유와 함께 적혀 있다', () => {
     expect(files.flatMap(({ f, code }) => scan(f, code).dynamic)).toEqual([]);
+  });
+
+  it('상수 인자의 글자도 obsidianKo 에 있다', () => {
+    const bad = Object.entries(DYNAMIC_ARGS).flatMap(([f, args]) =>
+      args
+        .filter((a) => /^[A-Z][A-Z0-9_]*$/.test(a))
+        .flatMap((a) => {
+          const key = constantLiteral(readFileSync(f, 'utf-8'), a);
+          return key !== undefined && Object.hasOwn(obsidianKo, key) ? [] : [`${f}: ${a} = ${String(key)}`];
+        }),
+    );
+    expect(bad).toEqual([]);
   });
 
   it('검사 자체: 줄을 넘는 중첩 삼항의 host.t 셋에서 키 셋을 찾는다', () => {
