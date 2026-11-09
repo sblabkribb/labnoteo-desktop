@@ -4,7 +4,7 @@
  *
  * The source is never gated on composition: CodeMirror keeps the composing syllable in the document, so the
  * list ranks on it and stays open while a Korean syllable composes. Only acceptance is gated: `apply` returns
- * without dispatching while `view.composing`, and `wikiCompletionGuards()` keeps Enter and Tab away from the
+ * without dispatching while `view.composing`, and `completionGuards()` keeps Enter and Tab away from the
  * completion keymap while the IME owns them, then reopens the list after `compositionend`.
  */
 import type { EditorState, Extension } from '@codemirror/state';
@@ -53,7 +53,7 @@ export function wikiContext(lineBefore: string): WikiContext | null {
 const CODE_NODES = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText', 'CodeMark']);
 
 /** True when `pos` is inside code: a code node in the syntax tree, or an unclosed backtick run earlier on the line. */
-function inCode(state: EditorState, pos: number, lineBefore: string): boolean {
+export function inCode(state: EditorState, pos: number, lineBefore: string): boolean {
   const tree = ensureSyntaxTree(state, pos, 50) ?? syntaxTree(state);
   for (let n: ReturnType<typeof tree.resolveInner> | null = tree.resolveInner(pos, -1); n; n = n.parent) {
     if (CODE_NODES.has(n.name)) return true;
@@ -238,16 +238,23 @@ function imeAcceptKey(event: KeyboardEvent, view: EditorView): boolean {
   return completionStatus(view.state) === 'active';
 }
 
+/** Whether the completion list should reopen after `compositionend`, given the line before the cursor. */
+export type ReopenIf = (lineBefore: string, view: EditorView) => boolean;
+
+/** Reopens after `compositionend` when the cursor is inside `[[`. */
+export const wikiReopen: ReopenIf = (lineBefore) => wikiContext(lineBefore) !== null;
+
 /**
- * IME guards (D9):
+ * IME guards (D9), shared by every completion source in the editor:
  * - Enter or Tab while the list is open and the IME is composing is left to the IME. CodeMirror calls
  *   `preventDefault()` for every DOM handler that returns true, so the guard is a capture-phase listener on
  *   `view.dom` (an ancestor of the content element) that stops the event before any CodeMirror handler sees it,
  *   without `preventDefault()`: the syllable commits and neither the completion keymap nor the list keys run.
  *   (CodeMirror already drops keys once it has seen `compositionstart`; this also covers a keydown that comes first.)
- * - after `compositionend`, the list is reopened when the cursor is inside `[[`, so the follow-up Enter accepts.
+ * - after `compositionend`, the list is reopened when any `reopenIf` predicate matches the line before the cursor,
+ *   so the follow-up Enter accepts.
  */
-export function wikiCompletionGuards(): Extension {
+export function completionGuards(reopenIf: readonly ReopenIf[]): Extension {
   return [
     ViewPlugin.define((view) => {
       const onKeydown = (event: KeyboardEvent) => {
@@ -259,10 +266,17 @@ export function wikiCompletionGuards(): Extension {
     EditorView.domEventHandlers({
       compositionend: (_event, view) => {
         setTimeout(() => {
-          if (view.dom.isConnected && wikiContext(lineBeforeCursor(view))) startCompletion(view);
+          if (!view.dom.isConnected) return;
+          const line = lineBeforeCursor(view);
+          if (reopenIf.some((reopen) => reopen(line, view))) startCompletion(view);
         }, 0);
         return false;
       },
     }),
   ];
+}
+
+/** The guards for `[[` completion alone. */
+export function wikiCompletionGuards(): Extension {
+  return completionGuards([wikiReopen]);
 }

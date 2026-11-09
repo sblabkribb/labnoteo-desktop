@@ -22,7 +22,8 @@ import { vaultImages, type VaultImages } from './live/vaultImages';
 import { pasteImages } from './live/pasteImage';
 import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
 import { linkIndex } from '../links/linkIndex';
-import { wikiCompletionGuards, wikiCompletionSource, type WikiCompletionDeps } from '../links/complete';
+import { completionGuards, wikiCompletionSource, wikiReopen, type WikiCompletionDeps } from '../links/complete';
+import { sampleReopen } from '../samples/complete';
 import {
   linkResolution,
   reconfigureFlusher,
@@ -549,12 +550,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       labnoteMarkdown(),
       // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었다(markdownSyntax.ts).
       // `[[` 뒤의 노트·별칭·제목·(`![[` 뒤) 이미지 완성. 조합 중에도 목록은 열려 거르지만, 받아들이기는 조합이 끝난 뒤에만 한다
-      // (wikiCompletionGuards: 조합 중 Enter/Tab 은 IME 몫, compositionend 뒤 목록을 다시 연다).
+      // (completionGuards: 조합 중 Enter/Tab 은 IME 몫, compositionend 뒤 `[[`·`@` 안이면 목록을 다시 연다).
       autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }),
-      wikiCompletionGuards(),
+      completionGuards([wikiReopen, sampleReopen]),
       // 표 칸 편집기에도 같은 완성을 싣는다. 칸 안에서는 별칭 구분자 앞에 백슬래시를 붙이고(inTable), 목록이 열린 동안의
       // Enter·Tab·위아래·Escape 는 칸 이동 대신 완성 목록이 받는다(cellEditor.ts 의 keys()).
-      cellExtras.of([autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }), wikiCompletionGuards()]),
+      cellExtras.of([autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }), completionGuards([wikiReopen, sampleReopen])]),
       // 샘플 ID 강조(D7): 셀 편집기에도 싣는다(바깥 편집기의 설정과 노트 경로를 읽는다).
       cellExtras.of(sampleHighlight),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
