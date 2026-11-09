@@ -1,0 +1,188 @@
+/**
+ * The one wrapper around Lucide (lucide-react, ISC). No other file imports lucide-react; a guard test enforces it.
+ * Icons are drawn with stroke 1.75 and currentColor, sized 14/16/18, and never carry a style attribute (CSP
+ * style-src 'self'). Without a label an icon is decorative (aria-hidden); with one it is role="img" + aria-label.
+ */
+import type { JSX } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Braces,
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown,
+  CircleCheck,
+  CircleDashed,
+  CircleDot,
+  CircleX,
+  ClipboardPaste,
+  Clock,
+  Code,
+  Command,
+  Contrast,
+  Copy,
+  CornerDownRight,
+  Download,
+  Ellipsis,
+  ExternalLink,
+  Eye,
+  File,
+  FilePlus,
+  FileText,
+  FileType,
+  Filter,
+  FlaskConical,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  FolderSearch,
+  Hash,
+  Heading,
+  Image,
+  Info,
+  Keyboard,
+  Languages,
+  Link,
+  ListTree,
+  Minus,
+  Moon,
+  Paperclip,
+  PanelLeft,
+  PanelRight,
+  Pencil,
+  Plus,
+  Printer,
+  QrCode,
+  Quote,
+  RefreshCw,
+  ScanBarcode,
+  Scissors,
+  Search,
+  Settings,
+  Sheet,
+  Sigma,
+  SquareCode,
+  Sun,
+  SunMoon,
+  Table,
+  Tag,
+  Terminal,
+  TestTube,
+  TextSelect,
+  Trash2,
+  TriangleAlert,
+  Upload,
+  User,
+  Workflow,
+  X,
+  ZoomIn,
+  ZoomOut,
+  type LucideIcon,
+} from 'lucide-react';
+
+const ICONS = {
+  'panel-left': PanelLeft,
+  'panel-right': PanelRight,
+  search: Search,
+  terminal: Terminal,
+  command: Command,
+  'flask-conical': FlaskConical,
+  'file-plus': FilePlus,
+  'scan-barcode': ScanBarcode,
+  folder: Folder,
+  'folder-open': FolderOpen,
+  'folder-plus': FolderPlus,
+  workflow: Workflow,
+  'circle-dot': CircleDot,
+  'circle-check': CircleCheck,
+  'circle-half': Contrast,
+  'circle-dashed': CircleDashed,
+  file: File,
+  'file-text': FileText,
+  image: Image,
+  sheet: Sheet,
+  'file-type': FileType,
+  braces: Braces,
+  paperclip: Paperclip,
+  'test-tube': TestTube,
+  'list-tree': ListTree,
+  link: Link,
+  'corner-down-right': CornerDownRight,
+  'book-open': BookOpen,
+  code: Code,
+  'chevron-right': ChevronRight,
+  'chevron-down': ChevronDown,
+  'chevrons-up-down': ChevronsUpDown,
+  settings: Settings,
+  x: X,
+  plus: Plus,
+  check: Check,
+  'arrow-left': ArrowLeft,
+  'arrow-right': ArrowRight,
+  ellipsis: Ellipsis,
+  'qr-code': QrCode,
+  table: Table,
+  calendar: Calendar,
+  'sun-moon': SunMoon,
+  sun: Sun,
+  moon: Moon,
+  languages: Languages,
+  keyboard: Keyboard,
+  'triangle-alert': TriangleAlert,
+  'circle-x': CircleX,
+  info: Info,
+  copy: Copy,
+  scissors: Scissors,
+  'clipboard-paste': ClipboardPaste,
+  'text-select': TextSelect,
+  quote: Quote,
+  'square-code': SquareCode,
+  minus: Minus,
+  sigma: Sigma,
+  clock: Clock,
+  tag: Tag,
+  hash: Hash,
+  user: User,
+  heading: Heading,
+  'zoom-in': ZoomIn,
+  'zoom-out': ZoomOut,
+  'external-link': ExternalLink,
+  'folder-search': FolderSearch,
+  eye: Eye,
+  filter: Filter,
+  pencil: Pencil,
+  'trash-2': Trash2,
+  'refresh-cw': RefreshCw,
+  printer: Printer,
+  download: Download,
+  upload: Upload,
+} as const satisfies Record<string, LucideIcon>;
+
+export type IconName = keyof typeof ICONS;
+
+/** Every name, in declaration order (tests and galleries). */
+export const ICON_NAMES = Object.keys(ICONS) as IconName[];
+
+export type IconSize = 14 | 16 | 18;
+
+export function Icon(p: { name: IconName; size?: IconSize; label?: string; className?: string }): JSX.Element {
+  const Glyph = ICONS[p.name];
+  const size = p.size ?? 16;
+  const className = p.className ? `icon ${p.className}` : 'icon';
+  const a11y = p.label
+    ? { role: 'img' as const, 'aria-label': p.label }
+    : { 'aria-hidden': true as const };
+  return (
+    <Glyph
+      size={size}
+      strokeWidth={1.75}
+      absoluteStrokeWidth={false}
+      className={className}
+      focusable="false"
+      {...a11y}
+    />
+  );
+}
