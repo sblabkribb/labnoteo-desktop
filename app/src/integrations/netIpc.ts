@@ -428,7 +428,7 @@ export async function partbankCatalogWrite(
   await call<null>(invoke, 'partbank_catalog_write', { name, content });
 }
 
-export type StateName = 'partbankUsage' | 'bfwCatalogCache';
+export type StateName = 'partbankUsage' | 'bfwCatalogCache' | 'scanFolderHistory' | 'slackLink';
 
 export function integrationStateRead(name: StateName, invoke: InvokeFn = tauriInvoke): Promise<string | null> {
   return call<string | null>(invoke, 'integration_state_read', { name });

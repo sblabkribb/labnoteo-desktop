@@ -10,6 +10,7 @@ import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJou
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
 import { openInBrowser } from '../../labnote/print/openInBrowser';
+import * as scan from '../../labnote/scan/scanIpc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -19,19 +20,9 @@ const fixture: Record<string, string[]> = JSON.parse(
 /**
  * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 11 이 netIpc.ts 래퍼로 비웠다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
- * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 래퍼를 만들며 비운다.
+ * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [
-  'scan_folder_choose',
-  'scan_folder_clear',
-  'scan_folder_set_mode',
-  'scan_folder_status',
-  'scan_folder_list',
-  'scan_folder_prune_baseline',
-  'scan_folder_read',
-  'scan_folder_move',
-  'scan_folder_watch',
-];
+const PENDING_TS_WRAPPERS: readonly string[] = [];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
@@ -64,6 +55,10 @@ function recorder() {
     if (cmd === 'vault_created_times') return [null];
     if (cmd === 'slack_call') return { status: 200, json: { ok: true } };
     if (cmd === 'slack_download') return new ArrayBuffer(0);
+    if (cmd === 'scan_folder_list') return [];
+    if (cmd === 'scan_folder_prune_baseline') return ['a|1|2'];
+    if (cmd === 'scan_folder_read') return new ArrayBuffer(0);
+    if (cmd === 'scan_folder_move') return 'labnote-processed/a.jpg';
     if (cmd === 'index_bodies') return { items: [], next: null };
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
@@ -134,6 +129,16 @@ describe('IPC 인자 이름 계약', () => {
     // SP7 Part B Slack 커맨드
     await net.slackCall({ method: 'authTest' }, r.invoke);
     expect(await net.slackDownload({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' }, r.invoke)).toBeInstanceOf(ArrayBuffer);
+    // SP7 Part B 스캔 폴더 커맨드: 래퍼마다 한 번씩
+    await scan.scanFolderChoose(r.invoke);
+    await scan.scanFolderClear(r.invoke);
+    await scan.scanFolderSetMode('shared', r.invoke);
+    await scan.scanFolderStatus(r.invoke);
+    expect(await scan.scanFolderList(r.invoke)).toEqual([]);
+    expect(await scan.scanFolderPruneBaseline(['a|1|2'], r.invoke)).toEqual(['a|1|2']);
+    expect(await scan.scanFolderRead('a.jpg', r.invoke)).toBeInstanceOf(ArrayBuffer);
+    expect(await scan.scanFolderMove('a.jpg', 'processed', r.invoke)).toBe('labnote-processed/a.jpg');
+    await scan.scanFolderWatch(r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)
