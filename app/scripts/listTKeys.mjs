@@ -5,10 +5,34 @@
 // <from>..<to> 줄(1부터, 양끝 포함)에서 시작하는 t( / this.t( / plugin.t( / host.t( 부름의 첫 인자에 적힌 글자를
 // 모두 찾아 [{ key, inKo }] JSON 배열 하나로 낸다(inKo: vendor/labnoteo/src/l10n.ko.ts 에 그 키가 있는지).
 // 인자는 줄을 넘어도 되고 삼항이면 글자 둘을 모두 낸다(src/labnote/__tests__/koCoverage.test.ts 와 같은 방식).
+// 글자가 없는 첫 인자(t(KEY), t(`...`), 식)는 { key: <인자 원문>, inKo: false, dynamic: true } 로 낸다.
 // inKo 가 false 인 키가 하나라도 있으면 1 로 끝난다. 잘못된 인자는 2.
+//   node scripts/listTKeys.mjs --ko-keys  는 l10n.ko.ts 에서 읽은 키 전부를 JSON 배열로 낸다(시험용).
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const koFile = join(appDir, 'vendor', 'labnoteo', 'src', 'l10n.ko.ts');
+
+const QUOTED = /'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g;
+/** 글자 안의 \' 같은 이스케이프를 풀어 키 원문으로 만든다. */
+const ESCAPES = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', 0: '\0' };
+const unescape = (s) =>
+  s.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (_, cp, u4, x2, c) =>
+    cp || u4 || x2 ? String.fromCodePoint(parseInt(cp ?? u4 ?? x2, 16)) : (ESCAPES[c] ?? c),
+  );
+const literals = (code) => [...code.matchAll(QUOTED)].map((m) => unescape(m[1] ?? m[2]));
+
+/** l10n.ko.ts 의 키: 줄 첫머리의 글자 키나 맨 이름 키(Undo: ...) 뒤에 쌍점이 오는 것. 값은 다음 줄에 있어도 된다. */
+const KO_KEY = /^\s*(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|([A-Za-z_$][\w$]*))\s*:/gm;
+const koText = readFileSync(koFile, 'utf-8').replace(/\r\n/g, '\n');
+const koKeys = new Set([...koText.matchAll(KO_KEY)].map((m) => (m[3] !== undefined ? m[3] : unescape(m[1] ?? m[2]))));
+
+if (process.argv[2] === '--ko-keys') {
+  console.log(JSON.stringify([...koKeys], null, 2));
+  process.exit(0);
+}
 
 const [path, fromArg, toArg] = process.argv.slice(2);
 const from = Number(fromArg);
@@ -18,25 +42,12 @@ if (!path || !Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to 
   process.exit(2);
 }
 
-const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const find = (p) => [resolve(p), join(appDir, p), join(appDir, '..', p)].find((c) => existsSync(c));
 const file = find(path);
 if (!file) {
   console.error(`not found: ${path}`);
   process.exit(2);
 }
-const koFile = join(appDir, 'vendor', 'labnoteo', 'src', 'l10n.ko.ts');
-
-const QUOTED = /'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g;
-/** 글자 안의 \' 같은 이스케이프를 풀어 키 원문으로 만든다. */
-const unescape = (s) => s.replace(/\\(.)/g, '$1');
-const literals = (code) => [...code.matchAll(QUOTED)].map((m) => unescape(m[1] ?? m[2]));
-
-/** l10n.ko.ts 의 키: 줄 첫머리의 글자 뒤에 쌍점이 오는 것. 값이 다음 줄에 있어도 된다. */
-const KO_KEY = /^\s*(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")\s*:/gm;
-const koText = readFileSync(koFile, 'utf-8').replace(/\r\n/g, '\n');
-const koKeys = new Set([...koText.matchAll(KO_KEY)].map((m) => unescape(m[1] ?? m[2])));
-
 const lines = readFileSync(file, 'utf-8').replace(/\r\n/g, '\n').split('\n');
 if (to > lines.length) {
   console.error(`${path} has ${lines.length} lines, fewer than ${to}`);
@@ -75,7 +86,17 @@ const out = [];
 const seen = new Set();
 for (const m of code.matchAll(CALLEE)) {
   if (m.index >= rangeEnd) break;
-  for (const key of literals(firstArg(m.index + m[0].length))) {
+  const arg = firstArg(m.index + m[0].length);
+  const found = literals(arg);
+  if (found.length === 0) {
+    const text = arg.trim();
+    if (!seen.has(text)) {
+      seen.add(text);
+      out.push({ key: text, inKo: false, dynamic: true });
+    }
+    continue;
+  }
+  for (const key of found) {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ key, inKo: koKeys.has(key) });

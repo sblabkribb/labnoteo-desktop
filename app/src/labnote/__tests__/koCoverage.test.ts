@@ -62,6 +62,7 @@ describe('KO_ROOTS 가 코어 번역에 넘기는 키', () => {
 
   it('scans every SP6 folder, not only src/labnote', () => {
     expect(KO_ROOTS).toEqual(['src/labnote', 'src/integrations', 'src/partbank', 'src/ai', 'src/bfworkflow']);
+    expect(files.map((x) => x.f)).toContain('src/integrations/IntegrationSettingsDialog.tsx'); // 새 폴더도 실제로 읽었다
   });
 
   it('글자 키는 모두 obsidianKo 에 있다', () => {

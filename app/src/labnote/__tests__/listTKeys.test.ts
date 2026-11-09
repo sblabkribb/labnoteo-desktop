@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import obsidianKo from '../../../vendor/labnoteo/src/l10n.ko';
 
-type Row = { key: string; inKo: boolean };
+type Row = { key: string; inKo: boolean; dynamic?: true };
 const run = (...args: string[]) => spawnSync('node', ['scripts/listTKeys.mjs', ...args], { encoding: 'utf-8' });
 
 describe('scripts/listTKeys.mjs', () => {
@@ -46,6 +46,32 @@ describe('scripts/listTKeys.mjs', () => {
     expect(JSON.parse(r.stdout)).toEqual([
       { key: 'Cancel', inKo: Object.hasOwn(obsidianKo, 'Cancel') },
       { key: 'No such key in ko, surely.', inKo: false },
+    ]);
+  });
+
+  it('--ko-keys reads every key of l10n.ko.ts, quoted or bare', () => {
+    const r = run('--ko-keys');
+    expect(r.status).toBe(0);
+    const keys = JSON.parse(r.stdout) as string[];
+    const want = Object.keys(obsidianKo);
+    expect(keys.filter((k) => !Object.hasOwn(obsidianKo, k))).toEqual([]); // 없는 키를 읽지 않는다
+    expect(want.filter((k) => !keys.includes(k))).toEqual([]); // 있는 키를 빠뜨리지 않는다
+    expect(keys.length).toBe(want.length);
+    expect(keys).toContain('Undo');
+  });
+
+  it('finds bare-identifier ko keys and reports first arguments without a literal as dynamic', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'listtkeys-'));
+    const f = join(dir, 'x.ts');
+    writeFileSync(f, ["this.t('Undo');", "t('Details');", 't(KEY);', 't(`tpl ${x}`);', "t('Two\\n\\nlines \\'q\\'');"].join('\n'));
+    const r = run(f, '1', '5');
+    expect(r.status).toBe(1);
+    expect(JSON.parse(r.stdout)).toEqual([
+      { key: 'Undo', inKo: true },
+      { key: 'Details', inKo: true },
+      { key: 'KEY', inKo: false, dynamic: true },
+      { key: '`tpl ${x}`', inKo: false, dynamic: true },
+      { key: "Two\n\nlines 'q'", inKo: false }, // \n 은 줄바꿈으로 푼다(n 이 아니다)
     ]);
   });
 
