@@ -23,7 +23,7 @@ import { pasteImages } from './live/pasteImage';
 import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
 import { linkIndex } from '../links/linkIndex';
 import { completionGuards, wikiCompletionSource, wikiReopen, type WikiCompletionDeps } from '../links/complete';
-import { sampleReopen } from '../samples/complete';
+import { pendingSampleInsert, sampleCompletionSource, sampleOptionClass, sampleReopen, type SampleCompletionDeps } from '../samples/complete';
 import {
   linkResolution,
   reconfigureFlusher,
@@ -496,6 +496,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         return items;
       },
     };
+    // `@` 샘플 완성(D9, D10)이 읽는 것: 노트 경로, 바깥 편집기의 샘플 설정 퍼싯, 앱이 준 SampleEnv(늘 최신 prop).
+    const sampleDeps: SampleCompletionDeps = {
+      notePath: () => path,
+      config: (state) => state.facet(sampleEditorConfig),
+      env: () => latest.current.sampleEnv?.(),
+    };
     // 상태(확장 포함)는 노트를 채울 때마다 새로 만든다: 되돌리기 기록이 읽기 이전으로 거슬러 가지 못하게.
     extensions.current = (doc) => [
       // 줄 구분자는 파일에서 온 그대로: 섞인 파일에서도 손대지 않은 줄의 바이트가 바뀌지 않는다.
@@ -551,11 +557,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었다(markdownSyntax.ts).
       // `[[` 뒤의 노트·별칭·제목·(`![[` 뒤) 이미지 완성. 조합 중에도 목록은 열려 거르지만, 받아들이기는 조합이 끝난 뒤에만 한다
       // (completionGuards: 조합 중 Enter/Tab 은 IME 몫, compositionend 뒤 `[[`·`@` 안이면 목록을 다시 연다).
-      autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }),
+      autocompletion({ override: [wikiCompletionSource(completionDeps), sampleCompletionSource(sampleDeps)], icons: false, optionClass: sampleOptionClass }),
       completionGuards([wikiReopen, sampleReopen]),
+      // 동작 줄(새 ID 생성 등)의 결과를 기다리는 트리거 범위. 기다리는 동안의 모든 변경에 따라 옮긴다(D9).
+      pendingSampleInsert,
       // 표 칸 편집기에도 같은 완성을 싣는다. 칸 안에서는 별칭 구분자 앞에 백슬래시를 붙이고(inTable), 목록이 열린 동안의
       // Enter·Tab·위아래·Escape 는 칸 이동 대신 완성 목록이 받는다(cellEditor.ts 의 keys()).
-      cellExtras.of([autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }), completionGuards([wikiReopen, sampleReopen])]),
+      cellExtras.of([
+        autocompletion({ override: [wikiCompletionSource(completionDeps), sampleCompletionSource(sampleDeps)], icons: false, optionClass: sampleOptionClass }),
+        completionGuards([wikiReopen, sampleReopen]),
+        pendingSampleInsert,
+      ]),
       // 샘플 ID 강조(D7): 셀 편집기에도 싣는다(바깥 편집기의 설정과 노트 경로를 읽는다).
       cellExtras.of(sampleHighlight),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
