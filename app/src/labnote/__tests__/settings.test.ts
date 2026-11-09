@@ -68,11 +68,24 @@ describe('보관함별 설정', () => {
         'partbankSendUsages',
         'partbankWebUrl',
         'sampleTracking',
+        'scanEmbedWidth',
+        'scanJpegQuality',
+        'scanMaxImageEdge',
         'schemaVersion',
         'workflowViewGroupBy',
         'worksheetPaperSize',
       ].sort(),
     );
+  });
+
+  it('scan settings follow the plugin defaults, ranges and migration', () => {
+    expect(fromPluginData({})).toMatchObject({ scanMaxImageEdge: 2400, scanJpegQuality: 0.85, scanEmbedWidth: 200 });
+    expect(fromPluginData({ scanMaxImageEdge: 99999, scanJpegQuality: 0.1 })).toMatchObject({ scanMaxImageEdge: 2400, scanJpegQuality: 0.85 });
+    expect(fromPluginData({ scanMaxImageEdge: 3000.4, scanJpegQuality: 0.7 })).toMatchObject({ scanMaxImageEdge: 3000, scanJpegQuality: 0.7 });
+    expect(fromPluginData({ scanEmbedWidth: 300, schemaVersion: 1 }).scanEmbedWidth).toBe(200);
+    expect(fromPluginData({ scanEmbedWidth: 300, schemaVersion: 2 }).scanEmbedWidth).toBe(300);
+    expect(fromPluginData({ scanEmbedWidth: 0 }).scanEmbedWidth).toBe(0);
+    expect(fromPluginData({ scanEmbedWidth: 50 }).scanEmbedWidth).toBe(200);
   });
 
   it('worksheetPaperSize defaults to a4 and keeps letter', () => {

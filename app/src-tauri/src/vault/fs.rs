@@ -735,30 +735,58 @@ pub fn write_image_free(locks: &PathLocks, root: &Path, dir: &str, name: &str, b
     for k in 0..=99u32 {
         let file = if k == 0 { format!("{stem}.{ext}") } else { format!("{stem} {k}.{ext}") };
         let rel = if dir.is_empty() { file } else { format!("{dir}/{file}") };
-        let written = locks.with(root, &rel, || -> Result<bool, FsError> {
-            // Confined again per candidate: the folder now exists, so a link
-            // planted in it is resolved before anything is created.
-            let abs = confine_write(root, &rel)?;
-            let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&abs) {
-                Ok(f) => f,
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => return Ok(false),
-                // A folder with this name reports access denied on Windows.
-                Err(e) if e.kind() == ErrorKind::PermissionDenied && abs.exists() => return Ok(false),
-                Err(e) => return Err(e.into()),
-            };
-            let result = f.write_all(bytes).and_then(|()| f.sync_all());
-            drop(f);
-            if let Err(e) = result {
-                let _ = std::fs::remove_file(&abs);
-                return Err(e.into());
-            }
-            Ok(true)
-        })?;
-        if written {
+        if create_new_image(locks, root, &rel, bytes)? {
             return Ok(rel);
         }
     }
     Err(FsError::Exists)
+}
+
+/// Create vault file `rel` with `bytes`, never replacing anything: `Ok(false)`
+/// when the name is taken (a file or a folder). Confined under the path lock
+/// right before the create, so a link planted in the folder is resolved first.
+/// A failed write removes the half-written file.
+fn create_new_image(locks: &PathLocks, root: &Path, rel: &str, bytes: &[u8]) -> Result<bool, FsError> {
+    locks.with(root, rel, || -> Result<bool, FsError> {
+        let abs = confine_write(root, rel)?;
+        let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&abs) {
+            Ok(f) => f,
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => return Ok(false),
+            // A folder with this name reports access denied on Windows.
+            Err(e) if e.kind() == ErrorKind::PermissionDenied && abs.exists() => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        let result = f.write_all(bytes).and_then(|()| f.sync_all());
+        drop(f);
+        if let Err(e) = result {
+            let _ = std::fs::remove_file(&abs);
+            return Err(e.into());
+        }
+        Ok(true)
+    })
+}
+
+/// Write a scan image into vault folder `dir` (missing folders are created)
+/// under exactly `name`, with `create_new`: a taken name is `Exists`, and
+/// nothing is ever replaced or renamed here. The plugin's `freeName` loop
+/// (`name_2`, `name_3`, ...) runs in TypeScript on `Exists` (SP7 B5), so filed
+/// names keep the plugin's shape. Same name rules as `write_image_free` (no
+/// SVG) and the same `MAX_IMAGE_BYTES` cap. Returns the vault path written.
+pub fn write_image_exact(locks: &PathLocks, root: &Path, dir: &str, name: &str, bytes: &[u8]) -> Result<String, FsError> {
+    safe_image_name(name)?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(FsError::TooLarge);
+    }
+    if !dir.is_empty() {
+        let abs_dir = confine_write(root, dir)?;
+        std::fs::create_dir_all(&abs_dir)?;
+    }
+    let rel = if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") };
+    if create_new_image(locks, root, &rel, bytes)? {
+        Ok(rel)
+    } else {
+        Err(FsError::Exists)
+    }
 }
 
 /// Decode a `encodeURIComponent` header value. Malformed escapes and bytes
@@ -902,6 +930,27 @@ pub async fn vault_write_image(
     let root = state.root()?;
     let locks = Arc::clone(&state.locks);
     tauri::async_runtime::spawn_blocking(move || write_image_free(&locks, &root, &dir, &name, &bytes))
+        .await
+        .map_err(join_error)?
+}
+
+/// Scan filing: the raw protocol of `vault_write_image` (bytes as the raw
+/// body, percent-encoded `x-lno-dir` and `x-lno-name` headers), but the file is
+/// created under exactly `name` (`write_image_exact`); a taken name is `exists`.
+#[tauri::command]
+pub async fn scan_write_image(
+    state: tauri::State<'_, super::VaultState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, FsError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(FsError::Io(std::io::Error::new(ErrorKind::InvalidInput, "the image must be sent as raw bytes")));
+    };
+    let dir = header(&request, "x-lno-dir")?;
+    let name = header(&request, "x-lno-name")?;
+    let bytes = bytes.clone();
+    let root = state.root()?;
+    let locks = Arc::clone(&state.locks);
+    tauri::async_runtime::spawn_blocking(move || write_image_exact(&locks, &root, &dir, &name, &bytes))
         .await
         .map_err(join_error)?
 }
@@ -1702,6 +1751,64 @@ mod tests {
             Err(FsError::Vault(VaultError::Escape))
         ));
         assert!(!t.0.join("outside/images").exists());
+        std::fs::remove_dir(root.join("out")).unwrap();
+    }
+
+    #[test]
+    fn exact_write_refuses_an_existing_name() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(write_image_exact(&l, &root, "e/images/scans", "a.jpg", b"1").unwrap(), "e/images/scans/a.jpg");
+        assert!(matches!(write_image_exact(&l, &root, "e/images/scans", "a.jpg", b"2"), Err(FsError::Exists)));
+        assert!(
+            matches!(write_image_exact(&l, &root, "e/images/scans", "A.JPG", b"3"), Err(FsError::Exists)),
+            "a case-only difference is the same file on Windows"
+        );
+        assert_eq!(std::fs::read(root.join("e/images/scans/a.jpg")).unwrap(), b"1", "the first write is kept");
+        // A folder under the exact name is a collision too, never written into.
+        std::fs::create_dir_all(root.join("e/images/scans/d.png")).unwrap();
+        assert!(matches!(write_image_exact(&l, &root, "e/images/scans", "d.png", b"4"), Err(FsError::Exists)));
+        let names: Vec<_> = std::fs::read_dir(root.join("e/images/scans")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 2, "no suffixed copy was made: {names:?}");
+    }
+
+    #[test]
+    fn exact_write_creates_folders_and_refuses_svg_and_escape() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(
+            write_image_exact(&l, &root, "e/images/scans", "LN-7K3M9QX2_u1_p1_20261015.jpg", b"x").unwrap(),
+            "e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg"
+        );
+        assert_eq!(std::fs::read(root.join("e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg")).unwrap(), b"x");
+        assert!(matches!(write_image_exact(&l, &root, "s", "a.svg", b"x"), Err(FsError::NotImage)));
+        assert!(matches!(write_image_exact(&l, &root, "s", "a.html", b"x"), Err(FsError::NotImage)));
+        assert!(matches!(write_image_exact(&l, &root, "s", "../a.png", b"x"), Err(FsError::Vault(VaultError::Escape))));
+        assert!(matches!(write_image_exact(&l, &root, "../x", "a.png", b"x"), Err(FsError::Vault(VaultError::Escape))));
+        assert!(matches!(write_image_exact(&l, &root, ".obsidian", "a.png", b"x"), Err(FsError::Forbidden)));
+        let big = vec![0u8; MAX_IMAGE_BYTES as usize + 1];
+        assert!(matches!(write_image_exact(&l, &root, "big", "a.png", &big), Err(FsError::TooLarge)));
+        assert!(!t.0.join("x").exists() && !root.join("s").exists() && !root.join("big").exists(), "nothing written by a refused call");
+        assert_eq!(write_image_exact(&l, &root, "", "root.png", b"r").unwrap(), "root.png", "the vault root is a valid folder");
+    }
+
+    #[test]
+    fn exact_write_rejects_junction_out_of_vault() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(t.0.join("outside")).unwrap();
+        junction(&root.join("out"), &t.0.join("outside"));
+        assert!(matches!(
+            write_image_exact(&l, &root, "out/scans", "a.png", b"x"),
+            Err(FsError::Vault(VaultError::Escape))
+        ));
+        assert!(!t.0.join("outside/scans").exists());
         std::fs::remove_dir(root.join("out")).unwrap();
     }
 

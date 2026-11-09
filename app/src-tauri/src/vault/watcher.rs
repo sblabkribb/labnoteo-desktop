@@ -30,11 +30,11 @@ pub const EVENT: &str = "vault://changed";
 pub const LABSAMPLES_EVENT: &str = "vault://labsamples-changed";
 
 /// How long the folder must be quiet before a burst is reported.
-const QUIET: Duration = Duration::from_millis(200);
+pub(crate) const QUIET: Duration = Duration::from_millis(200);
 /// A burst is reported at the latest this long after its first event, however
 /// busy the folder stays (an endless stream of writes must not hold back the
 /// tree and the index forever).
-const MAX_WAIT: Duration = Duration::from_millis(1000);
+pub(crate) const MAX_WAIT: Duration = Duration::from_millis(1000);
 /// A flush with more vault changes than this (counted after paths that are not
 /// part of the vault, such as `.git/` and non-notes, are dropped) is reported as
 /// one `Rescan` instead of one change per path. A git pull or a sync of thousands of files would

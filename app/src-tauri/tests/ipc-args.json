@@ -17,6 +17,7 @@
   "vault_read_image": ["path"],
   "vault_list_images": [],
   "vault_write_image": ["x-lno-dir", "x-lno-name"],
+  "scan_write_image": ["x-lno-dir", "x-lno-name"],
   "vault_created_times": ["paths"],
   "print_open_in_browser": ["kind", "noteId", "html"],
   "settings_vault_read": [],
@@ -49,5 +50,16 @@
   "partbank_catalog_read": ["name"],
   "partbank_catalog_write": ["name", "content"],
   "integration_state_read": ["name"],
-  "integration_state_write": ["name", "content"]
+  "integration_state_write": ["name", "content"],
+  "slack_call": ["requestId", "method", "params"],
+  "slack_download": ["requestId", "url"],
+  "scan_folder_choose": [],
+  "scan_folder_clear": [],
+  "scan_folder_set_mode": ["mode"],
+  "scan_folder_status": [],
+  "scan_folder_list": [],
+  "scan_folder_prune_baseline": ["present"],
+  "scan_folder_read": ["name"],
+  "scan_folder_move": ["name", "outcome"],
+  "scan_folder_watch": []
 }

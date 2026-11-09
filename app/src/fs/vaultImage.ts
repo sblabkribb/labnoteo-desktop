@@ -48,3 +48,20 @@ export function writeVaultImage(
     headers: { 'x-lno-dir': encodeURIComponent(dir), 'x-lno-name': encodeURIComponent(name) },
   });
 }
+
+/**
+ * 스캔 이미지를 보관함 폴더 `dir` 에 **정확히** `name` 으로 쓴다(`scan_write_image`, SP7 B5).
+ * 전송 방식은 `writeVaultImage` 와 같다(원시 본문, 퍼센트 인코딩한 `x-lno-dir`/`x-lno-name` 헤더).
+ * 이미 있는 이름이면 Rust 가 덮어쓰지도 이름을 바꾸지도 않고 `exists` 로 거부한다. 그때는 호출하는
+ * 쪽(플러그인에서 옮긴 `freeName` 루프)이 `name_2`, `name_3` … 으로 다시 시도한다. 쓴 보관함 경로를 돌려준다.
+ */
+export function writeScanImage(
+  dir: string,
+  name: string,
+  bytes: Uint8Array,
+  invoke: RawInvoke = tauriInvoke as RawInvoke,
+): Promise<string> {
+  return invoke<string>('scan_write_image', bytes, {
+    headers: { 'x-lno-dir': encodeURIComponent(dir), 'x-lno-name': encodeURIComponent(name) },
+  });
+}

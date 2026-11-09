@@ -4,7 +4,7 @@
  * `notifySecretsChange` 를 부르고, partbank 기능과 bfworkflow 준비 상태가 `onSecretsChange` 로 새로 고친다.
  */
 
-export type Slot = 'partbankDesktop' | 'partbankWeb' | 'llmOpenai' | 'bfwServer' | 'bfwDesktop';
+export type Slot = 'partbankDesktop' | 'partbankWeb' | 'llmOpenai' | 'bfwServer' | 'bfwDesktop' | 'slackBot';
 
 /** Rust `secret_status` 의 모양. */
 export interface SecretStatus {

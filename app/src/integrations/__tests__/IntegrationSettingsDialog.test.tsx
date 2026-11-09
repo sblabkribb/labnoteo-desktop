@@ -34,6 +34,10 @@ const BASE: IntegrationSettingsValue = (() => {
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: s.allowHttpOrigins,
+    worksheetPaperSize: s.worksheetPaperSize,
+    scanMaxImageEdge: s.scanMaxImageEdge,
+    scanJpegQuality: s.scanJpegQuality,
+    scanEmbedWidth: s.scanEmbedWidth,
   };
 })();
 
@@ -365,5 +369,17 @@ describe('IntegrationSettingsDialog', () => {
     expect(await screen.findByText(t('integrations.keyFailed'))).toBeTruthy();
     expect(document.body.textContent).not.toContain('raw-rust-text');
     expect(document.body.textContent).not.toContain('pbk_bad');
+  });
+
+  it('shows the Barcode & scans section, and Close saves a scan size still being edited', async () => {
+    const deps = fakeDeps();
+    const onDone = vi.fn();
+    render(<IntegrationSettingsDialog deps={deps} onDone={onDone} onCancel={() => {}} />);
+    expect(await screen.findByRole('heading', { name: coreT('Barcode & scans') })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: coreT('Slack scans (optional)') })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(coreT('Stored scan size')), { target: { value: '3000' } });
+    fireEvent.click(screen.getByText(t('integrations.close'), { selector: 'button.primary' }));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(deps.commit).toHaveBeenCalledWith({ scanMaxImageEdge: 3000 });
   });
 });

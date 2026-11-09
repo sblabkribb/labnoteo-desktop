@@ -38,6 +38,8 @@ pub enum NetErrorKind {
     NoResult,
     /// A key would go to a non-loopback `http://` origin that is not allowed.
     Insecure,
+    /// A local file failure outside the vault (the scan folder, SP7 B4).
+    Io,
 }
 
 /// `Debug` is safe: every constructor that takes response text also takes the

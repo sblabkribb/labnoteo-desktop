@@ -879,3 +879,47 @@ button.links-target:focus-visible { outline-offset: -2px; }
 .barcode-id { margin: 0; text-align: center; font-family: var(--font-mono); font-size: 1.2em; user-select: all; }
 /* 편집기 머리의 QR 아이콘 단추(A6): 글자 단추와 같은 줄, 아이콘만 */
 .editor-actions .editor-qr { display: inline-flex; align-items: center; justify-content: center; margin-left: var(--space-1); padding: 0 var(--space-1); vertical-align: middle; }
+
+/* SP7 Part B: scans */
+/* 스캔 가져오기 창(Task 25): 끌어다 놓는 칸은 누르면 파일 고르기를 여는 단추, 끌고 있는 동안 .over */
+.dialog.scan-import { width: min(32rem, 100%); }
+.scan-drop {
+  display: block;
+  width: 100%;
+  padding: var(--space-6) var(--space-4);
+  background: transparent;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+  cursor: pointer;
+}
+.scan-drop.over { border-color: var(--accent); color: var(--text); }
+.scan-import-folder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.scan-import-folder .prompt-hint { flex: 1 1 16rem; margin: 0; }
+/* 스캔 결과 창(Task 25): 페이지마다 한 줄(이름과 설명, 오른쪽에 단추), 길면 이 목록만 스크롤 */
+.dialog.scan-results-dialog { width: min(44rem, 100%); }
+.scan-results { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; max-height: 55vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.scan-results li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.scan-result-text { display: flex; flex: 1 1 18rem; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.scan-result-desc { color: var(--text-muted); font-size: 0.93em; }
+.scan-result-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+/* 알림 안의 단추("자세히", "결과 다시 보기"): 글자 단추처럼 */
+.toast-action { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+/* 미분류 스캔 대기열(Task 26): 줄마다 이름·이유·작은 그림, 오른쪽에 넣기와 지우기. 그림을 누르면 창 안에서 크게(.scan-zoom) */
+.dialog.scan-unmatched-dialog { width: min(44rem, 100%); }
+.scan-unmatched { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; max-height: 60vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.scan-unmatched li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.scan-thumb-button { align-self: flex-start; margin-top: var(--space-1); padding: 0; background: transparent; border: 0; cursor: zoom-in; }
+.scan-thumb { display: block; max-width: 220px; max-height: 220px; }
+.scan-zoom { display: block; width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-out; }
+.scan-zoom img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
+/* 바코드와 스캔 설정(Task 29): 스캔 폴더 경로는 읽기 전용 고정폭 글(길면 줄바꿈), 단추 줄, 화질 막대와 그 값, Slack 앱 만드는 법은 줄마다 */
+.scan-folder-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.scan-folder-path { flex: 1 1 14rem; min-width: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.scan-number { width: 8rem; }
+.scan-quality { display: flex; align-items: center; gap: var(--space-2); }
+.scan-quality input[type="range"] { flex: 1 1 12rem; min-width: 0; }
+.scan-quality output { flex: none; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+.scan-howto summary { cursor: pointer; }
+.scan-howto .prompt-hint { white-space: pre-line; }

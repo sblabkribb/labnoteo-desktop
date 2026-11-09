@@ -43,6 +43,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .manage(labnoteo_app_lib::net::NetState::default())
         .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
+        .manage(labnoteo_app_lib::scan::ScanFolderState::inert())
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -125,8 +126,36 @@ fn ipc_argument_names_match_the_typescript_side() {
         "keyMissing"
     );
 
+    // Slack: a file URL off files.slack.com is refused before anything else
+    // (no token is looked up, nothing is sent), and a call without a stored
+    // bot token is keyMissing.
+    assert_eq!(
+        call("slack_download", args("slack_download", vec![json!("s1"), json!("https://evil.example/x")])).unwrap_err()["kind"],
+        "forbiddenPath"
+    );
+    assert_eq!(
+        call("slack_call", args("slack_call", vec![json!("s2"), json!("authTest"), json!({})])).unwrap_err()["kind"],
+        "keyMissing"
+    );
+    // A method off the allow-list is refused as a malformed argument.
+    assert!(call("slack_call", json!({"requestId": "s3", "method": "filesDelete", "params": {}})).is_err());
+
     // App-data stores (offline catalogs, integration state) are per vault.
     assert_eq!(call("partbank_catalog_list", args("partbank_catalog_list", vec![])).unwrap_err()["kind"], "notConfigured");
+
+    // The scan folder is held by Rust, per vault. A file name is checked
+    // before anything else; without a vault every command is notConfigured
+    // (the picker is never shown).
+    assert_eq!(call("scan_folder_status", args("scan_folder_status", vec![])).unwrap_err()["kind"], "notConfigured");
+    assert_eq!(call("scan_folder_choose", args("scan_folder_choose", vec![])).unwrap_err()["kind"], "notConfigured");
+    assert_eq!(
+        call("scan_folder_read", args("scan_folder_read", vec![json!("../x.jpg")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(
+        call("scan_folder_move", args("scan_folder_move", vec![json!("a\\b.jpg"), json!("processed")])).unwrap_err()["kind"],
+        "badInput"
+    );
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -161,6 +190,17 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("secret_set", args("secret_set", vec![json!("partbankWeb"), json!("pbk_t\u{7}")])).unwrap_err()["kind"],
         "badInput"
     );
+    // The Slack bot slot (fixed origin https://slack.com) only takes a bot token.
+    assert_eq!(
+        call("secret_set", args("secret_set", vec![json!("slackBot"), json!("xoxp-1")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!((&status["set"]["slackBot"], &status["epoch"]["slackBot"]), (&json!(false), &json!(0)));
+    assert_eq!(ok("secret_set", args("secret_set", vec![json!("slackBot"), json!("xoxb-t")])), Value::Null);
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["slackBot"], true);
+    assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("slackBot")])), Value::Null);
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["slackBot"], false);
     assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("partbankWeb")])), Value::Null);
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));
@@ -257,6 +297,32 @@ fn ipc_argument_names_match_the_typescript_side() {
         r#"{"origin":"o"}"#
     );
     assert!(call("integration_state_read", json!({"name": "../x"})).is_err());
+
+    // With a vault and no scan folder: an empty status, and every folder
+    // command but clear and watch is notConfigured. No command takes a path.
+    assert_eq!(
+        ok("scan_folder_status", args("scan_folder_status", vec![])),
+        json!({"path": null, "mode": "dedicated", "exists": false, "insideVault": false, "since": null, "baseline": null})
+    );
+    assert_eq!(call("scan_folder_read", args("scan_folder_read", vec![json!("../x.jpg")])).unwrap_err()["kind"], "badInput");
+    assert_eq!(call("scan_folder_read", args("scan_folder_read", vec![json!("a.jpg")])).unwrap_err()["kind"], "notConfigured");
+    assert_eq!(call("scan_folder_list", args("scan_folder_list", vec![])).unwrap_err()["kind"], "notConfigured");
+    assert_eq!(
+        call("scan_folder_move", args("scan_folder_move", vec![json!("a.jpg"), json!("failed")])).unwrap_err()["kind"],
+        "notConfigured"
+    );
+    assert_eq!(
+        call("scan_folder_set_mode", args("scan_folder_set_mode", vec![json!("shared")])).unwrap_err()["kind"],
+        "notConfigured"
+    );
+    assert_eq!(
+        call("scan_folder_prune_baseline", args("scan_folder_prune_baseline", vec![json!(["a|1|2"])])).unwrap_err()["kind"],
+        "notConfigured"
+    );
+    assert!(call("scan_folder_set_mode", json!({"mode": "elsewhere"})).is_err());
+    assert!(call("scan_folder_move", json!({"name": "a.jpg", "outcome": "deleted"})).is_err());
+    assert_eq!(ok("scan_folder_clear", args("scan_folder_clear", vec![])), Value::Null);
+    assert_eq!(ok("scan_folder_watch", args("scan_folder_watch", vec![])), Value::Null);
     assert!(dir.join("data").join("integrations").join("partbank").is_dir());
 
     // The link journal: kept in the app data dir, never in the vault.
@@ -440,6 +506,24 @@ title: 실험
     assert!(raw_call("vault_write_image", vec!["exp", "p.html"], vec![1]).is_err());
     // A JSON body is refused: the bytes must come raw.
     assert!(call("vault_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
+    // Scan images: the same raw protocol, but exactly the name given; a
+    // taken name is `exists` (the TS `freeName` loop picks the next one).
+    assert_eq!(
+        raw_call("scan_write_image", vec!["exp%2Fimages%2Fscans", "LN-7K3M9QX2_u1_p1_20261015.jpg"], vec![5]).unwrap(),
+        json!("exp/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg")
+    );
+    assert_eq!(
+        raw_call("scan_write_image", vec!["exp/images/scans", "LN-7K3M9QX2_u1_p1_20261015.jpg"], vec![6]).unwrap_err()["kind"],
+        "exists"
+    );
+    assert_eq!(
+        std::fs::read(dir.join("vault").join("exp/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg")).unwrap(),
+        vec![5u8],
+        "never overwrites"
+    );
+    assert_eq!(raw_call("scan_write_image", vec!["exp", "p.svg"], vec![1]).unwrap_err()["kind"], "notImage");
+    assert_eq!(raw_call("scan_write_image", vec!["..", "p.png"], vec![1]).unwrap_err()["kind"], "escape");
+    assert!(call("scan_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
     std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
 
     // A misspelled argument is refused rather than ignored.
@@ -538,11 +622,11 @@ fn error_kinds_match_the_typescript_side() {
 fn net_error_kinds_match_the_fixture() {
     use labnoteo_app_lib::net::NetErrorKind as K;
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(NET_ERRORS).unwrap();
-    assert_eq!(fixture.len(), 17, "ipc-net-errors.json lists every kind");
+    assert_eq!(fixture.len(), 18, "ipc-net-errors.json lists every kind");
     let all = [
         K::NotConfigured, K::KeyMissing, K::InvalidUrl, K::ForbiddenPath, K::Offline, K::Timeout,
         K::Tls, K::Redirect, K::Status, K::NotJson, K::TooLarge, K::Cancelled, K::Keychain,
-        K::BadInput, K::Remote, K::NoResult, K::Insecure,
+        K::BadInput, K::Remote, K::NoResult, K::Insecure, K::Io,
     ];
     // Exhaustive on purpose: a new variant stops compiling here until it is
     // given a name (and an entry in the fixture).
@@ -564,13 +648,14 @@ fn net_error_kinds_match_the_fixture() {
         K::Remote => "remote",
         K::NoResult => "noResult",
         K::Insecure => "insecure",
+        K::Io => "io",
     };
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-net-errors.json", name(k)));
         assert_eq!(serde_json::to_value(k).unwrap(), Value::String(expected.clone()), "kind {}", name(k));
     }
     let named: std::collections::BTreeSet<&str> = all.iter().map(name).collect();
-    assert_eq!(named.len(), 17);
+    assert_eq!(named.len(), 18);
 }
 
 #[test]
@@ -610,6 +695,19 @@ fn bfworkflow_notes_event_matches_the_typescript_side() {
     assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
     assert_eq!(payload[ev["payload"]["fields"]["step"].as_str().unwrap()], "init");
     assert_eq!(payload[ev["payload"]["fields"]["message"].as_str().unwrap()], "m");
+}
+
+#[test]
+fn scan_folder_changed_event_matches_the_typescript_side() {
+    use labnoteo_app_lib::scan::{folder_changed_payload, FOLDER_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let ev = &fixture["scanFolderChanged"];
+    assert_eq!(ev["name"], FOLDER_EVENT);
+    let payload = folder_changed_payload();
+    let keys: std::collections::BTreeSet<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+    let fields: std::collections::BTreeSet<&str> =
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(keys, fields, "payload field names vs ipc-events.json");
 }
 
 /// The index is a cache. A vault whose index cannot open must still be watched:

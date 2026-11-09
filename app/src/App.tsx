@@ -73,6 +73,7 @@ import { vaultCreatedTimes } from './fs/vaultImage';
 import { NoteIdIndex, currentNoteIdIndex, setNoteIdIndex } from './labnote/barcode/noteIdIndex';
 import { appNoteIdSource } from './labnote/barcode/noteIdSource';
 import { cancelNoteIdTouches, notifyingRun, startIdWatch } from './labnote/barcode/idWatch';
+import { startScan } from './labnote/scan/commands';
 import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
 
@@ -325,6 +326,10 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     catalogNoticed.current = true;
     void catalogNoticeOnOpen(ctx);
   }, [ctx]);
+  // SP7 Part B: 스캔 가져오기(Task 31). 보관함을 열면 ScanFeature 를 놓고 Rust 의 스캔 폴더 감시, 폴더 감시자(30초 폴링),
+  // Slack 받은 편지함(90초, 연결을 켠 보관함만), 노트를 따라가는 스캔 옮기기를 시작한다. 보관함을 바꾸면 모두 거두고 해독 워커를 끝낸다.
+  // 이 효과는 아래 명령 등록 효과보다 먼저 선언한다: 내려갈 때 정리는 선언 순서로 돌므로 cancelAllRequests 보다 먼저 멈춘다.
+  useEffect(() => (ctx ? startScan(ctx) : undefined), [ctx]);
   useEffect(() => {
     registerAllCommands();
     registerSampleSources();

@@ -12,7 +12,7 @@ import { registerAllCommands } from '../commands/registerAll';
 const VENDOR_SRC = 'vendor/labnoteo/src';
 const SOURCES = ['main.ts', 'barcode/barcodeFeature.ts'];
 
-/** 앱이 등록하는 플러그인 명령(SP2 부터; 바코드 넷은 SP7 Part A). */
+/** 앱이 등록하는 플러그인 명령(SP2 부터; 바코드 넷은 SP7 Part A, 스캔 셋은 SP7 Part B). */
 const PORTED = [
   'create-experiment',
   'create-workflow',
@@ -40,6 +40,9 @@ const PORTED = [
   'assign-note-id',
   'print-experiment-worksheet',
   'print-whole-note',
+  'import-scanned-pages',
+  'process-scan-folder',
+  'assign-unmatched-scans',
 ] as const;
 
 /** 아직 옮기지 않은 플러그인 명령과 그것을 옮길 하위 프로젝트(계획의 "Deferred to later sub-projects"). */
@@ -51,9 +54,6 @@ const DEFERRED: Record<string, string> = {
   'renumber-workflows':
     'rename and links: must call queueSampleSourceRenames after the README hold is released (vendor tests/plugin/renumberWorkflows.test.ts "sample sources after renumbering", #149)',
   'toggle-mcp-server': 'SP7: MCP server',
-  'import-scanned-pages': 'barcode',
-  'process-scan-folder': 'barcode',
-  'assign-unmatched-scans': 'barcode',
 };
 
 /** 플러그인 소스에서 `id: '<id>'` 로 등록하는 명령 id(중복 없이). */

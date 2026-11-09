@@ -11,5 +11,9 @@
     "payload": {
       "fields": { "requestId": "requestId", "step": "step", "message": "message" }
     }
+  },
+  "scanFolderChanged": {
+    "name": "scan://folder-changed",
+    "payload": { "fields": {} }
   }
 }

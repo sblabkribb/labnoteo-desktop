@@ -47,7 +47,18 @@ export type OverrideKey =
   // AI 명령(SP6 Task 31): 플러그인의 'Configure an AI provider in settings first.' 는 앱의 연동 설정을 가리킨다.
   | 'ai.configureFirst'
   // 인쇄가 안 되어 브라우저로 열었을 때: 플러그인 문장의 "Printing from Obsidian did not work…" 대신
-  | 'print.openedInBrowser';
+  | 'print.openedInBrowser'
+  // 스캔 결과의 HEIC·TIFF 안내: 플러그인 문장의 "which Obsidian cannot open" 대신(SP7 B11)
+  | 'scan.heicAdvice'
+  | 'scan.tiffAdvice'
+  // 스캔 폴더가 없을 때: 플러그인 문장의 "Settings → Labnote Assistant → Barcode & scans" 대신 연동 설정(SP7 B11)
+  | 'scan.setFolderFirst'
+  // Slack 받은 편지함: 플러그인 문장의 "Add the scopes in docs/SCAN.md" 와 "See the Slack section of docs/SCAN.md" 대신(SP7 B11)
+  | 'scan.slackMissingScope'
+  | 'scan.slackCheckFailed'
+  // 바코드와 스캔 설정(SP7 Task 29): 플러그인 문장의 "show up in Obsidian" 과 "See docs/SCAN.md for the steps" 대신(B4, B11)
+  | 'scan.insideVault'
+  | 'scan.slackTokenHelp';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

@@ -30,6 +30,10 @@ pub enum StateName {
     PartbankUsage,
     /// bfworkflow catalog cache: `{origin, fetchedAt, hash, workflows, hw, sw}`.
     BfwCatalogCache,
+    /// Shared scan folder's 90-day history: `{"<name>|<size>|<mtimeMs>": <seenAtMs>}`.
+    ScanFolderHistory,
+    /// Slack inbox link: `{enabled, mode, channelId, linkCode, userId, lastTs, claimedTs}` (never the token).
+    SlackLink,
 }
 
 impl StateName {
@@ -37,6 +41,8 @@ impl StateName {
         match self {
             StateName::PartbankUsage => ("partbank", "usage-state.json"),
             StateName::BfwCatalogCache => ("bfworkflow", "catalog-cache.json"),
+            StateName::ScanFolderHistory => ("scan", "history.json"),
+            StateName::SlackLink => ("scan", "slack-link.json"),
         }
     }
 }
@@ -310,6 +316,28 @@ mod tests {
         assert_eq!(state_read_at(&dirs, &b, StateName::PartbankUsage).unwrap(), None);
         assert!(vault_dir(&dirs, "partbank", &a).join("usage-state.json").is_file());
         assert!(vault_dir(&dirs, "bfworkflow", &a).join("catalog-cache.json").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_state_names_roundtrip() {
+        let dir = scratch_dir("store-scan-state");
+        let dirs = dir.join("integrations");
+        let (a, b) = (dir.join("vaultA"), dir.join("vaultB"));
+        assert_eq!(state_read_at(&dirs, &a, StateName::ScanFolderHistory).unwrap(), None);
+        assert_eq!(state_read_at(&dirs, &a, StateName::SlackLink).unwrap(), None);
+        state_write_at(&dirs, &a, StateName::ScanFolderHistory, "{\"a|1|2\":3}").unwrap();
+        state_write_at(&dirs, &a, StateName::SlackLink, r#"{"enabled":true}"#).unwrap();
+        assert_eq!(state_read_at(&dirs, &a, StateName::ScanFolderHistory).unwrap().as_deref(), Some("{\"a|1|2\":3}"));
+        assert_eq!(state_read_at(&dirs, &a, StateName::SlackLink).unwrap().as_deref(), Some(r#"{"enabled":true}"#));
+        assert_eq!(state_read_at(&dirs, &b, StateName::ScanFolderHistory).unwrap(), None);
+        assert_eq!(state_read_at(&dirs, &b, StateName::SlackLink).unwrap(), None);
+        // Both sit next to the scan folder's folder.json, under scan/<vaultKey>/.
+        assert!(vault_dir(&dirs, "scan", &a).join("history.json").is_file());
+        assert!(vault_dir(&dirs, "scan", &a).join("slack-link.json").is_file());
+        assert!(!a.exists());
+        assert_eq!(serde_json::from_str::<StateName>(r#""scanFolderHistory""#).unwrap(), StateName::ScanFolderHistory);
+        assert_eq!(serde_json::from_str::<StateName>(r#""slackLink""#).unwrap(), StateName::SlackLink);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

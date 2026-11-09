@@ -5,11 +5,12 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
-import { listVaultImages, readVaultImage, vaultCreatedTimes, writeVaultImage } from '../vaultImage';
+import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultImage } from '../vaultImage';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
 import { openInBrowser } from '../../labnote/print/openInBrowser';
+import * as scan from '../../labnote/scan/scanIpc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -19,6 +20,7 @@ const fixture: Record<string, string[]> = JSON.parse(
 /**
  * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 11 이 netIpc.ts 래퍼로 비웠다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
+ * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
  */
 const PENDING_TS_WRAPPERS: readonly string[] = [];
 
@@ -41,6 +43,7 @@ function recorder() {
       sent.set(cmd, Object.keys(args ?? {}).sort());
     }
     if (cmd === 'vault_write_image') return 'exp/images/p.png';
+    if (cmd === 'scan_write_image') return 'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg';
     if (cmd === 'vault_modify') return { kind: 'ok' };
     if (cmd === 'vault_read') return 'old';
     if (cmd === 'vault_list' || cmd === 'search') return [];
@@ -50,6 +53,12 @@ function recorder() {
     if (cmd === 'vault_read_image') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
     if (cmd === 'vault_created_times') return [null];
+    if (cmd === 'slack_call') return { status: 200, json: { ok: true } };
+    if (cmd === 'slack_download') return new ArrayBuffer(0);
+    if (cmd === 'scan_folder_list') return [];
+    if (cmd === 'scan_folder_prune_baseline') return ['a|1|2'];
+    if (cmd === 'scan_folder_read') return new ArrayBuffer(0);
+    if (cmd === 'scan_folder_move') return 'labnote-processed/a.jpg';
     if (cmd === 'index_bodies') return { items: [], next: null };
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
@@ -87,6 +96,9 @@ describe('IPC 인자 이름 계약', () => {
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
+    expect(await writeScanImage('e/images/scans', 'LN-7K3M9QX2_u1_p1_20261015.jpg', new Uint8Array([1]), r.invoke)).toBe(
+      'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg',
+    );
     expect(await vaultCreatedTimes(['a.md'], r.invoke)).toEqual([null]);
     await openInBrowser('note', 'LN-7K3M9QX2', '<p>', r.invoke);
     expect(await readLinkJournal(r.invoke)).toBeNull();
@@ -114,6 +126,19 @@ describe('IPC 인자 이름 계약', () => {
     await net.partbankCatalogWrite('a.json', '{}', r.invoke);
     await net.integrationStateRead('partbankUsage', r.invoke);
     await net.integrationStateWrite('partbankUsage', '{}', r.invoke);
+    // SP7 Part B Slack 커맨드
+    await net.slackCall({ method: 'authTest' }, r.invoke);
+    expect(await net.slackDownload({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' }, r.invoke)).toBeInstanceOf(ArrayBuffer);
+    // SP7 Part B 스캔 폴더 커맨드: 래퍼마다 한 번씩
+    await scan.scanFolderChoose(r.invoke);
+    await scan.scanFolderClear(r.invoke);
+    await scan.scanFolderSetMode('shared', r.invoke);
+    await scan.scanFolderStatus(r.invoke);
+    expect(await scan.scanFolderList(r.invoke)).toEqual([]);
+    expect(await scan.scanFolderPruneBaseline(['a|1|2'], r.invoke)).toEqual(['a|1|2']);
+    expect(await scan.scanFolderRead('a.jpg', r.invoke)).toBeInstanceOf(ArrayBuffer);
+    expect(await scan.scanFolderMove('a.jpg', 'processed', r.invoke)).toBe('labnote-processed/a.jpg');
+    await scan.scanFolderWatch(r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)
@@ -127,6 +152,22 @@ describe('IPC 인자 이름 계약', () => {
 
   it('래퍼 대기 목록은 픽스처에 있는 커맨드만 담는다', () => {
     for (const cmd of PENDING_TS_WRAPPERS) expect(Object.keys(fixture)).toContain(cmd);
+  });
+
+  it('writeScanImage 는 vault_write_image 와 같은 원시 본문과 퍼센트 인코딩 헤더로 정확한 이름을 보낸다', async () => {
+    const r = recorder();
+    const bytes = new Uint8Array([7, 8]);
+    let body: unknown;
+    const invoke = (async (cmd: string, args?: unknown, options?: { headers?: Record<string, string> }) => {
+      body = args;
+      return (r.invoke as (c: string, a?: unknown, o?: unknown) => Promise<unknown>)(cmd, args, options);
+    }) as never;
+    await writeScanImage('실험/images/scans', 'LN-7K3M9QX2_u1_p1_20261015_2.jpg', bytes, invoke);
+    expect(body).toBe(bytes);
+    expect(r.headers.get('scan_write_image')).toEqual({
+      'x-lno-dir': '%EC%8B%A4%ED%97%98%2Fimages%2Fscans',
+      'x-lno-name': 'LN-7K3M9QX2_u1_p1_20261015_2.jpg',
+    });
   });
 
   it('writeVaultImage 는 바이트를 원시 본문으로, 폴더와 이름은 퍼센트 인코딩한 헤더로 보낸다', async () => {

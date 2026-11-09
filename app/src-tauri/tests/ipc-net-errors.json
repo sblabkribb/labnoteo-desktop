@@ -15,5 +15,6 @@
   "badInput": "badInput",
   "remote": "remote",
   "noResult": "noResult",
-  "insecure": "insecure"
+  "insecure": "insecure",
+  "io": "io"
 }

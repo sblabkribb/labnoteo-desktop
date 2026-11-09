@@ -6,6 +6,8 @@ import {
   cancelAllRequests,
   llmChat,
   setSecret,
+  slackCall,
+  slackDownload,
   toNetError,
   vaultGuard,
   vaultSignal,
@@ -30,9 +32,9 @@ describe('netIpc', () => {
     expect(toNetError('plain').kind).toBe('badInput');
   });
 
-  it('NET_ERROR_KINDS lists the 17 kinds Rust serializes', () => {
+  it('NET_ERROR_KINDS lists the 18 kinds Rust serializes', () => {
     const pinned = JSON.parse(readFileSync('src-tauri/tests/ipc-net-errors.json', 'utf-8')) as Record<string, string>;
-    expect(NET_ERROR_KINDS).toHaveLength(17);
+    expect(NET_ERROR_KINDS).toHaveLength(18);
     expect([...NET_ERROR_KINDS].sort()).toEqual(Object.values(pinned).sort());
   });
 
@@ -157,8 +159,59 @@ describe('netIpc', () => {
 
   it('secretStatusOf fills the missing slots', () => {
     expect(secretStatusOf({ partbankWeb: true }, { partbankWeb: 2 })).toEqual({
-      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false },
-      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0 },
+      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false },
+      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0 },
     });
+  });
+
+  it('secretStatusOf knows the Slack bot slot', () => {
+    const st = secretStatusOf({});
+    expect(st.set.slackBot).toBe(false);
+    expect(st.epoch.slackBot).toBe(0);
+  });
+
+  it('setSecret passes the slackBot slot through and surfaces badInput', async () => {
+    const { invoke, calls } = fakeInvoke({
+      secret_set: () => {
+        throw { kind: 'badInput', message: 'raw-rust-text' };
+      },
+    });
+    await expect(setSecret('slackBot', 'xoxp-1', invoke)).rejects.toMatchObject({ kind: 'badInput' });
+    expect(calls).toEqual([['secret_set', { slot: 'slackBot', value: 'xoxp-1' }]]);
+  });
+
+  it('slackCall sends a request id, the method and the params, and answers the reply', async () => {
+    const reply = { status: 429, json: { ok: false, error: 'ratelimited' }, retryAfter: 30 };
+    const f = fakeInvoke({ slack_call: () => reply });
+    expect(await slackCall({ method: 'conversationsHistory', params: { channel: 'D1', limit: 200 } }, f.invoke)).toEqual(reply);
+    const [cmd, args] = f.calls[0];
+    expect(cmd).toBe('slack_call');
+    expect(typeof args.requestId).toBe('string');
+    expect([args.method, args.params]).toEqual(['conversationsHistory', { channel: 'D1', limit: 200 }]);
+    await slackCall({ method: 'authTest' }, f.invoke);
+    expect(f.calls[1][1].params).toEqual({});
+  });
+
+  it('slackDownload answers the bytes and maps a refusal to a NetError', async () => {
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const f = fakeInvoke({ slack_download: () => bytes });
+    expect(await slackDownload({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' }, f.invoke)).toBe(bytes);
+    expect(f.calls[0][1]).toMatchObject({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' });
+    const g = fakeInvoke({
+      slack_download: () => {
+        throw { kind: 'forbiddenPath', message: 'raw-rust-text' };
+      },
+    });
+    await expect(slackDownload({ url: 'https://evil.example/x' }, g.invoke)).rejects.toMatchObject({ kind: 'forbiddenPath' });
+  });
+
+  it('an aborted Slack call sends net_cancel with its request id', async () => {
+    const f = fakeInvoke({ slack_call: () => new Promise(() => {}), net_cancel: () => true });
+    const ac = new AbortController();
+    const p = slackCall({ method: 'authTest', signal: ac.signal }, f.invoke);
+    ac.abort();
+    await expect(p).rejects.toMatchObject({ kind: 'cancelled' });
+    const id = f.calls.find(([c]) => c === 'slack_call')![1].requestId;
+    expect(f.calls).toContainEqual(['net_cancel', { requestId: id }]);
   });
 });
