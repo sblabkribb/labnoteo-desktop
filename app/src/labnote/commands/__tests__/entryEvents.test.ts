@@ -7,13 +7,18 @@ import { createTestHost, type TestHost } from '../../__tests__/testHost';
 import { planRename } from '../../../links/planRename';
 import { renameWithLinks } from '../../../links/renameWithLinks';
 import { LOCAL, NOTE, SAMPLE_VAULT } from '../../../samples/__tests__/fixtures';
-import { entryEvents, listFilesUnder, type EntryEvent } from '../entryEvents';
+import { entryEvents, listFilesUnder, MAX_LIST_DEPTH, type EntryEvent } from '../entryEvents';
 import { deleteEntry, renameEntry } from '../fileOps';
 
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }));
 
 let hosts: TestHost[] = [];
 let offs: Array<() => void> = [];
+// 붙잡아 둔 흐름: 단언이 실패해도 풀어 다음 테스트에 링크 잠금이 남지 않게 한다
+let holds: Array<() => void> = [];
+function hold(): Promise<void> {
+  return new Promise<void>((r) => holds.push(r));
+}
 function setup(files: Record<string, string> = SAMPLE_VAULT): { th: TestHost; seen: EntryEvent[] } {
   const th = createTestHost(files);
   hosts.push(th);
@@ -21,7 +26,9 @@ function setup(files: Record<string, string> = SAMPLE_VAULT): { th: TestHost; se
   offs.push(entryEvents.subscribe((e) => seen.push(e)));
   return { th, seen };
 }
-afterEach(() => {
+afterEach(async () => {
+  for (const r of holds.splice(0)) r();
+  await new Promise((r) => setTimeout(r, 0));
   for (const off of offs.splice(0)) off();
   for (const th of hosts.splice(0)) th.cleanup();
   vi.restoreAllMocks();
@@ -50,6 +57,25 @@ describe('listFilesUnder', () => {
     );
   });
 
+  it('stops at a folder that loops back on itself (a junction to an ancestor)', async () => {
+    let calls = 0;
+    const fs = {
+      list: async (p: string) => {
+        if (++calls > 10000) throw new Error('runaway');
+        if (p.endsWith('.md')) throw new Error('not a folder');
+        return ['loop', 'a.md'];
+      },
+      read: async (p: string) => {
+        if (p.endsWith('a.md')) return '';
+        throw new Error('not a file');
+      },
+    } as unknown as Parameters<typeof listFilesUnder>[0];
+    const files = await listFilesUnder(fs, 'top');
+    expect(calls).toBeLessThan(10000);
+    expect(files[0]).toBe('top/a.md');
+    expect(files.length).toBeLessThanOrEqual(MAX_LIST_DEPTH + 1);
+  });
+
   it('a missing folder lists nothing', async () => {
     const { th } = setup();
     expect(await listFilesUnder(th.host.fs, 'nowhere')).toEqual([]);
@@ -60,8 +86,15 @@ describe('entryEvents', () => {
   it('a folder rename emits every file inside, .json included, and settles after the link rewrite', async () => {
     const { th, seen } = setup();
     const journal = th.ctx.links!.journal;
-    const setStatus = vi.spyOn(journal, 'setStatus');
-    const done = () => setStatus.mock.calls.filter((c) => c[0] === 'done').length;
+    const log: string[] = [];
+    const held = hold();
+    const release = () => holds.forEach((r) => r());
+    const original = journal.setStatus.bind(journal);
+    vi.spyOn(journal, 'setStatus').mockImplementation(async (s) => {
+      if (s === 'done') await held; // 링크 고침의 끝을 붙잡아 둔다
+      await original(s);
+      log.push(s);
+    });
     const plan = await planFor(th, 'labnote/061_PCR', 'labnote/061_PCR2', true);
     const flow = renameWithLinks(th.ctx, plan, journal);
     // 이름을 바꾼 직후, 링크 고침이 끝나기 전에 알린다
@@ -73,10 +106,43 @@ describe('entryEvents', () => {
     expect(e.to).toBe('labnote/061_PCR2');
     expect(e.files.map((f) => f.from)).toEqual(expect.arrayContaining([NOTE, `${LOCAL}/DNA.json`]));
     expect(e.files).toContainEqual({ from: `${LOCAL}/DNA.json`, to: 'labnote/061_PCR2/resources/labsamples/DNA.json' });
-    let settledAt = -1;
-    await e.settled.then(() => (settledAt = done()));
-    expect(settledAt).toBe(1);
+    let isSettled = false;
+    void e.settled.then(() => {
+      isSettled = true;
+      log.push('settled');
+    });
+    await vi.waitFor(() => expect(log).toContain('renamed'));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(isSettled).toBe(false);
+    release();
     await flow;
+    await e.settled;
+    expect(log).toEqual(['renamed', 'done', 'settled']);
+  });
+
+  it('a plain rename settles only after the renamed note is reopened', async () => {
+    const { th, seen } = setup({ ...SAMPLE_VAULT, 'notes/a.md': '# a\n' });
+    vi.spyOn(th.ctx, 'activePath').mockReturnValue('notes/a.md');
+    vi.spyOn(th.ctx, 'closeActive').mockResolvedValue(true);
+    const held = hold();
+    const release = () => holds.forEach((r) => r());
+    const opened: string[] = [];
+    vi.spyOn(th.ctx, 'openFile').mockImplementation(async (p: string) => {
+      await held;
+      opened.push(p);
+    });
+    th.answer.prompt('b');
+    const flow = renameEntry(th.ctx, 'notes/a.md', false, []);
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    const e = seen[0] as Extract<EntryEvent, { kind: 'renamed' }>;
+    let isSettled = false;
+    void e.settled.then(() => (isSettled = true));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(isSettled).toBe(false);
+    release();
+    expect(await flow).toBe('notes/b.md');
+    await e.settled;
+    expect(opened).toEqual(['notes/b.md']);
   });
 
   it('settled still resolves when the link rewrite fails after the rename', async () => {

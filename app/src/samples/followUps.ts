@@ -33,9 +33,12 @@ async function afterRename(env: SampleEnv, e: Renamed): Promise<void> {
   const jobs: Array<Promise<void>> = [];
   if (e.isDir) {
     const samplesOf = experimentLosingLabsamples(e.from, e.to);
-    // 플러그인: 옛 이름이 labsamples 이거나 그 아래에 labsamples 폴더가 있었다. 빈 labsamples 폴더는 목록에 없어 보지 않는다.
+    // 플러그인: 옛 이름이 labsamples 이거나 그 아래에 labsamples 폴더가 있었다. 빈 labsamples 폴더는 파일 목록에 없어
+    // 새 자리에서 그 폴더가 있는지 본다.
     const holdsSamples =
-      posix.basename(e.from) === 'labsamples' || e.files.some((f) => f.from.startsWith(`${e.from}/labsamples/`));
+      posix.basename(e.from) === 'labsamples' ||
+      e.files.some((f) => f.from.startsWith(`${e.from}/labsamples/`)) ||
+      (samplesOf !== undefined && (await env.fs.exists(`${e.to}/labsamples`)));
     if (samplesOf && holdsSamples && (await samples.ready(e.from)) && (await env.fs.exists(samplesOf))) {
       jobs.push(offerLabsamplesFolderBack(env, e.to, samplesOf, e.from));
     }

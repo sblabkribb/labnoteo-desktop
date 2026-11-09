@@ -54,23 +54,29 @@ async function folderChildren(fs: LabnoteFs, path: string): Promise<string[] | u
   }
 }
 
+/**
+ * 내려가는 폴더 깊이의 한계. 보관함 안의 junction/심볼릭 링크가 조상을 가리켜도 끝없이 돌지 않는다
+ * (그보다 깊은 파일은 목록에 없고, 그 파일의 샘플 후속 처리만 빠진다).
+ */
+export const MAX_LIST_DEPTH = 32;
+
 /** Every file under `dir` (all extensions), walked with fs.list; a child is a folder when list() on it succeeds. */
 export async function listFilesUnder(fs: LabnoteFs, dir: string): Promise<string[]> {
   const out: string[] = [];
-  const queue = [dir];
+  const queue: Array<{ path: string; depth: number }> = [{ path: dir, depth: 0 }];
   while (queue.length > 0) {
     const current = queue.shift()!;
     let names: string[];
     try {
-      names = await fs.list(current);
+      names = await fs.list(current.path);
     } catch {
       continue;
     }
     for (const name of names) {
-      const child = join(current, name);
+      const child = join(current.path, name);
       const children = await folderChildren(fs, child);
       if (children === undefined) out.push(child);
-      else if (children.length > 0) queue.push(child);
+      else if (children.length > 0 && current.depth < MAX_LIST_DEPTH) queue.push({ path: child, depth: current.depth + 1 });
     }
   }
   return out;

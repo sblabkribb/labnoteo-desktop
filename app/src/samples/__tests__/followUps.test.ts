@@ -149,6 +149,17 @@ describe('wireSampleFollowUps: renames', () => {
     expect(th.asked.confirm).toHaveLength(1);
   });
 
+  it('a renamed resources folder holding an empty labsamples folder still offers it back', async () => {
+    const files = { ...VAULT };
+    delete files[`${LOCAL}/DNA.json`];
+    const th = setup(files);
+    await th.host.fs.mkdir(LOCAL);
+    th.answer.confirm(false);
+    await renameWithPlan(th, 'labnote/061_PCR/resources', 'labnote/061_PCR/resources_old', true);
+    await vi.waitFor(() => expect(th.asked.confirm).toHaveLength(1));
+    expect(th.asked.confirm[0].message).toContain(coreT(FOLDER_GONE, '061_PCR'));
+  });
+
   it('declining keeps the new folder name', async () => {
     const th = setup();
     th.answer.confirm(false);

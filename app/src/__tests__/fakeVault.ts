@@ -218,9 +218,12 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
             throw fail(ERROR_KINDS.io, 'a folder can not be moved into itself');
           }
           if (!sameEntry && existsAnyCase(to)) throw fail(ERROR_KINDS.exists, `exists: ${to}`);
+          // 빈 하위 폴더도 함께 옮긴다(NTFS 처럼)
+          const emptyDirs = [...madeDirs].filter((d) => under(from)(d)).map((d) => to + d.slice(from.length));
           const moved = removeTree(from);
           for (const [p, c] of Object.entries(moved)) await mem.write(to + p.slice(from.length), c);
           if (!fromIsFile && Object.keys(moved).length === 0) madeDirs.add(to);
+          emptyDirs.forEach((d) => madeDirs.add(d));
           return undefined;
         }
         case 'vault_trash': {
