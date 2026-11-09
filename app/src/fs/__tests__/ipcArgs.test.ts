@@ -9,6 +9,7 @@ import { listVaultImages, readVaultImage, vaultCreatedTimes, writeVaultImage } f
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
+import { openInBrowser } from '../../labnote/print/openInBrowser';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -87,6 +88,7 @@ describe('IPC 인자 이름 계약', () => {
     expect(await listVaultImages(r.invoke)).toEqual([]);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
     expect(await vaultCreatedTimes(['a.md'], r.invoke)).toEqual([null]);
+    await openInBrowser('note', 'LN-7K3M9QX2', '<p>', r.invoke);
     expect(await readLinkJournal(r.invoke)).toBeNull();
     await writeLinkJournalHeader('{}', r.invoke);
     await writeLinkJournalNote(0, '{}', r.invoke);

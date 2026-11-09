@@ -2,6 +2,7 @@ use tauri::Manager;
 
 pub mod index;
 pub mod net;
+pub mod print;
 pub mod vault;
 
 pub mod app {
@@ -68,6 +69,7 @@ macro_rules! register_commands {
             $crate::net::store::integration_state_write,
             // SP7 Part A
             $crate::vault::fs::vault_created_times,
+            $crate::print::print_open_in_browser,
         ])
     };
 }

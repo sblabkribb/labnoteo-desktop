@@ -386,6 +386,14 @@ title: 실험
         "badInput"
     );
 
+    // Print "Open in browser": a note ID that is not LN- plus 8 characters is
+    // refused as badInput before anything is written or opened.
+    assert_eq!(
+        call("print_open_in_browser", args("print_open_in_browser", vec![json!("note"), json!("bad"), json!("<p>")]))
+            .unwrap_err()["kind"],
+        "badInput"
+    );
+
     // Image write: a raw body, so the fixture lists header names instead of
     // JSON argument names. Values are percent-encoded (`encodeURIComponent`),
     // because a header value must be ASCII and a Korean name is not.

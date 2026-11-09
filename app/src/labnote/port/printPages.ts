@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/print/printPages.ts:14-158 sha256:9a7718806550580e
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: pageCss became the static print/print.css (named pages a4/letter, a grid page whose header pushes the body down), so it is not exported; fitBodies(doc) became fitBodies(root) and shrinks the type by toggling the classes fit-95…fit-70 instead of writing el.style, and drops the header-overlap code (the grid replaces it); buildPrintHtml became pagesHtml (the page sections, marked with the paper class), and Task 7 adds buildStandaloneHtml; MIN_SCALE is exported; printHtml, waitForImages and openHtmlInBrowser (iframe, Electron) are replaced by print/printRoot.ts and Task 7.
+// Changes: pageCss became the static print/print.css (named pages a4/letter, a grid page whose header pushes the body down), so it is not exported; fitBodies(doc) became fitBodies(root) and shrinks the type by toggling the classes fit-95…fit-70 instead of writing el.style, and drops the header-overlap code (the grid replaces it); buildPrintHtml became pagesHtml (the page sections, marked with the paper class) plus buildStandaloneHtml over the sanitized tree (the print.css text via '?raw' in print/openInBrowser.ts, one CSP meta, and FIT_SCRIPT, a hand-written copy of the class-based fitBodies pinned by FIT_SCRIPT_SHA256); MIN_SCALE is exported; printHtml, waitForImages and openHtmlInBrowser (iframe, Electron) are replaced by print/printRoot.ts and Task 7.
 /**
  * Printable pages with a QR code in two corners (top right, bottom left), so
  * a photo still shows one when a hand or a fold covers the other.
@@ -87,4 +87,33 @@ export function pagesHtml(pages: readonly PrintPage[], paper: WorksheetPaperSize
       );
     })
     .join('\n');
+}
+
+/**
+ * The standalone file's only script: {@link fitBodies} with {@link MIN_SCALE}, run on `load`, written out by hand
+ * (a bundler's `Function.toString` would change with the build and break the pinned hash). It is a constant of
+ * the app, never note text.
+ */
+export const FIT_SCRIPT =
+  "window.addEventListener('load',function(){document.querySelectorAll('.body').forEach(function(el){" +
+  "Array.prototype.slice.call(el.classList).forEach(function(c){if(/^fit-[0-9]+$/.test(c))el.classList.remove(c);});" +
+  "var s=1,a='';while(el.scrollHeight>el.clientHeight+1&&s>0.7){s=Math.round((s-0.05)*100)/100;" +
+  "if(a)el.classList.remove(a);a='fit-'+Math.round(s*100);el.classList.add(a);}});});";
+
+/** Base64 SHA-256 of {@link FIT_SCRIPT}, for the standalone file's CSP `script-src`. A test recomputes it. */
+export const FIT_SCRIPT_SHA256 = '2HdwHThfYFV1zCVwaTNLnG05jNj0abjqTSCGhPGa7As=';
+
+/**
+ * The file "Open in browser" writes: one CSP meta (no network, images only from `data:`, inline styles, and only
+ * the hashed fit script), the app's print CSS, and the pages read back from `root`, a tree that has already been
+ * through `sanitizePrintTree`. `paper` is carried by the page sections' class; `title` is escaped.
+ */
+export function buildStandaloneHtml(title: string, paper: WorksheetPaperSize, root: Element, css: string): string {
+  void paper; // the sections already carry `page a4|letter`, which selects the named @page
+  return (
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'sha256-${FIT_SCRIPT_SHA256}'">` +
+    `<title>${escapeHtml(title)}</title><style>${css}</style></head>` +
+    `<body class="printing-pages"><div class="print-root">${root.innerHTML}</div><script>${FIT_SCRIPT}</script></body></html>`
+  );
 }
