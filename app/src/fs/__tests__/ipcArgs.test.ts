@@ -14,6 +14,13 @@ const fixture: Record<string, string[]> = JSON.parse(
 );
 
 /**
+ * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 3 이 Rust 쪽 secret_* 를 먼저 넣었고,
+ * Task 11 이 netIpc.ts 래퍼를 만들어 아래 테스트에서 호출하면서 이 목록을 비운다.
+ * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
+ */
+const PENDING_TS_WRAPPERS: readonly string[] = ['secret_set', 'secret_clear', 'secret_status'];
+
+/**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
  * 본문이 원시 바이트(Uint8Array)면 인자 이름 대신 헤더 이름을 기록한다.
  */
@@ -79,8 +86,18 @@ describe('IPC 인자 이름 계약', () => {
     await writeLinkJournalNote(0, '{}', r.invoke);
     await clearLinkJournal(r.invoke);
 
-    const expected = Object.fromEntries(Object.entries(fixture).map(([k, v]) => [k, [...v].sort()]));
+    const expected = Object.fromEntries(
+      Object.entries(fixture)
+        .filter(([k]) => !PENDING_TS_WRAPPERS.includes(k))
+        .map(([k, v]) => [k, [...v].sort()]),
+    );
     expect(Object.fromEntries(r.sent)).toEqual(expected);
+    // 아직 래퍼가 없다고 적어 둔 커맨드를 실제로는 보냈다면 목록이 낡은 것이다.
+    for (const cmd of PENDING_TS_WRAPPERS) expect(r.sent.has(cmd)).toBe(false);
+  });
+
+  it('래퍼 대기 목록은 픽스처에 있는 커맨드만 담는다', () => {
+    for (const cmd of PENDING_TS_WRAPPERS) expect(Object.keys(fixture)).toContain(cmd);
   });
 
   it('writeVaultImage 는 바이트를 원시 본문으로, 폴더와 이름은 퍼센트 인코딩한 헤더로 보낸다', async () => {

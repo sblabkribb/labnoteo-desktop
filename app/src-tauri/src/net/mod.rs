@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod error;
+pub mod secrets;
 pub use error::*;
 
 #[cfg(test)]

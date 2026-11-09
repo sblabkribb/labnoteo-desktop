@@ -40,12 +40,15 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(IndexState::new(dir.join("data").join("index")))
         .manage(LinkJournalDir(dir.join("data").join("link-journal")))
         .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
+        .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
 
+    // Every response, kept so the test can check no key ever comes back.
+    let responses = std::cell::RefCell::new(Vec::<String>::new());
     let call = |cmd: &str, args: Value| -> Result<Value, Value> {
-        get_ipc_response(
+        let res = get_ipc_response(
             &webview,
             InvokeRequest {
                 cmd: cmd.into(),
@@ -57,7 +60,11 @@ fn ipc_argument_names_match_the_typescript_side() {
                 invoke_key: INVOKE_KEY.to_string(),
             },
         )
-        .map(|b| b.deserialize::<Value>().unwrap())
+        .map(|b| b.deserialize::<Value>().unwrap());
+        responses.borrow_mut().push(match &res {
+            Ok(v) | Err(v) => v.to_string(),
+        });
+        res
     };
     let ok = |cmd: &str, args: Value| {
         call(cmd, args.clone()).unwrap_or_else(|e| panic!("{cmd} {args} was refused: {e}"))
@@ -80,6 +87,9 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("vault_current", args("vault_current", vec![])), Value::Null);
     assert_eq!(call("link_journal_read", args("link_journal_read", vec![])).unwrap_err()["kind"], "noVault");
 
+    // Integration keys need the open vault's settings to name their origin.
+    assert_eq!(call("secret_status", args("secret_status", vec![])).unwrap_err()["kind"], "notConfigured");
+
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
     assert_eq!(info["hasObsidianConfig"], false);
@@ -101,6 +111,21 @@ fn ipc_argument_names_match_the_typescript_side() {
         "io"
     );
     assert!(dir.join("config").join("vaults").is_dir());
+
+    // Integration keys (Windows Credential Manager; here the memory store):
+    // the webview only ever learns a flag and an epoch, never the key.
+    assert_eq!(ok("secret_set", args("secret_set", vec![json!("partbankWeb"), json!("pbk_t")])), Value::Null);
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!(status["set"]["partbankWeb"], true);
+    assert_eq!(status["epoch"]["partbankWeb"], 1);
+    assert_eq!(status["set"]["llmOpenai"], false);
+    assert_eq!(
+        call("secret_set", args("secret_set", vec![json!("partbankWeb"), json!("pbk_t\u{7}")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("partbankWeb")])), Value::Null);
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));
 
     // The link journal: kept in the app data dir, never in the vault.
     assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);
@@ -275,6 +300,9 @@ title: 실험
     // A fixture entry nobody exercises pins nothing: every one was called above.
     let fixture_keys: std::collections::BTreeSet<String> = fixture.as_object().unwrap().keys().cloned().collect();
     assert_eq!(*used.borrow(), fixture_keys, "commands this test called vs ipc-args.json");
+    // No response, success or error, ever carried a key back to the webview.
+    let leaked: Vec<_> = responses.borrow().iter().filter(|r| r.contains("pbk_t")).cloned().collect();
+    assert!(leaked.is_empty(), "a response contained the key: {leaked:?}");
 
     drop(webview);
     let _ = std::fs::remove_dir_all(&dir);

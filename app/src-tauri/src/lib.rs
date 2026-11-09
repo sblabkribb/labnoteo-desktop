@@ -47,6 +47,9 @@ macro_rules! register_commands {
             $crate::vault::journal::link_journal_write_header,
             $crate::vault::journal::link_journal_write_note,
             $crate::vault::journal::link_journal_clear,
+            $crate::net::secrets::secret_set,
+            $crate::net::secrets::secret_clear,
+            $crate::net::secrets::secret_status,
         ])
     };
 }
@@ -87,6 +90,8 @@ pub fn run() {
             app.manage(index::IndexState::new(data.join("index")));
             // The link-update journal (rename recovery and undo), also outside every vault.
             app.manage(vault::LinkJournalDir(data.join("link-journal")));
+            // Integration keys: Windows Credential Manager only, never a file (D6).
+            app.manage(net::secrets::Secrets::keyring());
             // Watches the open vault for changes made outside the app; started
             // by `vault_open` / `vault_current`, moved when the vault changes.
             app.manage(vault::watcher::WatcherState::new(vault::watcher::app_starter(app.handle().clone())));
