@@ -39,9 +39,14 @@ export function appNoteIdSource(index: NoteIdIndex, fs: AppFs): NoteIdSource {
     idOf: (path) => index.idOf(path),
     read: (path) => fs.read(path),
     async process(path, fn) {
-      noteIdWrites.emit(path);
       try {
-        await processNote(fs, path, fn);
+        // 서비스가 아는 ID 는 글이 실제로 바뀌는 순간에만 잊는다: processNote 는 바쁜(조합 중) 노트와 읽기 실패를
+        // transform 전에 거부하므로, 그때는 아는 ID 가 남아 나중의 손 고침에도 "옛 ID 를 되돌릴까?" 를 묻는다.
+        await processNote(fs, path, (text) => {
+          const next = fn(text);
+          if (next !== text) noteIdWrites.emit(path);
+          return next;
+        });
       } finally {
         await index.refresh(path);
       }

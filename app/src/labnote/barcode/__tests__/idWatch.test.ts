@@ -11,6 +11,9 @@ import { createAppHost } from '../../host/createAppHost';
 import { closeAllDialogs, currentDialog, settleDialog, type DialogSpec } from '../../host/dialogStore';
 import { unsolicitedHost } from '../../host/whenNotComposing';
 import { coreT } from '../../i18n';
+import { setComposing } from '../../../editor/__tests__/composing';
+import { NoteBusyError } from '../../noteErrors';
+import { mountEditor } from '../../__tests__/editorHarness';
 import { NoteIdService } from '../../port/noteIdService';
 import { startIdWatch, noteIdTouch } from '../idWatch';
 import { NoteIdIndex, setNoteIdIndex } from '../noteIdIndex';
@@ -211,6 +214,25 @@ describe('idWatch', () => {
     expect(readNoteId(vault.files()['a.labnote.md'])).toBe(next);
     await idle();
     expect(currentDialog()).toBeNull();
+  });
+
+  it('a command write refused while composing keeps the known ID, so a later hand edit still offers it back', async () => {
+    const { fs, index, plain, vault, write } = await setup({ 'a.labnote.md': note(ID) });
+    await idle();
+    const m = mountEditor(vault, 'a.labnote.md');
+    await m.loaded();
+    setComposing(m.view(), true);
+    const command = new NoteIdService(appNoteIdSource(index, fs), plain);
+    await expect(command.ensureId(noteRef(index, 'a.labnote.md')!, { reassign: true })).rejects.toBeInstanceOf(
+      NoteBusyError,
+    );
+    setComposing(m.view(), false);
+    m.unmount();
+    expect(readNoteId(vault.files()['a.labnote.md'])).toBe(ID);
+    await idle();
+    await write('a.labnote.md', note(OTHER));
+    await until(() => !!shown());
+    expect(shown()!.confirmLabel).toBe(coreT('Restore ID'));
   });
 
   it('a duplicate-ID question is not opened while composing and opens after compositionend', async () => {

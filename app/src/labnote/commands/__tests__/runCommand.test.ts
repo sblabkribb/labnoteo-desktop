@@ -1,6 +1,7 @@
 import { WINDOWS_PATH_MAX } from '@labnoteo/core/lib/regexUtils';
 import { setLang } from '../../../i18n/lang';
 import { t } from '../../../i18n/t';
+import { NoNoteIdIndexError } from '../../barcode/noteIdIndex';
 import { NoteBusyError, NoteChangedError, NoteGoneError, NoteSaveError } from '../../noteErrors';
 import type { CommandContext } from '../context';
 import { runCommand } from '../runCommand';
@@ -67,6 +68,15 @@ describe('runCommand', () => {
       throw new NoteGoneError('a.md');
     });
     expect(notify.mock.calls.at(-1)).toEqual(['warn', t('command.noteGone')]);
+  });
+
+  it('NoNoteIdIndexError (note IDs still loading) is a localised warning, not raw English', async () => {
+    const { ctx, notify } = fakeCtx();
+    await runCommand(ctx, () => Promise.reject(new NoNoteIdIndexError()));
+    expect(notify.mock.calls[0]).toEqual(['warn', '노트 ID 를 아직 불러오는 중입니다. 잠시 뒤 다시 실행하세요.']);
+    setLang('en');
+    await runCommand(ctx, () => Promise.reject(new NoNoteIdIndexError()));
+    expect(notify.mock.calls[1]).toEqual(['warn', 'Note IDs are still loading. Try again in a moment.']);
   });
 
   it("an unknown rejection shows 'Command failed: …' and does not throw", async () => {
