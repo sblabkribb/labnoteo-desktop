@@ -39,5 +39,6 @@
   "llm_probe": ["provider", "endpoint", "model", "apiKey"],
   "bfw_request": ["path", "query"],
   "bfw_probe": ["connection", "url", "apiKey"],
-  "bfw_base": []
+  "bfw_base": [],
+  "bfw_generate_notes": ["requestId", "design", "language", "perWorkflow"]
 }

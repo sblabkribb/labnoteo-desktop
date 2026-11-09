@@ -58,6 +58,7 @@ macro_rules! register_commands {
             $crate::net::bfw::bfw_request,
             $crate::net::bfw::bfw_probe,
             $crate::net::bfw::bfw_base,
+            $crate::net::bfw::bfw_generate_notes,
         ])
     };
 }

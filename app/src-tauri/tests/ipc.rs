@@ -109,6 +109,16 @@ fn ipc_argument_names_match_the_typescript_side() {
     );
     // bfworkflow: with no vault there is no saved URL to resolve.
     assert_eq!(call("bfw_base", args("bfw_base", vec![])).unwrap_err()["kind"], "notConfigured");
+    // Note generation checks its input before anything else.
+    let design = json!({"designType": "service", "nodes": [], "edges": []});
+    assert_eq!(
+        call("bfw_generate_notes", args("bfw_generate_notes", vec![json!("g1"), design.clone(), json!("fr"), json!(false)])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(
+        call("bfw_generate_notes", args("bfw_generate_notes", vec![json!("g1"), design.clone(), json!("ko"), json!(true)])).unwrap_err()["kind"],
+        "notConfigured"
+    );
     assert_eq!(
         call("bfw_probe", args("bfw_probe", vec![json!("server"), json!("https://x.example"), Value::Null])).unwrap_err()["kind"],
         "keyMissing"
@@ -190,6 +200,14 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(
         call("bfw_probe", args("bfw_probe", vec![json!("server"), json!("https://x.example/path"), json!("typed")])).unwrap_err()["kind"],
         "invalidUrl"
+    );
+    assert_eq!(
+        call("bfw_generate_notes", args("bfw_generate_notes", vec![json!("g2"), json!({"nodes": []}), json!("en"), json!(false)])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(
+        call("bfw_generate_notes", args("bfw_generate_notes", vec![json!("g3"), design.clone(), json!("en"), json!(false)])).unwrap_err()["kind"],
+        "keyMissing"
     );
 
     // The link journal: kept in the app data dir, never in the vault.
@@ -507,6 +525,22 @@ fn event_name_and_payload_match_the_typescript_side() {
         assert_eq!(payload[ev["payload"]["fields"]["kind"].as_str().unwrap()], ev["payload"]["kinds"][name]);
     }
     assert_eq!(ev["payload"]["kinds"].as_object().unwrap().len(), 3);
+}
+
+#[test]
+fn bfworkflow_notes_event_matches_the_typescript_side() {
+    use labnoteo_app_lib::net::bfw::{NotesProgress, NOTES_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let ev = &fixture["bfwNotes"];
+    assert_eq!(ev["name"], NOTES_EVENT);
+    let payload = serde_json::to_value(NotesProgress { request_id: "r".into(), step: "init".into(), message: "m".into() }).unwrap();
+    let keys: std::collections::BTreeSet<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+    let fields: std::collections::BTreeSet<&str> =
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(keys, fields, "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
+    assert_eq!(payload[ev["payload"]["fields"]["step"].as_str().unwrap()], "init");
+    assert_eq!(payload[ev["payload"]["fields"]["message"].as_str().unwrap()], "m");
 }
 
 /// The index is a cache. A vault whose index cannot open must still be watched:

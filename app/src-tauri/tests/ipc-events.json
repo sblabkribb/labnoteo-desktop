@@ -5,5 +5,11 @@
       "fields": { "path": "path", "kind": "kind" },
       "kinds": { "created": "created", "modified": "modified", "removed": "removed" }
     }
+  },
+  "bfwNotes": {
+    "name": "bfworkflow://notes",
+    "payload": {
+      "fields": { "requestId": "requestId", "step": "step", "message": "message" }
+    }
   }
 }

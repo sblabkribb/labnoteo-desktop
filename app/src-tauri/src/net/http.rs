@@ -86,9 +86,9 @@ pub struct Incoming {
 
 /// Unregisters the request id when `send` ends, however it ends (the command
 /// future may also be dropped).
-struct Registration<'a> {
-    net: &'a NetState,
-    id: &'a str,
+pub(crate) struct Registration<'a> {
+    pub(crate) net: &'a NetState,
+    pub(crate) id: &'a str,
 }
 
 impl Drop for Registration<'_> {
@@ -97,7 +97,7 @@ impl Drop for Registration<'_> {
     }
 }
 
-fn cancelled() -> NetError {
+pub(crate) fn cancelled() -> NetError {
     NetError::new(NetErrorKind::Cancelled, "cancelled")
 }
 
@@ -109,12 +109,7 @@ pub async fn send(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Re
 }
 
 async fn send_inner(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<Incoming, NetError> {
-    if out.secret.is_some() && out.url.scheme() == "http" && !is_loopback(&out.url) && !out.allow_http {
-        return Err(NetError::new(
-            NetErrorKind::Insecure,
-            "a key is never sent without TLS to a server that is not this computer",
-        ));
-    }
+    refuse_insecure(&out.url, out.secret.is_some(), out.allow_http)?;
     let Some(id) = request_id else { return perform(out).await };
     let notify = net.register(id)?;
     let _registration = Registration { net, id };
@@ -124,7 +119,19 @@ async fn send_inner(net: &NetState, request_id: Option<&str>, out: Outgoing) -> 
     }
 }
 
-fn header_map(headers: &[(&'static str, String)]) -> Result<HeaderMap, NetError> {
+/// `insecure` when a key would go to a non-loopback `http://` origin the
+/// vault did not allow (D7); checked before anything is sent.
+pub(crate) fn refuse_insecure(url: &Url, has_secret: bool, allow_http: bool) -> Result<(), NetError> {
+    if has_secret && url.scheme() == "http" && !is_loopback(url) && !allow_http {
+        return Err(NetError::new(
+            NetErrorKind::Insecure,
+            "a key is never sent without TLS to a server that is not this computer",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn header_map(headers: &[(&'static str, String)]) -> Result<HeaderMap, NetError> {
     let mut map = HeaderMap::new();
     for (name, value) in headers {
         // Never name the value: it may be the key.
@@ -151,14 +158,7 @@ async fn perform(out: Outgoing) -> Result<Incoming, NetError> {
     let resp = req.send().await.map_err(net_error)?;
     let status = resp.status().as_u16();
     if (300..400).contains(&status) {
-        let location = resp
-            .headers()
-            .get(LOCATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|loc| out.url.join(loc).ok())
-            .filter(|u| u.has_host())
-            .map(|u| origin(&u));
-        return Err(NetError::redirect(location));
+        return Err(redirect_error(&resp, &out.url));
     }
     let bytes = read_capped(resp, out.max_body).await?;
     let text = String::from_utf8_lossy(&bytes);
@@ -169,13 +169,26 @@ async fn perform(out: Outgoing) -> Result<Incoming, NetError> {
     }
 }
 
-fn too_large() -> NetError {
+/// The `redirect` error of a 3xx answer to `url`, with only the origin of
+/// its `Location`.
+pub(crate) fn redirect_error(resp: &reqwest::Response, url: &Url) -> NetError {
+    let location = resp
+        .headers()
+        .get(LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|loc| url.join(loc).ok())
+        .filter(|u| u.has_host())
+        .map(|u| origin(&u));
+    NetError::redirect(location)
+}
+
+pub(crate) fn too_large() -> NetError {
     NetError::new(NetErrorKind::TooLarge, "the response is too large")
 }
 
 /// Reads the body, failing with `tooLarge` past `max`: before reading when
 /// `Content-Length` already says so, otherwise as soon as the chunks exceed it.
-async fn read_capped(resp: reqwest::Response, max: usize) -> Result<Vec<u8>, NetError> {
+pub(crate) async fn read_capped(resp: reqwest::Response, max: usize) -> Result<Vec<u8>, NetError> {
     if resp.content_length().is_some_and(|n| n > max as u64) {
         return Err(too_large());
     }
@@ -217,7 +230,7 @@ pub fn kind_of(err: &reqwest::Error) -> NetErrorKind {
 }
 
 /// A fixed message per kind, so no URL or library text reaches the webview.
-fn net_error(err: reqwest::Error) -> NetError {
+pub(crate) fn net_error(err: reqwest::Error) -> NetError {
     let kind = kind_of(&err);
     let message = match kind {
         NetErrorKind::Timeout => "the server did not answer in time",

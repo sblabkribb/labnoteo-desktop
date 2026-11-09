@@ -8,6 +8,7 @@ pub mod bfw;
 pub mod llm;
 pub mod partbank;
 pub mod secrets;
+pub mod sse;
 pub use error::*;
 
 #[cfg(test)]
