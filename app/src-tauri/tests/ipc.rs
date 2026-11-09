@@ -161,6 +161,17 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("secret_set", args("secret_set", vec![json!("partbankWeb"), json!("pbk_t\u{7}")])).unwrap_err()["kind"],
         "badInput"
     );
+    // The Slack bot slot (fixed origin https://slack.com) only takes a bot token.
+    assert_eq!(
+        call("secret_set", args("secret_set", vec![json!("slackBot"), json!("xoxp-1")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!((&status["set"]["slackBot"], &status["epoch"]["slackBot"]), (&json!(false), &json!(0)));
+    assert_eq!(ok("secret_set", args("secret_set", vec![json!("slackBot"), json!("xoxb-t")])), Value::Null);
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["slackBot"], true);
+    assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("slackBot")])), Value::Null);
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["slackBot"], false);
     assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("partbankWeb")])), Value::Null);
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));

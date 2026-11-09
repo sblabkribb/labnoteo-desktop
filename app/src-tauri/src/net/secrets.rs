@@ -4,7 +4,9 @@
 //! `"<slot>|<origin>"`, where `origin` is the normalized origin of the URL the
 //! open vault's settings name for that slot. A key is therefore bound to the
 //! server it was entered for: after the URL changes, the key reads "not set".
-//! `bfwDesktop` uses the fixed origin `loopback` (its port changes per launch).
+//! `bfwDesktop` uses the fixed origin `loopback` (its port changes per launch),
+//! and `slackBot` the fixed origin `https://slack.com` (only a bot token,
+//! `xoxb-…`, is accepted for it).
 //!
 //! No function here returns a key to the webview, and no error message ever
 //! contains one: the webview learns only a `set` flag and an `epoch` counter,
@@ -25,6 +27,9 @@ pub const SERVICE: &str = "kr.sblab.labnoteo";
 
 /// Longest key accepted, in bytes.
 const MAX_SECRET: usize = 4096;
+
+/// The fixed origin the Slack bot token is bound to.
+const SLACK_ORIGIN: &str = "https://slack.com";
 
 /// Where keys are kept. The app uses `KeyringStore`; tests use `MemoryStore`.
 pub trait SecretStore: Send + Sync {
@@ -110,6 +115,7 @@ pub enum Slot {
     LlmOpenai,
     BfwServer,
     BfwDesktop,
+    SlackBot,
 }
 
 impl Slot {
@@ -121,26 +127,31 @@ impl Slot {
             Slot::LlmOpenai => "llmOpenai",
             Slot::BfwServer => "bfwServer",
             Slot::BfwDesktop => "bfwDesktop",
+            Slot::SlackBot => "slackBot",
         }
     }
 
-    /// The URL the slot's key is bound to (`None` for `BfwDesktop`).
+    /// The URL the slot's key is bound to (`None` for the fixed-origin slots
+    /// `BfwDesktop` and `SlackBot`).
     fn url(self, cfg: &ServiceConfig) -> Option<&Url> {
         match self {
             Slot::PartbankDesktop => cfg.partbank_desktop.as_ref(),
             Slot::PartbankWeb => cfg.partbank_web.as_ref(),
             Slot::LlmOpenai => cfg.llm_openai.as_ref(),
             Slot::BfwServer => cfg.bfw_url.as_ref(),
-            Slot::BfwDesktop => None,
+            Slot::BfwDesktop | Slot::SlackBot => None,
         }
     }
 }
 
-/// `"<slotName>|<origin>"`, or `"bfwDesktop|loopback"`. A slot whose URL is
+/// `"<slotName>|<origin>"`, `"bfwDesktop|loopback"` or
+/// `"slackBot|https://slack.com"` (whatever the config is). A slot whose URL is
 /// missing or invalid is `notConfigured`.
 pub fn account(slot: Slot, cfg: &ServiceConfig) -> Result<String, NetError> {
-    if slot == Slot::BfwDesktop {
-        return Ok(format!("{}|loopback", slot.name()));
+    match slot {
+        Slot::BfwDesktop => return Ok(format!("{}|loopback", slot.name())),
+        Slot::SlackBot => return Ok(format!("{}|{SLACK_ORIGIN}", slot.name())),
+        _ => {}
     }
     let url = slot.url(cfg).ok_or_else(|| {
         NetError::new(NetErrorKind::NotConfigured, format!("no valid address is set for {}", slot.name()))
@@ -167,6 +178,19 @@ pub fn validate_secret(value: &str) -> Result<String, NetError> {
     Ok(trimmed.to_string())
 }
 
+/// `validate_secret`, plus the slot's own rule: the Slack bot slot only takes a
+/// bot token (`xoxb-…`). The error message never includes the value.
+pub fn validate_secret_for(slot: Slot, value: &str) -> Result<String, NetError> {
+    let key = validate_secret(value)?;
+    if slot == Slot::SlackBot && !key.starts_with("xoxb-") {
+        return Err(NetError::new(
+            NetErrorKind::BadInput,
+            "the Slack token must be a bot token starting with xoxb-",
+        ));
+    }
+    Ok(key)
+}
+
 /// The slot's key for the configured origin, if one is stored.
 pub fn key_for(store: &dyn SecretStore, slot: Slot, cfg: &ServiceConfig) -> Result<Option<String>, NetError> {
     store.get(&account(slot, cfg)?)
@@ -182,9 +206,12 @@ fn bump_epoch(store: &dyn SecretStore, slot: Slot, cfg: &ServiceConfig) -> Resul
     store.set(&acc, &next.to_string())
 }
 
-/// Validates and stores the slot's key, then bumps its epoch.
+/// Validates the key with the slot's rule (`validate_secret_for`) and stores
+/// it, then bumps its epoch. A refused key stores nothing.
 pub fn store_secret(store: &dyn SecretStore, slot: Slot, cfg: &ServiceConfig, value: &str) -> Result<(), NetError> {
-    store_at_account(store, &account(slot, cfg)?, value)
+    let account = account(slot, cfg)?;
+    let key = validate_secret_for(slot, value)?;
+    store_valid(store, &account, &key)
 }
 
 /// Validates and stores a key under an account built by `account` (or the
@@ -192,7 +219,12 @@ pub fn store_secret(store: &dyn SecretStore, slot: Slot, cfg: &ServiceConfig, va
 /// plugin LLM key import, whose origin comes from `data.json` (D9).
 pub fn store_at_account(store: &dyn SecretStore, account: &str, value: &str) -> Result<(), NetError> {
     let key = validate_secret(value)?;
-    store.set(account, &key)?;
+    store_valid(store, account, &key)
+}
+
+/// Stores an already validated key, then bumps `"epoch|<account>"`.
+fn store_valid(store: &dyn SecretStore, account: &str, key: &str) -> Result<(), NetError> {
+    store.set(account, key)?;
     let epoch_acc = format!("epoch|{account}");
     let next = read_epoch(store, &epoch_acc).saturating_add(1);
     store.set(&epoch_acc, &next.to_string())
@@ -212,6 +244,7 @@ pub struct SlotValues<T> {
     pub llm_openai: T,
     pub bfw_server: T,
     pub bfw_desktop: T,
+    pub slack_bot: T,
 }
 
 impl<T> SlotValues<T> {
@@ -222,6 +255,7 @@ impl<T> SlotValues<T> {
             llm_openai: f(Slot::LlmOpenai),
             bfw_server: f(Slot::BfwServer),
             bfw_desktop: f(Slot::BfwDesktop),
+            slack_bot: f(Slot::SlackBot),
         }
     }
 }
@@ -310,8 +344,35 @@ mod tests {
     #[test] fn status_serializes_flags_and_epochs_only() {
         let v = serde_json::to_value(status_of(&MemoryStore::default(), &cfg("{}"))).unwrap();
         assert_eq!(v, serde_json::json!({
-            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false},
-            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0}}));
+            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false},
+            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0}}));
+    }
+    #[test] fn slack_slot_has_fixed_origin() {
+        assert_eq!(account(Slot::SlackBot, &cfg("{}")).unwrap(), "slackBot|https://slack.com");
+        let c = cfg(r#"{"partbankWebUrl":"https://a.example","llmBaseUrl":"https://b.example"}"#);
+        assert_eq!(account(Slot::SlackBot, &c).unwrap(), "slackBot|https://slack.com");
+        assert_eq!(Slot::SlackBot.name(), "slackBot");
+        let slot: Slot = serde_json::from_str("\"slackBot\"").unwrap();
+        assert_eq!(slot, Slot::SlackBot);
+    }
+    #[test] fn slack_token_needs_xoxb() {
+        assert_eq!(validate_secret_for(Slot::SlackBot, "xoxp-1").unwrap_err().kind, NetErrorKind::BadInput);
+        assert_eq!(validate_secret_for(Slot::SlackBot, " xoxb-1 ").unwrap(), "xoxb-1");
+        assert_eq!(validate_secret_for(Slot::LlmOpenai, "xoxp-1").unwrap(), "xoxp-1");
+        let e = validate_secret_for(Slot::SlackBot, "xoxp-secretvalue").unwrap_err();
+        assert!(!e.message.contains("xoxp-secretvalue"));
+        assert_eq!(validate_secret_for(Slot::SlackBot, "").unwrap_err().kind, NetErrorKind::BadInput);
+        assert_eq!(validate_secret_for(Slot::SlackBot, "xoxb-\u{7}").unwrap_err().kind, NetErrorKind::BadInput);
+    }
+    #[test] fn store_secret_refuses_a_non_bot_slack_token_and_stores_nothing() {
+        let store = MemoryStore::default();
+        assert_eq!(store_secret(&store, Slot::SlackBot, &cfg("{}"), "xoxp-1").unwrap_err().kind, NetErrorKind::BadInput);
+        assert_eq!(store.get("slackBot|https://slack.com").unwrap(), None);
+        assert_eq!(store.get("epoch|slackBot|https://slack.com").unwrap(), None);
+        store_secret(&store, Slot::SlackBot, &cfg("{}"), " xoxb-ok ").unwrap();
+        assert_eq!(store.get("slackBot|https://slack.com").unwrap().as_deref(), Some("xoxb-ok"));
+        let st = status_of(&store, &cfg("{}"));
+        assert_eq!((st.set.slack_bot, st.epoch.slack_bot), (true, 1));
     }
     #[test] fn saving_a_key_bumps_the_epoch() {
         let store = MemoryStore::default(); let c = cfg(r#"{"partbankWebUrl":"https://a.example"}"#);

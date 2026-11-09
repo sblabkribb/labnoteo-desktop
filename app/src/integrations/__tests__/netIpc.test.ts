@@ -157,8 +157,24 @@ describe('netIpc', () => {
 
   it('secretStatusOf fills the missing slots', () => {
     expect(secretStatusOf({ partbankWeb: true }, { partbankWeb: 2 })).toEqual({
-      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false },
-      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0 },
+      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false },
+      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0 },
     });
+  });
+
+  it('secretStatusOf knows the Slack bot slot', () => {
+    const st = secretStatusOf({});
+    expect(st.set.slackBot).toBe(false);
+    expect(st.epoch.slackBot).toBe(0);
+  });
+
+  it('setSecret passes the slackBot slot through and surfaces badInput', async () => {
+    const { invoke, calls } = fakeInvoke({
+      secret_set: () => {
+        throw { kind: 'badInput', message: 'raw-rust-text' };
+      },
+    });
+    await expect(setSecret('slackBot', 'xoxp-1', invoke)).rejects.toMatchObject({ kind: 'badInput' });
+    expect(calls).toEqual([['secret_set', { slot: 'slackBot', value: 'xoxp-1' }]]);
   });
 });

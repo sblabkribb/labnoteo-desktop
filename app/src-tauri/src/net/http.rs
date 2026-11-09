@@ -9,6 +9,9 @@
 //! - Bodies are capped (`tooLarge`), and the key in use is redacted from every
 //!   text that comes back, 2xx included.
 //! - A request with an id can be cancelled from the webview (`net_cancel`).
+//! - `send_raw` follows the same rules but answers raw bytes and a few
+//!   headers, and treats a 429 as an answer (Slack's rate limit carries
+//!   `Retry-After`); `send` is `send_raw` plus UTF-8 text and redaction.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -84,6 +87,19 @@ pub struct Incoming {
     pub text: String,
 }
 
+/// A 2xx or 429 answer as raw bytes. `headers` holds only `content-type`,
+/// `retry-after` and `x-oauth-scopes` (names lower-cased), when present. The
+/// bytes are not redacted: callers that turn them into text redact it.
+#[derive(Debug, Clone)]
+pub struct IncomingRaw {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub bytes: Vec<u8>,
+}
+
+/// The response headers `IncomingRaw` keeps.
+const KEPT_HEADERS: [&str; 3] = ["content-type", "retry-after", "x-oauth-scopes"];
+
 /// Unregisters the request id when `send` ends, however it ends (the command
 /// future may also be dropped).
 pub(crate) struct Registration<'a> {
@@ -102,13 +118,28 @@ pub(crate) fn cancelled() -> NetError {
 }
 
 /// Sends one request (see the module doc for the rules). Every error is
-/// redacted with the request's key before it is returned.
+/// redacted with the request's key before it is returned, and a 2xx text
+/// too. Any non-2xx (429 included) is a `status` error.
 pub async fn send(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<Incoming, NetError> {
+    let secret = out.secret.clone();
+    let raw = send_raw(net, request_id, out).await?;
+    let text = String::from_utf8_lossy(&raw.bytes);
+    if (200..300).contains(&raw.status) {
+        Ok(Incoming { status: raw.status, text: redact_text(&text, secret.as_deref()) })
+    } else {
+        Err(NetError::status(raw.status, &text, secret.as_deref()))
+    }
+}
+
+/// Sends one request with `send`'s rules (insecure, redirect, the body cap,
+/// cancellation, redaction of every error), but answers the raw bytes and the
+/// kept headers, and answers a 429 too instead of failing with `status`.
+pub async fn send_raw(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<IncomingRaw, NetError> {
     let secret = out.secret.clone();
     send_inner(net, request_id, out).await.map_err(|e| e.redact(secret.as_deref()))
 }
 
-async fn send_inner(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<Incoming, NetError> {
+async fn send_inner(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<IncomingRaw, NetError> {
     refuse_insecure(&out.url, out.secret.is_some(), out.allow_http)?;
     let Some(id) = request_id else { return perform(out).await };
     let notify = net.register(id)?;
@@ -146,7 +177,7 @@ pub(crate) fn header_map(headers: &[(&'static str, String)]) -> Result<HeaderMap
     Ok(map)
 }
 
-async fn perform(out: Outgoing) -> Result<Incoming, NetError> {
+async fn perform(out: Outgoing) -> Result<IncomingRaw, NetError> {
     let secret = out.secret.as_deref();
     let mut req = client().request(out.method.clone(), out.url.clone()).headers(header_map(&out.headers)?);
     if let Some(json) = &out.json {
@@ -160,12 +191,18 @@ async fn perform(out: Outgoing) -> Result<Incoming, NetError> {
     if (300..400).contains(&status) {
         return Err(redirect_error(&resp, &out.url));
     }
+    let headers: Vec<(String, String)> = KEPT_HEADERS
+        .iter()
+        .filter_map(|name| {
+            let value = resp.headers().get(*name)?.to_str().ok()?;
+            Some((name.to_string(), value.to_string()))
+        })
+        .collect();
     let bytes = read_capped(resp, out.max_body).await?;
-    let text = String::from_utf8_lossy(&bytes);
-    if (200..300).contains(&status) {
-        Ok(Incoming { status, text: redact_text(&text, secret) })
+    if (200..300).contains(&status) || status == 429 {
+        Ok(IncomingRaw { status, headers, bytes })
     } else {
-        Err(NetError::status(status, &text, secret))
+        Err(NetError::status(status, &String::from_utf8_lossy(&bytes), secret))
     }
 }
 
@@ -456,6 +493,75 @@ mod tests {
             block_on(net.web_slot(Duration::from_millis(150)));
         }
         assert!(t.elapsed() >= Duration::from_millis(300));
+    }
+
+    #[test]
+    fn send_raw_keeps_selected_headers_and_bytes() {
+        let body: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x00, 0xff];
+        let s = serve(vec![Canned::ok("")
+            .header("Content-Type", "image/png")
+            .header("Retry-After", "7")
+            .header("X-OAuth-Scopes", "a,b")
+            .header("X-Other", "z")
+            .body(body.clone())]);
+        let raw = block_on(send_raw(&NetState::default(), None, get(&s.url, None))).unwrap();
+        assert_eq!(raw.status, 200);
+        assert_eq!(raw.bytes, body);
+        let mut headers = raw.headers.clone();
+        headers.sort();
+        assert_eq!(
+            headers,
+            vec![
+                ("content-type".to_string(), "image/png".to_string()),
+                ("retry-after".to_string(), "7".to_string()),
+                ("x-oauth-scopes".to_string(), "a,b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn send_raw_429_is_ok_with_retry_after() {
+        let s = serve(vec![Canned::status(429).header("Retry-After", "30").body("{\"ok\":false}")]);
+        let raw = block_on(send_raw(&NetState::default(), None, get(&s.url, None))).unwrap();
+        assert_eq!(raw.status, 429);
+        assert!(raw.headers.contains(&("retry-after".to_string(), "30".to_string())));
+        assert_eq!(raw.bytes, b"{\"ok\":false}");
+    }
+
+    #[test]
+    fn send_still_treats_429_as_a_status_error() {
+        let s = serve(vec![Canned::status(429).header("Retry-After", "30").body("slow down")]);
+        let e = block_on(send(&NetState::default(), None, get(&s.url, None))).unwrap_err();
+        assert_eq!((e.kind, e.status), (NetErrorKind::Status, Some(429)));
+        assert_eq!(e.body.as_deref(), Some("slow down"));
+    }
+
+    #[test]
+    fn send_raw_keeps_the_other_rules() {
+        // Other non-2xx statuses are redacted status errors.
+        let s = echo_header("x-api-key", 500);
+        let mut out = get(&s.url, Some("pbk_secret"));
+        out.headers.push(("X-API-Key", "pbk_secret".into()));
+        let e = block_on(send_raw(&NetState::default(), None, out)).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Status);
+        assert!(!serde_json::to_string(&e).unwrap().contains("pbk_secret"));
+        // Redirects are refused.
+        let s = serve(vec![Canned::status(302).header("Location", "https://files.example/x")]);
+        let e = block_on(send_raw(&NetState::default(), None, get(&s.url, None))).unwrap_err();
+        assert_eq!((e.kind, e.location.as_deref()), (NetErrorKind::Redirect, Some("https://files.example")));
+        // A key never goes to plain http off this computer.
+        let e = block_on(send_raw(&NetState::default(), None, get("http://10.255.255.1:9/x", Some("k")))).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Insecure);
+        // The body cap holds.
+        let s = serve(vec![Canned::ok(&"x".repeat(2048))]);
+        let mut out = get(&s.url, None);
+        out.max_body = 1024;
+        assert_eq!(block_on(send_raw(&NetState::default(), None, out)).unwrap_err().kind, NetErrorKind::TooLarge);
+        // A request id can be cancelled.
+        let net = NetState::default();
+        assert!(!net.cancel("r7"));
+        let s = serve(vec![Canned::ok("{}")]);
+        assert_eq!(block_on(send_raw(&net, Some("r7"), get(&s.url, None))).unwrap_err().kind, NetErrorKind::Cancelled);
     }
 
     #[test]
