@@ -11,6 +11,8 @@ import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
 import { runSampleSettings } from '../../samples/SampleSettingsDialog';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
 import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDialog';
+import { bfwReady } from '../../bfworkflow/bfwApp';
+import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -148,8 +150,19 @@ const integrationSettings: AppCommand = {
   run: (ctx) => runIntegrationSettings(ctx),
 };
 
+/**
+ * bfworkflow 카탈로그 동기화(SP6 D16): 서버 카탈로그가 같은 id 의 보관함 항목을 이기고, 보관함에만 있는 항목은 남긴다.
+ * 지금 연결(서버 또는 데스크톱 앱)의 키가 설정됐을 때만 보인다.
+ */
+const bfwSyncCatalogs: AppCommand = {
+  id: 'app.bfw-sync-catalogs',
+  nameKey: 'cmd.bfwSyncCatalogs',
+  run: (ctx) => runBfwSyncCatalogs(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
