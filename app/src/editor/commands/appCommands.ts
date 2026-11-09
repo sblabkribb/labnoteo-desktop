@@ -14,6 +14,7 @@ import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDi
 import { bfwReady } from '../../bfworkflow/bfwApp';
 import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
 import { runNotesFromDesign } from '../../bfworkflow/notesFromDesign';
+import { runDesignUsage, runOpenDesign } from '../../bfworkflow/openDesign';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -173,8 +174,30 @@ const bfwNotesFromDesign: AppCommand = {
   available: (ctx) => bfwReady(ctx),
 };
 
+/**
+ * bfworkflow 설계를 기본 브라우저에서 열기(SP6 Task 41): 워크플로 노트에서는 그 워크플로를 쓰는 설계 중에서,
+ * 아니면 모든 설계 중에서 고른다. 지금 연결의 키가 설정됐을 때만 보인다.
+ */
+const bfwOpenDesign: AppCommand = {
+  id: 'app.bfw-open-design',
+  nameKey: 'cmd.bfwOpenDesign',
+  run: (ctx) => runOpenDesign(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
+/**
+ * 이 워크플로를 쓰는 bfworkflow 설계(SP6 Task 41, 읽기 전용): 설계마다 코드와 노트의 UO 사용 횟수를 보이고,
+ * 고르면 설계 페이지를 연다. 사용처를 bfworkflow 로 보내는 것은 서버 엔드포인트가 생길 때까지 미룬다(D3).
+ */
+const bfwDesignUsage: AppCommand = {
+  id: 'app.bfw-design-usage',
+  nameKey: 'cmd.bfwDesignUsage',
+  run: (ctx) => runDesignUsage(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
