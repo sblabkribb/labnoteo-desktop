@@ -6,6 +6,7 @@ import type { CommandContext } from '../labnote/commands/context';
 import type { Command } from '../labnote/commands/registry';
 import { overrideOr } from '../labnote/i18n';
 import { downloadPartbankCatalog } from '../labnote/port/partbankCatalog';
+import { refreshLocationsIn, vaultSampleFolders } from '../labnote/port/partbankLocation';
 import { createSampleEnv } from '../samples/env';
 import { currentCatalogStore } from './catalogOverlay';
 import { partbank } from './current';
@@ -26,6 +27,22 @@ export const partbankCommands: Command[] = [
         return;
       }
       await downloadPartbankCatalog(createSampleEnv(ctx), feature, currentCatalogStore());
+    },
+  },
+  {
+    id: 'refresh-partbank-locations',
+    nameKey: 'Refresh storage locations from partbank',
+    available: configured,
+    run: async (ctx) => {
+      const feature = partbank(ctx);
+      if (!feature) {
+        // plugin: 'Set up a partbank connection in the plugin settings first.'
+        ctx.host.notify('info', overrideOr('partbank.setupFirst'));
+        return;
+      }
+      // 열린 노트와 상관없이 보관함 전체: 모든 실험의 Local 대장과 Global 대장(#437).
+      const env = createSampleEnv(ctx);
+      await refreshLocationsIn(env, feature, await vaultSampleFolders(env));
     },
   },
 ];

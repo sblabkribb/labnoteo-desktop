@@ -1,7 +1,6 @@
 // Ported from app/vendor/labnoteo/src/partbank/partbankRegister.ts:50-432 sha256:a529a74c9b309e25
-// Ported from app/vendor/labnoteo/src/partbank/partbankLocation.ts:117-141 sha256:6c0312941ecd7f68
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin becomes SampleEnv plus PartbankFeature: registerPartbankItem, resolveSampleType, addStrainType, collectLinkedCandidates, catalogSeedNote and noticeForRegistration take env in place of plugin, and pickPartbankReference takes (env, feature, opts) (registerPartbankItem needs no feature: its client is passed in). plugin.t → env.t; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; confirmModal(app, message, label) → env.host.confirm(message, { confirmLabel: label }); new Notice(m) → env.host.notify('info', m), and 'warn' for the alias clash; searchPartbankModal(app, client, entities, {…}) → searchPartbankDialog({ type, initialQuery, client, entities, onError }), whose placeholder and empty text the dialog builds itself; plugin.partbank.notifyError(err, client.kind) → feature.notifyError(err, client); addStrainType's settings write + saveSettings → env.updateSettings({ customSampleTypes: [...] }), and refreshSampleViews → env.changed(); plugin.samplesChanged() → env.changed([the written registry]); plugin.localSampleFolder() → env.localFolder(); plugin.sampleTrackingFor → env.trackingFor; plugin.host.editTarget()?.path → env.editTarget()?.path, falling back to env.activePath(); loadCatalogSamples and pickAliasSibling come from the sample ports (sampleScope, sampleCreate). A vault switch is checked for (D11): pickPartbankReference and registerPartbankItem take a VaultGuard at the start (client.vaultGuard(), or opts.guard), guard.check() runs before upsertSampleRecord and before addStrainType's settings write, a cancelled item refetch or stock lookup is not taken for an item without detail or stock, and a cancelled registration returns undefined and writes nothing; resolveSampleType takes opts.guard for that. registerPartbankItem refuses an unreadable (conflicted) target registry with RegistryUnreadableError (assertRegistryReadable) before the alias-sibling question and the stock lookup, as sampleCreate does; the caller routes it through runCommand-style handling. vaultSampleFolders and linkedSamplesIn (partbankLocation.ts:117-141) are ported here as private helpers ahead of the storage-location port (Task 22), which register-or-reuse needs for #446.
+// Changes: LabnotePlugin becomes SampleEnv plus PartbankFeature: registerPartbankItem, resolveSampleType, addStrainType, collectLinkedCandidates, catalogSeedNote and noticeForRegistration take env in place of plugin, and pickPartbankReference takes (env, feature, opts) (registerPartbankItem needs no feature: its client is passed in). plugin.t → env.t; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; confirmModal(app, message, label) → env.host.confirm(message, { confirmLabel: label }); new Notice(m) → env.host.notify('info', m), and 'warn' for the alias clash; searchPartbankModal(app, client, entities, {…}) → searchPartbankDialog({ type, initialQuery, client, entities, onError }), whose placeholder and empty text the dialog builds itself; plugin.partbank.notifyError(err, client.kind) → feature.notifyError(err, client); addStrainType's settings write + saveSettings → env.updateSettings({ customSampleTypes: [...] }), and refreshSampleViews → env.changed(); plugin.samplesChanged() → env.changed([the written registry]); plugin.localSampleFolder() → env.localFolder(); plugin.sampleTrackingFor → env.trackingFor; plugin.host.editTarget()?.path → env.editTarget()?.path, falling back to env.activePath(); loadCatalogSamples and pickAliasSibling come from the sample ports (sampleScope, sampleCreate). A vault switch is checked for (D11): pickPartbankReference and registerPartbankItem take a VaultGuard at the start (client.vaultGuard(), or opts.guard), guard.check() runs before upsertSampleRecord and before addStrainType's settings write, a cancelled item refetch or stock lookup is not taken for an item without detail or stock, and a cancelled registration returns undefined and writes nothing; resolveSampleType takes opts.guard for that. registerPartbankItem refuses an unreadable (conflicted) target registry with RegistryUnreadableError (assertRegistryReadable) before the alias-sibling question and the stock lookup, as sampleCreate does; the caller routes it through runCommand-style handling. vaultSampleFolders and linkedSamplesIn, which register-or-reuse needs for #446, come from the storage-location port (partbankLocation).
 /**
  * Registering a partbank item as a sample: deciding its type, finding the
  * sample that already stands for it, and writing the record.
@@ -33,7 +32,6 @@ import {
 } from '@labnoteo/core/lib/sampleUtils';
 import {
   isSameSampleFolder,
-  listExperimentSampleFolders,
   loadSamplesByType,
   noteLabsamplesFolder,
   upsertSampleRecord,
@@ -46,6 +44,7 @@ import { searchPartbankDialog } from '../../partbank/PartbankSearchDialog';
 import { assertRegistryReadable, type SampleEnv } from '../../samples/env';
 import type { PartbankClient } from './partbankClient';
 import type { PartbankFeature } from './partbankFeature';
+import { linkedSamplesIn, vaultSampleFolders, type PartbankSampleRef } from './partbankLocation';
 import { pickAliasSibling } from './sampleCreate';
 import { loadCatalogSamples } from './sampleScope';
 
@@ -247,34 +246,7 @@ async function registerWithGuard(
   };
 }
 
-type LinkedRecord = { type: string; id: string; folder: string; record: SampleRecord };
-
-/**
- * Every experiment's Local registry, then the Global one: the whole vault, so
- * the result does not depend on which note is open (#437).
- */
-async function vaultSampleFolders(env: SampleEnv): Promise<string[]> {
-  const folders = await listExperimentSampleFolders(env.fs, '');
-  const global = env.globalFolder();
-  if (global && !folders.some((folder) => isSameSampleFolder(folder, global))) folders.push(global);
-  return folders;
-}
-
-/** Every sample in `folders` that carries a partbank link. */
-async function linkedSamplesIn(env: SampleEnv, folders: readonly string[]): Promise<LinkedRecord[]> {
-  const types = getSampleDisplayMeta(env.settings().customSampleTypes).types;
-  const out: LinkedRecord[] = [];
-  for (const folder of folders) {
-    if (!folder) continue;
-    for (const type of types) {
-      const records = await loadSamplesByType(env.fs, folder, type);
-      for (const [id, record] of Object.entries(records)) {
-        if (record.source) out.push({ type, id, folder, record });
-      }
-    }
-  }
-  return out;
-}
+type LinkedRecord = PartbankSampleRef;
 
 /**
  * Samples for the same partbank item in other experiments (#446): not used
