@@ -50,6 +50,16 @@ describe('앱 셸 CSS 계약', () => {
     expect(print['.lno-table-toolbar']?.display).toBe('none');
   });
 
+  it('사이드바 탭 이름(파일·워크플로·샘플·개요·링크)은 말줄임으로 잘리지 않고, 자리가 모자라면 다음 줄로 넘어간다', () => {
+    const tab = ruleFor('.sidebar-tab')!;
+    expect(tab.body).not.toMatch(/text-overflow/);
+    expect(tab.decls['overflow']).toBeUndefined();
+    expect(tab.decls['white-space']).toBe('nowrap');
+    // 0 바탕(flex-basis 0)이면 좁은 사이드바에서 이름보다 작아진다: 이름 길이를 바탕으로 늘어나기만 한다
+    expect(tab.decls['flex']).toBe('1 0 auto');
+    expect(ruleFor('.sidebar-tabs')!.decls['flex-wrap']).toBe('wrap');
+  });
+
   it('긴 노트 이름은 사이드바를 밀지 않고 말줄임된다', () => {
     const row = ruleFor('.note-tree [role="treeitem"]');
     expect(row).not.toBeNull();
