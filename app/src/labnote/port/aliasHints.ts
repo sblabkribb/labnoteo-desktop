@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/commands.ts:332-439 sha256:6d160ba5da070d7b
 // Ported from app/vendor/labnoteo/src/commands.ts:1322-1341 sha256:b38bc58dad3f9b74
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: catalogDescription(id, description) -> catalogDescription(id, description, locale); `getObsidianLanguage()` -> the `locale` parameter.
 // Changes: catalogKoFields is exported and takes a `locale` parameter instead of reading `getObsidianLanguage()`.
 // Changes: readChecklistLabels takes `LabnoteFs`; README is imported from ../paths; the imports below replace the top of commands.ts.

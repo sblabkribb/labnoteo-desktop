@@ -2,7 +2,7 @@
 // Ported from app/vendor/labnoteo/src/sampleDefinitionModal.ts:91-102 sha256:0f6a27425d2b7bf4
 // Ported from app/vendor/labnoteo/src/sampleDefinitionModal.ts:104-265 sha256:6fcaff52416d91f2
 // Ported from app/vendor/labnoteo/src/sampleDefinitionModal.ts:337-383 sha256:d4cd29fabdc9e9da
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: the Modal becomes a pure model plus a React view (samples/SampleDefinitionDialog.tsx) that only returns the chosen action (D16); the flows run in the command (Task 24). plugin.t → env.t; plugin.settings.globalSampleFolder → env.globalFolder(). moveTarget is a function of env, the definition and {docPath, localFolder}. onOpen's rows become SampleDefinitionModel.rows, with renderDescriptions (one row per description, its defining notes as `sources`) and renderDefinedIn (the `sources` basenames as the value, not links) folded in; its buttons become the action list in vendor order. The partbank actions (Refresh storage location, Open in partbank) are dropped (SP6); the partbank row stays as display. "Open JSON file" opens the file in the app (env.openFile), so it is offered for a catalog too and does not depend on Platform.isDesktopApp. The title names the ID after 'Sample definition'. The catalog's read-only sentence is `notice`. renderUsages becomes groupUsages: the grouping, folder order and labels are the vendor's, and the view renders the <details> with the first OPEN_USAGE_GROUPS open; every spot is a link (the spots come from notes that exist), named by the path's basename without `.md` (Obsidian TFile.basename).
 import type { Translator } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';

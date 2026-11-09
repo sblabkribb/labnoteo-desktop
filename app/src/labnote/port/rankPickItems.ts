@@ -1,5 +1,5 @@
 // Ported from app/vendor/labnoteo/src/modals.ts:28-88 sha256:eabb6bd0568e5688
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: only the ranking functions (pickRank, startsWordWithoutSpaces, rankPickItems, withSelectedFirst); the Obsidian modals are not copied.
 // Changes: `PickItem` is imported from @labnoteo/core here; the source imports it at the top of modals.ts.
 

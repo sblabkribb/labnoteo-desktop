@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/catalogUpdate.ts:1-274 sha256:00b633f3725a2f29
 // Ported from app/vendor/labnoteo/src/scaffold/installRecord.ts:23-35 sha256:fb61007dfb9f5706
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: getObsidianLanguage() -> getLang() (the app language, '../../i18n/lang').
 // Changes: contentHash is copied from src/scaffold/installRecord.ts (below the imports) instead of imported, because installRecord.ts reaches scaffold assets.
 // Changes: "this plugin version" in the confirm text stays the plugin key verbatim, so the Korean list translates it.

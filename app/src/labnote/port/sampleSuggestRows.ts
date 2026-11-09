@@ -1,5 +1,5 @@
 // Ported from app/vendor/labnoteo/src/sampleSuggest.ts:146-213 sha256:ffe8c1689dc4d910
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: returns rows instead of SuggestEntry; partbank branch removed (SP6 registers a SampleCandidateSource); plugin → SampleEnv. getSuggestions is split into existingRows (record merge, sort, existing/discarded split) and actionKinds (the create actions); the record loader and catalog check are injected (cached in samples/sources.ts); the trigger comes parsed in the SampleQuery, and the Local folder is the query note's (noteLabsamplesFolder(q.notePath), which equals plugin.localSampleFolder() for the active .md note).
 import { buildSampleCompletionEntries, type SampleCandidate, type SampleTrigger } from '@labnoteo/core';
 import { compareSamples, isCatalogSampleType, sampleSuggestActions } from '@labnoteo/core/lib/sampleUtils';

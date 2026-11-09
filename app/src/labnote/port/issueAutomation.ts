@@ -3,7 +3,7 @@
 // Ported from app/vendor/labnoteo/src/scaffold/assets.ts:135-135 sha256:355b1a34877427ad
 // Ported from app/vendor/labnoteo/src/scaffold/scaffold.ts:395-402 sha256:996d8f9d46a05b9e
 // Ported from app/vendor/labnoteo/src/commands.ts:1052-1070 sha256:c4af1f6a018f77e1
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: only these constants and functions; assets.ts and scaffold.ts import the bundled templates (dist-automation/), which the app does not have.
 // Changes: `LABNOTEO_DIR` is not exported (only SETUP_DOC_PATH uses it here).
 // Changes: `host: LabnoteHost` -> `host: Pick<LabnoteHost, 'fs'>` in all three functions.

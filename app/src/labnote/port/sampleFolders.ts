@@ -1,5 +1,5 @@
 // Ported from app/vendor/labnoteo/src/main.ts:3332-3357 sha256:9de7584691c80346
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: the LabnotePlugin methods become module functions; `this.activeNotePath()` is the `activePath` parameter, `this.settings.globalSampleFolder` the `globalFolder` parameter, and `this.lastExperimentDir` a module variable; `rememberExperiment` is added as the test reset.
 import { resolveLocalSampleFolder } from '@labnoteo/core/lib/sampleStorage';
 

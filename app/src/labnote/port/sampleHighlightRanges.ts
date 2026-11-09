@@ -1,7 +1,7 @@
 // Ported from app/vendor/labnoteo/src/sampleHighlight.ts:40-67 sha256:23311c4c48e8a6a5
 // Ported from app/vendor/labnoteo/src/sampleHighlight.ts:78-107 sha256:cd226ae8ef546144
 // Ported from app/vendor/labnoteo/src/sampleHighlight.ts:109-215 sha256:4007eec8f1158ad6
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: sample checks only (issue markers dropped); colour → sampleTypeClass instead of an inline style (CSP); returns plain ranges for a CM6 ViewPlugin; definedIds passed in.
 // Changes: HighlightState and MarkerOptions keep only their sample members (colors, the marker, duplicate, comment and malformed members go with the markers); collectTokenRanges loses its `colors` parameter, adds sampleTypeClass(type) after the ID class and uses the app's lno-* class names; sampleTokenRanges is the app's entry point over these.
 import { findSampleIdRanges, staleSampleAliasEnd } from '@labnoteo/core';

@@ -1,5 +1,5 @@
 // Ported from app/vendor/labnoteo/src/sampleIdIndex.ts:13-194 sha256:46ae174b880183b1
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: none (imports only).
 /**
  * The sample IDs each lab note can resolve, for marking a reference to a
