@@ -914,3 +914,12 @@ button.links-target:focus-visible { outline-offset: -2px; }
 .scan-thumb { display: block; max-width: 220px; max-height: 220px; }
 .scan-zoom { display: block; width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-out; }
 .scan-zoom img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
+/* 바코드와 스캔 설정(Task 29): 스캔 폴더 경로는 읽기 전용 고정폭 글(길면 줄바꿈), 단추 줄, 화질 막대와 그 값, Slack 앱 만드는 법은 줄마다 */
+.scan-folder-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.scan-folder-path { flex: 1 1 14rem; min-width: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.scan-number { width: 8rem; }
+.scan-quality { display: flex; align-items: center; gap: var(--space-2); }
+.scan-quality input[type="range"] { flex: 1 1 12rem; min-width: 0; }
+.scan-quality output { flex: none; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+.scan-howto summary { cursor: pointer; }
+.scan-howto .prompt-hint { white-space: pre-line; }

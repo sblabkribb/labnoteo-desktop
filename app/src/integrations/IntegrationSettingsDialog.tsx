@@ -11,6 +11,7 @@ import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
 import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
+import { ScanSettingsSection } from '../labnote/scan/ScanSettingsSection';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -38,6 +39,10 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: [...s.allowHttpOrigins],
+    worksheetPaperSize: s.worksheetPaperSize,
+    scanMaxImageEdge: s.scanMaxImageEdge,
+    scanJpegQuality: s.scanJpegQuality,
+    scanEmbedWidth: s.scanEmbedWidth,
   };
 }
 
@@ -147,6 +152,8 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
     bfw: useRef<HTMLInputElement>(null),
   };
   const first = useRef<HTMLDivElement>(null);
+  /** 섹션이 맡긴, 아직 떠나지 않은 칸의 저장(플러그인 ctx.onHide). 닫기 전에 부른다. */
+  const hideCommits = useRef<Array<() => Promise<void>>>([]);
 
   useEffect(() => {
     let live = true;
@@ -217,6 +224,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
       await commitEndpoint(valRef.current.llmProvider === 'ollama' ? 'llmEndpointOllama' : 'llmEndpointOpenai');
       await commitModel();
     }
+    for (const commit of hideCommits.current) await commit();
   };
 
   const toggleAllow = (origin: string) => {
@@ -469,6 +477,17 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
             })}
           />
         </section>
+
+        {/* SP7 Part B: 바코드와 스캔, Slack(Task 29) */}
+        <ScanSettingsSection
+          deps={deps}
+          secrets={status}
+          onSecrets={setStatus}
+          onLeave={close}
+          onHide={(commit) => {
+            if (!hideCommits.current.includes(commit)) hideCommits.current.push(commit);
+          }}
+        />
       </div>
       <div className="dialog-actions">
         <button type="button" className="primary" onClick={() => void close()}>

@@ -405,6 +405,18 @@ const ko: Record<string, string> = {
   'scan.slackMissingScope':
     '봇 토큰에 권한이 빠졌습니다. Slack 앱의 OAuth & Permissions에서 Bot Token Scopes에 {0}을(를) 추가하고 앱을 다시 설치하세요.',
   'scan.slackCheckFailed': 'Slack 스캔을 확인하지 못했습니다({0}). 연동 설정 → 바코드와 스캔의 Slack 항목에서 봇 권한을 확인하세요.',
+  // 바코드와 스캔 설정(SP7 Task 29): 폴더는 Rust 의 고르기 창으로만 고른다. 보관함 안의 폴더는 공유 폴더로만(B4), 토큰은 자격 증명 관리자에만(B6)
+  'scan.chooseFolder': '폴더 고르기',
+  'scan.clearFolder': '지우기',
+  'scan.tokenPerUser': '토큰은 이 PC의 Windows 자격 증명 관리자에 하나만 저장됩니다. 연결한 보관함에서만 Slack을 확인합니다.',
+  'scan.insideVault':
+    '이 폴더는 보관함 안에 있어 원본 사진이 파일 목록과 git에도 보입니다. 보관함 안의 폴더는 공유 폴더로만 쓸 수 있습니다. 보관함 밖의 폴더가 더 좋습니다.',
+  'scan.vaultRootRefused': '보관함 맨 위 폴더는 스캔 폴더로 쓸 수 없습니다.',
+  'scan.slackTokenHelp': '직접 만든 Slack 앱의 Bot User OAuth Token(xoxb-…)입니다. 이 PC에만 저장됩니다. 필요한 권한: {0}.',
+  'scan.slackTokenKept': '봇 토큰은 이 PC에 그대로 있습니다. 다른 보관함에서 쓰지 않으면 키 지우기로 지우세요.',
+  'scan.slackHowToTitle': 'Slack 앱 만드는 법',
+  'scan.slackHowTo':
+    '1. api.slack.com/apps에서 Create New App → From scratch로 앱을 만들고 워크스페이스를 고릅니다.\n2. OAuth & Permissions의 Bot Token Scopes에 추가합니다. DM으로 보낼 때: {0}. 비공개 채널로 보낼 때: {1}. 권장: {2}.\n3. DM으로 보낼 때는 App Home에서 Messages 탭을 켜고 메시지 보내기를 허용합니다.\n4. Install to Workspace를 누르고 Bot User OAuth Token(xoxb-…)을 복사해 위 칸에 붙여 넣습니다.\n5. 비공개 채널로 보낼 때는 그 채널에서 /invite @봇이름 을 실행합니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -810,6 +822,17 @@ const en: Record<string, string> = {
   'scan.slackMissingScope':
     'The bot token is missing a permission. Add {0} to Bot Token Scopes under OAuth & Permissions of your Slack app and reinstall it.',
   'scan.slackCheckFailed': 'Slack scans: checking failed ({0}). Check the bot permissions in the Slack part of Integration settings → Barcode & scans.',
+  'scan.chooseFolder': 'Choose folder',
+  'scan.clearFolder': 'Clear',
+  'scan.tokenPerUser': 'The token is kept once in Windows Credential Manager on this PC. Only vaults you connect check Slack.',
+  'scan.insideVault':
+    'This folder is inside the vault, so the original photos also show in the file tree and in git. A folder inside the vault can only be a shared folder. A folder outside the vault is better.',
+  'scan.vaultRootRefused': 'The vault folder itself cannot be the scan folder.',
+  'scan.slackTokenHelp': 'The Bot User OAuth Token (xoxb-…) of a Slack app you made for yourself. Stored on this PC only. Scopes it needs: {0}.',
+  'scan.slackTokenKept': 'The bot token is still stored on this PC. If no other vault uses it, remove it with Remove key.',
+  'scan.slackHowToTitle': 'How to make the Slack app',
+  'scan.slackHowTo':
+    '1. At api.slack.com/apps, choose Create New App → From scratch and pick your workspace.\n2. Under OAuth & Permissions, add Bot Token Scopes. For direct messages: {0}. For a private channel: {1}. Recommended: {2}.\n3. For direct messages, turn on the Messages tab in App Home and allow sending messages.\n4. Choose Install to Workspace, copy the Bot User OAuth Token (xoxb-…) and paste it above.\n5. For a private channel, run /invite @your-bot in that channel.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

@@ -55,7 +55,10 @@ export type OverrideKey =
   | 'scan.setFolderFirst'
   // Slack 받은 편지함: 플러그인 문장의 "Add the scopes in docs/SCAN.md" 와 "See the Slack section of docs/SCAN.md" 대신(SP7 B11)
   | 'scan.slackMissingScope'
-  | 'scan.slackCheckFailed';
+  | 'scan.slackCheckFailed'
+  // 바코드와 스캔 설정(SP7 Task 29): 플러그인 문장의 "show up in Obsidian" 과 "See docs/SCAN.md for the steps" 대신(B4, B11)
+  | 'scan.insideVault'
+  | 'scan.slackTokenHelp';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

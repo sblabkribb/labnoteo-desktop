@@ -158,6 +158,11 @@ export class ScanFeature {
     }
   }
 
+  /** How many pages wait in the unmatched queue (the settings section's "Unmatched scans" row). */
+  async unmatchedCount(): Promise<number> {
+    return (await this.unmatchedIo.list()).length;
+  }
+
   /** One batch at a time: a batch started while another runs waits for it. */
   runWithProgress(inputs: ScanInput[], skipNoQr: boolean, manual: boolean): Promise<ScanResult[]> {
     return this.runs.runWithProgress(inputs, skipNoQr, manual);

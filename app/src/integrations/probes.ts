@@ -25,6 +25,11 @@ export type IntegrationSettingsValue = Pick<
   | 'bfwUrl'
   | 'bfwConnection'
   | 'allowHttpOrigins'
+  // SP7 Part B: the "Barcode & scans" section (Task 29)
+  | 'worksheetPaperSize'
+  | 'scanMaxImageEdge'
+  | 'scanJpegQuality'
+  | 'scanEmbedWidth'
 >;
 
 export type ProbeId = 'partbankDesktop' | 'partbankWeb' | 'llm' | 'bfw';
