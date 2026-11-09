@@ -35,6 +35,29 @@ export function openNote(path: string): EditorHandle | undefined {
   return registry.get(keyOf(path));
 }
 
+type WriteListener = (path: string) => void;
+const writeListeners = new Set<WriteListener>();
+
+/**
+ * processNote 가 닫힌 노트의 글을 바꿔 썼다는 알림(경로 하나). 열린 노트에 쓴 것은 편집기의 변경으로 따로 보인다.
+ * 샘플 동기화(samples/sync.ts)가 듣는다.
+ */
+export const noteWrites = {
+  emit(path: string): void {
+    for (const fn of [...writeListeners]) {
+      try {
+        fn(path);
+      } catch (e) {
+        console.error('[noteWrites] listener failed', e);
+      }
+    }
+  },
+  subscribe(fn: WriteListener): () => void {
+    writeListeners.add(fn);
+    return () => void writeListeners.delete(fn);
+  },
+};
+
 const COMMAND_EDIT = () => [isolateHistory.of('full'), Transaction.userEvent.of('input.labnote')];
 
 /**
@@ -92,6 +115,7 @@ export async function processNote(fs: AppFs, path: string, transform: (text: str
     changed = next !== current;
     return next;
   });
+  if (changed) noteWrites.emit(path);
   return changed;
 }
 

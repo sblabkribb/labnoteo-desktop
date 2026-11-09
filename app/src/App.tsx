@@ -31,6 +31,7 @@ import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSample
 import { createSampleEnv } from './samples/env';
 import { installSampleActionRunners } from './samples/actionRunners';
 import { registerSampleSources } from './samples/sources';
+import { samplesSync, setSampleSyncEnv } from './samples/sync';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
@@ -58,6 +59,7 @@ import { renameEvents } from './links/renameWithLinks';
 import { deleteEvents } from './labnote/commands/fileOps';
 import { currentDialog } from './labnote/host/dialogStore';
 import { subscribeVaultChanges, type ListenFn } from './vault/useVaultEvents';
+import { useVaultChanges } from './labnote/panel/useVaultChanges';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 
 type SidebarTab = 'files' | 'workflows' | 'outline' | 'links';
@@ -279,6 +281,16 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     navigate: (dir) => void navFns.go(dir),
   });
   usePaletteHotkey(ctx);
+  // 저장 때의 샘플 동기화(D12)가 쓸 SampleEnv. 맥락이 바뀌거나 보관함 화면이 내려가면, 기다리던 동기화를 그 맥락으로 먼저 돌린다.
+  useEffect(() => {
+    setSampleSyncEnv(() => ctx && createSampleEnv(ctx));
+    return ctx ? () => void samplesSync.flush() : undefined;
+  }, [ctx]);
+  // 앱 밖에서 고친 노트(감시자의 변경)도 동기화한다. 지워진 노트는 읽지 못해 아무것도 하지 않는다.
+  useVaultChanges((paths) => {
+    if (paths === 'all') return;
+    for (const p of paths) if (p.endsWith('.labnote.md')) samplesSync.touchPath(p);
+  });
   // 설정을 읽은 뒤 보관함마다 한 번: 번들 카탈로그가 바뀌었으면 알린다. 여는 것을 막지 않는다(기다리지 않고, 던지지 않는다).
   const catalogNoticed = useRef(false);
   useEffect(() => {

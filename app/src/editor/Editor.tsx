@@ -41,6 +41,7 @@ import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { VAULT_CHANGED, type ListenFn } from '../vault/useVaultEvents';
 import { lineSeparatorOf, loadDocument, parseRaw, saveDocument, toRaw, type LoadedDocument } from './documentIo';
 import { registerOpenNote } from '../labnote/openNotes';
+import { samplesSync } from '../samples/sync';
 import { captureFocus } from '../ui/returnFocus';
 import { extractOutline, type OutlineItem } from './outline/extract';
 import { clearOutline, publishCursor, publishOutline } from './outline/outlineStore';
@@ -622,6 +623,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       linkClickHandler(linkDeps),
       keymap.of([{ key: 'Alt-Enter', run: followLinkAtCursor(linkDeps) }]),
       lock.current.of(locked.current ? LOCKED : []),
+      // 샘플 동기화(D12): 본문이 바뀔 때마다 이 노트의 `{Type}.json` 쓰기를 800 ms 미룬다. 모드 칸 밖이라 두 모드 모두에서 듣는다.
+      // 표 칸 편집기에는 싣지 않는다: 칸의 변경은 바깥 편집기의 변경으로 다시 온다. 조합 중이면 때가 되어도 다시 미룬다.
+      EditorView.updateListener.of((u) => {
+        if (u.docChanged) samplesSync.touch(path, u.view);
+      }),
       EditorView.updateListener.of((u) => {
         // 선택 없이 위쪽 줄이 바뀌어도 커서의 줄 번호는 움직인다(한 프레임에 한 번)
         if (u.selectionSet || u.docChanged) publishCursorLine();
