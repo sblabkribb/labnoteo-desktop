@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/sampleActions.ts:1617-1812 sha256:137eabce6c61d0e2
 // labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info', m) without the duration ('warn' for 'Sample not found' and the two move refusals); pickModal(app, items, opts) → env.host.pick(items, opts); confirmModal(app, m, label, opts) → env.host.confirm(m, { confirmLabel: label, ...opts }); plugin.fs → env.fs (safeRegistryFs, D13); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.refreshSampleViews() → env.changed([written registries]); processNoteThroughVault → env.processNote. Both flows refuse an unreadable (conflicted) registry with RegistryUnreadableError: the source registry before the first question, the destination registry (folder/newType.json, or toFolder/type.json) before the confirmation, so no note is rewritten and no record is deleted for a write that would be refused. The open-editor branch of changeSampleTypeInteractive is folded into env.processNote, which re-plans on an open note's live buffer and applies the change as one transaction (one undo step per note); ScopedNote has no editor (sampleScope.ts). planNotesInScope comes from sampleDelete.ts and storedAlias from sampleCreate.ts.
+// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info', m) without the duration ('warn' for 'Sample not found' and the two move refusals); pickModal(app, items, opts) → env.host.pick(items, opts); confirmModal(app, m, label, opts) → env.host.confirm(m, { confirmLabel: label, ...opts }); plugin.fs → env.fs (safeRegistryFs, D13); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.refreshSampleViews() → env.changed([written registries]); processNoteThroughVault → env.processNote. Both flows refuse an unreadable (conflicted) registry with RegistryUnreadableError: the source registry before the first question, the destination registry (folder/newType.json, or toFolder/type.json) before the confirmation, so no note is rewritten and no record is deleted for a write that would be refused. The open-editor branch of changeSampleTypeInteractive is folded into env.processNote, which re-plans on an open note's live buffer and applies the change as one transaction (one undo step per note); ScopedNote has no editor (sampleScope.ts). planNotesInScope comes from sampleDelete.ts and storedAlias from sampleCreate.ts. changeSampleTypeInteractive skips a note whose env.processNote rejects with NoteBusyError (an open note that is saving or composing), rewrites the rest, names the skipped notes in the final notice (app key samples.busySkipped), and calls env.changed in a finally, so the views refresh even when the loop stops.
 import { generateSampleId, getSampleDisplayMeta } from '@labnoteo/core/lib/sampleUtils';
 import {
   applyAliasRewrite,
@@ -15,6 +15,8 @@ import {
   type AliasRewriteEdit,
 } from '@labnoteo/core/lib/sampleStorage';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
+import { t as appT } from '../../i18n/t';
+import { NoteBusyError } from '../noteErrors';
 import { assertRegistryReadable, type SampleEnv } from '../../samples/env';
 import { storedAlias } from './sampleCreate';
 import { planNotesInScope } from './sampleDelete';
@@ -80,18 +82,34 @@ export async function changeSampleTypeInteractive(
   if (held > 0) message += `\n\n${heldNotesSentence(env, held)}`;
   if (!(await env.host.confirm(message, { confirmLabel: env.t('Change type') }))) return false;
 
-  await putSampleRecord(env.fs, folder, newType, newId, { ...record, type: newType });
-  await deleteSampleRecord(env.fs, folder, type, id);
   let updated = 0;
-  for (const note of planned) {
-    // Re-planned on the live text (an open note's buffer), as one transaction so one undo reverts the note.
-    if (await env.processNote(note.path, (content) => applyAliasRewrite(content, plan(content)))) updated++;
+  const busy: string[] = [];
+  try {
+    await putSampleRecord(env.fs, folder, newType, newId, { ...record, type: newType });
+    await deleteSampleRecord(env.fs, folder, type, id);
+    for (const note of planned) {
+      // Re-planned on the live text (an open note's buffer), as one transaction so one undo reverts the note.
+      // A busy open note is skipped, not fatal: the record has already moved, so the other notes still need the new id.
+      try {
+        if (await env.processNote(note.path, (content) => applyAliasRewrite(content, plan(content)))) updated++;
+      } catch (err) {
+        if (!(err instanceof NoteBusyError)) throw err;
+        busy.push(note.path);
+      }
+    }
+  } finally {
+    env.changed([`${folder}/${newType}.json`, `${folder}/${type}.json`]);
   }
-  env.changed([`${folder}/${newType}.json`, `${folder}/${type}.json`]);
   const done = env.t('Changed {0} to {1}.', id, newId);
   // Ctrl+Z reverts a note but not the record, leaving the old id unregistered (#151).
   const undo = env.t('Ctrl+Z only reverts the note, not the sample record. To undo, change the type again.');
-  env.host.notify('info', planned.length > 0 ? `${done} ${env.t('{0} note(s) updated.', String(updated))} ${undo}` : done);
+  const skipped = busy.length > 0 ? appT('samples.busySkipped', String(busy.length), busy.join(', ')) : '';
+  env.host.notify(
+    'info',
+    planned.length > 0
+      ? [done, env.t('{0} note(s) updated.', String(updated)), skipped, undo].filter(Boolean).join(' ')
+      : done,
+  );
   return true;
 }
 

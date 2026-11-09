@@ -2,7 +2,7 @@
 // Ported from app/vendor/labnoteo/src/sampleActions.ts:1029-1075 sha256:0f5f71b2947392f8
 // Ported from app/vendor/labnoteo/src/sampleActions.ts:1348-1437 sha256:5a5e731b8052d094
 // labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info', m) without the duration ('warn' for 'Sample not found'); promptModal/confirmModal(app, …, label, opts) → env.host.prompt/confirm(…, { confirmLabel: label, ...opts }); plugin.host.pick → env.host.pick; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.refreshSampleViews() → env.changed([written registry]); plugin.host.editTarget() → env.editTarget(); processNoteThroughVault → env.processNote. editSampleInteractive refuses an unreadable (conflicted) registry with RegistryUnreadableError before the first prompt, as the create flow does. The reading-view branch of the definition sync is dropped: the app has no reading view, so the active note's definition is replaced through its edit target (one undo step). rewriteStaleAliases has no open-editor branch: ScopedNote has no editor (sampleScope.ts), and env.processNote re-plans on an open note's live buffer and applies the change as one transaction (one undo step per note). otherExperimentsWithSample (1011-1027) was ported ahead in sampleQuery.ts (Task 18) and is imported from there.
+// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info', m) without the duration ('warn' for 'Sample not found'); promptModal/confirmModal(app, …, label, opts) → env.host.prompt/confirm(…, { confirmLabel: label, ...opts }); plugin.host.pick → env.host.pick; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.refreshSampleViews() → env.changed([written registry]); plugin.host.editTarget() → env.editTarget(); processNoteThroughVault → env.processNote. editSampleInteractive refuses an unreadable (conflicted) registry with RegistryUnreadableError before the first prompt, as the create flow does. The reading-view branch of the definition sync is dropped: the app has no reading view, so the active note's definition is replaced through its edit target (one undo step). rewriteStaleAliases has no open-editor branch: ScopedNote has no editor (sampleScope.ts), and env.processNote re-plans on an open note's live buffer and applies the change as one transaction (one undo step per note). otherExperimentsWithSample (1011-1027) was ported ahead in sampleQuery.ts (Task 18) and is imported from there. rewriteStaleAliases skips a note whose env.processNote rejects with NoteBusyError (an open note that is saving or composing), rewrites the rest, and names the skipped notes in its sentence (app key samples.busySkipped).
 import { buildSampleDefinitionText, sampleAliasProblem } from '@labnoteo/core/lib/sampleUtils';
 import {
   applyAliasRewrite,
@@ -18,6 +18,8 @@ import {
 } from '@labnoteo/core/lib/sampleStorage';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
+import { t as appT } from '../../i18n/t';
+import { NoteBusyError } from '../noteErrors';
 import { assertRegistryReadable, type SampleEnv } from '../../samples/env';
 import { confirmAliasClash, confirmLocationClash } from './sampleCreate';
 import { sampleListHeaders, updateSampleListTables } from './sampleListTable';
@@ -226,16 +228,24 @@ async function rewriteStaleAliases(
   }
 
   let updated = 0;
+  const busy: string[] = [];
   for (const note of planned) {
     // Re-planned on the live text (an open note's buffer: the user may have
     // typed meanwhile), as one transaction so a single undo reverts the note.
-    if (
-      await env.processNote(note.path, (content) =>
-        applyAliasRewrite(content, planAliasRewrite(content, type, id, oldAlias, newAlias, sampleListHeaders(env))),
-      )
-    ) {
-      updated++;
+    // A busy open note is skipped, not fatal: the other notes still get the new alias.
+    try {
+      if (
+        await env.processNote(note.path, (content) =>
+          applyAliasRewrite(content, planAliasRewrite(content, type, id, oldAlias, newAlias, sampleListHeaders(env))),
+        )
+      ) {
+        updated++;
+      }
+    } catch (err) {
+      if (!(err instanceof NoteBusyError)) throw err;
+      busy.push(note.path);
     }
   }
-  return env.t('{0} note(s) updated.', String(updated));
+  const done = env.t('{0} note(s) updated.', String(updated));
+  return busy.length > 0 ? `${done} ${appT('samples.busySkipped', String(busy.length), busy.join(', '))}` : done;
 }

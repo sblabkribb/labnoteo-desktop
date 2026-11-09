@@ -10,7 +10,8 @@ import { undo } from '@codemirror/commands';
 import { getLang, setLang } from '../../i18n/lang';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { editSampleInteractive, setSampleDiscardedInteractive } from '../../labnote/port/sampleEdit';
-import { createSampleEnv, RegistryUnreadableError, sampleEvents } from '../env';
+import { NoteBusyError } from '../../labnote/noteErrors';
+import { createSampleEnv, RegistryUnreadableError, sampleEvents, type SampleEnv } from '../env';
 import { CONFLICTED, koListHeader, LOCAL, NOTE, SAMPLE_VAULT } from './fixtures';
 
 const A = 'labnote/001_Test';
@@ -66,6 +67,30 @@ describe('editSampleInteractive alias rewrite (vendor)', () => {
     expect(th.vault.files()[`${A}/002_WD020_B.labnote.md`]).toBe('RNA-1;siKIF 를 처리했다\n');
     expect(th.vault.files()[`${B}/001_WD010_C.labnote.md`]).toBe('RNA-1;si KIF\n');
     expect(lastNotice(th)).toBe('Sample updated: RNA-1 2 note(s) updated.');
+    expect(events).toContainEqual([REGISTRY]);
+  });
+
+  it('skips a note busy in the editor, rewrites the rest and names it in the notice', async () => {
+    const busy = `${A}/001_WD010_A.labnote.md`;
+    const th = host({
+      [busy]: '@rna;RNA-1;si KIF;kd\n',
+      [`${A}/002_WD020_B.labnote.md`]: 'RNA-1;si KIF 를 처리했다\n',
+    });
+    th.answer.confirm(true);
+    th.answer.prompt('siKIF', 'kd', '');
+    const env = createSampleEnv(th.ctx);
+    const busyEnv: SampleEnv = {
+      ...env,
+      processNote: (p, f) => (p === busy ? Promise.reject(new NoteBusyError(p)) : env.processNote(p, f)),
+    };
+
+    expect(await editSampleInteractive(busyEnv, { folder: FOLDER, type: 'RNA', id: 'RNA-1', record: RECORD })).toBe(true);
+
+    expect(th.vault.files()[busy]).toBe('@rna;RNA-1;si KIF;kd\n');
+    expect(th.vault.files()[`${A}/002_WD020_B.labnote.md`]).toBe('RNA-1;siKIF 를 처리했다\n');
+    expect(lastNotice(th)).toBe(
+      `Sample updated: RNA-1 1 note(s) updated. 1 note(s) were busy in the editor and were left unchanged: ${busy}.`,
+    );
     expect(events).toContainEqual([REGISTRY]);
   });
 

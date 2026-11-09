@@ -10,7 +10,8 @@ import { getLang, setLang } from '../../i18n/lang';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { changeSampleTypeInteractive, moveSampleInteractive } from '../../labnote/port/sampleMove';
 import type { SampleScope } from '../../labnote/port/sampleScope';
-import { createSampleEnv, RegistryUnreadableError, sampleEvents } from '../env';
+import { NoteBusyError } from '../../labnote/noteErrors';
+import { createSampleEnv, RegistryUnreadableError, sampleEvents, type SampleEnv } from '../env';
 import { CONFLICTED, GLOBAL, LOCAL, NOTE, SAMPLE_VAULT } from './fixtures';
 
 let hosts: TestHost[] = [];
@@ -279,6 +280,28 @@ describe('changeSampleTypeInteractive (vendor)', () => {
     expect(json(th, REGISTRY)).toHaveProperty('RNA-1');
     expect(th.vault.files()[`${FOLDER}/Plasmid.json`]).toBeUndefined();
     expect(th.vault.files()[`${A}/001_WD010_A.labnote.md`]).toBe('@rna;RNA-1;pUC19;vector\n');
+  });
+
+  it('skips a note busy in the editor, rewrites the rest, names it, and still refreshes the views', async () => {
+    const th = host(files());
+    th.answer.pick('Plasmid');
+    th.answer.confirm(true);
+    const busy = `${A}/001_WD010_A.labnote.md`;
+    const env = createSampleEnv(th.ctx);
+    const busyEnv: SampleEnv = {
+      ...env,
+      processNote: (p, f) => (p === busy ? Promise.reject(new NoteBusyError(p)) : env.processNote(p, f)),
+    };
+
+    expect(await changeSampleTypeInteractive(busyEnv, { folder: FOLDER, type: 'RNA', id: 'RNA-1' })).toBe(true);
+
+    expect(json(th, `${FOLDER}/Plasmid.json`)).toHaveProperty('Plasmid-1');
+    expect(th.vault.files()[busy]).toBe('@rna;RNA-1;pUC19;vector\n');
+    expect(th.vault.files()[`${A}/002_WD020_B.labnote.md`]).toBe('used Plasmid-1;pUC19 and RNA-12\n');
+    expect(events).toHaveLength(1);
+    const notice = th.notes.at(-1)?.message ?? '';
+    expect(notice).toContain('1 note(s) updated.');
+    expect(notice).toContain(`1 note(s) were busy in the editor and were left unchanged: ${busy}.`);
   });
 
   it('does not offer the current type', async () => {
