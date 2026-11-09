@@ -1,0 +1,31 @@
+import type { AppFs } from '../../fs/tauriLabnoteFs';
+import { processNote } from '../openNotes';
+import type { NoteIdSource } from '../port/noteIdService';
+import type { NoteIdIndex, NoteRef } from './noteIdIndex';
+
+/**
+ * 앱의 NoteIdSource: 노트 목록과 ID 는 노트 ID 색인에서, 읽기와 쓰기는 편집기를 아는 fs(editorAwareFs)로.
+ * 쓰기는 processNote 다: 열린 노트는 버퍼에 최소 교체로 넣고 저장하며, 바쁘거나 한글 조합 중이면 NoteBusyError 로
+ * 아무것도 바꾸지 않는다. 닫힌 노트는 비교 후 쓰기이고, 그 사이 지워진 노트는 다시 만들지 않는다(NoteGoneError).
+ * 쓰기를 시도한 뒤에는(실패해도) 그 경로를 색인에서 다시 읽는다.
+ */
+export function appNoteIdSource(index: NoteIdIndex, fs: AppFs): NoteIdSource {
+  return {
+    files: () => index.refs(),
+    idOf: (path) => index.idOf(path),
+    read: (path) => fs.read(path),
+    async process(path, fn) {
+      try {
+        await processNote(fs, path, fn);
+      } finally {
+        await index.refresh(path);
+      }
+    },
+    exists: (path) => index.exists(path),
+  };
+}
+
+/** 색인에 있는 그 경로의 노트. 없으면 undefined. */
+export function noteRef(index: NoteIdIndex, path: string): NoteRef | undefined {
+  return index.refs().find((r) => r.path === path);
+}
