@@ -79,9 +79,10 @@ export function createPageDecoder(output: () => ImageOutput, deps: PageDecoderDe
       const { skipped } = await forEachPdfPage(await deps.pdf(), input.bytes, async page => {
         const hash = shortHash(await sha256Hex(new TextEncoder().encode(`${fileHash}:${page.page}`)));
         if (!page.bitmap) {
-          // Open for Task 25/27 and the user: the User Decision (2026-11-09) words this "unsupported image format in
-          // this PDF" and asks for the page to be queued as unmatched; until then it is an `error` result, which the scan
-          // folder must count as failed so the original stays in place.
+          // Deviates from the User Decision (2026-11-09), which asks for this page to be queued as unmatched: there is
+          // no rendered image to queue (the unmatched queue lists and files images only), so it is an `error` result in
+          // the page's place and the other pages still file. Nothing is deleted: the scan folder moves the original to
+          // labnote-failed/ when no page filed (outcomeOf), otherwise to labnote-processed/.
           await onPage(failedPage(input.name, hash, page.page, t('scan.pdfPageFailed', page.page)));
           return;
         }

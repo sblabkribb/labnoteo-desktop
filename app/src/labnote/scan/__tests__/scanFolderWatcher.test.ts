@@ -100,6 +100,13 @@ describe('watcher helpers', () => {
     expect(outcomeOf([])).toBe('processed');
   });
 
+  it('a PDF with an unreadable page and a filed page counts as processed; all pages unreadable counts as failed', () => {
+    // SMOKE-TEST SP7 step 8: an undecodable PDF page is an `error` result (not queued); the original is kept either way.
+    const r = (status: ScanResult['status']): ScanResult => ({ source: 'scan.pdf', status });
+    expect(outcomeOf([r('filed'), r('error'), r('filed')])).toBe('processed');
+    expect(outcomeOf([r('error'), r('error')])).toBe('failed');
+  });
+
   it('tells a folder inside the vault, whatever the slashes and case', () => {
     expect(isInsideFolder('C:\\Vault\\scans', 'c:/vault')).toBe(true);
     expect(isInsideFolder('C:/Vault', 'C:/Vault/')).toBe(true);
