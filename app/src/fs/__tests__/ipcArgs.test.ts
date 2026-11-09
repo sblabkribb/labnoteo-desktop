@@ -5,7 +5,7 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
-import { listVaultImages, readVaultImage, vaultCreatedTimes, writeVaultImage } from '../vaultImage';
+import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultImage } from '../vaultImage';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
@@ -52,6 +52,7 @@ function recorder() {
       sent.set(cmd, Object.keys(args ?? {}).sort());
     }
     if (cmd === 'vault_write_image') return 'exp/images/p.png';
+    if (cmd === 'scan_write_image') return 'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg';
     if (cmd === 'vault_modify') return { kind: 'ok' };
     if (cmd === 'vault_read') return 'old';
     if (cmd === 'vault_list' || cmd === 'search') return [];
@@ -100,6 +101,9 @@ describe('IPC 인자 이름 계약', () => {
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
+    expect(await writeScanImage('e/images/scans', 'LN-7K3M9QX2_u1_p1_20261015.jpg', new Uint8Array([1]), r.invoke)).toBe(
+      'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg',
+    );
     expect(await vaultCreatedTimes(['a.md'], r.invoke)).toEqual([null]);
     await openInBrowser('note', 'LN-7K3M9QX2', '<p>', r.invoke);
     expect(await readLinkJournal(r.invoke)).toBeNull();
@@ -143,6 +147,22 @@ describe('IPC 인자 이름 계약', () => {
 
   it('래퍼 대기 목록은 픽스처에 있는 커맨드만 담는다', () => {
     for (const cmd of PENDING_TS_WRAPPERS) expect(Object.keys(fixture)).toContain(cmd);
+  });
+
+  it('writeScanImage 는 vault_write_image 와 같은 원시 본문과 퍼센트 인코딩 헤더로 정확한 이름을 보낸다', async () => {
+    const r = recorder();
+    const bytes = new Uint8Array([7, 8]);
+    let body: unknown;
+    const invoke = (async (cmd: string, args?: unknown, options?: { headers?: Record<string, string> }) => {
+      body = args;
+      return (r.invoke as (c: string, a?: unknown, o?: unknown) => Promise<unknown>)(cmd, args, options);
+    }) as never;
+    await writeScanImage('실험/images/scans', 'LN-7K3M9QX2_u1_p1_20261015_2.jpg', bytes, invoke);
+    expect(body).toBe(bytes);
+    expect(r.headers.get('scan_write_image')).toEqual({
+      'x-lno-dir': '%EC%8B%A4%ED%97%98%2Fimages%2Fscans',
+      'x-lno-name': 'LN-7K3M9QX2_u1_p1_20261015_2.jpg',
+    });
   });
 
   it('writeVaultImage 는 바이트를 원시 본문으로, 폴더와 이름은 퍼센트 인코딩한 헤더로 보낸다', async () => {

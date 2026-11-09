@@ -506,6 +506,24 @@ title: 실험
     assert!(raw_call("vault_write_image", vec!["exp", "p.html"], vec![1]).is_err());
     // A JSON body is refused: the bytes must come raw.
     assert!(call("vault_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
+    // Scan images: the same raw protocol, but exactly the name given; a
+    // taken name is `exists` (the TS `freeName` loop picks the next one).
+    assert_eq!(
+        raw_call("scan_write_image", vec!["exp%2Fimages%2Fscans", "LN-7K3M9QX2_u1_p1_20261015.jpg"], vec![5]).unwrap(),
+        json!("exp/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg")
+    );
+    assert_eq!(
+        raw_call("scan_write_image", vec!["exp/images/scans", "LN-7K3M9QX2_u1_p1_20261015.jpg"], vec![6]).unwrap_err()["kind"],
+        "exists"
+    );
+    assert_eq!(
+        std::fs::read(dir.join("vault").join("exp/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg")).unwrap(),
+        vec![5u8],
+        "never overwrites"
+    );
+    assert_eq!(raw_call("scan_write_image", vec!["exp", "p.svg"], vec![1]).unwrap_err()["kind"], "notImage");
+    assert_eq!(raw_call("scan_write_image", vec!["..", "p.png"], vec![1]).unwrap_err()["kind"], "escape");
+    assert!(call("scan_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
     std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
 
     // A misspelled argument is refused rather than ignored.

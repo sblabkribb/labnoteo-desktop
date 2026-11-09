@@ -37,6 +37,7 @@ macro_rules! register_commands {
             $crate::vault::fs::vault_read_image,
             $crate::vault::fs::vault_list_images,
             $crate::vault::fs::vault_write_image,
+            $crate::vault::fs::scan_write_image,
             $crate::vault::settings::settings_vault_read,
             $crate::vault::settings::settings_vault_write,
             $crate::vault::settings::settings_import_plugin,
