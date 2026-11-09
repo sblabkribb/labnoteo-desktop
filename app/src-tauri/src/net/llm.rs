@@ -47,14 +47,33 @@ fn not_configured() -> NetError {
     NetError::new(NetErrorKind::NotConfigured, "no AI provider or endpoint is set")
 }
 
+/// The base of an OpenAI-compatible endpoint: one final path segment exactly
+/// `v1` (case-sensitive, with or without a trailing `/`) is removed, so
+/// `https://host/v1` and `https://gw/openai/v1/` work like `https://host` and
+/// `https://gw/openai` (OpenAI SDK convention). Everything else is unchanged.
+/// The origin never changes, so key binding by origin is unaffected.
+pub fn openai_base(url: &Url) -> Url {
+    let path = url.path();
+    let trimmed = path.strip_suffix('/').unwrap_or(path);
+    match trimmed.strip_suffix("/v1") {
+        Some(rest) => {
+            let mut base = url.clone();
+            base.set_path(rest);
+            base
+        }
+        None => url.clone(),
+    }
+}
+
 /// `<ollama>/api/chat` or `<openai>/v1/chat/completions`, appended as a
-/// string so a gateway base path is kept (vendor `joinUrl`). No provider, or
-/// no valid saved endpoint, is `notConfigured`.
+/// string so a gateway base path is kept (vendor `joinUrl`); a trailing `/v1`
+/// on the OpenAI-compatible endpoint is its base (`openai_base`). No
+/// provider, or no valid saved endpoint, is `notConfigured`.
 pub fn chat_url(kind: LlmKind, cfg: &ServiceConfig) -> Result<Url, NetError> {
     let base = endpoint_of(kind, cfg).ok_or_else(not_configured)?;
     Ok(match kind {
         LlmKind::Ollama => join_path(base, "/api/chat"),
-        _ => join_path(base, "/v1/chat/completions"),
+        _ => join_path(&openai_base(base), "/v1/chat/completions"),
     })
 }
 
@@ -114,7 +133,7 @@ fn matches_model(name: &str, model: &str) -> bool {
 }
 
 /// A connection test of unsaved fields: `GET <endpoint>/api/tags` (Ollama) or
-/// `GET <endpoint>/v1/models` (OpenAI-compatible). The key follows the D8
+/// `GET <openai_base(endpoint)>/v1/models` (OpenAI-compatible). The key follows the D8
 /// probe rule: a non-empty `api_key` as typed, otherwise the keychain key only
 /// when `endpoint` has the saved OpenAI endpoint's origin, otherwise none (a
 /// local OpenAI-compatible server often needs none). Ollama never gets
@@ -148,7 +167,7 @@ pub async fn llm_probe_call(
     };
     let url = match provider {
         LlmKind::Ollama => join_path(&target, "/api/tags"),
-        _ => join_path(&target, "/v1/models"),
+        _ => join_path(&openai_base(&target), "/v1/models"),
     };
     let out = Outgoing {
         method: reqwest::Method::GET,
@@ -443,5 +462,63 @@ mod tests {
         assert_eq!(serde_json::to_value(&p).unwrap(), json!({"models": ["a"], "modelFound": true}));
         let i = Incoming { status: 200, text: "x".into() };
         assert_eq!(serde_json::to_value(&i).unwrap(), json!({"status": 200, "text": "x"}));
+    }
+
+    #[test]
+    fn openai_base_strips_only_a_final_v1_segment() {
+        let b = |u: &str| openai_base(&parse_llm_endpoint(u).unwrap()).to_string();
+        assert_eq!(b("https://host/v1"), "https://host/");
+        assert_eq!(b("https://host/v1/"), "https://host/");
+        assert_eq!(b("https://gw.lab.kr/openai/v1"), "https://gw.lab.kr/openai");
+        assert_eq!(b("https://gw.lab.kr/openai/v1/"), "https://gw.lab.kr/openai");
+        for u in ["https://host/v1x", "https://host/api/v10", "https://host/V1", "https://host/v1/chat/completions", "https://host/openai"] {
+            assert_eq!(b(u), parse_llm_endpoint(u).unwrap().to_string(), "{u}");
+        }
+        // Only one segment is removed.
+        assert_eq!(b("https://host/v1/v1"), "https://host/v1");
+    }
+
+    #[test]
+    fn openai_chat_url_treats_a_trailing_v1_as_the_base() {
+        let c = |o: &str| chat_url(LlmKind::Openai, &cfg(json!({"llmProvider": "openai", "llmEndpointOpenai": o}))).unwrap().to_string();
+        assert_eq!(c("https://host/v1"), "https://host/v1/chat/completions");
+        assert_eq!(c("https://host/v1/"), "https://host/v1/chat/completions");
+        assert_eq!(c("https://gw.lab.kr/openai/v1"), "https://gw.lab.kr/openai/v1/chat/completions");
+        assert_eq!(c("https://host/v1x"), "https://host/v1x/v1/chat/completions");
+        assert_eq!(c("https://host/api/v10"), "https://host/api/v10/v1/chat/completions");
+        assert_eq!(c("https://host/V1"), "https://host/V1/v1/chat/completions");
+        let o = chat_url(LlmKind::Ollama, &cfg(json!({"llmEndpointOllama": "http://localhost:11434/v1"}))).unwrap().to_string();
+        assert_eq!(o, "http://localhost:11434/v1/api/chat");
+    }
+
+    #[test]
+    fn openai_chat_with_v1_endpoint_posts_once_to_v1_chat_completions() {
+        let s = serve(vec![Canned::ok("{}")]);
+        let c = cfg(json!({"llmProvider": "openai", "llmEndpointOpenai": format!("{}/v1", s.url)}));
+        chat(&c, &MemoryStore::default(), LlmKind::Openai, json!({})).unwrap();
+        let reqs = s.requests.lock().unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].path, "/v1/chat/completions");
+    }
+
+    #[test]
+    fn openai_probe_with_v1_endpoint_hits_v1_models_with_the_stored_key() {
+        let s = serve(vec![Canned::ok(r#"{"data":[{"id":"m"}]}"#)]);
+        let c = cfg(json!({"llmProvider": "openai", "llmEndpointOpenai": s.url}));
+        let store = store_with_openai_key(&c, "sk-stored");
+        let p = probe(Some(&c), &store, LlmKind::Openai, &format!("{}/v1", s.url), "m", None).unwrap();
+        assert!(p.model_found);
+        settle();
+        let reqs = s.requests.lock().unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].path, "/v1/models");
+        assert_eq!(reqs[0].header("authorization"), Some("Bearer sk-stored"));
+    }
+
+    #[test]
+    fn ollama_probe_keeps_a_trailing_v1() {
+        let s = serve(vec![Canned::ok(r#"{"models":[]}"#)]);
+        probe(None, &MemoryStore::default(), LlmKind::Ollama, &format!("{}/v1", s.url), "m", None).unwrap();
+        assert_eq!(s.requests.lock().unwrap()[0].path, "/v1/api/tags");
     }
 }
