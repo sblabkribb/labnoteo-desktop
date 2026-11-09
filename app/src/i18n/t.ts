@@ -401,6 +401,10 @@ const ko: Record<string, string> = {
   'scan.tiffAdvice': 'TIFF 스캔이라 열 수 없습니다. 복합기 저장 형식을 PDF나 JPEG로 바꾸세요.',
   'scan.noteBusy': '노트를 30초 동안 편집하고 있어서 붙이지 못했습니다.',
   'scan.setFolderFirst': '먼저 스캔 폴더를 고르세요: 연동 설정 → 바코드와 스캔.',
+  // Slack 받은 편지함(SP7 Task 28): 플러그인 문장은 docs/SCAN.md 를 가리키므로 앱 문장으로, 권한 이름은 그 자리에(B11)
+  'scan.slackMissingScope':
+    '봇 토큰에 권한이 빠졌습니다. Slack 앱의 OAuth & Permissions에서 Bot Token Scopes에 {0}을(를) 추가하고 앱을 다시 설치하세요.',
+  'scan.slackCheckFailed': 'Slack 스캔을 확인하지 못했습니다({0}). 연동 설정 → 바코드와 스캔의 Slack 항목에서 봇 권한을 확인하세요.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -803,6 +807,9 @@ const en: Record<string, string> = {
   'scan.tiffAdvice': 'TIFF scan, which the app cannot open. Set the scanner to save PDF or JPEG.',
   'scan.noteBusy': 'The note was being edited for 30 seconds, so the scan was not filed.',
   'scan.setFolderFirst': 'Set a scan folder first: Integration settings → Barcode & scans.',
+  'scan.slackMissingScope':
+    'The bot token is missing a permission. Add {0} to Bot Token Scopes under OAuth & Permissions of your Slack app and reinstall it.',
+  'scan.slackCheckFailed': 'Slack scans: checking failed ({0}). Check the bot permissions in the Slack part of Integration settings → Barcode & scans.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

@@ -8,7 +8,8 @@
  *   창을 다시 연다(플러그인은 모달을 다시 그린다). 대화상자는 한 번에 하나만 보이므로 고르기 창은 대기열 창을 닫은 뒤에 연다.
  * - 스캔 폴더 감시(port/scanFolderWatcher.ts): `watcher`. 보관함을 열면 start(), 폴더나 방식을 바꾸면 restart(), 닫으면 dispose 가 stop().
  *   지금 처리(processFolderNow)는 사용자가 부른 실행이라 진행 창과 결과 창을 연다. 30초 폴링과 폴더 변경 이벤트는 배경 실행이다.
- * - Task 28 이 `slack` 을 더한다.
+ * - Slack 받은 편지함(port/slackInbox.ts): `slack`. 보관함을 열면 start()(90초마다, 연결을 켠 보관함만), 닫으면 dispose 가 stop().
+ *   Slack 으로 온 사진은 배경 실행이다(대화상자 없음, QR 없는 사진도 결과로 알린다).
  */
 import { listVaultImages, readVaultImage } from '../../fs/vaultImage';
 import type { InvokeFn, ListenFn } from '../../integrations/netIpc';
@@ -23,6 +24,8 @@ import { createPageDecoder } from '../port/pageDecoder';
 import { ScanRuns } from '../port/scanFeatureRuns';
 import { ScanFolderWatcher } from '../port/scanFolderWatcher';
 import { ScanPipeline, unzipScans, type PageDecoder, type PipelineDeps, type ScanInput, type ScanResult } from '../port/scanPipeline';
+import { summarizeResults } from '../port/scanResults';
+import { SlackInbox } from '../port/slackInbox';
 import { assignUnmatched, listUnmatched, type AssignDeps } from '../port/unmatchedScans';
 import { createDecodeClient, type DecodeClient } from './decodeClient';
 import { openImportDialog } from './ImportDialog';
@@ -48,6 +51,8 @@ export class ScanFeature {
   readonly decoder: PageDecoder;
   /** The scan folder watcher: the settings section calls restart() after choosing, clearing or changing the mode. */
   readonly watcher: ScanFolderWatcher;
+  /** The Slack inbox: the settings section calls verify, beginLink and disconnect. */
+  readonly slack: SlackInbox;
   private readonly runs: ScanRuns;
   private readonly notify: typeof notify;
   /** The decode worker this feature started (none when the decoder was handed in). */
@@ -85,6 +90,13 @@ export class ScanFeature {
       notify: (message) => this.notify('info', message),
       invoke: deps.invoke,
       listen: deps.listen,
+    });
+    this.slack = new SlackInbox({
+      run: (inputs) => this.runWithProgress(inputs, false, false),
+      summarize: (results) => summarizeResults(coreT, results),
+      notify: (message) => this.notify('info', message),
+      report: (results) => this.report(results, false),
+      invoke: deps.invoke,
     });
     const images = deps.images ?? { list: () => listVaultImages(), read: (path: string) => readVaultImage(path) };
     this.unmatchedIo = {
@@ -156,9 +168,10 @@ export class ScanFeature {
     this.runs.report(results, manual);
   }
 
-  /** Stops the folder watcher and the decode worker. */
+  /** Stops the folder watcher, the Slack inbox and the decode worker. */
   dispose(): void {
     this.watcher.stop();
+    this.slack.stop();
     this.client?.terminate();
   }
 }

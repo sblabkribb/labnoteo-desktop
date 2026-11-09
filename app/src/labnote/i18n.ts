@@ -52,7 +52,10 @@ export type OverrideKey =
   | 'scan.heicAdvice'
   | 'scan.tiffAdvice'
   // 스캔 폴더가 없을 때: 플러그인 문장의 "Settings → Labnote Assistant → Barcode & scans" 대신 연동 설정(SP7 B11)
-  | 'scan.setFolderFirst';
+  | 'scan.setFolderFirst'
+  // Slack 받은 편지함: 플러그인 문장의 "Add the scopes in docs/SCAN.md" 와 "See the Slack section of docs/SCAN.md" 대신(SP7 B11)
+  | 'scan.slackMissingScope'
+  | 'scan.slackCheckFailed';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {
