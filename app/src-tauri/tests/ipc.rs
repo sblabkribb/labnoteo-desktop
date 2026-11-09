@@ -107,6 +107,12 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("llm_probe", args("llm_probe", vec![json!("ollama"), json!("ftp://x"), json!("m"), Value::Null])).unwrap_err()["kind"],
         "invalidUrl"
     );
+    // bfworkflow: with no vault there is no saved URL to resolve.
+    assert_eq!(call("bfw_base", args("bfw_base", vec![])).unwrap_err()["kind"], "notConfigured");
+    assert_eq!(
+        call("bfw_probe", args("bfw_probe", vec![json!("server"), json!("https://x.example"), Value::Null])).unwrap_err()["kind"],
+        "keyMissing"
+    );
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -168,6 +174,23 @@ fn ipc_argument_names_match_the_typescript_side() {
     // names another provider is refused before anything is sent.
     let llm = call("llm_chat", args("llm_chat", vec![json!("r"), json!("ollama"), json!({})])).unwrap_err();
     assert!(llm["kind"] == "badInput" || llm["kind"] == "notConfigured", "{llm}");
+
+    // bfworkflow with the vault open and no settings written: the default
+    // server is the base, a request without a key is keyMissing, and a path
+    // off the allow-list is refused before anything else.
+    assert_eq!(ok("bfw_base", args("bfw_base", vec![])), "https://workflow.kbiofoundry.kr/");
+    assert_eq!(
+        call("bfw_request", args("bfw_request", vec![json!("/api/auth/me"), Value::Null])).unwrap_err()["kind"],
+        "keyMissing"
+    );
+    assert_eq!(
+        call("bfw_request", args("bfw_request", vec![json!("/api/api-keys"), Value::Null])).unwrap_err()["kind"],
+        "forbiddenPath"
+    );
+    assert_eq!(
+        call("bfw_probe", args("bfw_probe", vec![json!("server"), json!("https://x.example/path"), json!("typed")])).unwrap_err()["kind"],
+        "invalidUrl"
+    );
 
     // The link journal: kept in the app data dir, never in the vault.
     assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);

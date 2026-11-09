@@ -55,6 +55,9 @@ macro_rules! register_commands {
             $crate::net::partbank::partbank_probe,
             $crate::net::llm::llm_chat,
             $crate::net::llm::llm_probe,
+            $crate::net::bfw::bfw_request,
+            $crate::net::bfw::bfw_probe,
+            $crate::net::bfw::bfw_base,
         ])
     };
 }

@@ -36,5 +36,8 @@
   "partbank_request": ["connection", "method", "path", "query", "body"],
   "partbank_probe": ["connection", "url", "apiKey"],
   "llm_chat": ["requestId", "provider", "body"],
-  "llm_probe": ["provider", "endpoint", "model", "apiKey"]
+  "llm_probe": ["provider", "endpoint", "model", "apiKey"],
+  "bfw_request": ["path", "query"],
+  "bfw_probe": ["connection", "url", "apiKey"],
+  "bfw_base": []
 }

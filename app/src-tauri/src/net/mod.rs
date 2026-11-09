@@ -4,6 +4,7 @@
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod bfw;
 pub mod llm;
 pub mod partbank;
 pub mod secrets;
