@@ -417,6 +417,22 @@ const ko: Record<string, string> = {
   'scan.slackHowToTitle': 'Slack 앱 만드는 법',
   'scan.slackHowTo':
     '1. api.slack.com/apps에서 Create New App → From scratch로 앱을 만들고 워크스페이스를 고릅니다.\n2. OAuth & Permissions의 Bot Token Scopes에 추가합니다. DM으로 보낼 때: {0}. 비공개 채널로 보낼 때: {1}. 권장: {2}.\n3. DM으로 보낼 때는 App Home에서 Messages 탭을 켜고 메시지 보내기를 허용합니다.\n4. Install to Workspace를 누르고 Bot User OAuth Token(xoxb-…)을 복사해 위 칸에 붙여 넣습니다.\n5. 비공개 채널로 보낼 때는 그 채널에서 /invite @봇이름 을 실행합니다.',
+  // SP7 Part C: MCP 서버 설정(Task 37). 토큰 값은 보이지 않는다: 번호만 보이고 복사는 Rust 가 한다.
+  'mcp.enableDesc': '외부 MCP 클라이언트에 도구를 노출합니다. 보관함을 바꾸는 도구는 labnoteO에서 허용해야 실행됩니다.',
+  'mcp.tokenDesc':
+    '외부 MCP 클라이언트용 베어러 토큰입니다. labnoteO나 서버를 다시 시작해도 유지됩니다. 유출됐다면 재발급하고, 새 토큰을 모든 클라이언트에 다시 붙여 넣으세요.',
+  'mcp.port': '포트',
+  'mcp.portInvalid': '1024에서 65535 사이의 숫자를 입력하세요.',
+  'mcp.listening': 'http://127.0.0.1:{0}/ 에서 듣는 중',
+  'mcp.tokenCopied': '토큰을 복사했습니다. 60초 뒤 클립보드에서 지웁니다.',
+  'mcp.copyFailed': '클립보드에 복사하지 못했습니다.',
+  'mcp.tokenIssued': '토큰 #{0} 사용 중',
+  'mcp.tokenNone': '아직 토큰이 없습니다',
+  'mcp.connect.heading': '클라이언트 연결',
+  'mcp.connect.hint':
+    '아래 설정을 클라이언트에 붙여 넣으세요. 화면의 <token> 자리는 복사할 때 실제 토큰으로 채워지며, 60초 뒤 클립보드에서 지웁니다.',
+  'mcp.connect.copy': '{0} 설정 복사',
+  'mcp.connect.copied': '{0} 설정을 토큰과 함께 복사했습니다. 60초 뒤 클립보드에서 지웁니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -833,6 +849,22 @@ const en: Record<string, string> = {
   'scan.slackHowToTitle': 'How to make the Slack app',
   'scan.slackHowTo':
     '1. At api.slack.com/apps, choose Create New App → From scratch and pick your workspace.\n2. Under OAuth & Permissions, add Bot Token Scopes. For direct messages: {0}. For a private channel: {1}. Recommended: {2}.\n3. For direct messages, turn on the Messages tab in App Home and allow sending messages.\n4. Choose Install to Workspace, copy the Bot User OAuth Token (xoxb-…) and paste it above.\n5. For a private channel, run /invite @your-bot in that channel.',
+  // SP7 Part C: MCP server settings (Task 37). The token is never shown: only its number, and Rust copies it.
+  'mcp.enableDesc': 'Exposes tools to external MCP clients. Tools that change the vault run only after you allow them in labnoteO.',
+  'mcp.tokenDesc':
+    'Bearer token for external MCP clients. It stays the same when labnoteO or the server restarts; regenerate it if it leaked, then paste the new one into every client.',
+  'mcp.port': 'Port',
+  'mcp.portInvalid': 'Enter a number from 1024 to 65535.',
+  'mcp.listening': 'Listening on http://127.0.0.1:{0}/',
+  'mcp.tokenCopied': 'Token copied. It is cleared from the clipboard after 60 s.',
+  'mcp.copyFailed': 'Could not copy to the clipboard.',
+  'mcp.tokenIssued': 'Token #{0} in use',
+  'mcp.tokenNone': 'No token yet',
+  'mcp.connect.heading': 'Connect a client',
+  'mcp.connect.hint':
+    'Paste a setup below into your client. The <token> placeholder is filled in with the real token only when you copy, and the clipboard is cleared after 60 s.',
+  'mcp.connect.copy': 'Copy {0} setup',
+  'mcp.connect.copied': 'Copied the {0} setup with your token. It is cleared from the clipboard after 60 s.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

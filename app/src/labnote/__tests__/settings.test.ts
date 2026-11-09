@@ -63,6 +63,8 @@ describe('보관함별 설정', () => {
         'llmEndpointOpenai',
         'llmModel',
         'llmProvider',
+        'mcpEnabled',
+        'mcpPort',
         'partbankDefaultConnection',
         'partbankDesktopUrl',
         'partbankSendUsages',
@@ -154,6 +156,34 @@ describe('보관함별 설정', () => {
     const again = await loadVaultSettings(store.invoke);
     expect(again.settings.workflowViewGroupBy).toBe('author');
     expect(again.settings.customSampleTypes).toEqual(['Plasmid']);
+  });
+
+  it('importing plugin data never turns the MCP server on', () => {
+    expect(fromPluginData({ mcpEnabled: true }).mcpEnabled).toBe(false);
+    expect(fromPluginData(undefined).mcpPort).toBe(3987);
+    expect(fromPluginData({ mcpPort: 4000 }).mcpPort).toBe(3987); // not a plugin key
+  });
+
+  it('a stored mcpEnabled true is kept; mcpPort outside 1024-65535 falls back to 3987', async () => {
+    const f = fakeStore({ stored: JSON.stringify({ schemaVersion: 3, mcpEnabled: true, mcpPort: 80 }) });
+    const { settings } = await loadVaultSettings(f.invoke);
+    expect(settings.mcpEnabled).toBe(true);
+    expect(settings.mcpPort).toBe(3987);
+    const g = fakeStore({ stored: JSON.stringify({ schemaVersion: 3, mcpPort: 4000 }) });
+    expect((await loadVaultSettings(g.invoke)).settings.mcpPort).toBe(4000);
+    expect((await loadVaultSettings(g.invoke)).settings.mcpEnabled).toBe(false);
+    for (const odd of [65536, 4000.5, '4000', null]) {
+      const h = fakeStore({ stored: JSON.stringify({ mcpPort: odd, mcpEnabled: 'yes' }) });
+      const r = (await loadVaultSettings(h.invoke)).settings;
+      expect(r.mcpPort).toBe(3987);
+      expect(r.mcpEnabled).toBe(false);
+    }
+    // a save and reload keeps both
+    const store = fakeStore();
+    const { settings: fresh } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings({ ...fresh, mcpEnabled: true, mcpPort: 5000 }, store.invoke);
+    const back = (await loadVaultSettings(store.invoke)).settings;
+    expect([back.mcpEnabled, back.mcpPort]).toEqual([true, 5000]);
   });
 
   it('legacyNotesOfferDismissed (app-only key) defaults to false and survives a save and reload', async () => {

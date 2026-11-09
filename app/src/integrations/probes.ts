@@ -30,6 +30,9 @@ export type IntegrationSettingsValue = Pick<
   | 'scanMaxImageEdge'
   | 'scanJpegQuality'
   | 'scanEmbedWidth'
+  // SP7 Part C: MCP 서버 스위치와 포트(McpSection)
+  | 'mcpEnabled'
+  | 'mcpPort'
 >;
 
 export type ProbeId = 'partbankDesktop' | 'partbankWeb' | 'llm' | 'bfw';

@@ -61,5 +61,14 @@
   "scan_folder_prune_baseline": ["present"],
   "scan_folder_read": ["name"],
   "scan_folder_move": ["name", "outcome"],
-  "scan_folder_watch": []
+  "scan_folder_watch": [],
+  "mcp_token_status": [],
+  "mcp_token_regenerate": [],
+  "mcp_token_copy": ["snippet"],
+  "mcp_start": ["port", "tools"],
+  "mcp_stop": [],
+  "mcp_status": [],
+  "mcp_claim": ["callId"],
+  "mcp_reply": ["callId", "reply"],
+  "mcp_drain": []
 }

@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 pub mod index;
+pub mod mcp;
 pub mod net;
 pub mod print;
 pub mod scan;
@@ -84,6 +85,16 @@ macro_rules! register_commands {
             $crate::scan::scan_folder_read,
             $crate::scan::scan_folder_move,
             $crate::scan::scan_folder_watch,
+            // SP7 Part C
+            $crate::mcp::token::mcp_token_status,
+            $crate::mcp::token::mcp_token_regenerate,
+            $crate::mcp::token::mcp_token_copy,
+            $crate::mcp::bridge::mcp_start,
+            $crate::mcp::bridge::mcp_stop,
+            $crate::mcp::bridge::mcp_status,
+            $crate::mcp::bridge::mcp_claim,
+            $crate::mcp::bridge::mcp_reply,
+            $crate::mcp::bridge::mcp_drain,
         ])
     };
 }
@@ -111,6 +122,19 @@ pub fn run() {
         .manage(net::NetState::default())
         // The scan folder's watcher (SP7 B4); started by `scan_folder_watch` / `scan_folder_choose`.
         .manage(scan::ScanFolderState::default())
+        // SP7 Part C: the MCP server's state (the in-memory token copy) and
+        // the clipboard the token is copied to from Rust (C5).
+        .manage(mcp::McpState::default())
+        .manage(mcp::ClipState(std::sync::Arc::new(mcp::ArboardClipboard)))
+        // SP7 Part C: a page load in the main webview (reload, navigation,
+        // crash recovery) stops the MCP server and fails its pending calls,
+        // from Rust, because JS cannot reliably invoke during unload (C3).
+        // The vault effect starts it again.
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+                mcp::page_load_started(&webview.state::<mcp::McpState>());
+            }
+        })
         .setup(|app| {
             // Never abort startup over where the last vault is remembered: fall
             // back to the temp dir (the choice is then just not kept long-term).

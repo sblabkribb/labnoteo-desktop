@@ -11,6 +11,7 @@ import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
 import { openInBrowser } from '../../labnote/print/openInBrowser';
 import * as scan from '../../labnote/scan/scanIpc';
+import * as mcp from '../../labnote/mcp/mcpIpc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -21,6 +22,7 @@ const fixture: Record<string, string[]> = JSON.parse(
  * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 11 이 netIpc.ts 래퍼로 비웠다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
  * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
+ * SP7 Part C 의 mcp_* 커맨드 아홉은 Task 36 의 mcpIpc.ts 래퍼로 비웠다.
  */
 const PENDING_TS_WRAPPERS: readonly string[] = [];
 
@@ -139,6 +141,16 @@ describe('IPC 인자 이름 계약', () => {
     expect(await scan.scanFolderRead('a.jpg', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await scan.scanFolderMove('a.jpg', 'processed', r.invoke)).toBe('labnote-processed/a.jpg');
     await scan.scanFolderWatch(r.invoke);
+    // SP7 Part C MCP 커맨드: 래퍼마다 한 번씩
+    await mcp.mcpTokenStatus(r.invoke);
+    await mcp.mcpTokenRegenerate(r.invoke);
+    await mcp.mcpTokenCopy(r.invoke);
+    await mcp.mcpStart(3987, [{ name: 'read_section', description: 'd', inputSchema: {}, mutates: false }], r.invoke);
+    await mcp.mcpStop(r.invoke);
+    await mcp.mcpStatus(r.invoke);
+    await mcp.mcpClaim('c1', r.invoke);
+    await mcp.mcpReply('c1', { kind: 'noReply' }, r.invoke);
+    await mcp.mcpDrain(r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

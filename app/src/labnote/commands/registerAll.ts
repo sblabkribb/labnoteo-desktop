@@ -3,6 +3,7 @@ import { aiCommands } from '../../ai/commands';
 import { sampleCommands } from '../../samples/commands';
 import { barcodeCommands } from '../barcode/commands';
 import { scanCommands } from '../scan/commands';
+import { mcpCommands } from '../mcp/commands';
 import { catalogCommands } from './catalogs';
 import { editorInsertCommands } from './editorInserts';
 import { experimentCommands } from './experiment';
@@ -31,6 +32,8 @@ function allCommands(): Command[] {
     ...barcodeCommands,
     // SP7 Part B
     ...scanCommands,
+    // SP7 Part C
+    ...mcpCommands,
   ];
 }
 

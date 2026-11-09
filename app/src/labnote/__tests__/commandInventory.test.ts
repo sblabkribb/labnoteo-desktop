@@ -43,6 +43,7 @@ const PORTED = [
   'import-scanned-pages',
   'process-scan-folder',
   'assign-unmatched-scans',
+  'toggle-mcp-server',
 ] as const;
 
 /** 아직 옮기지 않은 플러그인 명령과 그것을 옮길 하위 프로젝트(계획의 "Deferred to later sub-projects"). */
@@ -53,7 +54,6 @@ const DEFERRED: Record<string, string> = {
   'open-user-guide': 'exports and automation',
   'renumber-workflows':
     'rename and links: must call queueSampleSourceRenames after the README hold is released (vendor tests/plugin/renumberWorkflows.test.ts "sample sources after renumbering", #149)',
-  'toggle-mcp-server': 'SP7: MCP server',
 };
 
 /** 플러그인 소스에서 `id: '<id>'` 로 등록하는 명령 id(중복 없이). */

@@ -31,6 +31,7 @@ export type AppSettings = Pick<
   | 'scanMaxImageEdge'
   | 'scanJpegQuality'
   | 'scanEmbedWidth'
+  | 'mcpEnabled'
 > & {
   schemaVersion: number;
   importedFromPlugin?: boolean;
@@ -42,7 +43,17 @@ export type AppSettings = Pick<
   bfwConnection: 'server' | 'desktop';
   /** 앱에만 있는 키: 암호화 없이(http) 키를 보내도 된다고 사용자가 허락한 origin 들. 기본 []. */
   allowHttpOrigins: string[];
+  /** 앱에만 있는 키(SP7 Part C): MCP 서버가 듣는 127.0.0.1 포트. 1024-65535 정수, 아니면 3987. */
+  mcpPort: number;
 };
+
+/** MCP 서버의 기본 포트(플러그인과 같다). */
+export const MCP_DEFAULT_PORT = 3987;
+
+/** MCP 서버가 쓸 수 있는 포트: 1024-65535 정수(Rust `check_port` 와 같은 범위). */
+export function isMcpPort(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535;
+}
 
 /** bfworkflow 서버의 기본 주소. */
 export const BFW_DEFAULT_URL = 'https://workflow.kbiofoundry.kr';
@@ -117,6 +128,9 @@ const KEYS = [
   'scanMaxImageEdge',
   'scanJpegQuality',
   'scanEmbedWidth',
+  // SP7 Part C: MCP 서버. mcpEnabled 는 플러그인 키지만 가져올 때는 늘 끈다(C6). mcpPort 는 앱 키.
+  'mcpEnabled',
+  'mcpPort',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -124,6 +138,7 @@ const APP_DEFAULTS = {
   legacyNotesOfferDismissed: false,
   bfwUrl: BFW_DEFAULT_URL,
   bfwConnection: 'server',
+  mcpPort: MCP_DEFAULT_PORT,
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -146,6 +161,8 @@ export function fromPluginData(raw: unknown): AppSettings {
   if (isOriginUrl(data.bfwUrl)) settings.bfwUrl = data.bfwUrl.trim();
   if (data.bfwConnection === 'server' || data.bfwConnection === 'desktop') settings.bfwConnection = data.bfwConnection;
   settings.allowHttpOrigins = httpOrigins(data.allowHttpOrigins);
+  // 가져오기는 리스너를 열지 않는다(C6): 플러그인에서 켜 두었어도 앱에서는 꺼진 채로 시작한다.
+  settings.mcpEnabled = false;
   return settings;
 }
 
@@ -159,6 +176,10 @@ export function fromStored(raw: unknown): AppSettings {
   if (raw && typeof raw === 'object' && (raw as { legacyNotesOfferDismissed?: unknown }).legacyNotesOfferDismissed === true) {
     settings.legacyNotesOfferDismissed = true;
   }
+  // MCP(C6): 앱이 저장한 값이 꼭 true 일 때만 켜고, 범위 안의 정수 포트만 살린다.
+  if (raw && typeof raw === 'object' && (raw as { mcpEnabled?: unknown }).mcpEnabled === true) settings.mcpEnabled = true;
+  const port = raw && typeof raw === 'object' ? (raw as { mcpPort?: unknown }).mcpPort : undefined;
+  if (isMcpPort(port)) settings.mcpPort = port;
   return settings;
 }
 

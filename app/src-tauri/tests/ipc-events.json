@@ -15,5 +15,17 @@
   "scanFolderChanged": {
     "name": "scan://folder-changed",
     "payload": { "fields": {} }
+  },
+  "mcpCall": {
+    "name": "mcp://call",
+    "payload": {
+      "fields": { "callId": "callId", "name": "name", "args": "args", "mutates": "mutates" }
+    }
+  },
+  "mcpCancel": {
+    "name": "mcp://cancel",
+    "payload": {
+      "fields": { "callId": "callId" }
+    }
   }
 }

@@ -58,7 +58,10 @@ export type OverrideKey =
   | 'scan.slackCheckFailed'
   // 바코드와 스캔 설정(SP7 Task 29): 플러그인 문장의 "show up in Obsidian" 과 "See docs/SCAN.md for the steps" 대신(B4, B11)
   | 'scan.insideVault'
-  | 'scan.slackTokenHelp';
+  | 'scan.slackTokenHelp'
+  // MCP 설정(SP7 Part C): 플러그인 문장은 "allow them in Obsidian", "when Obsidian or the server restarts" 라고 쓴다.
+  | 'mcp.enableDesc'
+  | 'mcp.tokenDesc';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

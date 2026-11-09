@@ -26,6 +26,19 @@ const ARGS: &str = include_str!("ipc-args.json");
 const ERRORS: &str = include_str!("ipc-errors.json");
 const EVENTS: &str = include_str!("ipc-events.json");
 const NET_ERRORS: &str = include_str!("ipc-net-errors.json");
+const MCP_ERRORS: &str = include_str!("ipc-mcp-errors.json");
+
+/// True when `s` holds a run of 48 or more hex chars: the shape of an MCP token.
+fn has_48_hex(s: &str) -> bool {
+    let mut run = 0;
+    for c in s.chars() {
+        run = if c.is_ascii_hexdigit() { run + 1 } else { 0 };
+        if run >= 48 {
+            return true;
+        }
+    }
+    false
+}
 
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
@@ -34,6 +47,8 @@ fn ipc_argument_names_match_the_typescript_side() {
     std::fs::create_dir_all(dir.join("vault")).unwrap();
     let vault = dir.join("vault").to_string_lossy().into_owned();
 
+    // The fake clipboard (never the real one), kept so the copy can be checked.
+    let clip = std::sync::Arc::new(labnoteo_app_lib::mcp::FakeClipboard::default());
     let app = labnoteo_app_lib::register_commands!(mock_builder())
         .manage(VaultState::default())
         .manage(SettingsFile(dir.join("config").join("settings.json")))
@@ -44,6 +59,8 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::net::NetState::default())
         .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
         .manage(labnoteo_app_lib::scan::ScanFolderState::inert())
+        .manage(labnoteo_app_lib::mcp::McpState::default())
+        .manage(labnoteo_app_lib::mcp::ClipState(clip.clone()))
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -526,6 +543,55 @@ title: 실험
     assert!(call("scan_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
     std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
 
+    // The MCP token (Credential Manager; here the memory store): the webview
+    // learns a flag and an epoch, and the copy goes to the clipboard from Rust.
+    let first = responses.borrow().len();
+    assert_eq!(ok("mcp_token_status", args("mcp_token_status", vec![])), json!({"set": false, "epoch": 0}));
+    assert_eq!(ok("mcp_token_regenerate", args("mcp_token_regenerate", vec![])), json!({"set": true, "epoch": 1}));
+    assert_eq!(ok("mcp_token_status", args("mcp_token_status", vec![])), json!({"set": true, "epoch": 1}));
+    assert_eq!(ok("mcp_token_copy", args("mcp_token_copy", vec![Value::Null])), Value::Null);
+    {
+        use labnoteo_app_lib::mcp::Clipboard;
+        let copied = clip.get().expect("the token is on the (fake) clipboard");
+        assert!(has_48_hex(&copied), "the clipboard holds the token");
+        // A client's setup holds the same token, filled in by Rust.
+        let snippet = json!({"client": "claudeCode", "port": 3987});
+        assert_eq!(ok("mcp_token_copy", args("mcp_token_copy", vec![snippet])), Value::Null);
+        let setup = clip.get().expect("the setup is on the (fake) clipboard");
+        assert!(setup.starts_with("claude mcp add") && setup.contains(&format!("Bearer {copied}")), "{setup}");
+        let bad = json!({"client": "claudeCode", "port": 80});
+        assert_eq!(call("mcp_token_copy", args("mcp_token_copy", vec![bad])).unwrap_err()["kind"], "badInput");
+        assert!(call("mcp_token_copy", args("mcp_token_copy", vec![json!({"client": "other", "port": 3987})])).is_err());
+        for r in responses.borrow()[first..].iter() {
+            assert!(!r.contains(&copied), "{r}");
+        }
+    }
+    // The MCP server and its bridge: a port outside 1024..=65535 is refused,
+    // a free port starts it, and a call id nobody emitted is never claimed
+    // or answered.
+    assert_eq!(
+        ok("mcp_status", args("mcp_status", vec![])),
+        json!({"running": false, "port": null, "tokenSet": true, "tokenEpoch": 1})
+    );
+    assert_eq!(call("mcp_start", args("mcp_start", vec![json!(0), json!([])])).unwrap_err()["kind"], "badInput");
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let tool = json!([{"name": "read_note", "description": "Read", "inputSchema": {"type": "object"}, "mutates": false}]);
+    let started = ok("mcp_start", args("mcp_start", vec![json!(free), tool]));
+    assert_eq!(started["running"], true);
+    assert_eq!(started["port"], free);
+    assert_eq!(ok("mcp_status", args("mcp_status", vec![]))["running"], true);
+    assert_eq!(ok("mcp_claim", args("mcp_claim", vec![json!("nope")])), json!(false));
+    assert_eq!(
+        ok("mcp_reply", args("mcp_reply", vec![json!("nope"), json!({"kind": "result", "result": {"content": []}})])),
+        json!(false)
+    );
+    assert_eq!(ok("mcp_drain", args("mcp_drain", vec![])), json!(0));
+    assert_eq!(ok("mcp_stop", args("mcp_stop", vec![])), Value::Null);
+    assert_eq!(ok("mcp_status", args("mcp_status", vec![]))["running"], false);
+    for r in responses.borrow().iter() {
+        assert!(!has_48_hex(r), "a response holds a 48-hex string: {r}");
+    }
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
@@ -658,6 +724,30 @@ fn net_error_kinds_match_the_fixture() {
     assert_eq!(named.len(), 18);
 }
 
+/// What `McpError` puts in `kind`, one entry per `McpErrorKind`.
+#[test]
+fn mcp_error_kinds_match_the_fixture() {
+    use labnoteo_app_lib::mcp::{McpError, McpErrorKind as K};
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(MCP_ERRORS).unwrap();
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a name (and an entry in the fixture).
+    let name = |k: &K| match k {
+        K::PortInUse => "portInUse",
+        K::Keychain => "keychain",
+        K::BadInput => "badInput",
+        K::Clipboard => "clipboard",
+        K::Io => "io",
+        K::NotRunning => "notRunning",
+    };
+    let all = [K::PortInUse, K::Keychain, K::BadInput, K::Clipboard, K::Io, K::NotRunning];
+    assert_eq!(fixture.len(), all.len(), "ipc-mcp-errors.json lists every kind");
+    for k in &all {
+        let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-mcp-errors.json", name(k)));
+        let wire = serde_json::to_value(McpError::new(*k, "m")).unwrap();
+        assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
+    }
+}
+
 #[test]
 fn event_name_and_payload_match_the_typescript_side() {
     use labnoteo_app_lib::vault::watcher::{Change, Kind, EVENT};
@@ -708,6 +798,31 @@ fn scan_folder_changed_event_matches_the_typescript_side() {
     let fields: std::collections::BTreeSet<&str> =
         ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
     assert_eq!(keys, fields, "payload field names vs ipc-events.json");
+}
+
+#[test]
+fn mcp_events_match_the_typescript_side() {
+    use labnoteo_app_lib::mcp::bridge::{CallEvent, CancelEvent, CALL_EVENT, CANCEL_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let fields_of = |ev: &Value| -> std::collections::BTreeSet<String> {
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap().to_string()).collect()
+    };
+    let keys_of = |v: &Value| -> std::collections::BTreeSet<String> { v.as_object().unwrap().keys().cloned().collect() };
+
+    let ev = &fixture["mcpCall"];
+    assert_eq!(ev["name"], CALL_EVENT);
+    let payload = serde_json::to_value(CallEvent { call_id: "c".into(), name: "n".into(), args: json!({"a": 1}), mutates: true }).unwrap();
+    assert_eq!(keys_of(&payload), fields_of(ev), "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["callId"].as_str().unwrap()], "c");
+    assert_eq!(payload[ev["payload"]["fields"]["name"].as_str().unwrap()], "n");
+    assert_eq!(payload[ev["payload"]["fields"]["args"].as_str().unwrap()], json!({"a": 1}));
+    assert_eq!(payload[ev["payload"]["fields"]["mutates"].as_str().unwrap()], true);
+
+    let ev = &fixture["mcpCancel"];
+    assert_eq!(ev["name"], CANCEL_EVENT);
+    let payload = serde_json::to_value(CancelEvent { call_id: "c".into() }).unwrap();
+    assert_eq!(keys_of(&payload), fields_of(ev), "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["callId"].as_str().unwrap()], "c");
 }
 
 /// The index is a cache. A vault whose index cannot open must still be watched:
