@@ -6,15 +6,18 @@
 //! it never crosses IPC, an event, a log or an error. The webview learns only
 //! a `set` flag and an `epoch` counter.
 
+pub mod bridge;
 pub mod clipboard;
 pub mod rpc;
 pub mod server;
 pub mod token;
 
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 
 use serde::Serialize;
 
+pub use bridge::{drain_pending, page_load_started, McpStatus, ReplyIn};
 pub use clipboard::{ArboardClipboard, ClipState, Clipboard, FakeClipboard};
 pub use token::{ensure_token, new_token, regenerate, token_status, TokenStatus, MCP_ACCOUNT};
 
@@ -47,7 +50,11 @@ impl McpError {
 
 /// The server's shared state. `token` is the in-memory copy requests are
 /// compared against: empty until a token is ensured or regenerated.
+/// `running` is the live server, if any; `pending` holds the `tools/call`s
+/// waiting for the webview (C3).
 #[derive(Default)]
 pub struct McpState {
     pub(crate) token: Arc<RwLock<String>>,
+    pub(crate) running: Mutex<Option<bridge::Running>>,
+    pub(crate) pending: Arc<Mutex<HashMap<String, bridge::Pending>>>,
 }

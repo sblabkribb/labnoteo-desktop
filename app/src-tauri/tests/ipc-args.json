@@ -52,5 +52,11 @@
   "integration_state_write": ["name", "content"],
   "mcp_token_status": [],
   "mcp_token_regenerate": [],
-  "mcp_token_copy": []
+  "mcp_token_copy": [],
+  "mcp_start": ["port", "tools"],
+  "mcp_stop": [],
+  "mcp_status": [],
+  "mcp_claim": ["callId"],
+  "mcp_reply": ["callId", "reply"],
+  "mcp_drain": []
 }

@@ -474,6 +474,28 @@ title: 실험
             assert!(!r.contains(&copied), "{r}");
         }
     }
+    // The MCP server and its bridge: a port outside 1024..=65535 is refused,
+    // a free port starts it, and a call id nobody emitted is never claimed
+    // or answered.
+    assert_eq!(
+        ok("mcp_status", args("mcp_status", vec![])),
+        json!({"running": false, "port": null, "tokenSet": true, "tokenEpoch": 1})
+    );
+    assert_eq!(call("mcp_start", args("mcp_start", vec![json!(0), json!([])])).unwrap_err()["kind"], "badInput");
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let tool = json!([{"name": "read_note", "description": "Read", "inputSchema": {"type": "object"}, "mutates": false}]);
+    let started = ok("mcp_start", args("mcp_start", vec![json!(free), tool]));
+    assert_eq!(started["running"], true);
+    assert_eq!(started["port"], free);
+    assert_eq!(ok("mcp_status", args("mcp_status", vec![]))["running"], true);
+    assert_eq!(ok("mcp_claim", args("mcp_claim", vec![json!("nope")])), json!(false));
+    assert_eq!(
+        ok("mcp_reply", args("mcp_reply", vec![json!("nope"), json!({"kind": "result", "result": {"content": []}})])),
+        json!(false)
+    );
+    assert_eq!(ok("mcp_drain", args("mcp_drain", vec![])), json!(0));
+    assert_eq!(ok("mcp_stop", args("mcp_stop", vec![])), Value::Null);
+    assert_eq!(ok("mcp_status", args("mcp_status", vec![]))["running"], false);
     for r in responses.borrow().iter() {
         assert!(!has_48_hex(r), "a response holds a 48-hex string: {r}");
     }
@@ -670,6 +692,31 @@ fn bfworkflow_notes_event_matches_the_typescript_side() {
     assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
     assert_eq!(payload[ev["payload"]["fields"]["step"].as_str().unwrap()], "init");
     assert_eq!(payload[ev["payload"]["fields"]["message"].as_str().unwrap()], "m");
+}
+
+#[test]
+fn mcp_events_match_the_typescript_side() {
+    use labnoteo_app_lib::mcp::bridge::{CallEvent, CancelEvent, CALL_EVENT, CANCEL_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let fields_of = |ev: &Value| -> std::collections::BTreeSet<String> {
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap().to_string()).collect()
+    };
+    let keys_of = |v: &Value| -> std::collections::BTreeSet<String> { v.as_object().unwrap().keys().cloned().collect() };
+
+    let ev = &fixture["mcpCall"];
+    assert_eq!(ev["name"], CALL_EVENT);
+    let payload = serde_json::to_value(CallEvent { call_id: "c".into(), name: "n".into(), args: json!({"a": 1}), mutates: true }).unwrap();
+    assert_eq!(keys_of(&payload), fields_of(ev), "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["callId"].as_str().unwrap()], "c");
+    assert_eq!(payload[ev["payload"]["fields"]["name"].as_str().unwrap()], "n");
+    assert_eq!(payload[ev["payload"]["fields"]["args"].as_str().unwrap()], json!({"a": 1}));
+    assert_eq!(payload[ev["payload"]["fields"]["mutates"].as_str().unwrap()], true);
+
+    let ev = &fixture["mcpCancel"];
+    assert_eq!(ev["name"], CANCEL_EVENT);
+    let payload = serde_json::to_value(CancelEvent { call_id: "c".into() }).unwrap();
+    assert_eq!(keys_of(&payload), fields_of(ev), "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["callId"].as_str().unwrap()], "c");
 }
 
 /// The index is a cache. A vault whose index cannot open must still be watched:

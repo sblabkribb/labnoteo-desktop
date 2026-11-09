@@ -11,5 +11,17 @@
     "payload": {
       "fields": { "requestId": "requestId", "step": "step", "message": "message" }
     }
+  },
+  "mcpCall": {
+    "name": "mcp://call",
+    "payload": {
+      "fields": { "callId": "callId", "name": "name", "args": "args", "mutates": "mutates" }
+    }
+  },
+  "mcpCancel": {
+    "name": "mcp://cancel",
+    "payload": {
+      "fields": { "callId": "callId" }
+    }
   }
 }

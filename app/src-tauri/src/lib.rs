@@ -75,6 +75,12 @@ macro_rules! register_commands {
             $crate::mcp::token::mcp_token_status,
             $crate::mcp::token::mcp_token_regenerate,
             $crate::mcp::token::mcp_token_copy,
+            $crate::mcp::bridge::mcp_start,
+            $crate::mcp::bridge::mcp_stop,
+            $crate::mcp::bridge::mcp_status,
+            $crate::mcp::bridge::mcp_claim,
+            $crate::mcp::bridge::mcp_reply,
+            $crate::mcp::bridge::mcp_drain,
         ])
     };
 }
@@ -104,6 +110,15 @@ pub fn run() {
         // the clipboard the token is copied to from Rust (C5).
         .manage(mcp::McpState::default())
         .manage(mcp::ClipState(std::sync::Arc::new(mcp::ArboardClipboard)))
+        // SP7 Part C: a page load in the main webview (reload, navigation,
+        // crash recovery) stops the MCP server and fails its pending calls,
+        // from Rust, because JS cannot reliably invoke during unload (C3).
+        // The vault effect starts it again.
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+                mcp::page_load_started(&webview.state::<mcp::McpState>());
+            }
+        })
         .setup(|app| {
             // Never abort startup over where the last vault is remembered: fall
             // back to the temp dir (the choice is then just not kept long-term).
