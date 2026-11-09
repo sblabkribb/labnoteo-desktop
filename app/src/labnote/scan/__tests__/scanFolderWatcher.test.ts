@@ -101,7 +101,8 @@ describe('watcher helpers', () => {
   });
 
   it('a PDF with an unreadable page and a filed page counts as processed; all pages unreadable counts as failed', () => {
-    // SMOKE-TEST SP7 step 8: an undecodable PDF page is an `error` result (not queued); the original is kept either way.
+    // SMOKE-TEST SP7 step 8 (open, awaiting the user's sign-off on not queueing it): an undecodable PDF page is for now
+    // an `error` result; the original is kept either way.
     const r = (status: ScanResult['status']): ScanResult => ({ source: 'scan.pdf', status });
     expect(outcomeOf([r('filed'), r('error'), r('filed')])).toBe('processed');
     expect(outcomeOf([r('error'), r('error')])).toBe('failed');
