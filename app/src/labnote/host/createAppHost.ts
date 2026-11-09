@@ -1,4 +1,4 @@
-import type { EditTarget, LabnoteHost, PickItem } from '@labnoteo/core';
+import type { EditTarget, LabnoteHost, NotifyKind, PickItem } from '@labnoteo/core';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { coreT } from '../i18n';
 import type { AliasOpts } from './AliasDialog';
@@ -10,6 +10,8 @@ export type { AliasOpts } from './AliasDialog';
 /** 앱의 LabnoteHost: 코어 호스트에 이름 바꾸기·휴지통이 있는 fs 와 별칭 대화상자를 더한다. */
 export interface AppHost extends LabnoteHost {
   readonly fs: AppFs;
+  /** 코어의 알림에 `ms`(기본 시간 대신 사라질 때까지의 시간)를 더한다. 잠긴 파일 경고는 15 초 남는다. */
+  notify(kind: NotifyKind, message: string, opts?: { ms?: number }): void;
   /** '' = 빈 채로 냈다, undefined = 닫았다. */
   alias(opts: AliasOpts): Promise<string | undefined>;
   /** confirm 과 같지만 단추가 셋 이상이다. 고른 단추의 값, 닫으면 undefined. */
@@ -49,7 +51,7 @@ export function createAppHost(deps: {
     confirm: (message, opts) => confirmDialog(message, opts),
     alias: (opts) => aliasDialog(opts),
     choose: (message, choices, opts) => choiceDialog(message, choices, opts),
-    notify: (kind, message) => notify(kind, message),
+    notify: (kind, message, opts) => notify(kind, message, opts),
     editTarget: () => deps.editTarget(),
     openFile: (path, at) => deps.openFile(path, at),
     t: coreT,
