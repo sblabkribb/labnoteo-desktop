@@ -23,8 +23,15 @@ export type DialogSpec =
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
   | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
+  | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[] }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'sampleSettings'; value: SampleSettingsValue };
+
+/** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
+export interface ChoiceItem<T> {
+  label: string;
+  value: T;
+}
 
 export interface DialogEntry {
   readonly id: number;
@@ -145,6 +152,15 @@ export function confirmDialog(
   opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean } = {},
 ): Promise<boolean> {
   return openDialog<boolean>({ kind: 'confirm', message, ...opts }, false);
+}
+
+/** 셋 이상의 답이 있는 확인(AppHost.choose). 고른 단추의 값, 닫으면(Escape, 닫기 단추) undefined. */
+export function choiceDialog<T>(
+  message: string,
+  choices: readonly ChoiceItem<T>[],
+  opts: { title?: string } = {},
+): Promise<T | undefined> {
+  return openDialog<T | undefined>({ kind: 'choice', message, choices, ...opts }, undefined);
 }
 
 /**

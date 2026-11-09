@@ -1,6 +1,6 @@
 /**
  * 명령 테스트용 가짜 AppHost 와 CommandContext. 파일은 fakeVault 위의 편집기를 아는 fs(앱과 같은 배선)로 간다.
- * - pick / prompt / confirm / alias 는 미리 적어 둔 답을 차례로 돌려준다(값, 또는 받은 인자로 답을 고르는 함수).
+ * - pick / prompt / confirm / alias / choose 는 미리 적어 둔 답을 차례로 돌려준다(값, 또는 받은 인자로 답을 고르는 함수).
  *   답이 떨어지면 닫은 것처럼(undefined / false) 답한다. 받은 인자는 `asked` 에 남는다.
  * - notify 는 `notes` 에 남는다.
  * - `mount(path)` 는 진짜 Editor 를 그 경로에 열고 열린 노트로 삼는다(열린 노트 목록이 진짜다).
@@ -35,6 +35,7 @@ export interface Asked {
   prompt: PromptOpts[];
   confirm: Array<{ message: string; opts?: { confirmLabel?: string } }>;
   alias: AliasOpts[];
+  choose: Array<{ message: string; choices: Array<{ label: string; value: unknown }>; opts?: { title?: string } }>;
 }
 
 export interface TestHost {
@@ -53,6 +54,8 @@ export interface TestHost {
     prompt(...a: Array<Answer<[PromptOpts], string | undefined>>): void;
     confirm(...a: Array<Answer<[string], boolean>>): void;
     alias(...a: Array<Answer<[AliasOpts], string | undefined>>): void;
+    /** 고를 단추의 값, 또는 받은 글로 값을 고르는 함수. 답이 떨어지면 닫은 것(undefined)이다. */
+    choose(...a: unknown[]): void;
   };
   /** "이 노트"(편집기에 열린 노트)를 바꾼다. 편집기는 열지 않는다. */
   setActive(path: string | undefined): void;
@@ -77,10 +80,10 @@ export function createTestHost(
   for (const [p, text] of Object.entries(files)) if (p.endsWith('.md')) linkIndex.setNote(p, parseRaw(p, text).text);
   linkIndex.markReady();
   const notes: TestHost['notes'] = [];
-  const asked: Asked = { pick: [], prompt: [], confirm: [], alias: [] };
+  const asked: Asked = { pick: [], prompt: [], confirm: [], alias: [], choose: [] };
   const opened: string[] = [];
   const panels: TestHost['panels'] = [];
-  const queues = { pick: [] as unknown[], prompt: [] as unknown[], confirm: [] as unknown[], alias: [] as unknown[] };
+  const queues = { pick: [] as unknown[], prompt: [] as unknown[], confirm: [] as unknown[], alias: [] as unknown[], choose: [] as unknown[] };
   const next = <R>(q: unknown[], fallback: R, ...args: unknown[]): R => {
     if (q.length === 0) return fallback;
     const a = q.shift();
@@ -115,6 +118,10 @@ export function createTestHost(
     alias: async (opts) => {
       asked.alias.push(opts);
       return next<string | undefined>(queues.alias, undefined, opts);
+    },
+    choose: async <T>(message: string, choices: readonly { label: string; value: T }[], opts?: { title?: string }) => {
+      asked.choose.push({ message, choices: [...choices], opts });
+      return next<T | undefined>(queues.choose, undefined, message);
     },
     notify: (kind, message) => void notes.push({ kind, message }),
     editTarget: () => activeEditTarget(active),
@@ -162,6 +169,7 @@ export function createTestHost(
       prompt: (...a) => void queues.prompt.push(...a),
       confirm: (...a) => void queues.confirm.push(...a),
       alias: (...a) => void queues.alias.push(...a),
+      choose: (...a) => void queues.choose.push(...a),
     },
     setActive: (path) => void (active = path),
     async mount(path) {

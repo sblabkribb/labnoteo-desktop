@@ -2,7 +2,7 @@ import type { EditTarget, LabnoteHost } from '@labnoteo/core';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { coreT } from '../i18n';
 import type { AliasOpts } from './AliasDialog';
-import { aliasDialog, confirmDialog, pickDialog, pickManyDialog, promptDialog } from './dialogStore';
+import { aliasDialog, choiceDialog, confirmDialog, pickDialog, pickManyDialog, promptDialog, type ChoiceItem } from './dialogStore';
 import { notify } from './toastStore';
 
 export type { AliasOpts } from './AliasDialog';
@@ -12,6 +12,8 @@ export interface AppHost extends LabnoteHost {
   readonly fs: AppFs;
   /** '' = 빈 채로 냈다, undefined = 닫았다. */
   alias(opts: AliasOpts): Promise<string | undefined>;
+  /** confirm 과 같지만 단추가 셋 이상이다. 고른 단추의 값, 닫으면 undefined. */
+  choose<T>(message: string, choices: readonly ChoiceItem<T>[], opts?: { title?: string }): Promise<T | undefined>;
 }
 
 /**
@@ -32,6 +34,7 @@ export function createAppHost(deps: {
     prompt: (opts) => promptDialog(opts),
     confirm: (message, opts) => confirmDialog(message, opts),
     alias: (opts) => aliasDialog(opts),
+    choose: (message, choices, opts) => choiceDialog(message, choices, opts),
     notify: (kind, message) => notify(kind, message),
     editTarget: () => deps.editTarget(),
     openFile: (path, at) => deps.openFile(path, at),

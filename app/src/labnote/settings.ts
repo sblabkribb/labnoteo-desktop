@@ -17,7 +17,12 @@ export type AppSettings = Pick<
   | 'sampleTracking'
   | 'workflowViewGroupBy'
   | 'catalogNoticeHash'
-> & { schemaVersion: number; importedFromPlugin?: boolean };
+> & {
+  schemaVersion: number;
+  importedFromPlugin?: boolean;
+  /** 앱에만 있는 키: "예전 형식 노트 바꾸기" 제안에서 "이 보관함에서는 다시 묻지 않기"를 골랐다. 기본 false. */
+  legacyNotesOfferDismissed: boolean;
+};
 
 /** 고르는 키. 저장하기 전에도 이 목록으로 다시 걸러, 타입을 우회해 섞여 든 키도 저장되지 않게 한다. */
 const KEYS = [
@@ -29,11 +34,15 @@ const KEYS = [
   'sampleTracking',
   'workflowViewGroupBy',
   'catalogNoticeHash',
+  'legacyNotesOfferDismissed',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
+
+/** 플러그인에 없는 앱 키의 기본값. */
+const APP_DEFAULTS = { legacyNotesOfferDismissed: false } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
   const out = {} as Record<string, unknown>;
-  for (const k of KEYS) out[k] = s[k];
+  for (const k of KEYS) out[k] = k in APP_DEFAULTS ? APP_DEFAULTS[k as keyof typeof APP_DEFAULTS] : s[k as keyof LabnoteSettings];
   return out as AppSettings;
 }
 
@@ -47,6 +56,10 @@ function fromStored(raw: unknown): AppSettings {
   const settings = fromPluginData(raw);
   if (raw && typeof raw === 'object' && (raw as { importedFromPlugin?: unknown }).importedFromPlugin === true) {
     settings.importedFromPlugin = true;
+  }
+  // 앱 키는 migrateSettings 가 모른다: 저장된 값이 참일 때만 살린다.
+  if (raw && typeof raw === 'object' && (raw as { legacyNotesOfferDismissed?: unknown }).legacyNotesOfferDismissed === true) {
+    settings.legacyNotesOfferDismissed = true;
   }
   return settings;
 }

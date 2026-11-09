@@ -45,6 +45,7 @@ describe('보관함별 설정', () => {
         'catalogNoticeHash',
         'customSampleTypes',
         'globalSampleFolder',
+        'legacyNotesOfferDismissed',
         'sampleTracking',
         'schemaVersion',
         'workflowViewGroupBy',
@@ -112,5 +113,19 @@ describe('보관함별 설정', () => {
     const again = await loadVaultSettings(store.invoke);
     expect(again.settings.workflowViewGroupBy).toBe('author');
     expect(again.settings.customSampleTypes).toEqual(['Plasmid']);
+  });
+
+  it('legacyNotesOfferDismissed (app-only key) defaults to false and survives a save and reload', async () => {
+    expect(fromPluginData(undefined).legacyNotesOfferDismissed).toBe(false);
+    expect(fromPluginData({ legacyNotesOfferDismissed: true }).legacyNotesOfferDismissed).toBe(false); // not a plugin key
+    const store = fakeStore();
+    const { settings } = await loadVaultSettings(store.invoke);
+    expect(settings.legacyNotesOfferDismissed).toBe(false);
+    await saveVaultSettings({ ...settings, legacyNotesOfferDismissed: true }, store.invoke);
+    expect(JSON.parse(store.stored()!).legacyNotesOfferDismissed).toBe(true);
+    expect((await loadVaultSettings(store.invoke)).settings.legacyNotesOfferDismissed).toBe(true);
+    // a stored non-boolean is the default
+    const odd = fakeStore({ stored: JSON.stringify({ legacyNotesOfferDismissed: 'yes' }) });
+    expect((await loadVaultSettings(odd.invoke)).settings.legacyNotesOfferDismissed).toBe(false);
   });
 });

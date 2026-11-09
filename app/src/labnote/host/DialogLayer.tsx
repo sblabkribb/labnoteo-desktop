@@ -1,6 +1,7 @@
 import { useLayoutEffect, type RefObject } from 'react';
 import { useLang } from '../../i18n/useLang';
 import { AliasDialog } from './AliasDialog';
+import { ChoiceDialog } from './ChoiceDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { settleDialog, takeReturnFocus, useCurrentDialog, type DialogEntry } from './dialogStore';
 import { PickManyDialog, Picker } from './Picker';
@@ -23,6 +24,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <AliasDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'confirm':
       return <ConfirmDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'choice':
+      return <ChoiceDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'sampleDefinition':
       return <SampleDefinitionDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'sampleSettings':
