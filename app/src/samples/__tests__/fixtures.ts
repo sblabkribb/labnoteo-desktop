@@ -1,4 +1,8 @@
 /** 샘플 테스트들이 함께 쓰는 보관함과 상수(계획의 Shared test fixture). Task 15 가 koListHeader 를 더한다. */
+import { getLang, setLang } from '../../i18n/lang';
+import { coreT } from '../../labnote/i18n';
+import { sampleListHeaders } from '../../labnote/port/sampleListTable';
+
 /**
  * `KnownSampleIds`(Task 5 의 SampleIdIndex 포트)와 같은 꼴. 그 포트가 들어오기 전이라 여기서 구조로 적는다:
  * 구조가 같으므로 Task 5 의 타입에 그대로 맞는다.
@@ -34,3 +38,19 @@ export const KNOWN: KnownIds = {
   version: 1,
 };
 export const KNOWN_WITH_DNA9: KnownIds = { ...KNOWN, ids: new Set([...KNOWN.ids, 'dna-9']), version: 2 };
+
+/**
+ * 플러그인이 한국어로 쓰는 샘플 목록 표의 머리글 두 줄. 글자로 적지 않고 `sampleListHeaders` 에서 만든다:
+ * `setLang('ko')` 로 바꿔 첫 묶음(UI 언어)을 읽고, 앞의 언어로 되돌린다.
+ * 첫 줄은 `| ID | 별칭 | 설명 | 보관 위치 | 범위 | 폐기 |`.
+ */
+export function koListHeader(): string {
+  const prev = getLang();
+  setLang('ko');
+  try {
+    const cells = sampleListHeaders({ t: coreT })[0];
+    return `| ${cells.join(' | ')} |\n|${cells.map(() => '---').join('|')}|`;
+  } finally {
+    setLang(prev);
+  }
+}
