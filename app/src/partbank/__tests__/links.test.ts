@@ -384,6 +384,35 @@ describe('Open labnoteO link', () => {
     expect(pb.th.notes).toEqual([]);
   });
 
+  // SP6-B1: navigator.clipboard.readText() makes WebView2 show its own permission bubble and waits on it, so the
+  // prompt never opened. The link comes from Rust instead, which hands back only text shaped like a labnoteO link.
+  it('the clipboard is read through Rust, never the web clipboard, and the prompt opens prefilled', async () => {
+    const link = importLink(`server=${encodeURIComponent(PB_WEB)}&type=part&id=${OID1}`);
+    const readText = vi.fn(() => new Promise<string>(() => {}));
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { readText } });
+    const asked: string[] = [];
+    const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      asked.push(cmd);
+      if (cmd === 'clipboard_labnoteo_link') return `  ${link} `;
+      return pb.invoke(cmd, args);
+    }) as typeof pb.invoke;
+    pb.th.answer.prompt(undefined);
+    await runOpenLabnoteoLink(pb.th.ctx, undefined, { feature: pb.feature, invoke });
+    expect(readText).not.toHaveBeenCalled();
+    expect(asked).toContain('clipboard_labnoteo_link');
+    expect(pb.th.asked.prompt[0].value).toBe(link);
+    // Rust found no link (null), or could not be asked: the field is empty and nothing is said.
+    for (const answer of [null, Promise.reject(new Error('no clipboard'))]) {
+      const none = (async (cmd: string, args?: Record<string, unknown>) =>
+        cmd === 'clipboard_labnoteo_link' ? answer : pb.invoke(cmd, args)) as typeof pb.invoke;
+      pb.th.answer.prompt(undefined);
+      await runOpenLabnoteoLink(pb.th.ctx, undefined, { feature: pb.feature, invoke: none });
+    }
+    expect(pb.th.asked.prompt.slice(1).map((p) => p.value ?? '')).toEqual(['', '']);
+    expect(pb.th.notes).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
   it('an invalid link is refused with the app sentence, and the prompt says so while typing', async () => {
     pb.th.answer.prompt('https://example.com/not-a-link');
     await run('');

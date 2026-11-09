@@ -95,6 +95,8 @@ macro_rules! register_commands {
             $crate::mcp::bridge::mcp_claim,
             $crate::mcp::bridge::mcp_reply,
             $crate::mcp::bridge::mcp_drain,
+            // SP6-B1: "Open labnoteO link" reads a link off the clipboard from Rust.
+            $crate::mcp::clipboard::clipboard_labnoteo_link,
         ])
     };
 }

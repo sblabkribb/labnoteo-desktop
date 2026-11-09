@@ -562,6 +562,12 @@ title: 실험
         let bad = json!({"client": "claudeCode", "port": 80});
         assert_eq!(call("mcp_token_copy", args("mcp_token_copy", vec![bad])).unwrap_err()["kind"], "badInput");
         assert!(call("mcp_token_copy", args("mcp_token_copy", vec![json!({"client": "other", "port": 3987})])).is_err());
+        // "Open labnoteO link" (SP6-B1): the clipboard holding the token or its
+        // setup gives nothing; a link is handed out, trimmed.
+        assert_eq!(ok("clipboard_labnoteo_link", args("clipboard_labnoteo_link", vec![])), Value::Null);
+        clip.set_secret(" labnoteo://open?file=a.md
+").unwrap();
+        assert_eq!(ok("clipboard_labnoteo_link", args("clipboard_labnoteo_link", vec![])), json!("labnoteo://open?file=a.md"));
         for r in responses.borrow()[first..].iter() {
             assert!(!r.contains(&copied), "{r}");
         }

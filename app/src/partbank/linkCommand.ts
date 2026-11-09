@@ -16,6 +16,7 @@ import { handleOpenUri } from '../labnote/port/labnoteOpenUri';
 import type { PartbankFeature } from '../labnote/port/partbankFeature';
 import { handleImportUri } from '../labnote/port/partbankUri';
 import { createSampleEnv } from '../samples/env';
+import { readClipboardLink } from './clipboardIpc';
 import { partbank } from './current';
 
 export type LabnoteoLink = { action: 'import' | 'open'; params: Record<string, string> };
@@ -40,10 +41,6 @@ export function parseLabnoteoLink(text: string): LabnoteoLink | undefined {
   return { action: m[1].toLowerCase() as LabnoteoLink['action'], params };
 }
 
-async function readClipboardText(): Promise<string> {
-  return navigator.clipboard.readText();
-}
-
 /** 열린 보관함의 이름(VaultInfo.name). 묻지 못하면 undefined. */
 async function currentVaultName(invoke: InvokeFn): Promise<string | undefined> {
   try {
@@ -61,12 +58,14 @@ async function currentVaultName(invoke: InvokeFn): Promise<string | undefined> {
  */
 export async function runOpenLabnoteoLink(
   ctx: CommandContext,
-  readClipboard: () => Promise<string> = readClipboardText,
+  readClipboard?: () => Promise<string>,
   deps: { feature?: PartbankFeature; invoke?: InvokeFn } = {},
 ): Promise<void> {
+  // 웹 클립보드(navigator.clipboard)는 WebView2 가 권한을 먼저 묻는다: Rust 가 링크 꼴인 글만 돌려준다(SP6-B1).
+  const read = readClipboard ?? (() => readClipboardLink(deps.invoke ?? tauriInvoke));
   let clip = '';
   try {
-    clip = (await readClipboard()) ?? '';
+    clip = (await read()) ?? '';
   } catch {
     clip = '';
   }

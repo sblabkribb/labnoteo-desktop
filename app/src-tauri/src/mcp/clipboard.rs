@@ -83,9 +83,75 @@ pub async fn copy_then_clear(clip: Arc<dyn Clipboard>, token: String, after: Dur
     }
 }
 
+/// The longest clipboard text handed out as a labnoteO link.
+pub const LINK_MAX: usize = 8192;
+
+/// `text`, trimmed, when it is shaped like a labnoteO link
+/// (`obsidian://labnoteo-import|open…` or `labnoteo://import|open…`, no
+/// whitespace or control characters, at most `LINK_MAX` bytes); otherwise
+/// `None`. The webview parses the link itself: this only keeps any other
+/// clipboard text (a copied MCP token, a password) from reaching it.
+pub fn labnoteo_link(text: &str) -> Option<String> {
+    let link = text.trim();
+    if link.is_empty() || link.len() > LINK_MAX || link.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return None;
+    }
+    let lower = link.to_ascii_lowercase();
+    let rest = ["obsidian://labnoteo-import", "obsidian://labnoteo-open", "labnoteo://import", "labnoteo://open"]
+        .iter()
+        .find_map(|p| lower.strip_prefix(p))?;
+    (rest.is_empty() || rest.starts_with(['/', '?', '#'])).then(|| link.to_string())
+}
+
+/// The clipboard's text when it is a labnoteO link (`labnoteo_link`).
+pub fn clipboard_link(clip: &dyn Clipboard) -> Option<String> {
+    labnoteo_link(&clip.get()?)
+}
+
+/// "Open labnoteO link" prefills its prompt from this (SP6 D14). The web
+/// clipboard (`navigator.clipboard.readText`) would make WebView2 ask for a
+/// permission first, so Rust reads it, and hands out only a link.
+#[tauri::command]
+pub fn clipboard_labnoteo_link(clip: tauri::State<'_, ClipState>) -> Option<String> {
+    clipboard_link(clip.0.as_ref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test] fn only_text_shaped_like_a_labnoteo_link_is_handed_out() {
+        for (text, want) in [
+            ("obsidian://labnoteo-import?type=part&id=1", Some("obsidian://labnoteo-import?type=part&id=1")),
+            ("  OBSIDIAN://LABNOTEO-OPEN?file=a.md
+
+", Some("OBSIDIAN://LABNOTEO-OPEN?file=a.md")),
+            ("labnoteo://import?x=1", Some("labnoteo://import?x=1")),
+            ("labnoteo://open/?file=a.md#L3", Some("labnoteo://open/?file=a.md#L3")),
+            ("labnoteo://open", Some("labnoteo://open")),
+        ] {
+            assert_eq!(labnoteo_link(text).as_deref(), want, "{text}");
+        }
+        for text in [
+            "",
+            "a".repeat(48).as_str(),
+            "claude mcp add --header \"Authorization: Bearer abc\"",
+            "see obsidian://labnoteo-import?type=part",
+            "obsidian://labnoteo-import?type=part extra",
+            "obsidian://labnoteo-importx?type=part",
+            "obsidian://labnoteo-delete?file=a.md",
+            "https://example.com/?x=obsidian://labnoteo-open",
+            &format!("labnoteo://open?file={}", "a".repeat(LINK_MAX)),
+        ] {
+            assert_eq!(labnoteo_link(text), None, "{text}");
+        }
+        let clip = FakeClipboard::default();
+        assert_eq!(clipboard_link(&clip), None);
+        clip.set_secret(" labnoteo://open?file=a.md ").unwrap();
+        assert_eq!(clipboard_link(&clip).as_deref(), Some("labnoteo://open?file=a.md"));
+        clip.set_secret(&"f".repeat(48)).unwrap();
+        assert_eq!(clipboard_link(&clip), None);
+    }
 
     #[tokio::test(start_paused = true)] async fn copy_sets_clipboard_and_clears_after_60s_only_if_unchanged() {
         let clip: Arc<FakeClipboard> = Arc::default();

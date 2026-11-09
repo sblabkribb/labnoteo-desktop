@@ -65,6 +65,7 @@
   "mcp_token_status": [],
   "mcp_token_regenerate": [],
   "mcp_token_copy": ["snippet"],
+  "clipboard_labnoteo_link": [],
   "mcp_start": ["port", "tools"],
   "mcp_stop": [],
   "mcp_status": [],
