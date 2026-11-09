@@ -33,22 +33,39 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** A pdf.js stand-in: `pages` pages; a page number in `failing` throws while rendering. */
-function fakePdf(pages: number, failing: number[] = []) {
+/**
+ * A pdf.js stand-in: `pages` pages; a page number in `failing` throws while rendering; one in `missingImage` renders
+ * (as real pdf.js does when the worker cannot decode an image, e.g. JPEG 2000 under the CSP) but resolves its image
+ * object with null data: in `objs` for a page image, in `commonObjs` for a globally cached one when `global` is set.
+ */
+function fakePdf(pages: number, failing: number[] = [], missingImage: number[] = [], global = false) {
+  const commonObjs = { resolve: vi.fn((_id: string, _data?: unknown) => {}) };
   const getDocument = vi.fn((_src: { data: Uint8Array }) => ({
     promise: Promise.resolve({
       numPages: pages,
-      getPage: async (n: number) => ({
-        getViewport: ({ scale }: { scale: number }) => ({ width: 8.5 * 72 * scale, height: 11 * 72 * scale }),
-        render: () => ({
-          promise: failing.includes(n) ? Promise.reject(new Error('JpxError: OpenJPEG failed')) : Promise.resolve(),
-        }),
-        cleanup: vi.fn(),
-      }),
+      getPage: async (n: number) => {
+        const objs = { resolve: vi.fn((_id: string, _data?: unknown) => {}) };
+        const page = {
+          objs,
+          commonObjs,
+          getViewport: ({ scale }: { scale: number }) => ({ width: 8.5 * 72 * scale, height: 11 * 72 * scale }),
+          render: () => {
+            if (failing.includes(n)) return { promise: Promise.reject(new Error('JpxError: OpenJPEG failed')) };
+            page.objs.resolve(`img_p${n - 1}_1`, { width: 10, height: 10 });
+            if (missingImage.includes(n)) {
+              if (global) page.commonObjs.resolve(`g_d0_img_p${n - 1}_2`, null);
+              else page.objs.resolve(`img_p${n - 1}_2`, null);
+            }
+            return { promise: Promise.resolve() };
+          },
+          cleanup: vi.fn(),
+        };
+        return page;
+      },
       destroy: vi.fn(async () => {}),
     }),
   }));
-  return { getDocument } as PdfLib & { getDocument: typeof getDocument };
+  return { getDocument, commonObjs } as PdfLib & { getDocument: typeof getDocument; commonObjs: typeof commonObjs };
 }
 
 /** A decode-client stand-in: every page decodes as a page without our QR, unless `answer` says otherwise. */
@@ -87,6 +104,21 @@ describe('forEachPdfPage', () => {
     expect(out).toEqual({ pageCount: 2, skipped: 0 });
     expect(lib.getDocument.mock.calls[0][0].data).toBeInstanceOf(Uint8Array);
   });
+
+  it('a page whose image pdf.js could not decode (render resolves) reaches onPage with bitmap null', async () => {
+    for (const global of [false, true]) {
+      const lib = fakePdf(3, [], [2], global);
+      const sharedResolve = lib.commonObjs.resolve;
+      const seen: { page: number; bitmap: unknown; error?: unknown }[] = [];
+      await forEachPdfPage(lib, pdfBytes(), async (p) => {
+        seen.push({ page: p.page, bitmap: p.bitmap, error: p.bitmap ? undefined : p.error });
+      });
+      expect(seen.map((p) => p.bitmap === null)).toEqual([false, true, false]);
+      expect(String(seen[1].error)).toContain(global ? 'g_d0_img_p1_2' : 'img_p1_2');
+      // the watch is removed after each render: the shared commonObjs keeps its own resolve
+      expect(lib.commonObjs.resolve).toBe(sharedResolve);
+    }
+  });
 });
 
 describe('createPageDecoder', () => {
@@ -110,6 +142,18 @@ describe('createPageDecoder', () => {
     expect(results[1]).toMatchObject({ status: 'error', sourcePage: 2, message: t('scan.pdfPageFailed', 2) });
     expect(results[1].message).not.toBe('scan.pdfPageFailed');
     expect(results[2]).toMatchObject({ status: 'skipped', sourcePage: 3 });
+    expect(decode.calls).toBe(2);
+  });
+
+  it('a page whose image pdf.js could not decode is an error result, not blank, and the next page still decodes', async () => {
+    const decode = fakeDecode(() => ({ blank: true }));
+    const decoder = createPageDecoder(output, { pdf: async () => fakePdf(3, [], [2]), decode, unzip: unzipScans });
+    const results = await new ScanPipeline({ decoder } as unknown as PipelineDeps).run([input('scan.pdf', pdfBytes())], {
+      skipNoQr: true,
+    });
+    expect(results).toHaveLength(3);
+    expect(results[1]).toMatchObject({ status: 'error', sourcePage: 2, message: t('scan.pdfPageFailed', 2) });
+    expect(results.map((r) => r.status)).toEqual(['blank', 'error', 'blank']);
     expect(decode.calls).toBe(2);
   });
 
