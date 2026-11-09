@@ -45,6 +45,7 @@ import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
 import { registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
+import { legacyNotesOfferOnOpen } from './labnote/commands/legacyConvert';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
 import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
@@ -341,7 +342,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   // 링크 색인: 보관함이 바뀌면 비우고, 위 재구성이 끝나면 싣고, 보관함 변경을 따라간다.
   useLinkIndex(vault.root, rebuild?.root === vault.root ? rebuild.done : undefined);
   // 링크 고침 기록(SP4 D15): 보관함마다 한 번, 링크 색인이 준비된 뒤 읽는다. 끊긴 이름 바꾸기는 마칠지 묻고,
-  // 끝난 것은 "마지막 이름 바꾸기 되돌리기"를 위해 남긴다. VaultView 는 보관함마다 새로 마운트된다.
+  // 끝난 것은 "마지막 이름 바꾸기 되돌리기"를 위해 남긴다. 그다음 예전 형식 노트 제안(한 번 여는 동안 한 번).
+  // VaultView 는 보관함마다 새로 마운트된다.
   const recoverCtx = useRef(ctx);
   recoverCtx.current = ctx;
   const hasCtx = ctx !== undefined;
@@ -351,6 +353,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     void linkIndex
       .whenReady()
       .then(() => (live && recoverCtx.current ? recoverJournal(recoverCtx.current, linkJournal) : undefined))
+      // 끊긴 이름 바꾸기를 마친 뒤: 예전 형식(.md) 실험 노트가 있으면 .labnote.md 로 바꿀지 묻는다(묻기만 한다).
+      .then(() => (live && recoverCtx.current ? legacyNotesOfferOnOpen(recoverCtx.current) : undefined))
       .catch(() => undefined);
     return () => {
       live = false;

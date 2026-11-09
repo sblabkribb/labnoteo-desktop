@@ -49,6 +49,13 @@ describe('app-command registry', () => {
     }
   });
 
+  it('registers the "Convert older notes to .labnote.md" palette command', () => {
+    const c = appCommands().find((x) => x.id === 'app.convert-legacy-notes');
+    expect(c?.nameKey).toBe('cmd.convertLegacyNotes');
+    expect(catalogs.ko['cmd.convertLegacyNotes']).toBe('예전 형식 노트를 .labnote.md로 바꾸기');
+    expect(catalogs.en['cmd.convertLegacyNotes']).toBe('Convert older notes to .labnote.md');
+  });
+
   it('displayKey turns CodeMirror keys into labels', () => {
     expect(displayKey('Mod-e')).toBe('Ctrl+E');
     expect(displayKey('Mod-Shift-.')).toBe('Ctrl+Shift+.');
