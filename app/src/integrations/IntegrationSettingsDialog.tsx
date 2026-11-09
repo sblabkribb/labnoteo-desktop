@@ -106,17 +106,32 @@ const FULL_ADDRESS = 'Enter a full address starting with http:// or https://.';
 const originOf = (raw: string): URL | undefined => (isOriginUrl(raw) ? new URL(raw.trim()) : undefined);
 
 /** "연결 시험" 단추와 그 결과 줄. 등록된 시험이 없으면 아무것도 그리지 않는다. */
-function ProbeButton(props: { id: ProbeId; fields: () => Parameters<ProbeFn>[0] }) {
+/**
+ * "Test connection" and its result. `target` names what is tested (the address, provider, model, connection): the
+ * result is for that target only, so it is cleared when the target changes, and an answer for an earlier target is
+ * dropped (SP6-B3).
+ */
+function ProbeButton(props: { id: ProbeId; target: string; fields: () => Parameters<ProbeFn>[0] }) {
   const [state, setState] = useState<{ ok: boolean; message: string } | 'checking' | undefined>(undefined);
+  const runId = useRef(0);
+  const target = useRef(props.target);
+  if (target.current !== props.target) {
+    target.current = props.target;
+    runId.current++;
+    if (state !== undefined) setState(undefined);
+  }
   const probe = probeFor(props.id);
   if (!probe) return null;
   const run = async () => {
+    const mine = ++runId.current;
     setState('checking');
+    let out: { ok: boolean; message: string };
     try {
-      setState(await probe(props.fields()));
+      out = await probe(props.fields());
     } catch {
-      setState({ ok: false, message: t('integrations.testFailed') });
+      out = { ok: false, message: t('integrations.testFailed') };
     }
+    if (runId.current === mine) setState(out);
   };
   return (
     <div className="integration-test">
@@ -308,6 +323,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
         />
         <ProbeButton
           id={slot}
+          target={`${kind}|${draft[urlKey].trim()}`}
           fields={() => ({ url: draftRef.current[urlKey].trim(), apiKey: keyValue(keyRef), connection: kind })}
         />
       </div>
@@ -426,6 +442,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
               ) : null}
               <ProbeButton
                 id="llm"
+                target={`${provider}|${draft[endpointKey].trim()}|${draft.llmModel.trim()}`}
                 fields={() => ({
                   url: draftRef.current[endpointKey].trim(),
                   provider,
@@ -477,6 +494,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
           />
           <ProbeButton
             id="bfw"
+            target={`${val.bfwConnection}|${val.bfwConnection === 'server' ? draft.bfwUrl.trim() : ''}`}
             fields={() => ({
               url: val.bfwConnection === 'server' ? draftRef.current.bfwUrl.trim() : '',
               connection: val.bfwConnection,

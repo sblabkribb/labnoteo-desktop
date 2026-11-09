@@ -345,6 +345,35 @@ describe('IntegrationSettingsDialog', () => {
     off();
   });
 
+  // SP6-B3: a result is about the address it was made for; another address has not been tested.
+  it('a Test connection result is cleared when the address changes and stays cleared when it is changed back', async () => {
+    const off = registerProbe('partbankWeb', async () => ({ ok: true, message: 'Connected as kim.' }));
+    show(fakeDeps());
+    await screen.findByLabelText('partbank server API key');
+    await userEvent.click(screen.getByText(coreT('Test connection')));
+    expect(await screen.findByText('Connected as kim.')).toBeTruthy();
+    const url = screen.getByLabelText('partbank server address') as HTMLInputElement;
+    const before = url.value;
+    fireEvent.change(url, { target: { value: 'http://127.0.0.1:18799' } });
+    fireEvent.blur(url);
+    await waitFor(() => expect(screen.queryByText('Connected as kim.')).toBeNull());
+    fireEvent.change(url, { target: { value: before } });
+    expect(screen.queryByText('Connected as kim.')).toBeNull();
+    off();
+  });
+
+  it('a Test connection result that arrives after the address changed is not shown', async () => {
+    let answer: (v: { ok: boolean; message: string }) => void = () => {};
+    const off = registerProbe('partbankWeb', () => new Promise((r) => (answer = r)));
+    show(fakeDeps());
+    await screen.findByLabelText('partbank server API key');
+    await userEvent.click(screen.getByText(coreT('Test connection')));
+    fireEvent.change(screen.getByLabelText('partbank server address'), { target: { value: 'http://127.0.0.1:18799' } });
+    await act(async () => answer({ ok: true, message: 'Connected as kim.' }));
+    expect(screen.queryByText('Connected as kim.')).toBeNull();
+    off();
+  });
+
   it('Remove key shows only when a key is set', async () => {
     const deps = fakeDeps({}, { partbankWeb: true });
     show(deps);
