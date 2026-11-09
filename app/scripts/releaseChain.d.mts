@@ -17,3 +17,29 @@ export function setVersion(files: Record<string, string>, v: string): Record<str
 
 /** The shared version, or throws listing every site when they differ. */
 export function assertSameVersion(files: Record<string, string>): string;
+
+/** Key id of the placeholder updater pubkey committed before the real key exists. */
+export const PLACEHOLDER_KEY_ID: 'F52F0A1D2C0B789E';
+
+/** `plugins.updater.pubkey` (base64 of minisign text) -> key id, 16 upper-hex chars; throws if malformed. */
+export function keyIdFromPubkey(pubkeyB64: string): string;
+
+/** A tauri `.sig` (base64 of minisign signature text) -> key id; throws if malformed. */
+export function keyIdFromSig(sigB64: string): string;
+
+/** True when the pubkey's key id is the placeholder's; throws if malformed. */
+export function isPlaceholderPubkey(pubkeyB64: string): boolean;
+
+export type ReleaseDecision =
+  | { action: 'none'; reason: string }
+  | { action: 'bump' }
+  | { action: 'retag'; tag: string };
+
+/** The release decision table (B-R3, B-R4, B-R12); throws on a malformed tag or an empty core pointer. */
+export function decideRelease(i: {
+  ready: boolean;
+  newestTag: string | null;
+  coreAtMain: string;
+  coreAtTag: string | null;
+  tagReleased: boolean;
+}): ReleaseDecision;

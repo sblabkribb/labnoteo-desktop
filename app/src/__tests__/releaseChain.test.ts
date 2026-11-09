@@ -1,12 +1,18 @@
 // app/scripts/releaseChain.mjs — 앱 버전이 적힌 여섯 곳을 읽고, 올리고, 맞는지 본다.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  PLACEHOLDER_KEY_ID,
   VERSION_FILES,
   assertSameVersion,
   bumpPatch,
+  decideRelease,
+  isPlaceholderPubkey,
+  keyIdFromPubkey,
+  keyIdFromSig,
   readVersions,
   setVersion,
 } from '../../scripts/releaseChain.mjs';
@@ -252,5 +258,277 @@ describe('CLI', () => {
     const r = spawnSync(process.execPath, [script, 'nope'], { cwd: repoRoot, encoding: 'utf8' });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/usage/i);
+  });
+});
+
+// ---- Task 8: signing readiness and the release decision ----
+
+/** The placeholder pubkey committed before the real key exists (key id F52F0A1D2C0B789E). */
+const PLACEHOLDER_PUBKEY =
+  'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY1MkYwQTFEMkMwQjc4OUUKUldTZWVBc3NIUW92OVdWdkh4ZjdITnNnNis3dkZmT1dXaXhPbmRvV04xSkJscCtobjBOTnpHQUsK';
+
+const b64 = (b: Buffer | string) => Buffer.from(b).toString('base64');
+
+/** Key id as minisign prints it (u64 little-endian, upper hex) → the 8 bytes stored in the blob. */
+function idBytes(id: string): Buffer {
+  return Buffer.from(id, 'hex').reverse();
+}
+
+/** A minisign public key (tauri form: base64 of the two-line text) built from bytes. */
+function makePubkey(id: string, opts: { alg?: string; comment?: string; eol?: string } = {}): string {
+  const blob = Buffer.concat([Buffer.from(opts.alg ?? 'Ed'), idBytes(id), Buffer.alloc(32, 7)]);
+  const eol = opts.eol ?? '\n';
+  const comment = opts.comment ?? `untrusted comment: minisign public key: ${id}`;
+  return b64(`${comment}${eol}${b64(blob)}${eol}`);
+}
+
+/** A tauri .sig (base64 of the four-line minisign signature text) built from bytes. */
+function makeSig(id: string, alg = 'ED'): string {
+  const blob = Buffer.concat([Buffer.from(alg), idBytes(id), Buffer.alloc(64, 9)]);
+  return b64(
+    `untrusted comment: signature from tauri secret key\n${b64(blob)}\n` +
+      `trusted comment: timestamp:1794255331\tfile:f\n${b64(Buffer.alloc(64, 3))}\n`,
+  );
+}
+
+describe('keyIdFromPubkey / isPlaceholderPubkey', () => {
+  it('reads the committed placeholder pubkey as F52F0A1D2C0B789E', () => {
+    expect(PLACEHOLDER_KEY_ID).toBe('F52F0A1D2C0B789E');
+    expect(keyIdFromPubkey(PLACEHOLDER_PUBKEY)).toBe('F52F0A1D2C0B789E');
+    expect(isPlaceholderPubkey(PLACEHOLDER_PUBKEY)).toBe(true);
+  });
+  it('reads a key id from constructed bytes (little-endian, upper hex)', () => {
+    const pk = makePubkey('0123456789ABCDEF');
+    expect(keyIdFromPubkey(pk)).toBe('0123456789ABCDEF');
+    expect(isPlaceholderPubkey(pk)).toBe(false);
+  });
+  it('trusts the bytes, not the untrusted comment', () => {
+    const pk = makePubkey('0123456789ABCDEF', {
+      comment: 'untrusted comment: minisign public key: F52F0A1D2C0B789E',
+    });
+    expect(keyIdFromPubkey(pk)).toBe('0123456789ABCDEF');
+    expect(isPlaceholderPubkey(pk)).toBe(false);
+    expect(isPlaceholderPubkey(makePubkey('F52F0A1D2C0B789E', { comment: 'untrusted comment: x' }))).toBe(true);
+  });
+  it('accepts CRLF and surrounding whitespace', () => {
+    expect(keyIdFromPubkey(` ${makePubkey('00000000000000AA', { eol: '\r\n' })}\n`)).toBe('00000000000000AA');
+  });
+  it('throws on anything that is not a minisign public key', () => {
+    for (const bad of [
+      '',
+      'abc',
+      b64('untrusted comment: only one line\n'),
+      makePubkey('0123456789ABCDEF', { alg: 'ED' }), // signature algorithm, not a key
+      b64(`untrusted comment: short\n${b64(Buffer.from('Ed1234'))}\n`),
+      makeSig('0123456789ABCDEF'),
+    ]) {
+      expect(() => keyIdFromPubkey(bad)).toThrow();
+    }
+    expect(() => isPlaceholderPubkey('')).toThrow();
+  });
+});
+
+describe('keyIdFromSig', () => {
+  it('reads the key id from a constructed tauri .sig (prehashed ED and legacy Ed)', () => {
+    expect(keyIdFromSig(makeSig('34DA7BEFDD46DB75'))).toBe('34DA7BEFDD46DB75');
+    expect(keyIdFromSig(makeSig('34DA7BEFDD46DB75', 'Ed'))).toBe('34DA7BEFDD46DB75');
+    expect(keyIdFromSig(`${makeSig('F52F0A1D2C0B789E')}\r\n`)).toBe('F52F0A1D2C0B789E');
+  });
+  it('throws on anything that is not a minisign signature', () => {
+    for (const bad of ['', 'abc', makePubkey('0123456789ABCDEF'), makeSig('0123456789ABCDEF', 'XX')]) {
+      expect(() => keyIdFromSig(bad)).toThrow();
+    }
+  });
+});
+
+const tauriCli = join(appDir, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+
+describe('a throwaway key made by the tauri CLI', () => {
+  let tmp = '';
+  afterAll(() => {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+  it.skipIf(!existsSync(tauriCli))(
+    'signature and pubkey carry the same key id; keyid-match rejects it against the committed pubkey',
+    () => {
+      tmp = mkdtempSync(join(tmpdir(), 'labnoteo-keyid-'));
+      const key = join(tmp, 'k');
+      const run = (args: string[]) =>
+        spawnSync(process.execPath, [tauriCli, 'signer', ...args], {
+          encoding: 'utf8',
+          env: { ...process.env, CI: 'true' },
+        });
+      expect(run(['generate', '--ci', '-w', key, '-p', '']).status).toBe(0);
+      const file = join(tmp, 'one-byte');
+      writeFileSync(file, 'x');
+      expect(run(['sign', '-f', key, '-p', '', file]).status).toBe(0);
+
+      const pub = readFileSync(`${key}.pub`, 'utf8');
+      const sig = readFileSync(`${file}.sig`, 'utf8');
+      const id = keyIdFromPubkey(pub);
+      expect(id).toMatch(/^[0-9A-F]{16}$/);
+      expect(keyIdFromSig(sig)).toBe(id);
+      expect(Buffer.from(pub.trim(), 'base64').toString('utf8')).toContain(id);
+      expect(isPlaceholderPubkey(pub)).toBe(false);
+
+      // A throwaway key never matches the committed pubkey.
+      const r = spawnSync(
+        process.execPath,
+        [join('app', 'scripts', 'releaseChain.mjs'), 'keyid-match', `${file}.sig`],
+        { cwd: repoRoot, encoding: 'utf8' },
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('::error::');
+      expect(r.stderr).toContain(id);
+    },
+    60_000,
+  );
+});
+
+describe('decideRelease', () => {
+  const base = { ready: true, newestTag: 'v0.1.3', coreAtMain: 'aaa', coreAtTag: 'aaa', tagReleased: true };
+  it('not ready → none (not-ready), whatever else holds', () => {
+    for (const newestTag of [null, 'v0.1.3']) {
+      for (const coreAtTag of ['aaa', 'bbb', null]) {
+        for (const tagReleased of [true, false]) {
+          expect(decideRelease({ ...base, ready: false, newestTag, coreAtTag, tagReleased })).toEqual({
+            action: 'none',
+            reason: 'not-ready',
+          });
+        }
+      }
+    }
+  });
+  it('ready, no v* tag → none (no-first-release)', () => {
+    for (const tagReleased of [true, false]) {
+      expect(decideRelease({ ...base, newestTag: null, coreAtTag: null, tagReleased })).toEqual({
+        action: 'none',
+        reason: 'no-first-release',
+      });
+    }
+  });
+  it('ready, core moved since the tag → bump (released or not)', () => {
+    for (const tagReleased of [true, false]) {
+      expect(decideRelease({ ...base, coreAtTag: 'bbb', tagReleased })).toEqual({ action: 'bump' });
+    }
+  });
+  it('ready, tag without a core pointer counts as moved → bump', () => {
+    expect(decideRelease({ ...base, coreAtTag: null })).toEqual({ action: 'bump' });
+  });
+  it('ready, core not moved, tag unreleased → retag that tag', () => {
+    expect(decideRelease({ ...base, tagReleased: false })).toEqual({ action: 'retag', tag: 'v0.1.3' });
+  });
+  it('ready, core not moved, tag released → none (up-to-date)', () => {
+    expect(decideRelease(base)).toEqual({ action: 'none', reason: 'up-to-date' });
+  });
+  it('throws on a malformed tag or an empty core pointer at main', () => {
+    expect(() => decideRelease({ ...base, newestTag: '0.1.3' })).toThrow();
+    expect(() => decideRelease({ ...base, newestTag: 'v0.1' })).toThrow();
+    expect(() => decideRelease({ ...base, coreAtMain: '' })).toThrow();
+  });
+});
+
+describe('CLI — signing and decision', () => {
+  const script = join('app', 'scripts', 'releaseChain.mjs');
+  const cli = (args: string[], env: Record<string, string> = {}) =>
+    spawnSync(process.execPath, [script, ...args], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
+  const committedPubkey = (
+    JSON.parse(readFileSync(join(appDir, 'src-tauri', 'tauri.conf.json'), 'utf8')) as {
+      plugins: { updater: { pubkey: string } };
+    }
+  ).plugins.updater.pubkey;
+
+  it('`pubkey-check` fails with ::error:: exactly when the committed pubkey is the placeholder', () => {
+    const r = cli(['pubkey-check']);
+    if (isPlaceholderPubkey(committedPubkey)) {
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('::error::');
+      expect(r.stderr).toContain(PLACEHOLDER_KEY_ID);
+    } else {
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain(keyIdFromPubkey(committedPubkey));
+    }
+  });
+
+  describe('keyid-match', () => {
+    let tmp = '';
+    beforeAll(() => {
+      tmp = mkdtempSync(join(tmpdir(), 'labnoteo-sig-'));
+    });
+    afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+    it('exits 0 when the signature key id equals the committed pubkey key id', () => {
+      const f = join(tmp, 'same.sig');
+      writeFileSync(f, makeSig(keyIdFromPubkey(committedPubkey)));
+      const r = cli(['keyid-match', f]);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain(keyIdFromPubkey(committedPubkey));
+    });
+    it('exits 1 naming both ids on a mismatch', () => {
+      const f = join(tmp, 'other.sig');
+      writeFileSync(f, makeSig('0123456789ABCDEF'));
+      const r = cli(['keyid-match', f]);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('::error::');
+      expect(r.stderr).toContain('0123456789ABCDEF');
+      expect(r.stderr).toContain(keyIdFromPubkey(committedPubkey));
+    });
+    it('exits non-zero on a missing, unreadable or malformed signature file', () => {
+      expect(cli(['keyid-match', join(tmp, 'missing.sig')]).status).toBe(1);
+      const f = join(tmp, 'bad.sig');
+      writeFileSync(f, 'not a signature');
+      expect(cli(['keyid-match', f]).status).toBe(1);
+      expect(cli(['keyid-match']).status).not.toBe(0);
+    });
+  });
+
+  describe('decide', () => {
+    const env = {
+      READY: 'true',
+      NEWEST_TAG: 'v0.1.3',
+      CORE_AT_MAIN: 'aaa',
+      CORE_AT_TAG: 'aaa',
+      TAG_RELEASED: 'false',
+    };
+    const lines = (out: string) => out.trim().split(/\r?\n/);
+    it('prints action/tag/reason lines for $GITHUB_OUTPUT', () => {
+      const r = cli(['decide'], env);
+      expect(r.status).toBe(0);
+      expect(lines(r.stdout)).toEqual(['action=retag', 'tag=v0.1.3', 'reason=tag-unreleased']);
+    });
+    it('bump, up-to-date, not-ready and no-first-release', () => {
+      expect(lines(cli(['decide'], { ...env, CORE_AT_TAG: 'bbb' }).stdout)).toEqual([
+        'action=bump',
+        'tag=',
+        'reason=core-moved',
+      ]);
+      expect(lines(cli(['decide'], { ...env, TAG_RELEASED: 'true' }).stdout)).toEqual([
+        'action=none',
+        'tag=',
+        'reason=up-to-date',
+      ]);
+      expect(lines(cli(['decide'], { ...env, READY: 'false' }).stdout)).toEqual([
+        'action=none',
+        'tag=',
+        'reason=not-ready',
+      ]);
+      expect(lines(cli(['decide'], { ...env, NEWEST_TAG: '', CORE_AT_TAG: '' }).stdout)).toEqual([
+        'action=none',
+        'tag=',
+        'reason=no-first-release',
+      ]);
+    });
+    it('fails closed on a READY or TAG_RELEASED that is not true/false, or no core at main', () => {
+      for (const bad of [{ READY: '' }, { READY: 'yes' }, { TAG_RELEASED: '' }, { CORE_AT_MAIN: '' }]) {
+        const r = cli(['decide'], { ...env, ...bad });
+        expect(r.status).toBe(1);
+        expect(r.stdout).toBe('');
+        expect(r.stderr).toContain('::error::');
+      }
+    });
   });
 });
