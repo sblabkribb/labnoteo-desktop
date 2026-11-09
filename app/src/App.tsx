@@ -29,6 +29,7 @@ import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
 import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSampleStore';
 import { createSampleEnv } from './samples/env';
+import { installSampleActionRunners } from './samples/actionRunners';
 import { registerSampleSources } from './samples/sources';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
@@ -288,6 +289,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   useEffect(() => {
     registerAllCommands();
     registerSampleSources();
+    installSampleActionRunners();
     registerAllAppCommands();
     // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다
     return () => {
