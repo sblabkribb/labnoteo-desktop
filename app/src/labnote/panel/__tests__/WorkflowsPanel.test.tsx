@@ -185,6 +185,17 @@ describe('WorkflowsPanel', () => {
     expect(await findRow(/셋째 고침/)).toBeTruthy();
   });
 
+  it('grouping by last updated puts experiments into week groups with translated names (#515)', async () => {
+    const user = userEvent.setup();
+    mount();
+    await findRow(/첫 실험/);
+    await user.selectOptions(screen.getByRole('combobox', { name: '묶는 기준' }), 'updated');
+    expect(h.ctx.settings.workflowViewGroupBy).toBe('updated');
+    // 픽스처의 last_updated_date 는 2026-02-03: 지난주보다 앞이다
+    expect(coreT('Earlier')).not.toBe('Earlier');
+    expect(await findRow(`${coreT('Earlier')} [3]`)).toBeTruthy();
+  });
+
   it('group-by is kept in settings, and New experiment runs create-experiment', async () => {
     const user = userEvent.setup();
     mount();

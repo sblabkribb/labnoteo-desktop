@@ -33,7 +33,7 @@ interface Catalog {
   swUnitOps: UnitOperationItem[];
 }
 
-const GROUPS: readonly ExperimentGrouping[] = ['status', 'project', 'author', 'discuss'];
+const GROUPS: readonly ExperimentGrouping[] = ['status', 'project', 'author', 'discuss', 'updated'];
 
 /** 카탈로그를 보관함에 채우고(없는 것만) 읽는다. 루트는 늘 VAULT_ROOT('.')다. */
 async function loadCatalog(ctx: CommandContext): Promise<Catalog> {
@@ -229,6 +229,7 @@ export function WorkflowsPanel({ ctx, activePath }: WorkflowsPanelProps) {
           <option value="project">{t('workflows.groupBy.project')}</option>
           <option value="author">{t('workflows.groupBy.author')}</option>
           <option value="discuss">{t('workflows.groupBy.discuss')}</option>
+          <option value="updated">{t('workflows.groupBy.updated')}</option>
         </select>
         <button type="button" onClick={newExperiment}>
           {t('workflows.newExperiment')}

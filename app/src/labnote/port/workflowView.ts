@@ -1,9 +1,9 @@
 // Ported from app/vendor/labnoteo/src/views/workflowView.ts:297-334 sha256:a40fe987fe71fdcd
-// Ported from app/vendor/labnoteo/src/views/workflowView.ts:358-404 sha256:0c49d5cc14e302c6
+// Ported from app/vendor/labnoteo/src/views/workflowView.ts:363-436 sha256:baf82cce4ca39225
 // Ported from app/vendor/labnoteo/src/views/workflowView.ts:444-457 sha256:88ebcb824443ff15
-// labnoteO 0.138.0, Apache-2.0.
+// labnoteO 0.140.2, Apache-2.0.
 // Changes: checklistProgress(file) -> checklistProgress(folder, items, isFile): the caller (panel/experimentEntries.ts) reads the README and lists the folder; no mtime cache, no background re-read, `getAbstractFileByPath(p) instanceof TFile` -> `isFile(p)`; the de-duplication compares `key(path)` (default: the path), so a case-insensitive vault passes a case fold and two links differing only in case count once.
-// Changes: render()'s label object -> treeLabels(host); its search words -> discussWords(host); its `kept` filter -> keptExperiments(all, found, kept). `this.plugin.t` -> `host.t`. Drawing, grouping state and the no-match text stay in WorkflowsPanel.tsx.
+// Changes: render()'s label object -> treeLabels(host); its search words -> discussWords(host); its `kept` filter -> keptExperiments(all, found, kept). `this.plugin.t` -> `host.t`. Drawing, grouping state, the no-match text and the group-by choices (with "By last updated", #515) stay in WorkflowsPanel.tsx.
 // Changes: showMarkers(folder) method -> showMarkers(host, folder); `this.plugin.host` -> `host`, `this.plugin.t` -> `host.t`.
 
 import type { ExperimentEntry, ExperimentTreeLabels, LabnoteHost } from '@labnoteo/core';
@@ -82,6 +82,10 @@ export function treeLabels(host: Pick<LabnoteHost, 't'>): ExperimentTreeLabels {
     noProject: host.t('(no project)'),
     author: host.t('Author'),
     noAuthor: host.t('(no author)'),
+    updatedThisWeek: host.t('This week'),
+    updatedLastWeek: host.t('Last week'),
+    updatedEarlier: host.t('Earlier'),
+    noUpdated: host.t('(no date)'),
     unreadable: host.t('(front matter unreadable)'),
     frontMatterError: host.t('README front matter could not be read'),
   };
