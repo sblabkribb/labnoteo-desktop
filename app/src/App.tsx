@@ -27,6 +27,7 @@ import { LanguageToggle } from './i18n/LanguageToggle';
 import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
+import { offerPluginLlmKey } from './integrations/importLlmKey';
 import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSampleStore';
 import { createSampleEnv } from './samples/env';
 import { wireSampleFollowUps } from './samples/followUps';
@@ -252,7 +253,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     else void openFile(path, { line: line0 });
   };
   // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
-  const { settings, imported: settingsImported, update: updateSettings } = useVaultSettings(vault.root);
+  const { settings, imported: settingsImported, foundLlmKey, update: updateSettings } = useVaultSettings(vault.root);
   // 명령이 쓰는 호스트: 대화상자, 알림, 열린 노트는 버퍼를 기준으로 하는 파일 시스템, 열린 편집기의 편집 대상.
   const host = useMemo(
     () =>
@@ -265,6 +266,14 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+  // 플러그인 설정을 처음 가져올 때 data.json 에 LLM 키가 있었으면(D9) 자격 증명 관리자에 저장할지 한 번 묻는다.
+  // 값은 웹뷰로 오지 않는다: Rust 가 data.json 을 다시 읽어 저장한다. 보관함마다 한 번만 묻는다.
+  const llmKeyOffered = useRef<string>();
+  useEffect(() => {
+    if (!foundLlmKey || llmKeyOffered.current === vault.root) return;
+    llmKeyOffered.current = vault.root;
+    void offerPluginLlmKey(host);
+  }, [foundLlmKey, vault.root, host]);
   // 샘플 저장소(알려진 ID, README 의 sample_tracking)를 이 보관함의 fs 와 설정에 묶고, 대장 JSON 변경과 창 초점을 잇는다.
   useSampleStoreWiring(host.fs, settings);
   // 편집기의 샘플 설정(D8): 저장소 판이나 샘플 설정이 바뀔 때만 새 객체다.

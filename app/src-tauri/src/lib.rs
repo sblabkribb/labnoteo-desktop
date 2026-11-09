@@ -38,6 +38,8 @@ macro_rules! register_commands {
             $crate::vault::settings::settings_vault_read,
             $crate::vault::settings::settings_vault_write,
             $crate::vault::settings::settings_import_plugin,
+            $crate::vault::settings::settings_plugin_llm_key,
+            $crate::vault::settings::settings_import_llm_key,
             $crate::index::index_rebuild,
             $crate::index::index_upsert,
             $crate::index::index_remove,

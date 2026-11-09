@@ -7,6 +7,7 @@ import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
 import { listVaultImages, readVaultImage, writeVaultImage } from '../vaultImage';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
+import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -16,12 +17,12 @@ const fixture: Record<string, string[]> = JSON.parse(
 /**
  * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 3·4·5·6·7·8·9 가 Rust 쪽 secret_*·net_cancel·partbank_*·llm_*·bfw_*·integration_state_* 를 먼저 넣었고,
  * Task 11 이 netIpc.ts 래퍼를 만들어 아래 테스트에서 호출하면서 이 목록을 비운다.
+ * secret_status 는 Task 10 의 플러그인 LLM 키 가져오기(offerPluginLlmKey)가 이미 보낸다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
  */
 const PENDING_TS_WRAPPERS: readonly string[] = [
   'secret_set',
   'secret_clear',
-  'secret_status',
   'net_cancel',
   'partbank_request',
   'partbank_probe',
@@ -61,6 +62,8 @@ function recorder() {
     if (cmd === 'vault_read') return 'old';
     if (cmd === 'vault_list' || cmd === 'search') return [];
     if (cmd === 'vault_exists') return true;
+    if (cmd === 'settings_import_plugin') return '{}';
+    if (cmd === 'settings_plugin_llm_key') return true;
     if (cmd === 'vault_read_image') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
     if (cmd === 'index_bodies') return { items: [], next: null };
@@ -96,6 +99,7 @@ describe('IPC 인자 이름 계약', () => {
     await createVault(r.invoke, 'D:\\lab');
     const { settings } = await loadVaultSettings(r.invoke);
     await saveVaultSettings(settings, r.invoke);
+    await offerPluginLlmKey({ confirm: async () => true, notify: () => undefined }, r.invoke);
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');

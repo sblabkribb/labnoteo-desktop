@@ -184,10 +184,18 @@ fn bump_epoch(store: &dyn SecretStore, slot: Slot, cfg: &ServiceConfig) -> Resul
 
 /// Validates and stores the slot's key, then bumps its epoch.
 pub fn store_secret(store: &dyn SecretStore, slot: Slot, cfg: &ServiceConfig, value: &str) -> Result<(), NetError> {
-    let acc = account(slot, cfg)?;
+    store_at_account(store, &account(slot, cfg)?, value)
+}
+
+/// Validates and stores a key under an account built by `account` (or the
+/// same `"<slot>|<origin>"` shape), then bumps `"epoch|<account>"`. Used by the
+/// plugin LLM key import, whose origin comes from `data.json` (D9).
+pub fn store_at_account(store: &dyn SecretStore, account: &str, value: &str) -> Result<(), NetError> {
     let key = validate_secret(value)?;
-    store.set(&acc, &key)?;
-    bump_epoch(store, slot, cfg)
+    store.set(account, &key)?;
+    let epoch_acc = format!("epoch|{account}");
+    let next = read_epoch(store, &epoch_acc).saturating_add(1);
+    store.set(&epoch_acc, &next.to_string())
 }
 
 /// Deletes the slot's key (a missing key is fine), then bumps its epoch.

@@ -165,6 +165,24 @@ fn ipc_argument_names_match_the_typescript_side() {
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));
 
+    // Plugin import (D9): the returned JSON holds no key, and an LLM key in
+    // data.json is only offered. Storing it re-reads data.json in Rust, so the
+    // value never crosses IPC, and an existing key is kept.
+    let first = responses.borrow().len();
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("data.json"), r#"{"llmApiKey":"sk-imp","autoSyncUnitOpToc":false}"#).unwrap();
+    let imported = ok("settings_import_plugin", args("settings_import_plugin", vec![]));
+    assert!(imported.as_str().unwrap().contains("autoSyncUnitOpToc"), "{imported}");
+    assert_eq!(ok("settings_plugin_llm_key", args("settings_plugin_llm_key", vec![])), json!(true));
+    assert_eq!(ok("settings_import_llm_key", args("settings_import_llm_key", vec![])), json!(true));
+    assert_eq!(ok("settings_plugin_llm_key", args("settings_plugin_llm_key", vec![])), json!(false));
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["llmOpenai"], true);
+    assert_eq!(ok("settings_import_llm_key", args("settings_import_llm_key", vec![])), json!(false));
+    for r in responses.borrow()[first..].iter() {
+        assert!(!r.contains("sk-imp"), "{r}");
+    }
+    std::fs::remove_dir_all(dir.join("vault").join(".obsidian")).unwrap();
+
     // Cancelling an id that is not in flight answers false (it is remembered,
     // so a request registered later with it answers `cancelled` unsent).
     assert_eq!(ok("net_cancel", args("net_cancel", vec![json!("none")])), json!(false));

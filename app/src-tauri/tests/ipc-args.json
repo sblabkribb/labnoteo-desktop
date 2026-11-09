@@ -20,6 +20,8 @@
   "settings_vault_read": [],
   "settings_vault_write": ["content"],
   "settings_import_plugin": [],
+  "settings_plugin_llm_key": [],
+  "settings_import_llm_key": [],
   "index_rebuild": [],
   "index_upsert": ["path"],
   "index_remove": ["path"],

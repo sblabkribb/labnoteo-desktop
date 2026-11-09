@@ -1,15 +1,25 @@
-import { fromPluginData, loadVaultSettings, saveVaultSettings, type AppSettings } from '../settings';
+import {
+  BFW_DEFAULT_URL,
+  fromPluginData,
+  fromStored,
+  isOriginUrl,
+  isServiceUrl,
+  loadVaultSettings,
+  saveVaultSettings,
+  type AppSettings,
+} from '../settings';
 
 type Calls = Array<[string, Record<string, unknown> | undefined]>;
 
 /** Rust 쪽 저장소 흉내: settings_vault_write 가 쓴 글을 settings_vault_read 가 돌려준다. */
-function fakeStore(opts: { stored?: string | null; plugin?: string | null } = {}) {
+function fakeStore(opts: { stored?: string | null; plugin?: string | null; llmKey?: boolean } = {}) {
   let stored = opts.stored ?? null;
   const calls: Calls = [];
   const invoke = async (cmd: string, args?: Record<string, unknown>) => {
     calls.push([cmd, args]);
     if (cmd === 'settings_vault_read') return stored;
     if (cmd === 'settings_import_plugin') return opts.plugin ?? null;
+    if (cmd === 'settings_plugin_llm_key') return opts.llmKey ?? false;
     if (cmd === 'settings_vault_write') {
       stored = String(args?.content);
       return null;
@@ -32,7 +42,7 @@ describe('보관함별 설정', () => {
       llmEndpointOpenai: 'https://api.example.com',
     };
     const text = JSON.stringify(fromPluginData(raw));
-    for (const s of ['llmApiKey', 'mcpToken', 'partbankApiKey', 'sk-secret-openai', 'a'.repeat(48), 'pb-secret-key', 'llmEndpointOpenai']) {
+    for (const s of ['llmApiKey', 'mcpToken', 'partbankApiKey', 'sk-secret-openai', 'a'.repeat(48), 'pb-secret-key']) {
       expect(text).not.toContain(s);
     }
     const s = fromPluginData(raw);
@@ -40,12 +50,23 @@ describe('보관함별 설정', () => {
     expect(s.customSampleTypes).toEqual(['Strain']);
     expect(Object.keys(s).sort()).toEqual(
       [
+        'allowHttpOrigins',
         'autoSyncUnitOpToc',
         'autoUpdateLastUpdated',
+        'bfwConnection',
+        'bfwUrl',
         'catalogNoticeHash',
         'customSampleTypes',
         'globalSampleFolder',
         'legacyNotesOfferDismissed',
+        'llmEndpointOllama',
+        'llmEndpointOpenai',
+        'llmModel',
+        'llmProvider',
+        'partbankDefaultConnection',
+        'partbankDesktopUrl',
+        'partbankSendUsages',
+        'partbankWebUrl',
         'sampleTracking',
         'schemaVersion',
         'workflowViewGroupBy',
@@ -127,5 +148,70 @@ describe('보관함별 설정', () => {
     // a stored non-boolean is the default
     const odd = fakeStore({ stored: JSON.stringify({ legacyNotesOfferDismissed: 'yes' }) });
     expect((await loadVaultSettings(odd.invoke)).settings.legacyNotesOfferDismissed).toBe(false);
+  });
+
+  it('integration settings get the plugin defaults, with usage sending off', () => {
+    const s = fromPluginData({});
+    expect(s).toMatchObject({ partbankDesktopUrl: 'http://127.0.0.1:47830', partbankWebUrl: 'https://partbank.kbiofoundry.kr',
+      partbankDefaultConnection: 'web', partbankSendUsages: false, llmProvider: 'none', llmEndpointOllama: 'http://localhost:11434',
+      llmEndpointOpenai: 'https://api.openai.com', llmModel: 'llama3.1', bfwUrl: 'https://workflow.kbiofoundry.kr', bfwConnection: 'server', allowHttpOrigins: [] });
+  });
+
+  it('usage sending is on only when the plugin data says true', () => {
+    expect(fromPluginData({ partbankSendUsages: true }).partbankSendUsages).toBe(true);
+    expect(fromPluginData({ partbankSendUsages: false }).partbankSendUsages).toBe(false);
+    expect(fromPluginData(undefined).partbankSendUsages).toBe(false);
+    expect(fromPluginData({ partbankSendUsages: 'true' }).partbankSendUsages).toBe(false);
+  });
+
+  it('an invalid bfwUrl or bfwConnection falls back', () => {
+    expect(fromPluginData({ bfwUrl: 'ftp://x', bfwConnection: 'cloud' })).toMatchObject({ bfwUrl: BFW_DEFAULT_URL, bfwConnection: 'server' });
+    expect(fromPluginData({ bfwUrl: 'https://w.example/sub' }).bfwUrl).toBe(BFW_DEFAULT_URL);
+    expect(fromPluginData({ bfwUrl: 'https://w.example', bfwConnection: 'desktop' })).toMatchObject({ bfwUrl: 'https://w.example', bfwConnection: 'desktop' });
+  });
+
+  it('allowHttpOrigins keeps only http origins', () => {
+    expect(fromStored({ allowHttpOrigins: ['http://10.0.0.5:8000', 'https://x', 'http://a/b', 3] }).allowHttpOrigins).toEqual(['http://10.0.0.5:8000']);
+    expect(fromStored({ allowHttpOrigins: 'http://10.0.0.5:8000' }).allowHttpOrigins).toEqual([]);
+  });
+
+  it('the integration settings survive a save and reload', async () => {
+    const store = fakeStore();
+    const { settings } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings({ ...settings, llmProvider: 'openai', llmModel: 'gpt-x', partbankSendUsages: true, bfwConnection: 'desktop', allowHttpOrigins: ['http://10.0.0.5:8000'] }, store.invoke);
+    expect((await loadVaultSettings(store.invoke)).settings).toMatchObject({ llmProvider: 'openai', llmModel: 'gpt-x', partbankSendUsages: true, bfwConnection: 'desktop', allowHttpOrigins: ['http://10.0.0.5:8000'] });
+  });
+
+  it('saveVaultSettings never writes a key-like field even if one is smuggled in', async () => {
+    const f = fakeStore();
+    await saveVaultSettings({ ...fromPluginData({}), llmApiKey: 'sk-1' } as never, f.invoke);
+    expect(f.stored()).not.toContain('sk-1');
+  });
+
+  it('isServiceUrl and isOriginUrl', () => {
+    expect(isServiceUrl('https://a.example')).toBe(true);
+    expect(isServiceUrl('http://127.0.0.1:47830/api')).toBe(true);
+    for (const v of ['ftp://a', 'https://u:p@a', 'https://a/?q', 'https://a/#f', '', 'a.example', 3, undefined]) expect(isServiceUrl(v)).toBe(false);
+    expect(isOriginUrl('https://a.example/')).toBe(true);
+    expect(isOriginUrl('https://a.example')).toBe(true);
+    expect(isOriginUrl('https://a.example/x')).toBe(false);
+  });
+
+  it('loadVaultSettings reports a plugin LLM key only on the first import', async () => {
+    const first = fakeStore({ plugin: '{}', llmKey: true });
+    expect(await loadVaultSettings(first.invoke)).toMatchObject({ imported: true, foundLlmKey: true });
+    expect(count(first.calls, 'settings_plugin_llm_key')).toBe(1);
+    const again = await loadVaultSettings(first.invoke);
+    expect(again).toMatchObject({ imported: false, foundLlmKey: false });
+    expect(count(first.calls, 'settings_plugin_llm_key')).toBe(1);
+    const none = fakeStore({ plugin: '{}', llmKey: false });
+    expect(await loadVaultSettings(none.invoke)).toMatchObject({ imported: true, foundLlmKey: false });
+    // a failing check is "no key found", never a thrown error
+    const failing = fakeStore({ plugin: '{}' });
+    const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'settings_plugin_llm_key') throw { kind: 'io', message: 'x' };
+      return (failing.invoke as (c: string, a?: Record<string, unknown>) => Promise<unknown>)(cmd, args);
+    }) as never;
+    expect(await loadVaultSettings(invoke)).toMatchObject({ imported: true, foundLlmKey: false });
   });
 });
