@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:751-995 sha256:9bb886c45d2ff54f
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); new Notice(m) → env.host.notify('info', m); complete comes from port/aiCommon.ts (Task 31) and returns a ChatResult, so its content is read off it, and 'Configure an AI provider in settings first.' is complete's overrideOr('ai.configureFirst') (D21). getSampleDisplayMeta(plugin.settings.customSampleTypes).types → env.sampleEnv().types() (the same list); plugin.settings.globalSampleFolder → env.sampleEnv().globalFolder() (normalised); plugin.fs → env.sampleEnv().fs (safeRegistryFs over the recycle bin, D13). toolContext(plugin) → toolContext(env), whose fs is env.sampleEnv().fs, wrapped here so a write the guard refuses with RegistryUnreadableError (a conflicted registry) is remembered: nothing is written to that registry, and the end notice is followed by one host.notify('warn', t('samples.registryUnreadable', path)) per such registry instead of the vendor's silent skip. The creations stop, without a notice, once the open vault was switched (vaultSignal(), D11). After the creations, env.sampleEnv().changed(the written registries) runs (vendor: the tool's own refresh). The final Notice(…, 15000) → host.notify('warn') when aliases were renamed, and 'info' otherwise. The prompt, the 6000-char cap and the notice texts are the vendor's.
+// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); new Notice(m) → env.host.notify('info', m); complete comes from port/aiCommon.ts (Task 31) and returns a ChatResult, so its content is read off it, and 'Configure an AI provider in settings first.' is complete's overrideOr('ai.configureFirst') (D21). getSampleDisplayMeta(plugin.settings.customSampleTypes).types → env.sampleEnv().types() (the same list); plugin.settings.globalSampleFolder → env.sampleEnv().globalFolder() (normalised); plugin.fs → env.sampleEnv().fs (safeRegistryFs over the recycle bin, D13). toolContext(plugin) → toolContext(env), whose fs is env.sampleEnv().fs, wrapped here so a write the guard refuses with RegistryUnreadableError (a conflicted registry) is remembered: nothing is written to that registry, and the end notice is followed by one host.notify('warn', t('samples.registryUnreadable', path)) per such registry instead of the vendor's silent skip. A vaultGuard() is taken before the model is asked (D11): every registry-changing fs call of the tools (write, modify, mkdir, remove, rmdir, and writeNote through toolContext's beforeWrite) awaits guard.check() first, and the creations stop, without a notice, once a check failed or the guard's signal is aborted. After the creations, env.sampleEnv().changed(the written registries) runs (vendor: the tool's own refresh), but not once the vault was switched (those paths would be read in the new vault). The final Notice(…, 15000) → host.notify('warn') when aliases were renamed, and 'info' otherwise. The prompt, the 6000-char cap and the notice texts are the vendor's.
 import { createLabnoteTools, runTool } from '@labnoteo/core';
 import { canonicalSampleType, normalizeSampleId, toSampleAlias as toAlias } from '@labnoteo/core/lib/sampleUtils';
 import {
@@ -11,7 +11,7 @@ import {
 } from '@labnoteo/core/lib/sampleStorage';
 import type { AiEnv } from '../../ai/aiEnv';
 import { t as appT } from '../../i18n/t';
-import { vaultSignal } from '../../integrations/netIpc';
+import { vaultGuard } from '../../integrations/netIpc';
 import { RegistryUnreadableError } from '../../samples/env';
 import { complete, toolContext } from './aiCommon';
 
@@ -179,6 +179,8 @@ export async function extractSamplesCommand(env: AiEnv): Promise<void> {
     return;
   }
 
+  // Taken before the network wait: the relative registry paths below must still name this vault when written (D11).
+  const guard = await vaultGuard(env.invoke);
   const samples = env.sampleEnv();
   const types = samples.types();
   const out = await complete(env, [
@@ -217,7 +219,18 @@ export async function extractSamplesCommand(env: AiEnv): Promise<void> {
   const { fresh, skipped } = skipKnownSamples(prepared.samples, registries, referenced);
 
   const tools = createLabnoteTools();
-  const base = toolContext(env);
+  // Set once a guard check failed: the open vault was switched, so nothing more is written.
+  let switched = false;
+  const check = async (): Promise<void> => {
+    try {
+      await guard.check();
+    } catch (err) {
+      switched = true;
+      throw err;
+    }
+  };
+  const stopped = (): boolean => switched || guard.signal.aborted;
+  const base = toolContext(env, { beforeWrite: check });
   // Registries the guard refused to write (a conflict left in them): reported once each after the run.
   const unreadable = new Set<string>();
   const remember = <T>(p: Promise<T>): Promise<T> =>
@@ -229,8 +242,26 @@ export async function extractSamplesCommand(env: AiEnv): Promise<void> {
     ...base,
     fs: {
       ...base.fs,
-      write: (p: string, c: string) => remember(base.fs.write(p, c)),
-      modify: (p: string, u: (s: string) => string) => remember(base.fs.modify(p, u)),
+      write: async (p: string, c: string) => {
+        await check();
+        return remember(base.fs.write(p, c));
+      },
+      modify: async (p: string, u: (s: string) => string) => {
+        await check();
+        return remember(base.fs.modify(p, u));
+      },
+      mkdir: async (p: string) => {
+        await check();
+        return base.fs.mkdir(p);
+      },
+      remove: async (p: string) => {
+        await check();
+        return base.fs.remove(p);
+      },
+      rmdir: async (p: string) => {
+        await check();
+        return base.fs.rmdir(p);
+      },
     },
   };
 
@@ -239,12 +270,12 @@ export async function extractSamplesCommand(env: AiEnv): Promise<void> {
   let inGlobal = false;
   const renamed: string[] = [];
   const written = new Set<string>();
-  const vault = vaultSignal();
   try {
     for (const { originalAlias, ...s } of fresh) {
       // The open vault was switched: nothing more is written, and the notices would name the wrong vault.
-      if (vault.aborted) return;
+      if (stopped()) return;
       const res = await runTool(tools, 'create_sample', ctx, { ...s, documentPath: target.path });
+      if (stopped()) return;
       if (res.ok) {
         created++;
         if (!s.location) noLocation++;
@@ -255,7 +286,8 @@ export async function extractSamplesCommand(env: AiEnv): Promise<void> {
       }
     }
   } finally {
-    if (written.size > 0) samples.changed([...written]);
+    // After a switch these relative paths would be re-read in the new vault.
+    if (written.size > 0 && !stopped()) samples.changed([...written]);
   }
   const parts = [
     skipped > 0

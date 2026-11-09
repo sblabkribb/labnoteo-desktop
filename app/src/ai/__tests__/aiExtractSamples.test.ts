@@ -4,6 +4,7 @@
  * aiInsertTarget.test.ts 의 추출 사례를 옮겼다: 제공자 흉내는 `fakeInvoke({ llm_chat })`, 대장은 가짜 보관함의 진짜 파일이다.
  */
 import { fakeInvoke } from '../../integrations/__tests__/fakeNet';
+import { cancelAllRequests } from '../../integrations/netIpc';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import { closeAllDialogs } from '../../labnote/host/dialogStore';
@@ -250,11 +251,18 @@ type Message = { role: string; content: string };
 let hosts: TestHost[] = [];
 let offs: Array<() => void> = [];
 
-async function setup(files: Record<string, string>, content: string, settings: Record<string, unknown> = LLM) {
+const VAULT = () => ({ root: 'C:/Vault', name: 'Vault' });
+
+async function setup(
+  files: Record<string, string>,
+  content: string,
+  settings: Record<string, unknown> = LLM,
+  routes: Record<string, (args: Record<string, unknown>) => unknown> = {}
+) {
   const th = createTestHost({ [NOTE]: BODY, ...files }, settings);
   hosts.push(th);
   await th.mount(NOTE);
-  const f = fakeInvoke({ llm_chat: () => reply(content), net_cancel: () => null });
+  const f = fakeInvoke({ llm_chat: () => reply(content), net_cancel: () => null, vault_current: VAULT, ...routes });
   const changed: Array<readonly string[] | undefined> = [];
   offs.push(sampleEvents.subscribe((p) => changed.push(p)));
   return { th, f, changed, env: createAiEnv(th.ctx, f.invoke) };
@@ -306,7 +314,7 @@ describe('extractSamplesCommand', () => {
     const th = createTestHost({ [NOTE]: long }, LLM);
     hosts.push(th);
     await th.mount(NOTE);
-    const f = fakeInvoke({ llm_chat: () => reply('[]'), net_cancel: () => null });
+    const f = fakeInvoke({ llm_chat: () => reply('[]'), net_cancel: () => null, vault_current: VAULT });
     await extractSamplesCommand(createAiEnv(th.ctx, f.invoke));
     expect(sent(f)[0][1].content).toBe(long.slice(0, 6000));
   });
@@ -373,6 +381,55 @@ describe('extractSamplesCommand', () => {
     await extractSamplesCommand(env);
     expect(sent(f)[0][0].content).toMatch(/"type" must be one of: [^.]*\bStrain\b/);
     expect(Object.values(records(th, `${LOCAL}/Strain.json`))).toEqual([expect.objectContaining({ alias: 'BL21' })]);
+  });
+
+  // D11: the open vault was switched while the model answered — the relative registry paths now name the other vault.
+  it('writes nothing once the vault root changed during the request', async () => {
+    let root = 'C:/A';
+    const { th, env, changed } = await setup(
+      {},
+      JSON.stringify([{ type: 'DNA', alias: 'a', location: 'box' }]),
+      LLM,
+      {
+        vault_current: () => ({ root, name: 'v' }),
+        llm_chat: () => {
+          root = 'C:/B';
+          return reply(JSON.stringify([{ type: 'DNA', alias: 'a', location: 'box' }]));
+        },
+      }
+    );
+    const before = { ...th.vault.files() };
+    await extractSamplesCommand(env);
+    expect(th.vault.files()).toEqual(before);
+    expect(th.notes.filter(n => n.message.startsWith('Created'))).toHaveLength(0);
+    expect(changed).toHaveLength(0);
+  });
+
+  it('stops the creations when the vault is switched between them', async () => {
+    let checks = 0;
+    const { th, env, changed } = await setup(
+      {},
+      JSON.stringify([
+        { type: 'DNA', alias: 'a', location: 'box' },
+        { type: 'Plasmid', alias: 'p', location: 'box' },
+      ]),
+      LLM,
+      {
+        vault_current: () => {
+          // 1: the guard is taken; 2..: one check per registry write. The switch lands after the first registry.
+          checks++;
+          if (Object.keys(th.vault.files()).some(p => p.endsWith('/DNA.json'))) void cancelAllRequests(async () => null as never);
+          return VAULT();
+        },
+      }
+    );
+    await extractSamplesCommand(env);
+    expect(checks).toBeGreaterThan(1);
+    expect(Object.values(records(th, `${LOCAL}/DNA.json`))).toEqual([expect.objectContaining({ alias: 'a' })]);
+    expect(th.vault.files()[`${LOCAL}/Plasmid.json`]).toBeUndefined();
+    expect(th.notes.filter(n => n.message.startsWith('Created'))).toHaveLength(0);
+    // The old vault's registry paths are not announced into the new one.
+    expect(changed).toHaveLength(0);
   });
 
   it('a conflicted registry is reported and nothing is written for that type', async () => {
