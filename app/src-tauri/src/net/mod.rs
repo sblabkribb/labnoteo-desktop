@@ -4,6 +4,7 @@
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod partbank;
 pub mod secrets;
 pub use error::*;
 

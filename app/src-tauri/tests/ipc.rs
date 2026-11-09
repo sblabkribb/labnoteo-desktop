@@ -90,6 +90,16 @@ fn ipc_argument_names_match_the_typescript_side() {
 
     // Integration keys need the open vault's settings to name their origin.
     assert_eq!(call("secret_status", args("secret_status", vec![])).unwrap_err()["kind"], "notConfigured");
+    // PartBank: the webview names a connection and a path, never a host. With
+    // no vault there is no saved URL or key; a probe of unsaved fields without
+    // a typed key answers keyMissing and sends nothing.
+    let pb = call("partbank_request", args("partbank_request", vec![json!("web"), json!("GET"), json!("/auth/me"), Value::Null, Value::Null]))
+        .unwrap_err();
+    assert!(pb["kind"] == "keyMissing" || pb["kind"] == "notConfigured", "{pb}");
+    assert_eq!(
+        call("partbank_probe", args("partbank_probe", vec![json!("web"), json!("https://x.example"), Value::Null])).unwrap_err()["kind"],
+        "keyMissing"
+    );
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -131,6 +141,21 @@ fn ipc_argument_names_match_the_typescript_side() {
     // Cancelling an id that is not in flight answers false (it is remembered,
     // so a request registered later with it answers `cancelled` unsent).
     assert_eq!(ok("net_cancel", args("net_cancel", vec![json!("none")])), json!(false));
+
+    // With the vault open but no partbank key: keyMissing, and a path off the
+    // allow-list is refused before anything else.
+    assert_eq!(
+        call("partbank_request", args("partbank_request", vec![json!("web"), json!("GET"), json!("/auth/me"), Value::Null, Value::Null])).unwrap_err()["kind"],
+        "keyMissing"
+    );
+    assert_eq!(
+        call("partbank_request", args("partbank_request", vec![json!("desktop"), json!("GET"), json!("//evil.example/x"), Value::Null, Value::Null])).unwrap_err()["kind"],
+        "forbiddenPath"
+    );
+    assert_eq!(
+        call("partbank_probe", args("partbank_probe", vec![json!("web"), json!("https://x.example/path"), json!("typed")])).unwrap_err()["kind"],
+        "invalidUrl"
+    );
 
     // The link journal: kept in the app data dir, never in the vault.
     assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);
