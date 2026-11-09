@@ -102,7 +102,7 @@ const ko: Record<string, string> = {
   'links.busy': '링크를 고치는 중입니다. 끝난 뒤 다시 하세요',
   'legacy.offer.title': '예전 형식의 실험 노트',
   'legacy.offer.body':
-    '이 보관함에는 예전 이름 형식(.md)을 쓰는 실험 노트가 {0}개 있습니다. 앱은 이 노트들을 실험으로 알아보지 못해 단위 작업 넣기, Workflows 패널 같은 기능이 동작하지 않습니다.\n\n바꾸면 이름이 .labnote.md 로 바뀌고, 다른 노트에 있는 링크도 새 이름으로 고칩니다. 바꾼 노트는 Obsidian 플러그인에서도 그대로 쓸 수 있습니다.',
+    '이 보관함에는 예전 이름 형식(.md)을 쓰는 실험 노트가 {0}개 있습니다. 앱은 이 노트들을 실험으로 알아보지 못해 유닛 오퍼레이션 삽입이나 워크플로 탭 같은 기능이 동작하지 않습니다.\n\n바꾸면 이름이 .labnote.md 로 바뀌고, 다른 노트에 있는 링크도 새 이름으로 고칩니다. 바꾼 노트는 Obsidian 플러그인에서도 그대로 쓸 수 있습니다.',
   'legacy.offer.convert': '바꾸기',
   'legacy.offer.later': '나중에',
   'legacy.offer.never': '이 보관함에서는 다시 묻지 않기',
@@ -407,7 +407,7 @@ const en: Record<string, string> = {
   'links.busy': 'Links are being updated. Try again when it finishes',
   'legacy.offer.title': 'Older experiment notes',
   'legacy.offer.body':
-    "This vault has {0} experiment notes that use the older naming (.md). The app doesn't recognize them as experiments, so features like inserting unit operations and the Workflows panel don't work for them.\n\nConverting renames them to .labnote.md and updates links to them in other notes. Converted notes also work with the Obsidian plugin.",
+    "This vault has {0} experiment notes that use the older naming (.md). The app doesn't recognize them as experiments, so features like inserting unit operations and the Workflows tab don't work for them.\n\nConverting renames them to .labnote.md and updates links to them in other notes. Converted notes also work with the Obsidian plugin.",
   'legacy.offer.convert': 'Convert',
   'legacy.offer.later': 'Not now',
   'legacy.offer.never': "Don't ask again for this vault",
