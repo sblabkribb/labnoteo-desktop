@@ -1,11 +1,15 @@
 /**
  * port/*.ts 는 플러그인 코드의 복사본이다. 머리말이 출처 범위와 그 해시를 적고, 이 테스트가 지금 vendor 의 범위와
- * 맞춰 본다. vendor 가 새 릴리스로 옮겨 가 범위가 바뀌면 빨갛게 된다(설계상): 조용히 낡은 복사본을 싣지 않는다.
+ * 맞춰 본다. 적힌 줄이 그 해시가 아니어도, 같은 vendor 파일 안 다른 곳에 같은 줄 수·같은 해시의 덩어리가 꼭 하나
+ * 있으면 통과한다: 새 릴리스가 코드를 옮기기만 했을 때(줄 번호만 밀림) 예약된 sync-core 작업이 빨갛게 되지 않게.
+ * 그런 덩어리가 없거나 여럿이면(적힌 범위가 그중 하나가 아닌 한) port drift 로 빨갛게 된다(설계상): 내용이 바뀐
+ * 코드를 조용히 낡은 복사본으로 싣지 않는다. 머리말의 줄 번호는 다시 옮기거나 판을 올릴 때 portHash.mjs 로 고친다.
  * 다시 옮기는 법은 docs/superpowers/plans/2026-11-06-notebook-commands.md 의 Global Constraints "Porting rule".
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const PORT_DIR = 'src/labnote/port';
@@ -17,8 +21,25 @@ const CHANGES = /^\/\/ Changes: /;
 
 /** 범위(1부터, 양끝 포함)의 줄을 LF 로 이은 글의 SHA-256, 소문자 16진 앞 16글자. scripts/portHash.mjs 와 같다. */
 function rangeHash(text: string, from: number, to: number): string {
-  const lines = text.replace(/\r\n/g, '\n').split('\n').slice(from - 1, to);
-  return createHash('sha256').update(lines.join('\n'), 'utf8').digest('hex').slice(0, 16);
+  return linesHash(text.replace(/\r\n/g, '\n').split('\n'), from, to);
+}
+
+function linesHash(lines: string[], from: number, to: number): string {
+  return createHash('sha256').update(lines.slice(from - 1, to).join('\n'), 'utf8').digest('hex').slice(0, 16);
+}
+
+/** 적힌 범위가 해시와 맞거나, 같은 줄 수·같은 해시의 덩어리가 파일 안에 꼭 하나 있으면(옮겨지기만 함) 참. */
+function rangeFound(text: string, from: number, to: number, hash: string): boolean {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  if (from >= 1 && to >= from && to <= lines.length && linesHash(lines, from, to) === hash) return true;
+  if (to < from) return false;
+  const size = to - from + 1;
+  let matches = 0;
+  for (let s = 1; s + size - 1 <= lines.length; s++) {
+    if (linesHash(lines, s, s + size - 1) === hash) matches++;
+  }
+  // 여럿이면 적힌 범위가 그중 하나일 때만 통과인데, 그 경우는 위에서 이미 참을 돌려줬다
+  return matches === 1;
 }
 
 /** 포트 파일 하나의 문제. 비어 있으면 머리말이 맞고 vendor 와 어긋나지 않는다. `vendorRoot` 는 vendor/labnoteo 폴더. */
@@ -43,9 +64,7 @@ function checkPort(file: string, code: string, vendorRoot = 'vendor/labnoteo'): 
       problems.push(`${file}: ${where} names a vendor file that does not exist`);
       continue;
     }
-    const text = readFileSync(source, 'utf-8');
-    const count = text.replace(/\r\n/g, '\n').split('\n').length;
-    if (r.from < 1 || r.to < r.from || r.to > count || rangeHash(text, r.from, r.to) !== r.hash) {
+    if (!rangeFound(readFileSync(source, 'utf-8'), r.from, r.to, r.hash)) {
       problems.push(`port drift: re-port ${file} (${where})`);
     }
   }
@@ -91,6 +110,58 @@ describe('옮겨 온 코드의 출처', () => {
       'port/x.ts: no "// Changes:" line after the version line',
       'port/x.ts: app/vendor/labnoteo/src/nope.ts:1-2 names a vendor file that does not exist',
     ]);
+  });
+
+  describe('검사 자체: 작은 vendor 나무에서', () => {
+    const block = ['export function a() {', '  return 1;', '}'];
+    const blockHash = rangeHash(block.join('\n'), 1, 3);
+    const port = (from: number, to: number, path = 'src/a.ts') =>
+      [
+        `// Ported from app/vendor/labnoteo/${path}:${from}-${to} sha256:${blockHash}`,
+        '// labnoteO 0.138.0, Apache-2.0.',
+        '// Changes: none.',
+        'export {};',
+      ].join('\n');
+    let root = '';
+    const vendor = (lines: string[]) => {
+      root = mkdtempSync(join(tmpdir(), 'provenance-'));
+      mkdirSync(join(root, 'src'));
+      writeFileSync(join(root, 'src', 'a.ts'), lines.join('\n'));
+      return root;
+    };
+    afterEach(() => {
+      if (root) rmSync(root, { recursive: true, force: true });
+      root = '';
+    });
+
+    it('적힌 범위가 그대로면 통과한다', () => {
+      expect(checkPort('port/x.ts', port(2, 4), vendor(['// head', ...block, '// tail']))).toEqual([]);
+    });
+
+    it('덩어리가 다른 줄로 옮겨지기만 했으면 통과한다', () => {
+      expect(checkPort('port/x.ts', port(2, 4), vendor(['// one', '// two', '// three', ...block]))).toEqual([]);
+    });
+
+    it('덩어리 내용이 바뀌었으면 port drift 로 걸린다', () => {
+      const edited = ['export function a() {', '  return 2;', '}'];
+      expect(checkPort('port/x.ts', port(2, 4), vendor(['// head', ...edited, '// tail']))).toEqual([
+        'port drift: re-port port/x.ts (app/vendor/labnoteo/src/a.ts:2-4)',
+      ]);
+    });
+
+    it('같은 덩어리가 여러 곳에 있으면 적힌 범위가 그중 하나일 때만 통과한다', () => {
+      const tree = vendor(['// head', ...block, '// mid', ...block]);
+      expect(checkPort('port/x.ts', port(6, 8), tree)).toEqual([]);
+      expect(checkPort('port/x.ts', port(1, 3), tree)).toEqual([
+        'port drift: re-port port/x.ts (app/vendor/labnoteo/src/a.ts:1-3)',
+      ]);
+    });
+
+    it('vendor 파일이 없으면 걸린다', () => {
+      expect(checkPort('port/x.ts', port(1, 3, 'src/gone.ts'), vendor(block))).toEqual([
+        'port/x.ts: app/vendor/labnoteo/src/gone.ts:1-3 names a vendor file that does not exist',
+      ]);
+    });
   });
 
   it('scripts/portHash.mjs 는 이 테스트와 같은 해시를 낸다 (CRLF 를 LF 로 보고)', () => {

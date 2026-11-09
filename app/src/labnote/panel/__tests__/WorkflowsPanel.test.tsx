@@ -81,7 +81,7 @@ describe('WorkflowsPanel', () => {
 
     await user.clear(screen.getByRole('searchbox', { name: '실험 찾기' }));
     await user.type(screen.getByRole('searchbox', { name: '실험 찾기' }), '없는말');
-    expect(await screen.findByText(coreT('No experiment matches "{0}". The search reads folder names, titles, projects, authors, statuses and workflow note names.', '없는말'))).toBeTruthy();
+    expect(await screen.findByText(coreT('No experiment matches "{0}". The search reads folder names, titles, projects, authors, statuses, workflow note names, and dates written with "-" (last updated or created).', '없는말'))).toBeTruthy();
   });
 
   it('the experiment context menu has Retry only for failed/needs-repeat', async () => {

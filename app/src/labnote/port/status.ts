@@ -1,6 +1,6 @@
-// Ported from app/vendor/labnoteo/src/commands.ts:577-627 sha256:33155086d85cddef
-// Ported from app/vendor/labnoteo/src/commands.ts:754-830 sha256:a4afe98c5ba69f70
-// Ported from app/vendor/labnoteo/src/commands.ts:1050-1081 sha256:f87bdc02cef2c8ed
+// Ported from app/vendor/labnoteo/src/commands.ts:593-643 sha256:33155086d85cddef
+// Ported from app/vendor/labnoteo/src/commands.ts:770-846 sha256:a4afe98c5ba69f70
+// Ported from app/vendor/labnoteo/src/commands.ts:1072-1103 sha256:f87bdc02cef2c8ed
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: statusMeanings and readNoteForFrontMatterEdit are exported; statusMeanings and statusNames take `Pick<LabnoteHost, 't'>`.
 // Changes: the imports below replace the top of commands.ts. The host's fs is the app's editor-aware fs, so these reads see an open note's unsaved text.

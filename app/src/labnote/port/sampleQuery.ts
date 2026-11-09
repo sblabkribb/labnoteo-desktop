@@ -1,6 +1,6 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1011-1027 sha256:ffb375f9524c5bc9
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1077-1258 sha256:63bb36a7721812f0
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1301-1346 sha256:1d931e56b488573d
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1031-1047 sha256:ffb375f9524c5bc9
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1097-1278 sha256:63bb36a7721812f0
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1321-1366 sha256:1d931e56b488573d
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; usageSpotLabel takes the core Translator, as `translate`, since the app catalog test reads a bare one-letter t call as an app key. ScopedNote and notesInSampleScope (1259-1300) were ported ahead in sampleScope.ts (Task 14) and are re-exported here. otherExperimentsWithSample (1011-1027) comes here ahead of its edit range (Task 20), because notesForSample needs it. notesReferencingSample, notesUsingSample, notesForSample and heldNotesSentence are exported for the edit, delete and move ports.
 import type { PickItem, Translator } from '@labnoteo/core';

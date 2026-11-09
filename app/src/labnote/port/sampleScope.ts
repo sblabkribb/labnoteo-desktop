@@ -1,5 +1,5 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:67-133 sha256:5f0e141122d7bf4d
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1259-1300 sha256:62bfb89151155931
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:69-135 sha256:5f0e141122d7bf4d
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1279-1320 sha256:62bfb89151155931
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); plugin.settings.globalSampleFolder → env.globalFolder(), plugin.localSampleFolder() → env.localFolder(), plugin.fs → env.fs, plugin.settings.customSampleTypes → env.settings().customSampleTypes; validateDescription is exported (the create and edit flows import it). ScopedNote and notesInSampleScope come here, ahead of the rest of their range (Task 18), because updateSampleListTables needs them: they drop the editor map and ScopedNote.editor, since env.fs.read gives an open note's buffer (editorAwareFs) and env.processNote writes through it, and app.vault.getMarkdownFiles()/cachedRead become env.markdownFiles()/env.fs.read.
 import { getSampleDisplayMeta, hasSampleDescriptionSeparator, sampleAliasProblem } from '@labnoteo/core/lib/sampleUtils';

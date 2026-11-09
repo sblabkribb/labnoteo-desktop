@@ -1,6 +1,6 @@
-// Ported from app/vendor/labnoteo/src/views/workflowView.ts:291-328 sha256:a40fe987fe71fdcd
+// Ported from app/vendor/labnoteo/src/views/workflowView.ts:297-334 sha256:a40fe987fe71fdcd
 // Ported from app/vendor/labnoteo/src/views/workflowView.ts:358-404 sha256:0c49d5cc14e302c6
-// Ported from app/vendor/labnoteo/src/views/workflowView.ts:434-447 sha256:88ebcb824443ff15
+// Ported from app/vendor/labnoteo/src/views/workflowView.ts:444-457 sha256:88ebcb824443ff15
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: checklistProgress(file) -> checklistProgress(folder, items, isFile): the caller (panel/experimentEntries.ts) reads the README and lists the folder; no mtime cache, no background re-read, `getAbstractFileByPath(p) instanceof TFile` -> `isFile(p)`; the de-duplication compares `key(path)` (default: the path), so a case-insensitive vault passes a case fold and two links differing only in case count once.
 // Changes: render()'s label object -> treeLabels(host); its search words -> discussWords(host); its `kept` filter -> keptExperiments(all, found, kept). `this.plugin.t` -> `host.t`. Drawing, grouping state and the no-match text stay in WorkflowsPanel.tsx.

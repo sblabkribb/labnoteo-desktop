@@ -1,4 +1,4 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:304-413 sha256:6033c8282f547cb1
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:318-427 sha256:6033c8282f547cb1
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); processNoteThroughVault → env.processNote; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(). The open-editor branch of updateSampleListTables is folded into env.processNote, which applies the change to an open note's buffer as one minimal edit (openNotes.ts), so ScopedNote has no editor. sampleListRow, updateSampleListTables and listSome are exported for the create, sync, edit and delete ports.
 import { buildSampleReferenceText, planSampleListRowUpdate } from '@labnoteo/core/lib/sampleUtils';

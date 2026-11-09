@@ -243,7 +243,7 @@ export function WorkflowsPanel({ ctx, activePath }: WorkflowsPanelProps) {
           {searching && found.length === 0 && (
             <p className="workflows-hint" role="status">
               {coreT(
-                'No experiment matches "{0}". The search reads folder names, titles, projects, authors, statuses and workflow note names.',
+                'No experiment matches "{0}". The search reads folder names, titles, projects, authors, statuses, workflow note names, and dates written with "-" (last updated or created).',
                 query.trim(),
               )}
             </p>

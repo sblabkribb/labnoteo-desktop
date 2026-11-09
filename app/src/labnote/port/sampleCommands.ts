@@ -1,5 +1,5 @@
-// Ported from app/vendor/labnoteo/src/main.ts:785-815 sha256:06b20607dbe60741
-// Ported from app/vendor/labnoteo/src/main.ts:848-888 sha256:5da76ea9350fbbf6
+// Ported from app/vendor/labnoteo/src/main.ts:792-822 sha256:06b20607dbe60741
+// Ported from app/vendor/labnoteo/src/main.ts:855-895 sha256:5da76ea9350fbbf6
 // Ported from app/vendor/labnoteo/src/main.ts:890-940 sha256:3b3e70c313aca07c
 // Ported from app/vendor/labnoteo/src/sampleDefinitionModal.ts:31-59 sha256:8f0e42fc6e91eed7
 // labnoteO 0.138.0, Apache-2.0.

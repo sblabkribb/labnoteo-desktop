@@ -1,5 +1,5 @@
-// Ported from app/vendor/labnoteo/src/commands.ts:141-329 sha256:684fab5bd496e1ac
-// Ported from app/vendor/labnoteo/src/commands.ts:487-522 sha256:bb9a0f969e8e60fc
+// Ported from app/vendor/labnoteo/src/commands.ts:142-330 sha256:684fab5bd496e1ac
+// Ported from app/vendor/labnoteo/src/commands.ts:503-538 sha256:bb9a0f969e8e60fc
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: resolveLabnoteDir(app, host) async -> resolveLabnoteDir(host, activePath) sync and exported; `app.workspace.getActiveFile()?.path` -> the `active` parameter.
 // Changes: experimentFolderNames takes `Pick<LabnoteHost, 'fs'>` instead of `LabnoteHost`.
