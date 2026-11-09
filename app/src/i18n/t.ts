@@ -394,6 +394,22 @@ const ko: Record<string, string> = {
   'fileOps.renameGuarded.workflowNote':
     '워크플로 노트는 아직 이름을 바꿀 수 없습니다. README 체크리스트의 링크가 끊어집니다. 링크까지 고치는 이름 바꾸기는 나중에 추가됩니다.',
   'fileOps.renameGuarded.readme': 'README.labnote.md 는 실험을 알아보는 파일이라 이름을 바꿀 수 없습니다.',
+  // SP7 Part C: MCP 서버 설정(Task 37). 토큰 값은 보이지 않는다: 번호만 보이고 복사는 Rust 가 한다.
+  'mcp.enableDesc': '외부 MCP 클라이언트에 도구를 노출합니다. 보관함을 바꾸는 도구는 labnoteO에서 허용해야 실행됩니다.',
+  'mcp.tokenDesc':
+    '외부 MCP 클라이언트용 베어러 토큰입니다. labnoteO나 서버를 다시 시작해도 유지됩니다. 유출됐다면 재발급하고, 새 토큰을 모든 클라이언트에 다시 붙여 넣으세요.',
+  'mcp.port': '포트',
+  'mcp.portInvalid': '1024에서 65535 사이의 숫자를 입력하세요.',
+  'mcp.listening': 'http://127.0.0.1:{0}/ 에서 듣는 중',
+  'mcp.tokenCopied': '토큰을 복사했습니다. 60초 뒤 클립보드에서 지웁니다.',
+  'mcp.copyFailed': '클립보드에 복사하지 못했습니다.',
+  'mcp.tokenIssued': '토큰 #{0} 사용 중',
+  'mcp.tokenNone': '아직 토큰이 없습니다',
+  'mcp.connect.heading': '클라이언트 연결',
+  'mcp.connect.hint':
+    '아래 설정을 클라이언트에 붙여 넣으세요. 화면의 <token> 자리는 복사할 때 실제 토큰으로 채워지며, 60초 뒤 클립보드에서 지웁니다.',
+  'mcp.connect.copy': '{0} 설정 복사',
+  'mcp.connect.copied': '{0} 설정을 토큰과 함께 복사했습니다. 60초 뒤 클립보드에서 지웁니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -790,6 +806,22 @@ const en: Record<string, string> = {
   'fileOps.renameGuarded.workflowNote':
     "Workflow notes can't be renamed yet: their README checklist links would break. Renaming that also fixes links comes later.",
   'fileOps.renameGuarded.readme': "README.labnote.md identifies the experiment and can't be renamed.",
+  // SP7 Part C: MCP server settings (Task 37). The token is never shown: only its number, and Rust copies it.
+  'mcp.enableDesc': 'Exposes tools to external MCP clients. Tools that change the vault run only after you allow them in labnoteO.',
+  'mcp.tokenDesc':
+    'Bearer token for external MCP clients. It stays the same when labnoteO or the server restarts; regenerate it if it leaked, then paste the new one into every client.',
+  'mcp.port': 'Port',
+  'mcp.portInvalid': 'Enter a number from 1024 to 65535.',
+  'mcp.listening': 'Listening on http://127.0.0.1:{0}/',
+  'mcp.tokenCopied': 'Token copied. It is cleared from the clipboard after 60 s.',
+  'mcp.copyFailed': 'Could not copy to the clipboard.',
+  'mcp.tokenIssued': 'Token #{0} in use',
+  'mcp.tokenNone': 'No token yet',
+  'mcp.connect.heading': 'Connect a client',
+  'mcp.connect.hint':
+    'Paste a setup below into your client. The <token> placeholder is filled in with the real token only when you copy, and the clipboard is cleared after 60 s.',
+  'mcp.connect.copy': 'Copy {0} setup',
+  'mcp.connect.copied': 'Copied the {0} setup with your token. It is cleared from the clipboard after 60 s.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

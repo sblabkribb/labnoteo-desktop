@@ -3,6 +3,8 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
 import { coreT, overrideOr } from '../labnote/i18n';
 import type { CommandContext } from '../labnote/commands/context';
+import type { Notify } from '../labnote/mcp/commands';
+import { McpSection } from '../labnote/mcp/McpSection';
 import { DialogFrame } from '../labnote/host/DialogFrame';
 import { openDialog } from '../labnote/host/dialogStore';
 import { BFW_DEFAULT_URL, fromPluginData, isOriginUrl, type AppSettings } from '../labnote/settings';
@@ -23,6 +25,8 @@ export interface IntegrationDeps {
   status(): Promise<SecretStatus>;
   setSecret(slot: Slot, value: string): Promise<void>;
   clearSecret(slot: Slot): Promise<void>;
+  /** MCP 묶음(SP7 Part C)이 알림을 띄우고 Rust 를 부를 때. 없으면 MCP 묶음을 그리지 않는다. */
+  mcp?: { notify: Notify; invoke?: InvokeFn };
 }
 
 function pickIntegration(s: AppSettings): IntegrationSettingsValue {
@@ -38,6 +42,8 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: [...s.allowHttpOrigins],
+    mcpEnabled: s.mcpEnabled,
+    mcpPort: s.mcpPort,
   };
 }
 
@@ -60,6 +66,7 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
     status: () => secretStatus(invoke),
     setSecret: (slot, value) => setSecret(slot, value, invoke),
     clearSecret: (slot) => clearSecret(slot, invoke),
+    mcp: { notify: (kind, message) => ctx.host.notify(kind, message), invoke },
   };
 }
 
@@ -469,6 +476,16 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
             })}
           />
         </section>
+
+        {deps.mcp ? (
+          <McpSection
+            enabled={val.mcpEnabled}
+            port={val.mcpPort}
+            commit={(patch) => save(patch)}
+            notify={deps.mcp.notify}
+            invoke={deps.mcp.invoke}
+          />
+        ) : null}
       </div>
       <div className="dialog-actions">
         <button type="button" className="primary" onClick={() => void close()}>

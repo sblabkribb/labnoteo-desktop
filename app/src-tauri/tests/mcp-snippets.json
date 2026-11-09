@@ -1,0 +1,10 @@
+{
+  "port": 3987,
+  "token": "<token>",
+  "snippets": {
+    "claudeCode": "claude mcp add --transport http labnoteo http://127.0.0.1:3987/mcp --header \"Authorization: Bearer <token>\"",
+    "cursor": "{\n  \"mcpServers\": {\n    \"labnoteo\": {\n      \"url\": \"http://127.0.0.1:3987/mcp\",\n      \"headers\": {\n        \"Authorization\": \"Bearer <token>\"\n      }\n    }\n  }\n}",
+    "vsCode": "{\n  \"servers\": {\n    \"labnoteo\": {\n      \"type\": \"http\",\n      \"url\": \"http://127.0.0.1:3987/mcp\",\n      \"headers\": {\n        \"Authorization\": \"Bearer <token>\"\n      }\n    }\n  }\n}",
+    "claudeDesktop": "{\n  \"mcpServers\": {\n    \"labnoteo\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"mcp-remote\",\n        \"http://127.0.0.1:3987/mcp\",\n        \"--header\",\n        \"Authorization: Bearer <token>\"\n      ]\n    }\n  }\n}"
+  }
+}

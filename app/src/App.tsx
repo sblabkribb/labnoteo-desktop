@@ -41,6 +41,7 @@ import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
+import { startMcpForVault } from './labnote/mcp/commands';
 import { cancelAllRequests } from './integrations/netIpc';
 import { startBfworkflow } from './bfworkflow/bfwApp';
 import { editorAwareFs } from './labnote/editorAwareFs';
@@ -313,6 +314,10 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   useEffect(() => (ctx ? wireSampleFollowUps(() => createSampleEnv(ctx)) : undefined), [ctx]);
   // PartBank(SP6 Task 26): 기능, 카탈로그 저장소, `@` 출처, 연결 시험, 노트 사용처 동기화. 보관함을 바꾸면 모두 거둔다.
   useEffect(() => (ctx ? startPartbank(ctx) : undefined), [ctx]);
+  // SP7 Part C: MCP 서버(C6). 보관함마다 웹뷰 호스트가 mcp://call 을 듣고, 설정이 켜져 있으면 서버를 시작한다(실패하면 알리고
+  // 설정은 그대로 둔다). 보관함을 바꾸면 기다리는 호출을 끝내고(-32002) 서버를 멈추고 듣기를 그만둔다. 이 효과는 아래
+  // closeAllDialogs 효과보다 먼저 선언되어 먼저 정리된다. 페이지 새로 고침은 Rust 가 비운다(Task 34).
+  useEffect(() => (ctx ? startMcpForVault(ctx) : undefined), [ctx]);
   // 앱 밖에서 고친 노트(감시자의 변경)도 동기화한다. 지워진 노트는 읽지 못해 아무것도 하지 않는다.
   useVaultChanges((paths) => {
     if (paths === 'all') return;

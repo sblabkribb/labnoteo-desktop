@@ -6,9 +6,10 @@
 use std::sync::RwLock;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use super::bridge::check_port;
 use super::clipboard::{clear_if_unchanged_after, ClipState};
 use super::{McpError, McpErrorKind, McpState};
 use crate::net::secrets::{SecretStore, Secrets};
@@ -99,18 +100,104 @@ pub fn mcp_token_regenerate(secrets: State<'_, Secrets>, state: State<'_, McpSta
     regenerate(secrets.0.as_ref(), &state.token)
 }
 
-/// Copies the token to the clipboard from Rust (made first if there is none),
-/// kept out of clipboard history, and clears it 60 s later if unchanged.
+/// The MCP clients the settings' "Connect a client" rows set up (user
+/// decision 2026-11-09). A closed list: the webview names a client, never a
+/// template, so the token only ever lands in these texts.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum McpClient {
+    ClaudeCode,
+    Cursor,
+    VsCode,
+    ClaudeDesktop,
+}
+
+/// `mcp_token_copy`'s optional argument: copy a client's setup instead of the bare token.
+#[derive(Deserialize, Clone, Copy, Debug)]
+pub struct Snippet {
+    pub client: McpClient,
+    pub port: u16,
+}
+
+/// A client's setup text for `http://127.0.0.1:<port>/mcp` with `token` in its
+/// `Authorization` header. The exact texts are pinned, with `<token>`, in
+/// `tests/mcp-snippets.json`, which the TypeScript side shows.
+pub fn snippet_text(client: McpClient, port: u16, token: &str) -> String {
+    let url = format!("http://127.0.0.1:{port}/mcp");
+    match client {
+        McpClient::ClaudeCode => {
+            format!("claude mcp add --transport http labnoteo {url} --header \"Authorization: Bearer {token}\"")
+        }
+        McpClient::Cursor => format!(
+            "{{
+  \"mcpServers\": {{
+    \"labnoteo\": {{
+      \"url\": \"{url}\",
+      \"headers\": {{
+        \"Authorization\": \"Bearer {token}\"
+      }}
+    }}
+  }}
+}}"
+        ),
+        McpClient::VsCode => format!(
+            "{{
+  \"servers\": {{
+    \"labnoteo\": {{
+      \"type\": \"http\",
+      \"url\": \"{url}\",
+      \"headers\": {{
+        \"Authorization\": \"Bearer {token}\"
+      }}
+    }}
+  }}
+}}"
+        ),
+        McpClient::ClaudeDesktop => format!(
+            "{{
+  \"mcpServers\": {{
+    \"labnoteo\": {{
+      \"command\": \"npx\",
+      \"args\": [
+        \"mcp-remote\",
+        \"{url}\",
+        \"--header\",
+        \"Authorization: Bearer {token}\"
+      ]
+    }}
+  }}
+}}"
+        ),
+    }
+}
+
+/// What `mcp_token_copy` puts on the clipboard: the token, or a client's setup
+/// holding it (`badInput` for a port outside 1024..=65535).
+pub fn copy_text(token: &str, snippet: Option<Snippet>) -> Result<String, McpError> {
+    match snippet {
+        None => Ok(token.to_string()),
+        Some(s) => {
+            check_port(s.port)?;
+            Ok(snippet_text(s.client, s.port, token))
+        }
+    }
+}
+
+/// Copies the token, or a client's setup holding it, to the clipboard from
+/// Rust (the token is made first if there is none), kept out of clipboard
+/// history, and clears it 60 s later if unchanged.
 #[tauri::command]
 pub fn mcp_token_copy(
     secrets: State<'_, Secrets>,
     state: State<'_, McpState>,
     clip: State<'_, ClipState>,
+    snippet: Option<Snippet>,
 ) -> Result<(), McpError> {
     let token = ensure_token(secrets.0.as_ref(), &state.token)?;
+    let text = copy_text(&token, snippet)?;
     let clip = clip.0.clone();
-    clip.set_secret(&token)?;
-    tauri::async_runtime::spawn(clear_if_unchanged_after(clip, token, COPY_CLEAR_AFTER));
+    clip.set_secret(&text)?;
+    tauri::async_runtime::spawn(clear_if_unchanged_after(clip, text, COPY_CLEAR_AFTER));
     Ok(())
 }
 
@@ -161,6 +248,26 @@ mod tests {
     }
     #[test] fn status_of_an_empty_store_is_unset_epoch_zero() {
         assert_eq!(token_status(&MemoryStore::default()).unwrap(), TokenStatus { set: false, epoch: 0 });
+    }
+    #[test] fn client_snippets_match_the_shared_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../tests/mcp-snippets.json")).unwrap();
+        let port = fixture["port"].as_u64().unwrap() as u16;
+        let token = fixture["token"].as_str().unwrap();
+        let snippets = fixture["snippets"].as_object().unwrap();
+        assert_eq!(snippets.len(), 4);
+        for (name, client) in [("claudeCode", McpClient::ClaudeCode), ("cursor", McpClient::Cursor), ("vsCode", McpClient::VsCode), ("claudeDesktop", McpClient::ClaudeDesktop)] {
+            assert_eq!(snippet_text(client, port, token), snippets[name].as_str().unwrap(), "{name}");
+            let parsed: McpClient = serde_json::from_value(serde_json::json!(name)).unwrap();
+            assert_eq!(parsed, client);
+        }
+        assert!(snippet_text(McpClient::Cursor, 4000, "t").contains("http://127.0.0.1:4000/mcp"));
+    }
+    #[test] fn copy_text_is_the_token_or_the_snippet_holding_it() {
+        let t = "ab".repeat(24);
+        assert_eq!(copy_text(&t, None).unwrap(), t);
+        let s = copy_text(&t, Some(Snippet { client: McpClient::ClaudeCode, port: 3987 })).unwrap();
+        assert!(s.starts_with("claude mcp add") && s.contains(&format!("Bearer {t}")), "{s}");
+        assert_eq!(copy_text(&t, Some(Snippet { client: McpClient::VsCode, port: 80 })).unwrap_err().kind, McpErrorKind::BadInput);
     }
     #[test] fn no_mcp_command_returns_or_emits_the_token() {
         let store = MemoryStore::default(); let mem = RwLock::new(String::new());

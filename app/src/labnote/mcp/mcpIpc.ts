@@ -84,7 +84,19 @@ export function mcpTokenRegenerate(invoke: InvokeFn = tauriInvoke): Promise<Toke
   return invoke<TokenStatus>('mcp_token_regenerate', {});
 }
 
-/** Rust 가 클립보드에 직접 쓴다(Win+V 기록 제외, 60초 뒤 지움). 토큰은 웹뷰로 오지 않는다. */
-export async function mcpTokenCopy(invoke: InvokeFn = tauriInvoke): Promise<void> {
-  await invoke<null>('mcp_token_copy', {});
+/** "클라이언트 연결"의 클라이언트(닫힌 목록, Rust `McpClient`). */
+export type McpClientId = 'claudeCode' | 'cursor' | 'vsCode' | 'claudeDesktop';
+
+/** 토큰 대신 그 클라이언트의 설정 글(토큰을 Rust 가 채운다)을 복사할 때. */
+export interface McpSnippet {
+  client: McpClientId;
+  port: number;
+}
+
+/**
+ * Rust 가 클립보드에 직접 쓴다(Win+V 기록 제외, 60초 뒤 지움). 토큰은 웹뷰로 오지 않는다.
+ * `snippet` 이 있으면 토큰을 넣은 그 클라이언트의 설정 글을 복사한다.
+ */
+export async function mcpTokenCopy(invoke: InvokeFn = tauriInvoke, snippet: McpSnippet | null = null): Promise<void> {
+  await invoke<null>('mcp_token_copy', { snippet });
 }

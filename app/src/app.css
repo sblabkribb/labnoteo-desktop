@@ -879,3 +879,14 @@ button.links-target:focus-visible { outline-offset: -2px; }
 .barcode-id { margin: 0; text-align: center; font-family: var(--font-mono); font-size: 1.2em; user-select: all; }
 /* 편집기 머리의 QR 아이콘 단추(A6): 글자 단추와 같은 줄, 아이콘만 */
 .editor-actions .editor-qr { display: inline-flex; align-items: center; justify-content: center; margin-left: var(--space-1); padding: 0 var(--space-1); vertical-align: middle; }
+
+/* SP7 Part C: MCP */
+/* 연동 설정의 MCP 묶음(Task 37): 포트 칸은 좁게, 토큰은 번호만, 단추는 한 줄에 */
+.integration-field input.mcp-port { width: 8rem; }
+.mcp-token-state { margin: 0; color: var(--text); font-weight: 600; }
+.mcp-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* 클라이언트 연결: 클라이언트마다 이름과 복사 단추, 그 아래 <token> 자리 표시가 든 설정 글(길면 이 상자만 가로로 스크롤) */
+.mcp-client { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.mcp-client-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.mcp-client-name { font-weight: 600; }
+.mcp-snippet { margin: 0; padding: var(--space-2); max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: 0.85em; white-space: pre; user-select: text; }

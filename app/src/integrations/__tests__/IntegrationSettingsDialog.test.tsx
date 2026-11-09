@@ -34,6 +34,8 @@ const BASE: IntegrationSettingsValue = (() => {
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: s.allowHttpOrigins,
+    mcpEnabled: s.mcpEnabled,
+    mcpPort: s.mcpPort,
   };
 })();
 

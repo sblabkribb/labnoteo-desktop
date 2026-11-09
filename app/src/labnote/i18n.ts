@@ -47,7 +47,10 @@ export type OverrideKey =
   // AI 명령(SP6 Task 31): 플러그인의 'Configure an AI provider in settings first.' 는 앱의 연동 설정을 가리킨다.
   | 'ai.configureFirst'
   // 인쇄가 안 되어 브라우저로 열었을 때: 플러그인 문장의 "Printing from Obsidian did not work…" 대신
-  | 'print.openedInBrowser';
+  | 'print.openedInBrowser'
+  // MCP 설정(SP7 Part C): 플러그인 문장은 "allow them in Obsidian", "when Obsidian or the server restarts" 라고 쓴다.
+  | 'mcp.enableDesc'
+  | 'mcp.tokenDesc';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

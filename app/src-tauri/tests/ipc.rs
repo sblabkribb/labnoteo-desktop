@@ -465,11 +465,19 @@ title: 실험
     assert_eq!(ok("mcp_token_status", args("mcp_token_status", vec![])), json!({"set": false, "epoch": 0}));
     assert_eq!(ok("mcp_token_regenerate", args("mcp_token_regenerate", vec![])), json!({"set": true, "epoch": 1}));
     assert_eq!(ok("mcp_token_status", args("mcp_token_status", vec![])), json!({"set": true, "epoch": 1}));
-    assert_eq!(ok("mcp_token_copy", args("mcp_token_copy", vec![])), Value::Null);
+    assert_eq!(ok("mcp_token_copy", args("mcp_token_copy", vec![Value::Null])), Value::Null);
     {
         use labnoteo_app_lib::mcp::Clipboard;
         let copied = clip.get().expect("the token is on the (fake) clipboard");
         assert!(has_48_hex(&copied), "the clipboard holds the token");
+        // A client's setup holds the same token, filled in by Rust.
+        let snippet = json!({"client": "claudeCode", "port": 3987});
+        assert_eq!(ok("mcp_token_copy", args("mcp_token_copy", vec![snippet])), Value::Null);
+        let setup = clip.get().expect("the setup is on the (fake) clipboard");
+        assert!(setup.starts_with("claude mcp add") && setup.contains(&format!("Bearer {copied}")), "{setup}");
+        let bad = json!({"client": "claudeCode", "port": 80});
+        assert_eq!(call("mcp_token_copy", args("mcp_token_copy", vec![bad])).unwrap_err()["kind"], "badInput");
+        assert!(call("mcp_token_copy", args("mcp_token_copy", vec![json!({"client": "other", "port": 3987})])).is_err());
         for r in responses.borrow()[first..].iter() {
             assert!(!r.contains(&copied), "{r}");
         }
