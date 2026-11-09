@@ -70,6 +70,25 @@ it('runCommand turns RegistryUnreadableError into one warn toast', async () => {
   expect(th.notes).toEqual([{ kind: 'warn', message: t('samples.registryUnreadable', `${LOCAL}/DNA.json`) }]);
 });
 
+it('updateSettings forwards to ctx', async () => {
+  const th = host(SAMPLE_VAULT);
+  let release!: () => void;
+  const seen: unknown[] = [];
+  th.ctx.updateSettings = (p) => {
+    seen.push(p);
+    return new Promise<void>((r) => (release = r));
+  };
+  const env = createSampleEnv(th.ctx);
+  let done = false;
+  const pending = env.updateSettings({ customSampleTypes: ['Strain'] }).then(() => void (done = true));
+  expect(seen).toEqual([{ customSampleTypes: ['Strain'] }]);
+  await Promise.resolve();
+  expect(done).toBe(false); // 저장이 끝나야 풀린다
+  release();
+  await pending;
+  expect(done).toBe(true);
+});
+
 it('local folder follows vendor semantics', () => {
   rememberExperiment(undefined);
   expect(localSampleFolder(NOTE, GLOBAL)).toBe(LOCAL);

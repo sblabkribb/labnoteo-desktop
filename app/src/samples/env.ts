@@ -27,6 +27,8 @@ export interface SampleEnv {
   readonly fs: AppFs;
   readonly t: Translator;
   settings(): AppSettings;
+  /** 설정을 바꾸고 저장한다(ctx.updateSettings). 저장이 끝나면 풀린다. partbank 의 Strain 종류 추가가 쓴다. */
+  updateSettings(patch: Partial<AppSettings>): Promise<void>;
   /** sampleTypesFor(settings()): every stored custom name, unfiltered (Task 2). */
   types(): string[];
   /** settings().globalSampleFolder trimmed and normalised; never passed through core getGlobalLabsamplesFolder. */
@@ -173,6 +175,9 @@ export function createSampleEnv(ctx: CommandContext): SampleEnv {
     fs,
     t: ctx.host.t,
     settings: () => ctx.settings,
+    async updateSettings(patch) {
+      await ctx.updateSettings(patch);
+    },
     types,
     globalFolder,
     localFolder: () => localSampleFolder(ctx.activePath(), globalFolder()),
