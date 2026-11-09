@@ -1,6 +1,24 @@
-# Pushing a tag like v0.2.0 builds the NSIS installer and uploads it, its
-# signature and latest.json to the GitHub Release. The installed app reads
-# latest.json from the latest release (see plugins.updater in tauri.conf.json).
+# Builds the NSIS installer and uploads it, its signature and latest.json to the
+# GitHub Release for a v* tag. The installed app reads latest.json from the latest
+# release (see plugins.updater in tauri.conf.json).
+#
+# Three ways in:
+# - push of a v* tag by a person (the first release, or a manual one);
+# - workflow_call from sync-core with inputs tag + sha. A tag pushed with
+#   GITHUB_TOKEN starts no push-triggered workflow, so the automatic chain calls
+#   this workflow instead of relying on the tag push;
+# - workflow_dispatch with an existing tag, to retry a release by hand.
+# A called workflow sees the caller's github.ref / github.sha (main before the
+# version bump), so the tag and the commit always come from inputs first.
+#
+# Refuses to build, before checkout of any code that runs, when:
+# - the release for the tag already exists (exits green: nothing to do);
+# - the TAURI_SIGNING_PRIVATE_KEY secret is empty (no unsigned update, ever);
+# and, after checkout, when the tag points at another commit, any of the six
+# version sites differs from the tag, the committed updater pubkey is still the
+# placeholder, or a test signature made with the secret carries a key id other
+# than the committed pubkey's (installed apps would reject that release).
+# The publish step is last, so a failed guard or test publishes nothing.
 #
 # One-time setup: repository secret TAURI_SIGNING_PRIVATE_KEY (the updater's
 # private key; the matching public key is in tauri.conf.json) and, only if the
@@ -11,6 +29,27 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, e.g. v0.1.1
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release, e.g. v0.1.1
+        required: true
+        type: string
+      sha:
+        description: Commit the tag points at
+        required: true
+        type: string
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: write
@@ -18,47 +57,124 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Tag must match the app version
+    concurrency:
+      group: release-${{ inputs.tag || github.ref_name }}
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    defaults:
+      run:
         shell: bash
+    steps:
+      - name: Already released?
+        id: pre
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          for f in app/package.json app/src-tauri/tauri.conf.json; do
-            v=$(node -p "require('./$f').version")
-            [ "$v" = "$tag" ] || { echo "$f is $v, tag is $tag"; exit 1; }
-          done
-          v=$(grep -m1 '^version' app/src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          [ "$v" = "$tag" ] || { echo "Cargo.toml is $v, tag is $tag"; exit 1; }
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          if out=$(gh release view "$TAG" --json tagName 2>&1); then
+            echo "::notice::$TAG is already released; nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif grep -qi 'release not found' <<<"$out"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Could not check whether $TAG is released: $out"
+            exit 1
+          fi
+
+      - name: Signing key must be set
+        if: steps.pre.outputs.skip != 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set; refusing to publish an unsigned update"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.pre.outputs.skip != 'true'
+        with:
+          ref: ${{ inputs.sha || (inputs.tag && format('refs/tags/{0}', inputs.tag)) || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Tag must point at this commit
+        id: head
+        if: steps.pre.outputs.skip != 'true'
+        run: |
+          head=$(git rev-parse HEAD)
+          echo "sha=$head" >> "$GITHUB_OUTPUT"
+          # The peeled line (^{}) is the commit of an annotated tag; a light tag has only the first.
+          remote=$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
+          tagged=$(awk -v t="refs/tags/$TAG" '$2 == t "^{}" { p = $1 } $2 == t { l = $1 } END { print (p != "" ? p : l) }' <<<"$remote")
+          if [ -n "$tagged" ] && [ "$tagged" != "$head" ]; then
+            echo "::error::Tag $TAG points at $tagged, but this run checked out $head (tag moved?)"
+            exit 1
+          fi
+          echo "Releasing $TAG at $head"
+
+      - name: Tag must match the app version (all six sites)
+        if: steps.pre.outputs.skip != 'true'
+        run: |
+          v=$(node app/scripts/releaseChain.mjs versions)
+          if [ "$v" != "${TAG#v}" ]; then
+            echo "::error::App version is $v, tag is $TAG"
+            exit 1
+          fi
+
+      - name: Updater pubkey must not be the placeholder
+        if: steps.pre.outputs.skip != 'true'
+        run: node app/scripts/releaseChain.mjs pubkey-check
 
       - uses: actions/setup-node@v4
+        if: steps.pre.outputs.skip != 'true'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.pre.outputs.skip != 'true'
 
       - uses: swatinem/rust-cache@v2
+        if: steps.pre.outputs.skip != 'true'
         with:
           workspaces: app/src-tauri
 
       - name: Install dependencies
+        if: steps.pre.outputs.skip != 'true'
         working-directory: app
         run: npm ci
 
+      - name: Signing key must match the committed pubkey
+        if: steps.pre.outputs.skip != 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          probe="$RUNNER_TEMP/keyid-probe"
+          trap 'rm -f "$probe" "$probe.sig"' EXIT
+          printf x > "$probe"
+          (cd app && npx tauri signer sign "$probe" > /dev/null)
+          node app/scripts/releaseChain.mjs keyid-match "$probe.sig"
+
       - name: Test
+        if: steps.pre.outputs.skip != 'true'
         working-directory: app
         run: npm test
 
       - name: Rust tests
+        if: steps.pre.outputs.skip != 'true'
         working-directory: app/src-tauri
         run: cargo test --target x86_64-pc-windows-msvc
 
       - name: Build, sign and publish
+        if: steps.pre.outputs.skip != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,10 +182,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
-          tagName: ${{ github.ref_name }}
-          releaseName: labnoteO ${{ github.ref_name }}
+          tagName: ${{ env.TAG }}
+          releaseName: labnoteO ${{ env.TAG }}
           releaseBody: "Windows installer (unsigned: SmartScreen will warn on first install)."
+          commitish: ${{ steps.head.outputs.sha }}
           releaseDraft: false
+          prerelease: false
           includeUpdaterJson: true
           # Updater artifacts need the private key, so only the release build asks for them.
           args: --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json
