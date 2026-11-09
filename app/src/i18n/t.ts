@@ -396,6 +396,10 @@ const ko: Record<string, string> = {
   'fileOps.renameGuarded.readme': 'README.labnote.md 는 실험을 알아보는 파일이라 이름을 바꿀 수 없습니다.',
   'scan.pdfPageFailed': 'PDF {0}쪽을 읽지 못했습니다(JPEG 2000 이미지일 수 있습니다). PDF나 JPEG로 다시 스캔하세요.',
   'scan.imageTooLarge': '스캔 이미지가 20MB를 넘어 저장하지 못했습니다. 설정에서 이미지 크기를 줄이세요.',
+  // 스캔 결과(SP7 Task 25): 플러그인의 HEIC·TIFF 안내는 Obsidian 을 말하므로 앱 문장으로(B11), 30 초 동안 편집 중이던 노트(B9)
+  'scan.heicAdvice': 'HEIC 사진이라 열 수 없습니다. iPhone 설정 → 카메라 → 포맷 → "높은 호환성"으로 바꾸거나 JPEG로 공유하세요.',
+  'scan.tiffAdvice': 'TIFF 스캔이라 열 수 없습니다. 복합기 저장 형식을 PDF나 JPEG로 바꾸세요.',
+  'scan.noteBusy': '노트를 30초 동안 편집하고 있어서 붙이지 못했습니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -794,6 +798,9 @@ const en: Record<string, string> = {
   'fileOps.renameGuarded.readme': "README.labnote.md identifies the experiment and can't be renamed.",
   'scan.pdfPageFailed': 'Could not read page {0} of the PDF (it may be a JPEG 2000 image). Scan it again as PDF or JPEG.',
   'scan.imageTooLarge': 'The scan image is over 20 MB and was not stored. Lower the image size in settings.',
+  'scan.heicAdvice': 'HEIC photo, which the app cannot open. On iPhone set Settings → Camera → Formats → Most Compatible, or share the photo as JPEG.',
+  'scan.tiffAdvice': 'TIFF scan, which the app cannot open. Set the scanner to save PDF or JPEG.',
+  'scan.noteBusy': 'The note was being edited for 30 seconds, so the scan was not filed.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

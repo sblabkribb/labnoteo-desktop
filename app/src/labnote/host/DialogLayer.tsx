@@ -14,6 +14,8 @@ import { PartbankSearchDialog } from '../../partbank/PartbankSearchDialog';
 import { AiAnswerDialog } from '../port/aiAnswerDialog';
 import { WorksheetDialog } from '../print/WorksheetDialog';
 import { BarcodeDialog } from '../port/barcodeDialog';
+import { ImportDialog } from '../scan/ImportDialog';
+import { ResultsDialog } from '../scan/ResultsDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -48,6 +50,10 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <WorksheetDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'barcode':
       return <BarcodeDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'scanImport':
+      return <ImportDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'scanResults':
+      return <ResultsDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

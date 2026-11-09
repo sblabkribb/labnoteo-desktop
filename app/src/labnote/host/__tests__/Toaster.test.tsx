@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { setLang } from '../../../i18n/lang';
 import { Toaster } from '../Toaster';
-import { MAX_TOASTS, clearToasts, currentToasts, notify } from '../toastStore';
+import { MAX_TOASTS, clearToasts, currentToasts, notify, notifyStatus } from '../toastStore';
 import { styleAttributes } from './harness';
 
 afterEach(() => {
@@ -68,12 +68,75 @@ describe('알림(토스트)', () => {
     expect(screen.getByRole('button', { name: 'Dismiss notification' })).toBeTruthy();
   });
 
+  it('an action toast runs its action and closes', () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    const editor = document.createElement('textarea');
+    document.body.append(editor);
+    editor.focus();
+    const run = vi.fn();
+    act(() => notify('info', '스캔: 1쪽', { ms: 15000, action: { label: '자세히', run } }));
+    // 알림은 초점을 가져가지 않는다
+    expect(document.activeElement).toBe(editor);
+    const toast = screen.getByRole('status');
+    const button = within(toast).getByRole('button', { name: '자세히' });
+    expect(button.classList.contains('toast-action')).toBe(true);
+    expect(button.getAttribute('type')).toBe('button');
+    // ms 가 기본 6 초를 바꾼다
+    act(() => vi.advanceTimersByTime(14999));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    fireEvent.click(button);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(currentToasts()).toEqual([]);
+    editor.remove();
+  });
+
+  it('a toast with an empty message shows only its action', () => {
+    render(<Toaster />);
+    act(() => notify('info', '', { action: { label: '결과 다시 보기', run: () => {} } }));
+    const toast = screen.getByRole('status');
+    expect(toast.querySelector('.toast-message')).toBeNull();
+    expect(within(toast).getByRole('button', { name: '결과 다시 보기' })).toBeTruthy();
+  });
+
+  it('a status toast stays until closed and updates its text', () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    const editor = document.createElement('textarea');
+    document.body.append(editor);
+    editor.focus();
+    let status!: ReturnType<typeof notifyStatus>;
+    act(() => {
+      status = notifyStatus('스캔을 처리하는 중…');
+    });
+    expect(document.activeElement).toBe(editor);
+    expect(screen.getByRole('status').textContent).toContain('스캔을 처리하는 중…');
+    expect(currentToasts()[0].sticky).toBe(true);
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    act(() => status.update('스캔을 처리하는 중… 1쪽 완료 (a.jpg)'));
+    expect(screen.getByRole('status').textContent).toContain('1쪽 완료 (a.jpg)');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    act(() => status.close());
+    expect(screen.queryByRole('status')).toBeNull();
+    // 닫은 뒤의 update 와 close 는 아무것도 하지 않는다
+    act(() => {
+      status.update('늦은 글');
+      status.close();
+    });
+    expect(currentToasts()).toEqual([]);
+    editor.remove();
+  });
+
   it('no element has a style attribute', () => {
     render(<Toaster />);
     act(() => {
       notify('info', 'a');
       notify('warn', 'b');
       notify('error', 'c');
+      notify('info', 'd', { action: { label: 'e', run: () => {} } });
+      notifyStatus('f');
     });
     expect(styleAttributes()).toEqual([]);
   });
