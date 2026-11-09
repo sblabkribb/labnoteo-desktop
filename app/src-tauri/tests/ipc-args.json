@@ -25,6 +25,8 @@
   "settings_import_plugin": [],
   "settings_plugin_llm_key": [],
   "settings_import_llm_key": [],
+  "ui_prefs_read": [],
+  "ui_prefs_write": ["prefs"],
   "index_rebuild": [],
   "index_upsert": ["path"],
   "index_remove": ["path"],

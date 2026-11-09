@@ -14,6 +14,7 @@ import { openInBrowser } from '../../labnote/print/openInBrowser';
 import * as scan from '../../labnote/scan/scanIpc';
 import * as mcp from '../../labnote/mcp/mcpIpc';
 import { readClipboardLink } from '../../partbank/clipboardIpc';
+import { DEFAULT_PREFS, readUiPrefs, writeUiPrefs } from '../../ui/layoutStore';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -158,6 +159,8 @@ describe('IPC 인자 이름 계약', () => {
     await mcp.mcpReply('c1', { kind: 'noReply' }, r.invoke);
     await mcp.mcpDrain(r.invoke);
     await readClipboardLink(r.invoke);
+    expect(await readUiPrefs(r.invoke)).toEqual(DEFAULT_PREFS);
+    await writeUiPrefs({ ...DEFAULT_PREFS }, r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

@@ -107,6 +107,19 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("vault_current", args("vault_current", vec![])), Value::Null);
     assert_eq!(call("link_journal_read", args("link_journal_read", vec![])).unwrap_err()["kind"], "noVault");
 
+    // UI layout prefs: app-wide (no vault needed), defaults first, clamped on write,
+    // unknown fields dropped, stored as ui.json next to settings.json.
+    let defaults = ok("ui_prefs_read", args("ui_prefs_read", vec![]));
+    assert_eq!(defaults["leftWidth"], 272);
+    assert_eq!(defaults["rightOpen"], false);
+    let stored = ok(
+        "ui_prefs_write",
+        args("ui_prefs_write", vec![json!({"leftWidth": 9000, "leftHidden": true, "leftTab": "samples", "junk": 1})]),
+    );
+    assert_eq!(stored["leftWidth"], 480);
+    assert!(stored.get("junk").is_none(), "{stored}");
+    assert_eq!(ok("ui_prefs_read", args("ui_prefs_read", vec![])), stored);
+    assert!(dir.join("config").join("ui.json").is_file());
     // Integration keys need the open vault's settings to name their origin.
     assert_eq!(call("secret_status", args("secret_status", vec![])).unwrap_err()["kind"], "notConfigured");
     assert_eq!(

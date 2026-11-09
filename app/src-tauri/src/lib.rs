@@ -5,6 +5,7 @@ pub mod mcp;
 pub mod net;
 pub mod print;
 pub mod scan;
+pub mod ui_prefs;
 pub mod vault;
 
 pub mod app {
@@ -44,6 +45,8 @@ macro_rules! register_commands {
             $crate::vault::settings::settings_import_plugin,
             $crate::vault::settings::settings_plugin_llm_key,
             $crate::vault::settings::settings_import_llm_key,
+            $crate::ui_prefs::ui_prefs_read,
+            $crate::ui_prefs::ui_prefs_write,
             $crate::index::index_rebuild,
             $crate::index::index_upsert,
             $crate::index::index_remove,

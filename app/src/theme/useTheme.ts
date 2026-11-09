@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { layoutStore } from '../ui/layoutStore';
 
 export type Theme = 'system' | 'dark' | 'light';
 
@@ -7,7 +8,7 @@ export const THEME_KEY = 'labnoteo.theme';
 
 /**
  * 네이티브 창의 테마를 바꾸고 창을 보이는 이음새. 기본은 Tauri 창. `null` 이면 창이 다시 OS 설정을 따른다.
- * 창은 숨긴 채 뜬다(tauri.conf.json `visible: false`): `show` 는 첫 `setTheme` 이 끝나면(성공이든 실패든) 또는
+ * 창은 숨긴 채 뜬다(tauri.conf.json `visible: false`): `show` 는 첫 `setTheme` 과 `layoutStore.ready()` 가 끝나면(성공이든 실패든) 또는
  * `SHOW_FALLBACK_MS` 뒤에 한 번만 부른다. React 가 아예 뜨지 못하면 lib.rs 의 3 초 대비책이 창을 보인다.
  */
 export interface ThemeWindowApi {
@@ -69,7 +70,11 @@ function applyToWindow(theme: Theme, win: ThemeWindowApi | undefined, first: boo
   } catch {
     applied = Promise.resolve();
   }
-  applied.catch(() => undefined).finally(show);
+  // 배치(ui.json 의 사이드바 너비·숨김)도 걸린 뒤에 보인다: 첫 프레임에 너비가 튀거나 숨긴 사이드바가 비치지 않는다.
+  // ready() 는 거부하지 않는다(load 가 실패를 삼킨다). 걸리면 위의 SHOW_FALLBACK_MS 가 창을 보인다.
+  Promise.all([applied.catch(() => undefined), layoutStore.ready()])
+    .catch(() => undefined)
+    .finally(show);
 }
 
 export function useTheme(windowApi?: ThemeWindowApi): { theme: Theme; setTheme: (theme: Theme) => void } {

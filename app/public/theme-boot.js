@@ -15,3 +15,27 @@
     document.documentElement.removeAttribute('data-theme');
   }
 })();
+
+// 화면 배치의 거울(src/ui/layoutStore.ts 의 LAYOUT_KEY)도 첫 그림 전에 건다. 캐시일 뿐이다:
+// 앱에서는 Rust ui.json 이 layoutStore.load() 에서 이기고, 창은 그 뒤에 보인다. 이 몫은 브라우저 하네스의 첫 프레임이다.
+// 범위와 기본값은 layoutStore.ts·ui_prefs.rs 와 같다. 거울이 없거나 깨졌으면 아무것도 걸지 않는다(CSS 기본값).
+// CSP(style-src 'self') 때문에 style 속성 문자열은 쓰지 않고 CSSOM(setProperty)만 쓴다.
+(function () {
+  try {
+    var raw = localStorage.getItem('labnoteo.ui.layout');
+    if (!raw) return;
+    var p = JSON.parse(raw);
+    if (!p || typeof p !== 'object') return;
+    var width = function (v, min, max, d) {
+      return typeof v === 'number' && isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : d;
+    };
+    var root = document.documentElement;
+    root.style.setProperty('--side-w', width(p.leftWidth, 200, 480, 272) + 'px');
+    root.style.setProperty('--right-w', width(p.rightWidth, 220, 480, 280) + 'px');
+    root.setAttribute('data-left-hidden', String(p.leftHidden === true));
+    root.setAttribute('data-right-open', String(p.rightOpen === true));
+    root.setAttribute('data-density', p.density === 'compact' ? 'compact' : 'comfortable');
+  } catch (e) {
+    // 저장소를 쓸 수 없거나 거울이 깨졌다: CSS 기본값으로 그린다
+  }
+})();
