@@ -4,6 +4,9 @@
  * - 플러그인 창은 흐름이 끝나야(true) 닫히고, 취소하거나 거절되면(false) 그대로 남는다. 앱의 창은 고르는 순간 닫히므로
  *   흐름이 false 면 대장에서 정의를 다시 읽어 창을 다시 연다(거절된 흐름도 기록을 바꿨을 수 있다). 기록이 없어졌으면 멈춘다.
  * - "Open JSON file" 과 사용처는 앱 안에서 그 파일을 연다.
+ * - partbank(Task 23): "Open in partbank" 은 링크를 바깥에서 열고 끝난다. "Refresh storage location from partbank" 은
+ *   저장했든 아니든 창을 다시 열어, 새로 읽은 위치(또는 그대로인 위치)를 보인다(저장 알림은 새로 고침이 직접 한다).
+ *   partbank 기능이 아직 없으면 설정할 곳을 알리고 창을 다시 연다.
  */
 import { loadSamplesByType } from '@labnoteo/core/lib/sampleStorage';
 import { openSampleDefinitionDialog } from '../labnote/host/dialogStore';
@@ -13,12 +16,28 @@ import { editSampleInteractive, setSampleDiscardedInteractive } from '../labnote
 import { changeSampleTypeInteractive, moveSampleInteractive } from '../labnote/port/sampleMove';
 import { sampleUsageSpots, type ResolvedSampleDefinition } from '../labnote/port/sampleQuery';
 import { loadCatalogSamples } from '../labnote/port/sampleScope';
+import { overrideOr } from '../labnote/i18n';
+import { openInPartbank } from '../labnote/port/partbankActions';
+import { refreshOneLocation } from '../labnote/port/partbankLocation';
+import type { openExternal } from '../links/openExternal';
+import { partbank } from '../partbank/current';
 import type { SampleEnv } from './env';
 
 type Definition = ResolvedSampleDefinition & { type: string; id: string };
 
+/** Test seam: how "Open in partbank" opens its link. */
+export interface DefinitionFlowDeps {
+  open?: typeof openExternal;
+}
+
 /** 고른 동작의 흐름을 돌린다. 끝났으면 true, 취소·거절이면 false. */
-async function runAction(env: SampleEnv, def: Definition, action: SampleDefinitionAction, move: { toFolder: string } | undefined): Promise<boolean> {
+async function runAction(
+  env: SampleEnv,
+  def: Definition,
+  action: SampleDefinitionAction,
+  move: { toFolder: string } | undefined,
+  deps: DefinitionFlowDeps = {},
+): Promise<boolean> {
   const { scope, folder, type, id, record } = def;
   switch (action) {
     case 'edit':
@@ -38,6 +57,17 @@ async function runAction(env: SampleEnv, def: Definition, action: SampleDefiniti
         type,
         id,
       });
+    case 'partbankRefresh': {
+      const feature = partbank();
+      if (!feature) {
+        env.host.notify('info', overrideOr('partbank.setupFirst'));
+        return false;
+      }
+      return refreshOneLocation(env, feature, { type, id, folder, record });
+    }
+    case 'partbankOpen':
+      if (record.source) await openInPartbank(env, record.source, deps.open);
+      return true;
     case 'changeType':
       return changeSampleTypeInteractive(env, { folder, type, id });
     case 'openJson':
@@ -50,7 +80,12 @@ async function runAction(env: SampleEnv, def: Definition, action: SampleDefiniti
  * 정의 창을 열고 고른 것을 한다: 사용처를 고르면 그 줄로 가고, 동작을 고르면 그 흐름을 돌린 뒤 `env.changed([def.folder])`.
  * 사용처는 창이 열린 뒤에 채워진다(범위의 노트를 모두 읽으므로).
  */
-export async function runSampleDefinition(env: SampleEnv, def: Definition, where: { docPath?: string; localFolder?: string }): Promise<void> {
+export async function runSampleDefinition(
+  env: SampleEnv,
+  def: Definition,
+  where: { docPath?: string; localFolder?: string },
+  deps: DefinitionFlowDeps = {},
+): Promise<void> {
   for (;;) {
     const model = definitionModel(env, def, where);
     const usages = sampleUsageSpots(env, def.folder, def.type, def.id).then((spots) => groupUsages(spots, env.t));
@@ -63,11 +98,13 @@ export async function runSampleDefinition(env: SampleEnv, def: Definition, where
       await env.openFile(path, { line, ...(ch === undefined ? {} : { ch }) });
       return;
     }
-    if (result.action === 'openJson') {
-      await runAction(env, def, result.action, model.move);
+    if (result.action === 'openJson' || result.action === 'partbankOpen') {
+      await runAction(env, def, result.action, model.move, deps);
       return;
     }
-    if (await runAction(env, def, result.action, model.move)) {
+    const done = await runAction(env, def, result.action, model.move, deps);
+    // A refresh tells the store itself what it wrote; the dialog comes back either way, showing the location now held.
+    if (done && result.action !== 'partbankRefresh') {
       env.changed([def.folder]);
       return;
     }
