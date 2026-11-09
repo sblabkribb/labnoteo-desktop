@@ -1,8 +1,9 @@
 /**
  * Static guards for .github/workflows/release.yml (plan Task 9). The workflow runs only on GitHub, so these tests read it as
  * text and pin what must never regress: the three triggers, refs taken from `inputs` before `github.*` (a called workflow sees
- * the caller's main), the signing secret only in `env:`, every guard before the build, the publish step last, and a skip when
- * the tag is already released. Paths are relative to app/.
+ * the caller's main), the signing secret only in `env:`, every guard before the build, a skip only when the tag's release is
+ * complete (latest.json, installer and .sig: release-state.sh), and a draft that is published only after its assets are
+ * checked, so releases/latest never points at a release without latest.json. Paths are relative to app/.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -43,6 +44,9 @@ describe('release.yml', () => {
     const on = TEXT.slice(TEXT.indexOf('\non:'), TEXT.indexOf('\npermissions:'));
     expect(on).toMatch(/\n {2}push:\n {4}tags: \[\x27v\*\x27\]/); // \x27 = a quote (escapes.test reads quotes in a regex as a string)
     expect(on).toMatch(/\n {2}workflow_dispatch:\n {4}inputs:\n {6}tag:/);
+    // Optional sha on dispatch too, so `inputs.sha` is typed in every trigger (actionlint).
+    const dispatch = on.slice(on.indexOf('workflow_dispatch:'), on.indexOf('workflow_call:'));
+    expect(dispatch).toMatch(/\n {6}sha:\n(?: {8}.*\n)*? {8}required: false\n/);
     const call = on.slice(on.indexOf('workflow_call:'));
     expect(call).toMatch(/inputs:\n {6}tag:[\s\S]*?required: true[\s\S]*?\n {6}sha:[\s\S]*?required: true/);
     expect(call).toMatch(/secrets:\n {6}TAURI_SIGNING_PRIVATE_KEY:\n {8}required: false/);
@@ -73,7 +77,8 @@ describe('release.yml', () => {
     }
   });
 
-  it('checks, in order: already released, key set, checkout, tag commit, versions, pubkey, key id, tests, then publishes', () => {
+  it('checks, in order: tag form, checkout, already released, key set, tag commit, versions, pubkey, key id, tests, then publishes', () => {
+    const form = idx(/is not a release tag/);
     const pre = idx(/id: pre\b/);
     const keySet = idx(/-z "\$TAURI_SIGNING_PRIVATE_KEY"/);
     const checkout = idx(/uses: actions\/checkout@/);
@@ -84,21 +89,62 @@ describe('release.yml', () => {
     const keyId = idx(/releaseChain\.mjs keyid-match/);
     const npmTest = idx(/run: npm test/);
     const cargo = idx(/cargo test/);
-    const publish = idx(/uses: tauri-apps\/tauri-action@/);
-    expect(pre).toBe(0);
-    const order = [pre, keySet, checkout, tagCommit, versions, pubkey, npmCi, keyId, npmTest, cargo, publish];
+    const remove = idx(/gh release delete/);
+    const build = idx(/uses: tauri-apps\/tauri-action@/);
+    const undraft = idx(/gh release edit/);
+    expect(form).toBe(0);
+    expect(checkout).toBe(1);
+    expect(pre).toBe(2);
+    const order = [form, checkout, pre, keySet, tagCommit, versions, pubkey, npmCi, keyId, npmTest, cargo, remove, build, undraft];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(publish).toBe(STEPS.length - 1);
+    expect(remove).toBe(build - 1);
+    expect(undraft).toBe(STEPS.length - 1);
   });
 
-  it('skips every step after the first when the release already exists, and fails closed on a lookup error', () => {
-    const [first, ...rest] = STEPS;
-    expect(first).toMatch(/gh release view "\$TAG"/);
-    expect(first).toMatch(/release not found/);
-    expect(first).toMatch(/skip=true/);
-    expect(first).toMatch(/exit 1/);
-    expect(first).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/);
-    for (const s of rest) expect(s).toMatch(/\n {8}if: steps\.pre\.outputs\.skip != 'true'/);
+  it('refuses a tag that is not vX.Y.Z before checkout, without the token', () => {
+    const s = STEPS[0];
+    expect(s).toContain('^v[0-9]+');
+    expect(s).toMatch(/exit 1/);
+    expect(s).not.toMatch(/GH_TOKEN|github\.token/);
+  });
+
+  it('skips the build only when the release is complete, and fails closed on a lookup error', () => {
+    const p = idx(/id: pre\b/);
+    const pre = STEPS[p];
+    expect(pre).toMatch(/bash \.github\/scripts\/release-state\.sh "\$TAG"/);
+    expect(pre).not.toMatch(/gh release view/); // the asset rules live in release-state.sh / releaseChain.mjs
+    // Each case arm, up to its `;;`.
+    const arm = (label: string) => new RegExp(`\\n {12}${label}\\)\\n((?:(?! {12}\\S).*\\n)*?.*;;)`).exec(pre)?.[1] ?? '';
+    expect(arm('complete')).toMatch(/skip=true/);
+    expect(arm('none')).toMatch(/skip=false/);
+    expect(arm('draft\\|incomplete')).toMatch(/skip=false/);
+    expect(arm('\\*')).toMatch(/exit 1/);
+    expect(pre.match(/skip=true/g)).toHaveLength(1);
+    expect(pre).toMatch(/echo "state=\$state" >> "\$GITHUB_OUTPUT"/);
+    expect(pre).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/);
+    expect(pre).not.toMatch(/\n {8}if:/);
+    for (const s of STEPS.slice(p + 1)) expect(s).toMatch(/\n {8}if: steps\.pre\.outputs\.skip != 'true'/);
+  });
+
+  it('removes a half-uploaded or unpublished release (keeping the tag) right before building it again', () => {
+    const s = STEPS[idx(/gh release delete/)];
+    expect(s).toContain("if: steps.pre.outputs.skip != 'true' && steps.pre.outputs.state != 'none'");
+    expect(s).toMatch(/gh release delete "\$TAG" --yes/);
+    expect(s).not.toMatch(/cleanup-tag/);
+    expect(s).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/);
+  });
+
+  it('publishes the draft only after release-state.sh sees every asset, and checks it once more after', () => {
+    const s = STEPS[idx(/gh release edit/)];
+    const first = s.indexOf('release-state.sh');
+    const edit = s.indexOf('gh release edit "$TAG" --draft=false');
+    const second = s.indexOf('release-state.sh', edit);
+    expect(first).toBeGreaterThan(0);
+    expect(edit).toBeGreaterThan(first);
+    expect(second).toBeGreaterThan(edit);
+    expect(s).toMatch(/!= draft[\s\S]*?exit 1/);
+    expect(s).toMatch(/!= complete[\s\S]*?exit 1/);
+    expect(s).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/);
   });
 
   it('checks out the input commit (or the dispatched tag) without keeping credentials', () => {
@@ -110,14 +156,14 @@ describe('release.yml', () => {
     expect(s).toMatch(/persist-credentials: false/);
   });
 
-  it('publishes at the checked-out commit with the tag from inputs, signed, not a draft', () => {
+  it('uploads to a draft at the checked-out commit with the tag from inputs, signed', () => {
     const s = STEPS[idx(/uses: tauri-apps\/tauri-action@/)];
     expect(s).toMatch(/tagName: \$\{\{ env\.TAG \}\}/);
     expect(s).toMatch(/releaseName: labnoteO \$\{\{ env\.TAG \}\}/);
     expect(s).toMatch(/commitish: \$\{\{ steps\.head\.outputs\.sha \}\}/);
     expect(STEPS[idx(/id: head\b/)]).toMatch(/git rev-parse HEAD/);
     expect(idx(/id: head\b/)).toBeLessThan(idx(/git ls-remote/) + 1);
-    expect(s).toMatch(/releaseDraft: false/);
+    expect(s).toMatch(/releaseDraft: true/);
     expect(s).toMatch(/prerelease: false/);
     expect(s).toMatch(/includeUpdaterJson: true/);
     expect(s).toMatch(/--config src-tauri\/tauri\.release\.conf\.json/);

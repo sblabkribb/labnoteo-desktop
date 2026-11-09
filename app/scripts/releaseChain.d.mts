@@ -43,3 +43,14 @@ export function decideRelease(i: {
   coreAtTag: string | null;
   tagReleased: boolean;
 }): ReleaseDecision;
+
+/**
+ * Whether a GitHub Release (`gh release view <tag> --json isDraft,assets`) is fully uploaded: latest.json, the
+ * `*_<version>_x64-setup.exe` installer and its `.sig`, each non-empty (and `uploaded` when a state is given).
+ * 'complete' = published with all of them, 'draft' = all of them but still a draft, 'incomplete' = something is missing.
+ * Throws on a malformed tag or release JSON.
+ */
+export function releaseState(
+  release: { isDraft: boolean; assets: { name: string; size: number; state?: string }[] },
+  tag: string,
+): { state: 'complete' | 'draft' | 'incomplete'; missing: string[] };

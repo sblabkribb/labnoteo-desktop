@@ -22,15 +22,19 @@
 #   2. Decision (app/scripts/releaseChain.mjs decide), computed fresh each run, nothing remembered:
 #      - the core at main differs from the core at the newest vX.Y.Z tag -> bump the app patch version
 #        in all six version sites, commit, and push main and the new tag together (one atomic push);
-#      - the core is the same but that tag has no GitHub Release (a failed or skipped build) -> release
-#        that tag again, without a new version;
+#      - the core is the same but that tag has no COMPLETE GitHub Release (none, a draft, or one without
+#        latest.json, the installer or its .sig: .github/scripts/release-state.sh; a failed, skipped or
+#        half-uploaded build) -> release that tag again, without a new version;
 #      - otherwise, or with no vX.Y.Z tag at all (the first release is cut by hand), nothing.
 #   3. Job `release` CALLS release.yml with that tag and commit. A tag pushed with GITHUB_TOKEN starts
 #      no push-triggered workflow, so the tag push alone would release nothing (and never twice);
 #      the call puts the build in this run. release.yml refuses a missing or mismatched signing key and
-#      skips a tag that is already released.
+#      skips a tag that is already completely released; it uploads into a draft and publishes it only
+#      once every asset is there, so releases/latest never points at a release without latest.json.
 #   4. A failed release opens one `core-sync` issue "Release vX.Y.Z failed"; the next run retries it
-#      (step 2) and the issue closes once that tag has a release.
+#      (step 2) and the issue closes once that tag has a complete release.
+#   5. Issue housekeeping (release-blocked, core-sync closes) runs after the push and is best-effort:
+#      a GitHub API error there warns but never fails the run or holds back decide, push or release.
 #
 # Notes for maintainers:
 #   - Runs never overlap (concurrency group sync-core). GitHub keeps at most one run waiting: a newer
@@ -147,12 +151,11 @@ jobs:
           git add app/vendor/labnoteo app/package-lock.json
           git commit -m "chore(core): follow labnoteO $LATEST" -m "Moves app/vendor/labnoteo from $CURRENT to $LATEST. Install, npm ci, tests and build passed in sync-core."
 
+      # Only computes; the release-blocked issue is opened or closed by a best-effort step after the push.
       - name: Can a release be published?
         id: ready
         if: steps.find.outputs.behind == 'false' || steps.commit.outcome == 'success'
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
           ready=true
@@ -162,30 +165,12 @@ jobs:
             reason='the repository secret TAURI_SIGNING_PRIVATE_KEY is not set'
           elif ! out=$(node app/scripts/releaseChain.mjs pubkey-check 2>&1); then
             ready=false
-            reason=$(tail -n 1 <<<"$out")
+            reason=$(tail -n 1 <<<"$out" | sed 's/^::error:://' | tr -d '\r')
           fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
-          if [ "$ready" = true ]; then
-            for n in $(gh issue list --label release-blocked --state open --json number --jq '.[].number' 2>/dev/null); do
-              gh issue close "$n" --comment "Resolved: the signing key and the updater pubkey are in place; sync-core releases again."
-            done
-            exit 0
-          fi
-          echo "::warning::Automatic release skipped: $reason"
-          gh label create release-blocked --color FBCA04 --description 'Automatic app releases are waiting for setup' 2>/dev/null || true
-          existing="$(gh issue list --label release-blocked --state open --json number --jq '.[0].number')"
-          if [ -z "$existing" ]; then
-            gh issue create --label release-blocked \
-              --title "Automatic releases are waiting for the updater signing key" \
-              --body "sync-core keeps the core current but does not bump, tag or release the app: $reason.
-
-          One-time setup (maintainer, see docs/RELEASING.md on the maintainer's machine):
-          1. Generate the updater key pair once: \`npx tauri signer generate -w <path outside the repo>\`; keep the private key safe.
-          2. Put the private key into the repository secret \`TAURI_SIGNING_PRIVATE_KEY\` (and its password, if any, into \`TAURI_SIGNING_PRIVATE_KEY_PASSWORD\`).
-          3. Commit the public key as \`plugins.updater.pubkey\` in \`app/src-tauri/tauri.conf.json\`.
-          4. Cut the first release by hand (push a \`vX.Y.Z\` tag); installed copies older than that release must be reinstalled once.
-
-          This issue closes by itself on the first run that finds the key and the pubkey in place."
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != true ]; then
+            echo "::warning::Automatic release skipped: $reason"
           fi
 
       - name: Decide whether to release
@@ -205,13 +190,14 @@ jobs:
           if [ -n "$NEWEST_TAG" ]; then
             # Empty when the tag predates the submodule: counts as "core moved".
             CORE_AT_TAG=$(git rev-parse --verify --quiet "$NEWEST_TAG:app/vendor/labnoteo" || true)
-            if out=$(gh release view "$NEWEST_TAG" --json tagName 2>&1); then
+            # Released only when published WITH latest.json, the installer and its .sig; a draft or a
+            # half-uploaded release is retagged (release.yml removes it and builds again).
+            # A gh error fails this step (fail closed): no decision on a guess.
+            out=$(bash .github/scripts/release-state.sh "$NEWEST_TAG")
+            echo "$out"
+            state=$(sed -n 's/^state=//p' <<<"$out")
+            if [ "$state" = complete ]; then
               TAG_RELEASED=true
-            elif grep -qi 'release not found' <<<"$out"; then
-              TAG_RELEASED=false
-            else
-              echo "::error::Could not check whether $NEWEST_TAG is released: $out"
-              exit 1
             fi
           fi
           export READY NEWEST_TAG CORE_AT_MAIN CORE_AT_TAG TAG_RELEASED
@@ -272,8 +258,42 @@ jobs:
             git push --quiet "$remote" HEAD:main
           fi
 
+      # Issue housekeeping from here on is best-effort (continue-on-error): a GitHub API hiccup here must
+      # not turn the run red or skip the release job. Decide, bump and push above never depend on it.
+      - name: Open or close the release-blocked issue
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          READY: ${{ steps.ready.outputs.ready }}
+          REASON: ${{ steps.ready.outputs.reason }}
+        run: |
+          if [ "$READY" = true ]; then
+            for n in $(gh issue list --label release-blocked --state open --json number --jq '.[].number'); do
+              gh issue close "$n" --comment "Resolved: the signing key and the updater pubkey are in place; sync-core releases again."
+            done
+            exit 0
+          fi
+          gh label create release-blocked --color FBCA04 --description 'Automatic app releases are waiting for setup' 2>/dev/null || true
+          existing="$(gh issue list --label release-blocked --state open --json number --jq '.[0].number')"
+          if [ -z "$existing" ]; then
+            gh issue create --label release-blocked \
+              --title "Automatic releases are waiting for the updater signing key" \
+              --body "sync-core keeps the core current but does not bump, tag or release the app: $REASON.
+
+          One-time setup (maintainer, see docs/RELEASING.md on the maintainer's machine):
+          1. Generate the updater key pair once: \`npx tauri signer generate -w <path outside the repo>\`; keep the private key safe.
+          2. Put the private key into the repository secret \`TAURI_SIGNING_PRIVATE_KEY\` (and its password, if any, into \`TAURI_SIGNING_PRIVATE_KEY_PASSWORD\`).
+          3. Commit the public key as \`plugins.updater.pubkey\` in \`app/src-tauri/tauri.conf.json\`.
+          4. Cut the first release by hand (push a \`vX.Y.Z\` tag); installed copies older than that release must be reinstalled once.
+
+          This issue closes by itself on the first run that finds the key and the pubkey in place."
+          fi
+
       - name: Close release-failure issues whose tag is now released
         if: steps.decide.outcome == 'success'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -281,13 +301,16 @@ jobs:
           gh issue list --label core-sync --state open --json number,title \
             --jq '.[] | select(.title | test("^Release v[0-9]+\\.[0-9]+\\.[0-9]+ failed$")) | "\(.number) \(.title)"' |
           while read -r n _ tag _; do
-            if gh release view "$tag" --json tagName > /dev/null 2>&1; then
+            # Only a complete release (latest.json, installer, .sig) closes the issue.
+            state=$(bash .github/scripts/release-state.sh "$tag" | sed -n 's/^state=//p') || continue
+            if [ "$state" = complete ]; then
               gh issue close "$n" --comment "Resolved: $tag is released."
             fi
           done
 
       - name: Close core-sync issues once the core is current
         if: steps.find.outputs.behind == 'false' || steps.build.outcome == 'success'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -308,8 +331,9 @@ jobs:
           FAILED: ${{ steps.install.outcome != 'success' && 'npm install / npm ci' || steps.test.outcome != 'success' && 'npm test' || 'npm run build' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          # The red result is the point of this step; the issue is best-effort (a gh error only warns).
           gh label create core-sync --color D93F0B --description 'labnoteO core update needs attention' 2>/dev/null || true
-          existing="$(gh issue list --label core-sync --state open --search "in:title \"labnoteO $LATEST \"" --json number --jq '.[0].number')"
+          existing="$(gh issue list --label core-sync --state open --search "in:title \"labnoteO $LATEST \"" --json number --jq '.[0].number' || echo unknown)"
           if [ -z "$existing" ]; then
             gh issue create --label core-sync \
               --title "labnoteO $LATEST does not pass the desktop app's checks" \
@@ -317,7 +341,10 @@ jobs:
 
           Log: $RUN_URL
 
-          sync-core retries on the next labnoteO release and once a day (a network error during install can also land here; check the log). It commits the update and closes this issue once a labnoteO release passes."
+          sync-core retries on the next labnoteO release and once a day (a network error during install can also land here; check the log). It commits the update and closes this issue once a labnoteO release passes." \
+              || echo "::warning::Could not open the core-sync issue"
+          elif [ "$existing" = unknown ]; then
+            echo "::warning::Could not open the core-sync issue (the issue list could not be read)"
           fi
           exit 1
 
@@ -331,10 +358,13 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh label create core-sync --color D93F0B --description 'labnoteO core update needs attention' 2>/dev/null || true
-          existing="$(gh issue list --label core-sync --state open --search 'in:title "sync-core could not complete"' --json number --jq '.[0].number')"
+          existing="$(gh issue list --label core-sync --state open --search 'in:title "sync-core could not complete"' --json number --jq '.[0].number' || echo unknown)"
           if [ -z "$existing" ]; then
             gh issue create --label core-sync --title "sync-core could not complete" \
-              --body "The core update or the release step could not be finished (for example upstream could not be read, the release decision failed, or the push of main or the version tag was refused). Nothing half-done is left behind: main and the tag are pushed together or not at all, and the next run starts over. Log: $RUN_URL"
+              --body "The core update or the release step could not be finished (for example upstream could not be read, the release decision failed, or the push of main or the version tag was refused). Nothing half-done is left behind: main and the tag are pushed together or not at all, and the next run starts over. Log: $RUN_URL" \
+              || echo "::warning::Could not open the core-sync issue"
+          elif [ "$existing" = unknown ]; then
+            echo "::warning::Could not open the core-sync issue (the issue list could not be read)"
           fi
 
   # Runs the release build in this same run. A tag pushed with GITHUB_TOKEN starts no workflow,
@@ -372,7 +402,8 @@ jobs:
           }
           if [ "$RESULT" = success ]; then
             for n in $(numbers); do
-              gh issue close "$n" --comment "Resolved: $TAG is released. Log: $RUN_URL"
+              gh issue close "$n" --comment "Resolved: $TAG is released. Log: $RUN_URL" ||
+                echo "::warning::Could not close issue #$n"
             done
             exit 0
           fi

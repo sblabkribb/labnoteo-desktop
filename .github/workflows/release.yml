@@ -11,14 +11,20 @@
 # A called workflow sees the caller's github.ref / github.sha (main before the
 # version bump), so the tag and the commit always come from inputs first.
 #
-# Refuses to build, before checkout of any code that runs, when:
-# - the release for the tag already exists (exits green: nothing to do);
-# - the TAURI_SIGNING_PRIVATE_KEY secret is empty (no unsigned update, ever);
-# and, after checkout, when the tag points at another commit, any of the six
-# version sites differs from the tag, the committed updater pubkey is still the
-# placeholder, or a test signature made with the secret carries a key id other
-# than the committed pubkey's (installed apps would reject that release).
-# The publish step is last, so a failed guard or test publishes nothing.
+# Refuses a tag that is not vX.Y.Z before checkout. After checkout (no code of the
+# commit runs before the guards below except the release-state check):
+# - a COMPLETE release for the tag (published, with latest.json, the installer and
+#   its .sig: .github/scripts/release-state.sh) -> nothing to do, exits green;
+#   a draft or a half-uploaded release is removed (the tag stays) and built again;
+# - the TAURI_SIGNING_PRIVATE_KEY secret is empty -> refuse (no unsigned update, ever);
+# - the tag points at another commit, any of the six version sites differs from the
+#   tag, the committed updater pubkey is still the placeholder, or a test signature
+#   made with the secret carries a key id other than the committed pubkey's
+#   (installed apps would reject that release) -> refuse.
+# tauri-action uploads into a DRAFT release, which installed apps never see. The last
+# step publishes it only after release-state.sh finds every asset, so
+# releases/latest never points at a release without latest.json. A failed guard,
+# test or upload publishes nothing; the next run (or a retry) starts over.
 #
 # One-time setup: repository secret TAURI_SIGNING_PRIVATE_KEY (the updater's
 # private key; the matching public key is in tauri.conf.json) and, only if the
@@ -34,6 +40,12 @@ on:
       tag:
         description: Existing tag to release, e.g. v0.1.1
         required: true
+        type: string
+      # Declared so `inputs.sha` has one type in all three triggers (actionlint); leave it empty.
+      # A value that is not the tag's commit is refused by "Tag must point at this commit".
+      sha:
+        description: Optional; empty = the tag's commit
+        required: false
         type: string
   workflow_call:
     inputs:
@@ -66,25 +78,46 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Tag must be vX.Y.Z
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || (inputs.tag && format('refs/tags/{0}', inputs.tag)) || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      # Released = published WITH latest.json, the installer and its .sig. A release that only
+      # exists (a run that died mid-upload, or a draft never published) is built again.
       - name: Already released?
         id: pre
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
-            exit 1
-          fi
-          if out=$(gh release view "$TAG" --json tagName 2>&1); then
-            echo "::notice::$TAG is already released; nothing to do"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif grep -qi 'release not found' <<<"$out"; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Could not check whether $TAG is released: $out"
-            exit 1
-          fi
+          out=$(bash .github/scripts/release-state.sh "$TAG")
+          echo "$out"
+          state=$(sed -n 's/^state=//p' <<<"$out")
+          missing=$(sed -n 's/^missing=//p' <<<"$out")
+          case "$state" in
+            complete)
+              echo "::notice::$TAG is already released with all its assets; nothing to do"
+              skip=true ;;
+            none)
+              skip=false ;;
+            draft|incomplete)
+              echo "::warning::$TAG has a $state release (missing: ${missing:-nothing, unpublished}); it is removed and built again"
+              skip=false ;;
+            *)
+              echo "::error::Could not tell whether $TAG is released (state '$state')"
+              exit 1 ;;
+          esac
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
 
       - name: Signing key must be set
         if: steps.pre.outputs.skip != 'true'
@@ -95,13 +128,6 @@ jobs:
             echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set; refusing to publish an unsigned update"
             exit 1
           fi
-
-      - uses: actions/checkout@v4
-        if: steps.pre.outputs.skip != 'true'
-        with:
-          ref: ${{ inputs.sha || (inputs.tag && format('refs/tags/{0}', inputs.tag)) || github.sha }}
-          submodules: recursive
-          persist-credentials: false
 
       - name: Tag must point at this commit
         id: head
@@ -173,7 +199,15 @@ jobs:
         working-directory: app/src-tauri
         run: cargo test --target x86_64-pc-windows-msvc
 
-      - name: Build, sign and publish
+      # Right before the build, after every guard and test passed. The tag stays (no --cleanup-tag).
+      - name: Remove the incomplete release
+        if: steps.pre.outputs.skip != 'true' && steps.pre.outputs.state != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release delete "$TAG" --yes
+
+      - name: Build, sign and upload to a draft release
         if: steps.pre.outputs.skip != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
@@ -186,8 +220,31 @@ jobs:
           releaseName: labnoteO ${{ env.TAG }}
           releaseBody: "Windows installer (unsigned: SmartScreen will warn on first install)."
           commitish: ${{ steps.head.outputs.sha }}
-          releaseDraft: false
+          # A draft is invisible to installed apps (releases/latest skips drafts) until the step below publishes it.
+          releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
           # Updater artifacts need the private key, so only the release build asks for them.
           args: --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json
+
+      - name: Check every asset, then publish the release
+        if: steps.pre.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          out=$(bash .github/scripts/release-state.sh "$TAG")
+          echo "$out"
+          state=$(sed -n 's/^state=//p' <<<"$out")
+          if [ "$state" != draft ]; then
+            echo "::error::The draft release for $TAG is not ready to publish (state '$state'; $(grep '^missing=' <<<"$out" || true)); it stays unpublished and the next run builds it again"
+            exit 1
+          fi
+          gh release edit "$TAG" --draft=false
+          out=$(bash .github/scripts/release-state.sh "$TAG")
+          state=$(sed -n 's/^state=//p' <<<"$out")
+          if [ "$state" != complete ]; then
+            echo "::error::$TAG was published but reads back as '$state'"
+            exit 1
+          fi
+          echo "Published $TAG with latest.json, the installer and its signature"

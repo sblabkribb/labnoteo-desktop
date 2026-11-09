@@ -7,6 +7,8 @@
 //   node app/scripts/releaseChain.mjs keyid-match <sig>   .sig 의 키 id 가 커밋된 공개키의 키 id 와 다르면 exit 1
 //   node app/scripts/releaseChain.mjs decide              READY, NEWEST_TAG, CORE_AT_MAIN, CORE_AT_TAG, TAG_RELEASED
 //                                                         환경변수로 정해 action=/tag=/reason= 줄을 찍는다($GITHUB_OUTPUT 용)
+//   node app/scripts/releaseChain.mjs release-state <tag> stdin 의 `gh release view <tag> --json isDraft,assets` JSON 으로
+//                                                         state=complete|draft|incomplete 와 missing= 줄을 찍는다
 // 파일은 이 스크립트 위치로 찾으므로 어느 폴더에서 불러도 된다(보통 저장소 루트).
 // 함수들은 글 → 글(순수)이고 app/src/__tests__/releaseChain.test.ts 가 시험한다.
 // 고칠 때는 곳마다 고정한 정규식으로 그 한 줄만 바꾼다(형식·줄바꿈 그대로). JSON 파싱은 확인에만 쓴다.
@@ -219,6 +221,37 @@ export function decideRelease({ ready, newestTag, coreAtMain, coreAtTag, tagRele
   return { action: 'none', reason: 'up-to-date' };
 }
 
+// ---- 릴리스가 다 올라갔나 ----
+// 앱은 releases/latest 의 latest.json 을 읽는다. 그래서 Release 가 "있다"는 것만으로는 부족하다:
+// latest.json, 이 버전의 NSIS 설치 파일, 그 .sig 가 모두 올라가 있어야(크기 > 0, state 가 있다면 uploaded) 완성이다.
+//   complete   — 공개됐고 다 있다(다시 만들 것 없음)
+//   draft      — 다 있지만 아직 초안(앱에 보이지 않는다; release.yml 이 확인 뒤 공개한다)
+//   incomplete — 무엇인가 빠졌다(반쯤 올라간 릴리스: 지우고 다시 만든다)
+
+/** `gh release view <tag> --json isDraft,assets` 결과 → { state, missing }. 모양이 틀리면 던진다. */
+export function releaseState(release, tag) {
+  if (typeof tag !== 'string' || !TAG.test(tag)) throw new Error(`not a vX.Y.Z tag: ${JSON.stringify(tag)}`);
+  if (!release || typeof release !== 'object' || typeof release.isDraft !== 'boolean' || !Array.isArray(release.assets)) {
+    throw new Error('release JSON must have isDraft (boolean) and assets (array)');
+  }
+  const version = tag.slice(1);
+  const uploaded = new Set();
+  for (const a of release.assets) {
+    if (!a || typeof a.name !== 'string') continue;
+    if (a.state !== undefined && a.state !== 'uploaded') continue;
+    if (typeof a.size !== 'number' || !(a.size > 0)) continue;
+    uploaded.add(a.name);
+  }
+  const missing = [];
+  if (!uploaded.has('latest.json')) missing.push('latest.json');
+  const suffix = `_${version}_x64-setup.exe`;
+  const installers = [...uploaded].filter((n) => n.endsWith(suffix)).sort();
+  if (installers.length === 0) missing.push(`*${suffix}`, `*${suffix}.sig`);
+  else if (!installers.some((n) => uploaded.has(`${n}.sig`))) missing.push(`${installers[0]}.sig`);
+  const state = missing.length ? 'incomplete' : release.isDraft ? 'draft' : 'complete';
+  return { state, missing };
+}
+
 // ---- CLI ----
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -236,7 +269,7 @@ function saveFiles(before, after) {
 }
 
 const USAGE =
-  'usage: node app/scripts/releaseChain.mjs versions | bump | set <x.y.z> | pubkey-check | keyid-match <sigFile> | decide';
+  'usage: node app/scripts/releaseChain.mjs versions | bump | set <x.y.z> | pubkey-check | keyid-match <sigFile> | decide | release-state <tag>';
 
 function committedPubkey() {
   const conf = JSON.parse(readFileSync(join(repoRoot, CONF), 'utf8'));
@@ -316,6 +349,17 @@ function main(argv) {
     const d = decideFromEnv();
     const reason = d.action === 'none' ? d.reason : d.action === 'bump' ? 'core-moved' : 'tag-unreleased';
     console.log(`action=${d.action}\ntag=${d.action === 'retag' ? d.tag : ''}\nreason=${reason}`);
+    return 0;
+  }
+  if (cmd === 'release-state' && argv.length === 2) {
+    let release;
+    try {
+      release = JSON.parse(readFileSync(0, 'utf8'));
+    } catch (e) {
+      throw new Error(`release-state: stdin is not JSON (${e.message})`);
+    }
+    const r = releaseState(release, arg);
+    console.log(`state=${r.state}\nmissing=${r.missing.join(',')}`);
     return 0;
   }
   console.error(USAGE);

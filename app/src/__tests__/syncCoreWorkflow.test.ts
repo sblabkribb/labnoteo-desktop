@@ -110,6 +110,8 @@ describe('sync-core.yml', () => {
       idx(/id: decide\b/),
       idx(/id: bump\b/),
       idx(/id: tagit\b/),
+      idx(/name: Open or close the release-blocked issue/),
+      idx(/name: Close release-failure issues/),
       idx(/name: Close core-sync issues/),
       idx(/name: Report a release that breaks the app/),
       idx(/name: Report that the sync itself could not run/),
@@ -123,10 +125,18 @@ describe('sync-core.yml', () => {
     expect(s).toContain("HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}");
     expect(s).toMatch(/releaseChain\.mjs pubkey-check/);
     expect(s).toMatch(/::warning::Automatic release skipped: /);
-    expect(s).toMatch(/--label release-blocked/);
-    expect(s).toContain('Automatic releases are waiting for the updater signing key');
-    expect(s).toMatch(/gh issue close/);
     expect(s).toMatch(/echo "ready=\$ready" >> "\$GITHUB_OUTPUT"/);
+    expect(s).toMatch(/echo "reason=\$reason" >> "\$GITHUB_OUTPUT"/);
+    // Readiness talks to no one: the issue housekeeping is a separate best-effort step.
+    expect(s).not.toMatch(/\bgh |GH_TOKEN/);
+    const issue = step(/name: Open or close the release-blocked issue/);
+    expect(issue).toMatch(/continue-on-error: true/);
+    expect(issue).toContain("if: steps.ready.outcome == 'success'");
+    expect(issue).toContain('READY: ${{ steps.ready.outputs.ready }}');
+    expect(issue).toContain('REASON: ${{ steps.ready.outputs.reason }}');
+    expect(issue).toMatch(/--label release-blocked/);
+    expect(issue).toContain('Automatic releases are waiting for the updater signing key');
+    expect(issue).toMatch(/gh issue close/);
     // The secret itself is never handed to this job; only its presence.
     for (const line of LINES) {
       if (line.includes('secrets.')) expect(line.trim()).toBe("HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}");
@@ -140,8 +150,10 @@ describe('sync-core.yml', () => {
     expect(s).toMatch(/sort -V \| tail -n 1/);
     expect(s).toMatch(/git rev-parse HEAD:app\/vendor\/labnoteo/);
     expect(s).toContain('git rev-parse --verify --quiet "$NEWEST_TAG:app/vendor/labnoteo"');
-    expect(s).toMatch(/gh release view "\$NEWEST_TAG"/);
-    expect(s).toMatch(/release not found/);
+    // Released = a complete release (latest.json, installer, .sig), not just any release: a half-uploaded one is retried.
+    expect(s).toMatch(/bash \.github\/scripts\/release-state\.sh "\$NEWEST_TAG"/);
+    expect(s).not.toMatch(/gh release view/);
+    expect(s).toMatch(/if \[ "\$state" = complete \]; then\n\s*TAG_RELEASED=true/);
     expect(s).toMatch(/node app\/scripts\/releaseChain\.mjs decide/);
     expect(s).toMatch(/git rev-list -n 1 "\$NEWEST_TAG"/);
     expect(s).toMatch(/no-first-release/);
@@ -181,10 +193,35 @@ describe('sync-core.yml', () => {
     expect(r).toMatch(/Release \$TAG failed/);
     expect(r).toMatch(/gh issue create --label core-sync/);
     expect(r).toMatch(/gh issue close/);
-    // The sync job also closes stale "Release vX failed" issues once that tag has a release (fixed by hand, say).
-    expect(step(/name: Close release-failure issues/)).toMatch(/gh release view/);
+    // The sync job also closes stale "Release vX failed" issues once that tag has a complete release (fixed by hand, say).
+    const close = step(/name: Close release-failure issues/);
+    expect(close).toMatch(/bash \.github\/scripts\/release-state\.sh "\$tag"/);
+    expect(close).toMatch(/= complete/);
+    expect(close).not.toMatch(/gh release view/);
     // ...and the generic close step leaves them alone.
     expect(step(/name: Close core-sync issues/)).toMatch(/startswith\("Release "\) \| not/);
+  });
+
+  it('never lets issue housekeeping fail the sync or stand between decide, push and release', () => {
+    const push = idx(/id: tagit\b/);
+    const housekeeping = STEPS.map((s, i) => [s, i] as const).filter(([s]) => /\bgh (issue|label)\b/.test(s));
+    expect(housekeeping.length).toBeGreaterThanOrEqual(5);
+    for (const [s, i] of housekeeping) {
+      expect(i, s.split('\n')[0]).toBeGreaterThan(push);
+      if (/name: Report /.test(s)) {
+        // The two failure reports keep their red result (exit 1 / failure()), but a gh error only warns.
+        for (const line of s.split('\n').filter((l) => /^\s*gh (issue|label) create/.test(l))) {
+          expect(line, line).toMatch(/\|\| (true|echo "::warning::)|\\$/);
+        }
+        expect(s).toMatch(/::warning::Could not open/);
+      } else {
+        expect(s, s.split('\n')[0]).toMatch(/\n {8}continue-on-error: true\n/);
+      }
+    }
+    // decide and the push depend on decide/commit, not on any housekeeping step.
+    for (const p of [/id: decide\b/, /id: bump\b/, /id: tagit\b/]) {
+      expect(step(p)).not.toMatch(/steps\.(ready\.outcome|close)/);
+    }
   });
 
   it('reports a sync failure in any step except a red core, which has its own report', () => {

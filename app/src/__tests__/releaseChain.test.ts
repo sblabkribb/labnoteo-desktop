@@ -14,6 +14,7 @@ import {
   keyIdFromPubkey,
   keyIdFromSig,
   readVersions,
+  releaseState,
   setVersion,
 } from '../../scripts/releaseChain.mjs';
 
@@ -530,5 +531,94 @@ describe('CLI — signing and decision', () => {
         expect(r.stderr).toContain('::error::');
       }
     });
+  });
+});
+
+describe('releaseState', () => {
+  const asset = (name: string, size = 100, state: string | undefined = 'uploaded') =>
+    state === undefined ? { name, size } : { name, size, state };
+  const full = [
+    asset('labnoteO_0.1.3_x64-setup.exe'),
+    asset('labnoteO_0.1.3_x64-setup.exe.sig'),
+    asset('latest.json'),
+  ];
+  it('complete: published, with latest.json, the installer for this version and its .sig', () => {
+    expect(releaseState({ isDraft: false, assets: full }, 'v0.1.3')).toEqual({ state: 'complete', missing: [] });
+  });
+  it('accepts assets without a state field (only an explicit non-uploaded state counts against)', () => {
+    const assets = full.map((a) => asset(a.name, 5, undefined));
+    expect(releaseState({ isDraft: false, assets }, 'v0.1.3').state).toBe('complete');
+  });
+  it('draft: every asset is there but the release is still a draft (not offered to apps)', () => {
+    expect(releaseState({ isDraft: true, assets: full }, 'v0.1.3')).toEqual({ state: 'draft', missing: [] });
+  });
+  it('incomplete: no latest.json (a half-uploaded release), even when published', () => {
+    const r = releaseState({ isDraft: false, assets: full.slice(0, 2) }, 'v0.1.3');
+    expect(r.state).toBe('incomplete');
+    expect(r.missing).toEqual(['latest.json']);
+  });
+  it('incomplete: no installer, or no signature for it', () => {
+    expect(releaseState({ isDraft: false, assets: [full[2]] }, 'v0.1.3')).toEqual({
+      state: 'incomplete',
+      missing: ['*_0.1.3_x64-setup.exe', '*_0.1.3_x64-setup.exe.sig'],
+    });
+    expect(releaseState({ isDraft: false, assets: [full[0], full[2]] }, 'v0.1.3')).toEqual({
+      state: 'incomplete',
+      missing: ['labnoteO_0.1.3_x64-setup.exe.sig'],
+    });
+  });
+  it('an installer of another version does not count', () => {
+    const assets = [asset('labnoteO_0.1.2_x64-setup.exe'), asset('labnoteO_0.1.2_x64-setup.exe.sig'), full[2]];
+    expect(releaseState({ isDraft: false, assets }, 'v0.1.3').state).toBe('incomplete');
+  });
+  it('an empty or still-uploading asset does not count', () => {
+    const empty = [full[0], full[1], asset('latest.json', 0)];
+    expect(releaseState({ isDraft: false, assets: empty }, 'v0.1.3').missing).toEqual(['latest.json']);
+    const starting = [full[0], asset('labnoteO_0.1.3_x64-setup.exe.sig', 100, 'starter'), full[2]];
+    expect(releaseState({ isDraft: false, assets: starting }, 'v0.1.3').missing).toEqual([
+      'labnoteO_0.1.3_x64-setup.exe.sig',
+    ]);
+  });
+  it('a release with no assets at all is incomplete', () => {
+    expect(releaseState({ isDraft: false, assets: [] }, 'v0.1.3').state).toBe('incomplete');
+  });
+  it('throws on a malformed tag or release JSON', () => {
+    expect(() => releaseState({ isDraft: false, assets: full }, '0.1.3')).toThrow();
+    expect(() => releaseState({ isDraft: false } as never, 'v0.1.3')).toThrow();
+    expect(() => releaseState({ assets: full } as never, 'v0.1.3')).toThrow();
+    expect(() => releaseState(null as never, 'v0.1.3')).toThrow();
+  });
+});
+
+describe('CLI — release-state', () => {
+  const script = join('app', 'scripts', 'releaseChain.mjs');
+  const cli = (args: string[], input: string) =>
+    spawnSync(process.execPath, [script, ...args], { cwd: repoRoot, encoding: 'utf8', input });
+  const lines = (out: string) => out.trim().split(/\r?\n/);
+  const json = (isDraft: boolean, names: string[]) =>
+    JSON.stringify({ isDraft, assets: names.map((name) => ({ name, size: 10, state: 'uploaded' })) });
+  const ALL = ['labnoteO_0.2.0_x64-setup.exe', 'labnoteO_0.2.0_x64-setup.exe.sig', 'latest.json'];
+
+  it('reads the `gh release view --json isDraft,assets` JSON on stdin and prints state=/missing=', () => {
+    const r = cli(['release-state', 'v0.2.0'], json(false, ALL));
+    expect(r.status, r.stderr).toBe(0);
+    expect(lines(r.stdout)).toEqual(['state=complete', 'missing=']);
+    expect(lines(cli(['release-state', 'v0.2.0'], json(true, ALL)).stdout)).toEqual(['state=draft', 'missing=']);
+    expect(lines(cli(['release-state', 'v0.2.0'], json(false, ALL.slice(0, 2))).stdout)).toEqual([
+      'state=incomplete',
+      'missing=latest.json',
+    ]);
+  });
+  it('fails closed on bad JSON, a bad tag or no tag', () => {
+    for (const [args, input] of [
+      [['release-state', 'v0.2.0'], 'not json'],
+      [['release-state', 'v0.2.0'], '{}'],
+      [['release-state', '0.2.0'], json(false, ALL)],
+      [['release-state'], json(false, ALL)],
+    ] as const) {
+      const r = cli([...args], input);
+      expect(r.status).not.toBe(0);
+      expect(r.stdout).not.toMatch(/state=complete/);
+    }
   });
 });
