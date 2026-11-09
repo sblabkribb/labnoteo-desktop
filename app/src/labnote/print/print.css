@@ -127,3 +127,9 @@ body.printing-pages { margin: 0; padding: 0; }
 .print-root .note-body th,
 .print-root .note-body td { border: 0.2mm solid #999; padding: 0.5mm 1.5mm; }
 .print-root .note-body pre { white-space: pre-wrap; font-size: 8.5pt; }
+
+/* Whole-note measuring box (print/measure.ts): the page body's width (bodyBox), 10pt / 1.5, laid out but hidden
+   inside the off-view root, and removed once the blocks are measured. */
+.print-root .print-measure { position: absolute; left: 0; top: 0; visibility: hidden; font-size: 10pt; line-height: 1.5; }
+.print-root .print-measure.a4 { width: 182mm; }
+.print-root .print-measure.letter { width: 187.9mm; }

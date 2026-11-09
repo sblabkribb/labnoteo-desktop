@@ -44,7 +44,7 @@ async function waitForFonts(doc: Document, win: Window, ms: number): Promise<voi
   await Promise.race([ready.then(() => undefined, () => undefined), delay(win, ms)]);
 }
 
-async function waitForImages(root: HTMLElement, win: Window, ms: number): Promise<void> {
+async function waitForImages(root: ParentNode, win: Window, ms: number): Promise<void> {
   await Promise.all(
     Array.from(root.querySelectorAll('img'))
       .filter((img) => !img.complete)
@@ -57,6 +57,13 @@ async function waitForImages(root: HTMLElement, win: Window, ms: number): Promis
           }),
       ),
   );
+}
+
+/** 글꼴과 `root` 아래 이미지를 기다린다(각 `waitMs` 까지). 노트 전체 인쇄가 재기 전에도 쓴다. */
+export async function settle(root: ParentNode, doc: Document = document, waitMs: number = WAIT_MS): Promise<void> {
+  const win = doc.defaultView ?? window;
+  await waitForFonts(doc, win, waitMs);
+  await waitForImages(root, win, waitMs);
 }
 
 /** 지금 인쇄 루트를 쓰는 작업. 새 작업이 시작되면 앞 작업의 afterprint 는 아무것도 치우지 않는다. */
@@ -85,8 +92,7 @@ export async function printPages(
   try {
     const root = mountPages(pagesHtml(pages, paper), doc);
     doc.body.classList.add(PRINTING);
-    await waitForFonts(doc, win, waitMs);
-    await waitForImages(root, win, waitMs);
+    await settle(root, doc, waitMs);
     if (job !== currentJob) return; // 기다리는 사이 새 작업이 루트를 가져갔다
     fitBodies(root, MIN_SCALE);
     win.addEventListener('afterprint', cleanup);
