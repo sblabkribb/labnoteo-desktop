@@ -41,6 +41,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
   const parsed = parseFrontMatterYaml(text);
   const fm: Record<string, unknown> = parsed.frontMatter ?? {};
   const updated = fm.last_updated_date;
+  const created = fm.created_date;
 
   // 체크리스트 항목의 노트가 있는가: 폴더 목록에서, 없으면 그 링크 경로(보관함 기준)에서 본다
   const present = new Set(names.map((n) => fold(posix.join(folder, n))));
@@ -63,6 +64,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     status: typeof fm.status === 'string' ? fm.status : undefined,
     discuss: isDiscussFlagged(fm),
     lastUpdated: typeof updated === 'string' && updated.trim() ? updated.trim() : undefined,
+    created: typeof created === 'string' && created.trim() ? created.trim() : undefined,
     progress: checklistProgress(folder, items, (p) => present.has(fold(p)), fold),
     project: typeof fm.project === 'string' || typeof fm.project === 'number' ? String(fm.project) : undefined,
     authors: frontMatterNames(fm.author),

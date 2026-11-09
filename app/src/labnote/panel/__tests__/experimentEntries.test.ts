@@ -1,6 +1,7 @@
 import { createFakeVault } from '../../../__tests__/fakeVault';
 import { TauriLabnoteFs } from '../../../fs/tauriLabnoteFs';
 import { ExperimentEntryCache, readExperimentEntry } from '../experimentEntries';
+import { filterExperiments } from '@labnoteo/core';
 import { readme } from './panelFixtures';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -38,6 +39,19 @@ describe('readExperimentEntry', () => {
     });
     expect(e.frontMatterError).toBeUndefined();
     expect((await readExperimentEntry(fs, A, 3)).markers).toBe(3);
+  });
+
+  it('reads created_date, so the core search finds an experiment by the day it was made (#515)', async () => {
+    const vault = createFakeVault({
+      [`${A}/README.labnote.md`]: readme('A', 'in-progress', 'created_date: 2025-12-24\n'),
+      [`${B}/README.labnote.md`]: readme('B', 'in-progress', 'created_date: "  "\n'),
+    });
+    const fs = new TauriLabnoteFs(vault.invoke);
+    const a = await readExperimentEntry(fs, A);
+    const b = await readExperimentEntry(fs, B);
+    expect(a.created).toBe('2025-12-24');
+    expect(b.created).toBeUndefined();
+    expect(filterExperiments([a, b], '2025-12-24').map((e) => e.folder)).toEqual([A]);
   });
 
   it('progress counts only checklist entries whose note exists, and a note listed twice once', async () => {
