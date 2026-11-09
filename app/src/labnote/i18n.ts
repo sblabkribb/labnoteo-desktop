@@ -41,7 +41,9 @@ export type OverrideKey =
   | 'integrations.keyKeptHere'
   | 'ai.schemeHint'
   // 플러그인의 'Set up a partbank connection in the plugin settings first.': 앱에서는 연동 설정 대화상자(SP6 Task 16).
-  | 'partbank.setupFirst';
+  | 'partbank.setupFirst'
+  // 플러그인의 'Set the Global sample folder in the plugin settings before downloading a catalog.': 앱에서는 샘플 설정(SP6 Task 21).
+  | 'partbank.globalFolderFirst';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {
