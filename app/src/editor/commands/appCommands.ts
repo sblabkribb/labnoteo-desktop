@@ -13,6 +13,7 @@ import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert'
 import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDialog';
 import { bfwReady } from '../../bfworkflow/bfwApp';
 import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
+import { runNotesFromDesign } from '../../bfworkflow/notesFromDesign';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -161,8 +162,19 @@ const bfwSyncCatalogs: AppCommand = {
   available: (ctx) => bfwReady(ctx),
 };
 
+/**
+ * bfworkflow 설계에서 노트 만들기(SP6 Task 40): 서버에 저장된 노트를 쓰거나 SSE 로 새로 만들어 실험 폴더에 쓴다.
+ * 있는 노트는 묻지 않고 덮어쓰지 않는다. 지금 연결의 키가 설정됐을 때만 보인다.
+ */
+const bfwNotesFromDesign: AppCommand = {
+  id: 'app.bfw-notes-from-design',
+  nameKey: 'cmd.bfwNotesFromDesign',
+  run: (ctx) => runNotesFromDesign(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
