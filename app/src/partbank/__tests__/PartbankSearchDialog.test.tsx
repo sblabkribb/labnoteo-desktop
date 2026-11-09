@@ -120,6 +120,23 @@ describe('PartbankSearchDialog', () => {
     expect(search).toHaveBeenCalledTimes(1);
   });
 
+  it('Enter while composing does not pick a shown hit', async () => {
+    const { input, onDone } = setup(async () => ({ hits: [hit(OID1, 'pUC19')] }));
+    type(input, 'pUC');
+    vi.advanceTimersByTime(400);
+    await flush();
+    expect(rows()).toEqual(['pUC19']);
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(onDone).not.toHaveBeenCalled();
+    // 조합 플래그 없이 Enter 가 와도, compositionend 전이면 고르지 않는다
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onDone).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input, { data: '' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ id: OID1 }));
+  });
+
   it('Escape while composing does not cancel; Escape after it does', () => {
     const { input, onCancel } = setup(async () => ({ hits: [] }));
     fireEvent.compositionStart(input);
