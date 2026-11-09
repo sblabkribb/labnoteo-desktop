@@ -41,6 +41,8 @@ function value(): IntegrationSettingsValue {
     scanMaxImageEdge: s.scanMaxImageEdge,
     scanJpegQuality: s.scanJpegQuality,
     scanEmbedWidth: s.scanEmbedWidth,
+    mcpEnabled: s.mcpEnabled,
+    mcpPort: s.mcpPort,
   };
 }
 
