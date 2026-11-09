@@ -241,7 +241,8 @@ describe('results dialog', () => {
   it('a duplicate row has only Open note; an unmatched result offers Assign unmatched scans', () => {
     renderLayer();
     const feature = makeFeature();
-    const openUnmatched = vi.spyOn(feature, 'openUnmatched');
+    // The queue itself is unmatched.test.tsx's: here only that the results hand over to it.
+    const openUnmatched = vi.spyOn(feature, 'openUnmatched').mockResolvedValue(undefined);
     act(() =>
       feature.report(
         [

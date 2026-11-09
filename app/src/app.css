@@ -906,3 +906,11 @@ button.links-target:focus-visible { outline-offset: -2px; }
 .scan-result-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 /* 알림 안의 단추("자세히", "결과 다시 보기"): 글자 단추처럼 */
 .toast-action { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+/* 미분류 스캔 대기열(Task 26): 줄마다 이름·이유·작은 그림, 오른쪽에 넣기와 지우기. 그림을 누르면 창 안에서 크게(.scan-zoom) */
+.dialog.scan-unmatched-dialog { width: min(44rem, 100%); }
+.scan-unmatched { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; max-height: 60vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.scan-unmatched li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.scan-thumb-button { align-self: flex-start; margin-top: var(--space-1); padding: 0; background: transparent; border: 0; cursor: zoom-in; }
+.scan-thumb { display: block; max-width: 220px; max-height: 220px; }
+.scan-zoom { display: block; width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-out; }
+.scan-zoom img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
