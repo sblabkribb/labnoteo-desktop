@@ -13,6 +13,7 @@ import { parseRaw } from '../editor/documentIo';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
 import { ModifyConflictError } from '../fs/tauriLabnoteFs';
 import type { CommandContext } from '../labnote/commands/context';
+import { entryEvents, filesBefore, movedFiles } from '../labnote/commands/entryEvents';
 import { NoteBusyError, NoteGoneError, NoteSaveError } from '../labnote/noteErrors';
 import { openNote, processNote } from '../labnote/openNotes';
 import type { JournalStore } from './journal';
@@ -229,6 +230,8 @@ export async function renameWithLinks(
       planned: plan.notes.map((p) => ({ before: p.before, after: p.after })),
       undoable: true,
     });
+    // Listed before the rename (.json files and whole folders included) for the sample follow-ups (SP5 D14).
+    const files = await filesBefore(host.fs, plan.from, plan.isDir);
     try {
       await host.fs.rename(plan.from, plan.to);
     } catch (e) {
@@ -239,13 +242,28 @@ export async function renameWithLinks(
     }
     // Announce before any further await: a watcher 'removed' for the old path must not reach the history first.
     renameEvents.emit(plan.moves);
-    await journal.setStatus('renamed');
+    // Settles after the journal is done, or when the flow fails: no follow-up dialog opens while notes are still written.
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => (settle = resolve));
+    entryEvents.emit({
+      kind: 'renamed',
+      from: plan.from,
+      to: plan.to,
+      isDir: plan.isDir,
+      files: movedFiles(files, plan.from, plan.to),
+      settled,
+    });
+    try {
+      await journal.setStatus('renamed');
 
-    const report = await writeNotes(ctx, plan, plan.notes.map((_, i) => i), journal, { restore: opts.restore });
+      const report = await writeNotes(ctx, plan, plan.notes.map((_, i) => i), journal, { restore: opts.restore });
 
-    if (wasOpen) await ctx.openFile(plan.to + active.slice(plan.from.length));
-    await journal.setStatus('done');
-    return report;
+      if (wasOpen) await ctx.openFile(plan.to + active.slice(plan.from.length));
+      await journal.setStatus('done');
+      return report;
+    } finally {
+      settle();
+    }
   });
 }
 

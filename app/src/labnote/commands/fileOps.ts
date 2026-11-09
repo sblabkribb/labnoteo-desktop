@@ -32,6 +32,7 @@ import { openNote, processNote } from '../openNotes';
 import { README } from '../paths';
 import { warnIfWindowsPathTooLong } from '../port/experiments';
 import type { CommandContext, LinkDeps } from './context';
+import { entryEvents, filesBefore, movedFiles } from './entryEvents';
 
 export type RenameGuard = 'experimentFolder' | 'experimentParent' | 'labnoteRoot' | 'workflowNote' | 'readme' | undefined;
 
@@ -249,7 +250,14 @@ function reportRenameFailure(host: CommandContext['host'], e: unknown): boolean 
  * 링크를 고치지 않는 이름 바꾸기(링크가 없거나, "이름만 바꾸기"거나, 대소문자만 바뀌거나, 링크 의존성이 없을 때).
  * 열린 노트가 그 경로이거나 그 안에 있으면 먼저 저장하고 닫은 뒤 바꾸고, 새 경로에서 다시 연다. 바꿨으면 true.
  */
-async function plainRename(ctx: CommandContext, path: string, to: string, moves: readonly Move[], done: string): Promise<boolean> {
+async function plainRename(
+  ctx: CommandContext,
+  path: string,
+  to: string,
+  isDir: boolean,
+  moves: readonly Move[],
+  done: string,
+): Promise<boolean> {
   const { host } = ctx;
   const active = ctx.activePath();
   const wasOpen = active !== undefined && isUnder(active, path);
@@ -257,6 +265,8 @@ async function plainRename(ctx: CommandContext, path: string, to: string, moves:
     host.notify('warn', t('fileOps.unsaved'));
     return false;
   }
+  // 바꾸기 전에 뜬 목록(.json 과 폴더 속 파일까지): 샘플 후속 처리가 파일마다 본다(SP5 D14)
+  const files = await filesBefore(host.fs, path, isDir);
   try {
     await host.fs.rename(path, to);
   } catch (e) {
@@ -265,7 +275,14 @@ async function plainRename(ctx: CommandContext, path: string, to: string, moves:
     throw e;
   }
   renameEvents.emit(moves);
-  if (wasOpen) await ctx.openFile(to + active.slice(path.length));
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => (settle = resolve));
+  entryEvents.emit({ kind: 'renamed', from: path, to, isDir, files: movedFiles(files, path, to), settled });
+  try {
+    if (wasOpen) await ctx.openFile(to + active.slice(path.length));
+  } finally {
+    settle();
+  }
   host.notify('info', done);
   return true;
 }
@@ -390,7 +407,7 @@ async function renameLocked(
   if (linkKey(to) === linkKey(path) || !links) {
     const treeMoves = movesFor(path, to, isDir, entries.filter((e) => !e.isDir).map((e) => e.path));
     const done = links ? t('fileOps.renamed') : t('fileOps.renamed.linksNotUpdated');
-    return (await plainRename(ctx, path, to, treeMoves, done)) ? finish() : undefined;
+    return (await plainRename(ctx, path, to, isDir, treeMoves, done)) ? finish() : undefined;
   }
 
   if (!(await waitForLinks(ctx, links))) {
@@ -426,7 +443,7 @@ async function renameLocked(
 
   // 색인이 준비된 채로 고칠 링크를 찾지 못했다: 묻지 않고 바꾼다
   if (plan.notes.length === 0) {
-    return (await plainRename(ctx, path, to, plan.moves, t('fileOps.renamed'))) ? finish() : undefined;
+    return (await plainRename(ctx, path, to, isDir, plan.moves, t('fileOps.renamed'))) ? finish() : undefined;
   }
   if (plan.hasWikiRewrites && hasUnlinkableChars(baseName(to))) {
     host.notify('warn', t('links.rename.badName'));
@@ -441,7 +458,7 @@ async function renameLocked(
   );
   if (choice === undefined) return undefined;
   if (choice === 'skip') {
-    return (await plainRename(ctx, path, to, plan.moves, t('fileOps.renamed.linksNotUpdated'))) ? finish() : undefined;
+    return (await plainRename(ctx, path, to, isDir, plan.moves, t('fileOps.renamed.linksNotUpdated'))) ? finish() : undefined;
   }
 
   let report: RenameReport;
@@ -505,8 +522,10 @@ export async function deleteEntry(ctx: CommandContext, path: string, isDir: bool
     host.notify('warn', t('fileOps.unsaved'));
     return false;
   }
+  const files = await filesBefore(host.fs, path, isDir);
   await host.fs.trash(path);
   deleteEvents.emit(path);
+  entryEvents.emit({ kind: 'deleted', path, isDir, files });
   host.notify('info', t('fileOps.deleted', name));
   if (!isDir && isValidWorkflowPath(path)) await offerReadmeCleanup(ctx, path);
   ctx.refresh();

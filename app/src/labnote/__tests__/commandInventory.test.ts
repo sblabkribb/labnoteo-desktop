@@ -37,7 +37,8 @@ const DEFERRED: Record<string, string> = {
   'export-tables-csv': 'exports and automation',
   'export-experiment-tables-csv': 'exports and automation',
   'open-user-guide': 'exports and automation',
-  'renumber-workflows': 'rename and links',
+  'renumber-workflows':
+    'rename and links: must call queueSampleSourceRenames after the README hold is released (vendor tests/plugin/renumberWorkflows.test.ts "sample sources after renumbering", #149)',
   'download-partbank-catalog': 'platform and integrations',
   'refresh-partbank-locations': 'platform and integrations',
   'ai-draft-method': 'platform and integrations',
@@ -96,5 +97,11 @@ describe('명령 목록(플러그인과 맞춰 보기)', () => {
     const registered = new Set(commands().map((c) => c.id));
     expect(Object.keys(DEFERRED).filter((id) => !ids.has(id) || registered.has(id))).toEqual([]);
     expect(Object.values(DEFERRED).every((s) => s.trim() !== '')).toBe(true);
+  });
+
+  it('the renumber-workflows note names the sample source hook it must call (SP5 D2, #149)', async () => {
+    expect(DEFERRED['renumber-workflows']).toContain('must call queueSampleSourceRenames after the README hold is released');
+    const ledger = await import('../port/sampleLedger');
+    expect(typeof ledger.queueSampleSourceRenames).toBe('function');
   });
 });

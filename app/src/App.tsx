@@ -29,6 +29,7 @@ import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
 import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSampleStore';
 import { createSampleEnv } from './samples/env';
+import { wireSampleFollowUps } from './samples/followUps';
 import { installSampleActionRunners } from './samples/actionRunners';
 import { registerSampleSources } from './samples/sources';
 import { samplesSync, setSampleSyncEnv } from './samples/sync';
@@ -287,6 +288,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     setSampleSyncEnv(() => ctx && createSampleEnv(ctx));
     return ctx ? () => void samplesSync.flush() : undefined;
   }, [ctx]);
+  // 앱에서 한 이름 바꾸기와 삭제 뒤의 샘플 후속 처리(D14): sources 이름, 대장과 labsamples 되돌리기, 지운 대장 알림.
+  useEffect(() => (ctx ? wireSampleFollowUps(() => createSampleEnv(ctx)) : undefined), [ctx]);
   // 앱 밖에서 고친 노트(감시자의 변경)도 동기화한다. 지워진 노트는 읽지 못해 아무것도 하지 않는다.
   useVaultChanges((paths) => {
     if (paths === 'all') return;
