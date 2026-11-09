@@ -10,6 +10,8 @@ import { appCommands, clearAppCommandsForTest, registerAllAppCommands } from '..
 import { cancelAllRequests, NetError, type ListenFn, type NetError as NetErrorT } from '../../integrations/netIpc';
 import { cancelProgress, useProgress } from '../../integrations/progressStore';
 import { fakeInvoke, netError } from '../../integrations/__tests__/fakeNet';
+import { registerOpenNote } from '../../labnote/openNotes';
+import type { EditorHandle } from '../../editor/Editor';
 import { isFailedNote, runNotesFromDesign, safeTitle } from '../notesFromDesign';
 
 const DIR = 'labnote/001_단백질_발현';
@@ -311,6 +313,72 @@ describe('bfworkflow: Create notes from a design', () => {
     await run(s);
     expect(write).not.toHaveBeenCalled();
     expect(s.th.notes).toEqual([]);
+  });
+
+  it('a vault switch while the result arrives writes nothing', async () => {
+    const s = setup({
+      generate: (_a, _emit, me) => {
+        me.root.value = 'C:/other-vault';
+        return { workflows: [wf('WB030', 'PCR', '# pcr')] };
+      },
+    });
+    const write = vi.spyOn(s.th.host.fs, 'write');
+    const before = files(s);
+    s.th.answer.pick(pickService);
+    await run(s);
+    expect(write).not.toHaveBeenCalled();
+    expect(files(s)).toEqual(before);
+    expect(s.th.notes).toEqual([]);
+  });
+
+  it('a file that appears at the new path after the listing is never overwritten', async () => {
+    const existing = `${DIR}/001_WB030_PCR.labnote.md`;
+    const s = setup({
+      files: { [README_PATH]: readme(), [existing]: 'theirs' },
+      generate: () => ({ workflows: [wf('WB030', 'PCR', '# new')] }),
+    });
+    vi.spyOn(s.th.host.fs, 'list').mockResolvedValue(['README.labnote.md']);
+    s.th.answer.pick(pickService);
+    await run(s);
+    expect(files(s)[existing]).toBe('theirs');
+    expect(checklistLines(files(s)[README_PATH])).toHaveLength(0);
+    expect(s.th.notes).toContainEqual({ kind: 'warn', message: t('bfw.exists', '001_WB030_PCR.labnote.md') });
+  });
+
+  it('replace into a busy open note is refused with a notice', async () => {
+    const existing = `${DIR}/001_WB030_PCR.labnote.md`;
+    const orig = createWorkflowContent({ id: 'WB030', name: 'PCR', description: '' }, '김연구');
+    const s = setup({
+      files: { [README_PATH]: readme(), [existing]: orig },
+      generate: () => ({ workflows: [wf('WB030', 'PCR', '# new')] }),
+    });
+    const off = registerOpenNote(existing, { busy: () => true, view: () => undefined, rawText: () => orig } as unknown as EditorHandle);
+    try {
+      s.th.answer.pick(pickService, 'replace');
+      s.th.answer.confirm(true);
+      await run(s);
+    } finally {
+      off();
+    }
+    expect(files(s)[existing]).toBe(orig);
+    expect(s.th.notes).toContainEqual({ kind: 'warn', message: t('command.noteBusy') });
+  });
+
+  it('replace is not offered when the open buffer holds unsaved results', async () => {
+    const existing = `${DIR}/001_WB030_PCR.labnote.md`;
+    const orig = createWorkflowContent({ id: 'WB030', name: 'PCR', description: '' }, '김연구');
+    const s = setup({
+      files: { [README_PATH]: readme(), [existing]: orig },
+      generate: () => ({ workflows: [wf('WB030', 'PCR', '# new')] }),
+    });
+    const off = registerOpenNote(existing, { busy: () => false, view: () => undefined, rawText: () => 'unsaved results' } as unknown as EditorHandle);
+    try {
+      s.th.answer.pick(pickService);
+      await run(s);
+    } finally {
+      off();
+    }
+    expect(s.th.asked.pick[1].items.map((i) => i.value)).toEqual(['new', 'skip']);
   });
 
   it('cancel stops generation and writes nothing', async () => {
