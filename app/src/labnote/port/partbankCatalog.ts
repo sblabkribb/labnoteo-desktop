@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/partbank/partbankCatalog.ts:34-245 sha256:757b45fc424e926f
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin becomes (env, feature, store): downloadPartbankCatalog(env, feature, store) and knownCatalogIds(env, …) take a SampleEnv, the PartbankFeature and the app-data PartbankCatalogStore. The catalog is written with store.write(catalogFileName(type, kind), text) into app data (D13) instead of plugin.fs.write into the Global folder; the previous catalog is still read through env.fs (the D15 overlay) at the same virtual path, so knownCatalogIds is unchanged. plugin.partbank.defaultClient/notifyNotConfigured/notifyError(err, kind) → feature.defaultClient/notifyNotConfigured/notifyError(err, client); plugin.settings.globalSampleFolder → env.globalFolder(), and its missing-folder Notice ('Set the Global sample folder in the plugin settings before downloading a catalog.') → overrideOr('partbank.globalFolderFirst'), which names Sample settings; plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.fs → env.fs; plugin.t → env.t; new Notice(m, ms) → env.host.notify('info', m); plugin.samplesChanged() → env.changed([the written virtual paths]). The persistent "Downloading…" Notice becomes withProgress(env.t('Downloading the partbank catalog…'), …, { cancellable: true }): Cancel (or a vault switch) gives up at once, the answer of a page still on its way is ignored, and nothing is written; a cancelled download shows no error. A vaultGuard() is taken at the start and guard.check() runs before each store.write (D11). Listing and sorting are split: the progress dialog lists every type first and closes, and only then are items sorted into sample types, because the app's dialogs queue and the strain-type question could not show while the progress dialog is up. The strain question is asked once, for the first strain, and its answer, yes or no, stands for the rest of the download (the vendor asked again for every strain after a no, against its own doc comment); resolveSampleType gets the guard.
+// Changes: LabnotePlugin becomes (env, feature, store): downloadPartbankCatalog(env, feature, store) and knownCatalogIds(env, …) take a SampleEnv, the PartbankFeature and the app-data PartbankCatalogStore. The catalog is written with store.write(catalogFileName(type, kind), text) into app data (D13) instead of plugin.fs.write into the Global folder; the previous catalog is still read through env.fs (the D15 overlay) at the same virtual path, so knownCatalogIds is unchanged. plugin.partbank.defaultClient/notifyNotConfigured/notifyError(err, kind) → feature.defaultClient/notifyNotConfigured/notifyError(err, client); plugin.settings.globalSampleFolder → env.globalFolder(), and its missing-folder Notice ('Set the Global sample folder in the plugin settings before downloading a catalog.') → overrideOr('partbank.globalFolderFirst'), which names Sample settings; plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.fs → env.fs; plugin.t → env.t; new Notice(m, ms) → env.host.notify('info', m); plugin.samplesChanged() → env.changed([the written virtual paths]). The persistent "Downloading…" Notice becomes withProgress(env.t('Downloading the partbank catalog…'), …, { cancellable: true }): Cancel (or a vault switch) gives up at once, the answer of a page still on its way is ignored, no further page is requested (listAll's onPage callback throws once a signal aborts), and nothing is written; a cancelled download shows no error. A vaultGuard() is taken at the start and guard.check() runs before each store.write (D11). Listing and sorting are split: the progress dialog lists every type first and closes, and only then are items sorted into sample types, because the app's dialogs queue and the strain-type question could not show while the progress dialog is up. The strain question is asked once, for the first strain, and its answer, yes or no, stands for the rest of the download (the vendor asked again for every strain after a no, against its own doc comment); resolveSampleType gets the guard.
 /**
  * Downloading a partbank workspace into read-only `{Type}_partbank-*.json`
  * catalogs beside the sample registry.
@@ -150,8 +150,9 @@ const cancelled = () => new NetError('cancelled', 'cancelled');
 
 /**
  * `work`, or a `cancelled` rejection as soon as one of `signals` aborts. The
- * partbank call itself runs on in Rust (it has a 15 s timeout); its answer is
- * ignored.
+ * partbank call in flight runs on in Rust (it has a 15 s timeout); its answer is
+ * ignored. `work` must stop itself from starting further calls (see the onPage
+ * check in downloadPartbankCatalog).
  */
 function untilAborted<T>(signals: readonly AbortSignal[], work: Promise<T>): Promise<T> {
   if (signals.some((s) => s.aborted)) return Promise.reject(cancelled());
@@ -205,7 +206,12 @@ export async function downloadPartbankCatalog(
       async (progress) => {
         const signals = [progress.signal, guard.signal];
         for (const partbankType of PARTBANK_TYPES) {
-          listed.set(partbankType, await untilAborted(signals, client.listAll(partbankType)));
+          // The page check stops listAll from asking for the next page once
+          // cancelled; untilAborted stops the wait on the page in flight.
+          const stopIfAborted = () => {
+            if (signals.some((s) => s.aborted)) throw cancelled();
+          };
+          listed.set(partbankType, await untilAborted(signals, client.listAll(partbankType, stopIfAborted)));
         }
       },
       { cancellable: true },

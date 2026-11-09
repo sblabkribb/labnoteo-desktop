@@ -24,6 +24,7 @@ import {
 } from '../../labnote/port/partbankCatalog';
 import type { PartbankCatalogStore } from '../catalogOverlay';
 import { setPartbankFeature } from '../current';
+import { LIST_PAGE_SIZE } from '../../labnote/port/partbankClient';
 import { PB_WEB, pbEnv, type PbEnv } from './pbFixture';
 
 const WEB = PB_WEB;
@@ -334,6 +335,23 @@ describe('downloadPartbankCatalog', () => {
     // 사용자가 취소했으므로 오류를 띄우지 않고, 날 Rust 글도 보이지 않는다
     expect(env().th.notes.filter((n) => n.kind === 'error')).toEqual([]);
     expect(messages().join(' ')).not.toContain('raw-rust-text');
+  });
+
+  it('cancel during a full page asks for no further pages', async () => {
+    const p = pendingAt('/workspace/parts');
+    setup({}, { routes: workspaceRoutes({}, p.spec) });
+    const done = run();
+    await p.begun;
+    closeAllDialogs();
+    await done;
+    const before = requests();
+    // 꽉 찬 쪽(LIST_PAGE_SIZE)과 더 큰 total: 신호를 보지 않으면 다음 쪽을 계속 청한다
+    const full = Array.from({ length: LIST_PAGE_SIZE }, (_, i) => row(i % 100, `KBp_${String(i).padStart(6, '0')}`, `P${i}`));
+    p.answer({ status: 200, json: { items: full, total: 1000 } });
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(requests()).toBe(before);
+    expect(store.writes).toEqual([]);
+    expect(env().th.notes.filter((n) => n.kind === 'error')).toEqual([]);
   });
 
   it('a vault switch during listing writes nothing', async () => {
