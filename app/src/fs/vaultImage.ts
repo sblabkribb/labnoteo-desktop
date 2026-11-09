@@ -16,6 +16,15 @@ export function listVaultImages(invoke: InvokeFn = tauriInvoke): Promise<string[
   return invoke<string[]>('vault_list_images', {});
 }
 
+/**
+ * 보관함 상대 경로마다 파일을 만든 시각(에포크 밀리초, `vault_created_times`). 순서는 `paths` 와 같다.
+ * 보관함 밖으로 나가는 경로, 없는 파일, 폴더는 `null` 이다. 한 번에 20 000 개(`MAX_CREATED_TIMES`)를
+ * 넘기면 Rust 가 `badInput` 으로 거부한다.
+ */
+export function vaultCreatedTimes(paths: string[], invoke: InvokeFn = tauriInvoke): Promise<Array<number | null>> {
+  return invoke<Array<number | null>>('vault_created_times', { paths });
+}
+
 /** 원시 본문과 헤더를 보낼 수 있는 invoke(`@tauri-apps/api/core` 의 invoke 와 호환). */
 export type RawInvoke = <T>(
   cmd: string,

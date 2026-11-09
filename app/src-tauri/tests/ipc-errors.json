@@ -8,5 +8,6 @@
   "exists": "exists",
   "notImage": "notImage",
   "tooLarge": "tooLarge",
+  "badInput": "badInput",
   "io": "io"
 }

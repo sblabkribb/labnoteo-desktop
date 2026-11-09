@@ -66,6 +66,8 @@ macro_rules! register_commands {
             $crate::net::store::partbank_catalog_write,
             $crate::net::store::integration_state_read,
             $crate::net::store::integration_state_write,
+            // SP7 Part A
+            $crate::vault::fs::vault_created_times,
         ])
     };
 }

@@ -5,7 +5,7 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
-import { listVaultImages, readVaultImage, writeVaultImage } from '../vaultImage';
+import { listVaultImages, readVaultImage, vaultCreatedTimes, writeVaultImage } from '../vaultImage';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
@@ -48,6 +48,7 @@ function recorder() {
     if (cmd === 'settings_plugin_llm_key') return true;
     if (cmd === 'vault_read_image') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
+    if (cmd === 'vault_created_times') return [null];
     if (cmd === 'index_bodies') return { items: [], next: null };
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
@@ -85,6 +86,7 @@ describe('IPC 인자 이름 계약', () => {
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
+    expect(await vaultCreatedTimes(['a.md'], r.invoke)).toEqual([null]);
     expect(await readLinkJournal(r.invoke)).toBeNull();
     await writeLinkJournalHeader('{}', r.invoke);
     await writeLinkJournalNote(0, '{}', r.invoke);
