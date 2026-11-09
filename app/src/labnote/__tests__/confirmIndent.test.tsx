@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 
 describe('confirm message whitespace', () => {
   it('confirm paragraphs keep leading spaces (approval diffs)', () => {
-    const css = readFileSync('src/app.css', 'utf-8');
+    const css = readFileSync('src/styles/dialogs.css', 'utf-8');
     expect(css).toMatch(/\.confirm-message p \{[^}]*white-space: pre-wrap/);
     expect(css).not.toMatch(/\.confirm-message p \{[^}]*pre-line/);
   });

@@ -30,7 +30,7 @@ function load(): Theme {
   }
 }
 
-/** `system` 이면 속성을 지워 app.css 의 prefers-color-scheme 규칙이 이기게 한다. */
+/** `system` 이면 속성을 지워 styles/tokens.css 의 prefers-color-scheme 규칙이 이기게 한다. */
 function apply(theme: Theme) {
   const root = document.documentElement;
   if (theme === 'system') root.removeAttribute('data-theme');

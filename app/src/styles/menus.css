@@ -1,0 +1,64 @@
+/* 떠 있는 층: 알림(토스트), 맥락 메뉴. */
+
+/* 알림(토스트): .shell 과 대화상자 층 밖, 오른쪽 아래. 대화상자가 .shell 을 inert 로 막아도 닫을 수 있다 */
+.toaster {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: min(28rem, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  color: var(--text);
+  pointer-events: auto;
+}
+.toast.warn { border-left-color: var(--warning); }
+.toast.error { border-left-color: var(--danger); }
+.toast-message { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.toast-close { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--text-muted); }
+.toast-close::before { content: "×"; content: "×" / ""; }
+/* 알림 안의 단추("자세히", "결과 다시 보기"): 글자 단추처럼 */
+.toast-action { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+/* 맥락 메뉴: .shell 밖의 층. 위치(left, top)는 ContextMenu 가 CSSOM 으로 정한다 */
+.context-menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: var(--z-menu);
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  max-width: min(24rem, calc(100vw - 2 * var(--space-2)));
+  max-height: calc(100vh - 2 * var(--space-2));
+  overflow-y: auto;
+  padding: var(--space-1);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.context-menu-item {
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+}
+.context-menu-item:hover:not(:disabled), .context-menu-item:focus { background: var(--bg-selected); }
+.context-menu-item:disabled { color: var(--text-muted); }
+.context-menu-separator { flex: none; height: 1px; margin: var(--space-1) 0; background: var(--border); }

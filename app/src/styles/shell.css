@@ -1,0 +1,255 @@
+/* 앱 셸: 기본 요소, 단추와 입력, 포커스 링, 격자 배치, 상단 바, 알림 줄, 사이드바와 탭, 본문, 편집기 틀, 상태줄. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--font-size);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0 0 var(--space-3); line-height: 1.3; font-weight: 600; }
+h1 { font-size: 1.4rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; }
+p { margin: 0 0 var(--space-3); }
+a { color: var(--accent); }
+code, pre, kbd { font-family: var(--font-mono); font-size: 0.93em; }
+/* 글자색도 정한다: 배경만 바꾸면 흐린 글자·강조색·위험색이 선택 배경 위에서 4.5:1 아래로 떨어진다 (편집기의 선택 규칙과 같다) */
+::selection { background: var(--bg-selection); color: var(--text); }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* 단추 바탕은 둘러싼 영역이 --button-bg 로 정한다(없으면 --bg-elevated). 주된 단추(.primary)는 이 변수를 쓰지 않아
+   영역마다 강조색을 되돌려 놓을 필요가 없다. */
+button {
+  padding: var(--space-1) var(--space-3);
+  background: var(--button-bg, var(--bg-elevated));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--bg-hover); }
+button:disabled { opacity: 0.55; cursor: default; }
+
+/* 영역(상단 바, 알림 배너, 확인 창)마다 주된 동작 하나만 강조색을 쓴다: 한 화면에는 영역 수만큼 있을 수 있다 */
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+/* 보조 동작(편집기 머리의 "표 넣기" 등): 글 줄 안에 들어가도록 작게 */
+button.secondary { padding: 0 var(--space-2); font-size: 0.85em; }
+/* 편집기 머리의 노트 단추(표 넣기 옆) */
+.editor-actions { margin-left: var(--space-2); }
+/* 편집기 머리의 QR 아이콘 단추(A6): 글자 단추와 같은 줄, 아이콘만 */
+.editor-actions .editor-qr { display: inline-flex; align-items: center; justify-content: center; margin-left: var(--space-1); padding: 0 var(--space-1); vertical-align: middle; }
+
+button.danger { background: var(--danger); color: var(--bg); border-color: var(--danger); font-weight: 600; }
+button.danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.1); }
+
+input, select, textarea {
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+::placeholder { color: var(--text-muted); opacity: 1; }
+
+/* 키보드 사용자를 위한 포커스 링: 두 테마 모두 배경 대비 3:1 이상인 강조색 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+[role="alert"] { color: var(--danger); }
+/* 경고 안의 주된 단추는 자기 글자색(--accent-text)을 지킨다 */
+[role="alert"] button:not(.primary) { color: var(--text); }
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ───────── 앱 셸 ─────────
+   상단 바 / (알림) / 사이드바 + 본문 / 상태줄. 창 전체를 쓰고 페이지는 스크롤하지 않는다:
+   사이드바와 본문이 각자 스크롤한다. */
+.shell {
+  --sidebar-w: clamp(14rem, 26vw, 20rem);
+  height: 100vh;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top top"
+    "notices notices"
+    "side main"
+    "status status";
+}
+
+.topbar {
+  --button-bg: var(--bg);
+  grid-area: top;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.topbar h1 { margin: 0; font-size: 1rem; }
+.topbar p { margin: 0; }
+.topbar select { background: var(--bg); }
+.vault-name {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* "새 노트" 이름 입력은 상단 바 안에서 열린다: 입력 줄 뒤에 안내문이 한 줄을 다 쓴다 */
+.topbar form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.topbar form p { flex-basis: 100%; }
+:where(.topbar form) p { color: var(--text-muted); }
+
+/* 업데이트 배너와 노트 목록 오류: 상단 바 아래 전체 폭. 둘 다 떠도 줄이 쌓일 뿐 서로 가리지 않는다. */
+.notices { grid-area: notices; max-height: 30vh; overflow-y: auto; }
+.notices:empty { display: none; }
+.notices > *, .notices > aside > * { margin: 0; }
+.notices > p,
+.notices > aside {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.notices > aside {
+  --button-bg: var(--bg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  background: var(--bg-elevated);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sidebar {
+  grid-area: side;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--space-3) 0;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
+}
+/* 탭 패널(.sidebar-panel) 안: 파일 탭의 찾기 칸과 트리, Workflows 패널 */
+.sidebar-panel > section { padding: 0 var(--space-3) var(--space-3); }
+.sidebar-panel > section input { width: 100%; }
+.sidebar-panel > section > p { margin: var(--space-2) 0 0; }
+:where(.sidebar-panel > section) p { color: var(--text-muted); }
+.sidebar-panel > p { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
+
+.content {
+  grid-area: main;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-4) var(--space-5);
+}
+.empty-state { color: var(--text-muted); }
+
+/* 편집기: 경로 줄, 본문 틀. 본문의 색은 편집기 테마가 같은 토큰에서 읽는다. */
+.editor-path { color: var(--text-muted); font-size: 0.93em; margin-bottom: var(--space-2); }
+.editor-path [role="status"] {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+/* isolation: 편집기 안의 z-index(--z-popover 등)를 이 틀 안에 가둔다. 앱의 대화상자·메뉴·알림 층보다 위로 올라가지 않는다 */
+.editor-frame {
+  isolation: isolate;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+.editor-frame:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* 편집기가 띄우는 확인 창은 대화상자 층 밖(본문 흐름 안)에 놓이지만 모양은 하나의 .dialog 규칙을 따른다. 틀과의 간격만 둔다. */
+.editor-frame + .dialog { margin-top: var(--space-3); }
+
+.statusbar {
+  grid-area: status;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-1) var(--space-4);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.93em;
+}
+.status-notes { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); min-width: 0; }
+.status-version { margin-left: auto; }
+
+/* 보관함 선택·불러오는 중 화면 */
+.standalone-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
+.standalone-head h1 { margin: 0; }
+.standalone-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.standalone { max-width: 48rem; margin: 0 auto; padding: var(--space-6) var(--space-5); }
+
+/* 좁은 창: 사이드바를 본문 위로 쌓는다 */
+@media (max-width: 640px) {
+  .shell {
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas: "top" "notices" "side" "main" "status";
+  }
+  .sidebar { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
+/* 명령 팔레트 단추(상단 바): 이름은 aria-label 과 title 에 있다 */
+.palette-open::before { content: "⌘"; content: "⌘" / ""; }
+
+/* 사이드바 탭: 파일 / 워크플로 / 샘플 / 개요 / 링크.
+   이름은 말줄임(…)으로 자르지 않는다: 사이드바가 좁으면 탭이 다음 줄로 넘어가고, 탭 하나는 제 이름 길이 아래로 줄지 않는다 */
+.sidebar-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-2);
+}
+.sidebar-tab {
+  flex: 1 0 auto;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.sidebar-tab[aria-selected="true"] {
+  background: var(--bg-selected);
+  box-shadow: inset 0 -3px 0 var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}

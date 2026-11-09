@@ -1,0 +1,224 @@
+/* 트리: 들여쓰기, 검색 결과, 노트 트리, Workflows·Samples·링크 패널, 트리 아이콘. */
+
+/* 트리 들여쓰기: data-depth 한 단계 = --indent. 1..MAX_DEPTH(src/tree/depth.ts)마다 하나씩, 더 깊은 줄은 depthAttrs 가 MAX_DEPTH 로 고정한다 */
+[data-depth="1"] { padding-left: calc(var(--indent) * 1); }
+[data-depth="2"] { padding-left: calc(var(--indent) * 2); }
+[data-depth="3"] { padding-left: calc(var(--indent) * 3); }
+[data-depth="4"] { padding-left: calc(var(--indent) * 4); }
+[data-depth="5"] { padding-left: calc(var(--indent) * 5); }
+[data-depth="6"] { padding-left: calc(var(--indent) * 6); }
+[data-depth="7"] { padding-left: calc(var(--indent) * 7); }
+[data-depth="8"] { padding-left: calc(var(--indent) * 8); }
+[data-depth="9"] { padding-left: calc(var(--indent) * 9); }
+[data-depth="10"] { padding-left: calc(var(--indent) * 10); }
+[data-depth="11"] { padding-left: calc(var(--indent) * 11); }
+[data-depth="12"] { padding-left: calc(var(--indent) * 12); }
+[data-depth="13"] { padding-left: calc(var(--indent) * 13); }
+[data-depth="14"] { padding-left: calc(var(--indent) * 14); }
+[data-depth="15"] { padding-left: calc(var(--indent) * 15); }
+[data-depth="16"] { padding-left: calc(var(--indent) * 16); }
+[data-depth="17"] { padding-left: calc(var(--indent) * 17); }
+[data-depth="18"] { padding-left: calc(var(--indent) * 18); }
+[data-depth="19"] { padding-left: calc(var(--indent) * 19); }
+[data-depth="20"] { padding-left: calc(var(--indent) * 20); }
+[data-depth="21"] { padding-left: calc(var(--indent) * 21); }
+[data-depth="22"] { padding-left: calc(var(--indent) * 22); }
+[data-depth="23"] { padding-left: calc(var(--indent) * 23); }
+[data-depth="24"] { padding-left: calc(var(--indent) * 24); }
+
+/* 검색 결과: 한 건이 사이드바 폭 안에서 줄바꿈된다 */
+.search-results { --button-bg: var(--bg); }
+.search-results li { margin-top: var(--space-1); }
+.search-results li > button {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+/* 한 건 = 제목 · 경로 · 스니펫 세 줄. 마크업의 <br> 은 줄 구분이 이미 있으니 감춘다. */
+.search-results li > button > strong,
+.search-results li > button > small,
+.search-results li > button > span { display: block; }
+.search-results li > button > br { display: none; }
+.search-results li > button > strong { font-weight: 600; }
+.search-results li > button > small { color: var(--text-muted); font-size: 0.86em; }
+.search-results li > button > span { margin-top: var(--space-1); color: var(--text-muted); }
+
+/* 노트 트리: TreeView(role=tree, treeitem 은 .wf-tree-row)가 그린다. 줄의 기본 모양(접기 표시, 아이콘, hover)은
+   .wf-tree-row 규칙이 정하고, 여기에는 노트 트리만의 것을 둔다. */
+.note-tree { padding-left: var(--space-2); }
+.note-tree [role="treeitem"] {
+  min-width: 0;
+  /* 긴 이름은 사이드바를 밀지 않고 한 줄에서 말줄임. 전체 이름은 줄의 title 로 본다(NoteTree) */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 줄 전체(들여쓰기 포함)가 하나의 대상이다: 포커스 링이 사이드바 가장자리에서 잘리지 않게 안으로 그린다 */
+.note-tree [role="treeitem"]:focus-visible { outline-offset: -2px; }
+
+/* 깊은 트리는 사이드바 안에서 8단계(INDENT_CAP, src/tree/depth.ts)까지만 들여쓴다. 그보다 깊은 줄은 depthAttrs 가 .deep 을 달아
+   같은 들여쓰기로 이어지고, 이름이 들여쓰기에 밀려 안 보이지 않는다. (data-depth 규칙 자체는 MAX_DEPTH=24 단계까지 둔다.) */
+.sidebar .deep { padding-left: calc(var(--indent) * 8); }
+
+/* 지금 열린 노트: 색이 아니라 모양으로도 알린다 — 왼쪽 끝 3px 강조 막대.
+   배경 색조(--bg-selected)는 배경과 1.56:1 이라 상태 표시로는 모자라고, 막대가 3:1 을 채운다.
+   줄(treeitem) 자체가 대상이라 막대를 가리는 안쪽 단추가 없다: 깊이 0 의 노트도 막대가 보인다. */
+.note-tree [role="treeitem"][aria-current="true"] {
+  background: var(--bg-selected);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* 열린 줄도 커서에 반응한다. 일반 줄의 hover 보다 구체적이어야 이긴다. */
+.note-tree [role="treeitem"][aria-current="true"]:hover { background: var(--bg-selection); }
+
+/* Workflows 패널: 찾기, 묶는 기준, 새 실험, 실험 트리, 카탈로그 트리 */
+.workflows-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+.workflows-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+.workflows-search { flex: 1 1 100%; min-width: 0; }
+.workflows-group-by { flex: 1 1 auto; min-width: 0; }
+.workflows-hint { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
+
+.wf-tree { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
+.wf-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+  padding-right: var(--space-3);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-tree-row:hover { background: var(--bg-hover); }
+.wf-tree-row:focus-visible { outline-offset: -2px; }
+.wf-tree-row[aria-current="true"] { background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--accent); }
+.wf-tree-row[aria-expanded] { font-weight: 600; }
+.wf-tree-row.dimmed { color: var(--text-muted); }
+.wf-tree-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 접기 표시: 장식이라 접근 가능한 이름에는 들어가지 않는다 */
+.wf-tree-row[aria-expanded]::before {
+  content: "▾";
+  content: "▾" / "";
+  flex: none;
+  width: 1em;
+  color: var(--text-muted);
+}
+.wf-tree-row[aria-expanded="false"]::before { content: "▸"; content: "▸" / ""; }
+.wf-tree-row:not([aria-expanded])::before { content: ""; flex: none; width: 1em; }
+
+/* Samples 패널(SP5 Task 25): 찾기, 도움말, Local·Global 트리. 종류 줄의 견본은 편집기의 종류 색 토큰으로 칠한다 */
+.samples-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+.samples-search { margin: 0 var(--space-3); min-width: 0; }
+.samples-hint { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); font-size: var(--font-size-sm); }
+.sample-swatch {
+  flex: none;
+  width: 0.75em;
+  height: 0.75em;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.sample-swatch.lno-sample-t-dna { background: var(--sample-dna-bg); }
+.sample-swatch.lno-sample-t-rna { background: var(--sample-rna-bg); }
+.sample-swatch.lno-sample-t-plasmid { background: var(--sample-plasmid-bg); }
+.sample-swatch.lno-sample-t-reagent { background: var(--sample-reagent-bg); }
+.sample-swatch.lno-sample-t-primer { background: var(--sample-primer-bg); }
+.sample-swatch.lno-sample-t-protein { background: var(--sample-protein-bg); }
+.sample-swatch.lno-sample-t-equip { background: var(--sample-equip-bg); }
+.sample-swatch.lno-sample-t-labware { background: var(--sample-labware-bg); }
+.sample-swatch.lno-sample-t-other { background: var(--sample-other-bg); }
+.sample-swatch.lno-sample-t-custom { background: var(--sample-custom-bg); }
+
+/* 링크 패널(SP4 Task 17): 백링크 묶음(출처 노트 머리, 흐린 폴더), 링크 부분을 mark 로 칠한 맥락 줄 */
+.links-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); }
+.links-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.links-heading { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted); }
+.links-empty { margin: 0; color: var(--text-muted); }
+.links-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.links-source,
+.links-context {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.links-source { display: flex; align-items: baseline; gap: var(--space-2); font-weight: 600; }
+.links-source:hover,
+.links-context:hover { background: var(--bg-hover); }
+.links-source:focus-visible,
+.links-context:focus-visible { outline-offset: -2px; }
+.links-source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.links-source-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+.links-list { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
+.links-context { font-size: var(--font-size-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.links-context mark { background: var(--bg-selection); color: var(--text); border-radius: var(--radius); }
+.links-unlinked > summary { cursor: pointer; }
+.links-mention { display: flex; align-items: flex-start; gap: var(--space-1); }
+.links-mention .links-context { flex: 1 1 auto; }
+.links-mention-link {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.links-mention-link:hover { background: var(--bg-hover); }
+.links-target {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+button.links-target:hover { background: var(--bg-hover); }
+button.links-target:focus-visible { outline-offset: -2px; }
+.links-target-unresolved { color: var(--text-muted); }
+.links-target-unknown { color: var(--text); cursor: default; }
+.links-unresolved-mark { margin-left: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); }
+
+/* 트리 아이콘(treeIcons.ts): CSS 글리프만, 토큰 색 */
+.tree-icon { flex: none; width: 1.2em; text-align: center; color: var(--text-muted); }
+.ti-none::before { content: ""; }
+.ti-beaker::before { content: "⚗"; content: "⚗" / ""; color: var(--accent); }
+.ti-folder::before { content: "▣"; content: "▣" / ""; }
+.ti-file::before { content: "▤"; content: "▤" / ""; }
+.ti-warning::before { content: "⚠"; content: "⚠" / ""; color: var(--danger); }
+.ti-discuss::before { content: "✎"; content: "✎" / ""; color: var(--accent); }
+.ti-class::before { content: "◆"; content: "◆" / ""; color: var(--accent); }
+.ti-method::before { content: "◇"; content: "◇" / ""; }
+.ti-function::before { content: "•"; content: "•" / ""; }

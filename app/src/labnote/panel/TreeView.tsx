@@ -32,7 +32,7 @@ export interface TreeViewProps {
   scrollCurrent?: boolean;
   /** 목록(role=tree)의 클래스. 기본은 워크플로 패널의 'wf-tree', 노트 트리는 'plain-list note-tree'. */
   className?: string;
-  /** 줄의 아이콘 뒤에 그릴 표시(견본)의 클래스. 없으면 그리지 않는다. 색은 app.css 의 토큰으로만 칠한다(Samples 패널의 종류 색). */
+  /** 줄의 아이콘 뒤에 그릴 표시(견본)의 클래스. 없으면 그리지 않는다. 색은 styles/tokens.css 의 토큰으로만 칠한다(Samples 패널의 종류 색). */
   nodeClass?(node: TreeNode): string | undefined;
 }
 
@@ -83,7 +83,7 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
 /**
  * 코어 TreeNode 를 그리는 트리(role=tree). 펼친 줄만 그리는 평평한 목록이고 각 줄이 treeitem 이다(aria-level).
  * - 키보드는 vendor 의 treeKeyAction(WAI-ARIA 트리 패턴)을 따른다. 탭 정지는 한 줄(roving tabindex).
- * - 들여쓰기는 data-depth(app.css 의 NoteTree 와 같은 규칙), 아이콘은 TREE_ICON_CLASS, tooltip 은 title. color 는 쓰지 않는다.
+ * - 들여쓰기는 data-depth(styles/tree.css 의 NoteTree 와 같은 규칙), 아이콘은 TREE_ICON_CLASS, tooltip 은 title. color 는 쓰지 않는다.
  */
 export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);

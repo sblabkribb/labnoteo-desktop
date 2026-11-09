@@ -1,5 +1,5 @@
 /**
- * 코어 트리 모델(buildExperimentTree, buildWorkflowTree)의 아이콘 이름 -> CSS 클래스. 클래스는 app.css 에서
+ * 코어 트리 모델(buildExperimentTree, buildWorkflowTree)의 아이콘 이름 -> CSS 클래스. 클래스는 styles/tree.css 에서
  * CSS 만으로 글리프를 그린다(토큰 색, 그림 파일 없음). 모르는 이름은 'ti-none'(빈 자리)이다.
  */
 export const TREE_ICON_CLASS: Record<string, string> = {

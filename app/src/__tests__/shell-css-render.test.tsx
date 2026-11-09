@@ -1,17 +1,16 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FirstRun } from '../onboarding/FirstRun';
 import { NewNote } from '../tree/NewNote';
 import { NoteTree } from '../tree/NoteTree';
 
-import { compareSpecificity, declarations, parseRules, specificity, type Rule } from './css';
+import { allCss, compareSpecificity, declarations, parseRules, specificity, type Rule } from './css';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }));
 
 /**
- * app.css 를 실제 마크업에 대어 보는 작은 계단식. jsdom 의 getComputedStyle 은 선택자 특이도를 따지지 않아서(문서 순서만 본다)
+ * 앱 스타일(styles/*.css, 불러오는 순서대로 이은 것)을 실제 마크업에 대어 보는 작은 계단식. jsdom 의 getComputedStyle 은 선택자 특이도를 따지지 않아서(문서 순서만 본다)
  * 이긴 선언을 직접 고른다: 특이도가 높은 것, 같으면 뒤에 오는 것.
  *
  * 이것이 답하는 것은 정확히 "이 요소에 직접 선언된 값 가운데, 미디어 쿼리 밖에서, !important 없이, 상속 없이 이긴 값" 이다.
@@ -22,7 +21,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }));
  * - :hover 같은 상태는 jsdom 에서 맞지 않고, jsdom 이 못 읽는 선택자(:has 등)는 맞지 않은 것으로 친다.
  * - 한 규칙 안에 같은 속성이 두 번이면 뒤의 것이 이긴다. 단축 속성과 하위 속성(background 와 background-color)은 서로 다른 속성으로 본다.
  */
-const APP_RULES = parseRules(readFileSync('src/app.css', 'utf-8'));
+const APP_RULES = parseRules(allCss());
 
 function winning(el: Element, prop: string, rules: Rule[] = APP_RULES): string | undefined {
   let best: { spec: number[]; value: string } | undefined;
@@ -104,7 +103,7 @@ describe('계단식 자기 점검', () => {
     expect(() => winning(document.querySelector('p')!, 'color', parseRules('p { color: var(--b); color: var(--a) !important; }'))).toThrow(/important/);
   });
 
-  it('app.css 의 @media 안 규칙을 @-규칙 안의 것으로 읽는다 (예전 정규식은 머리를 못 잡아 무조건 규칙으로 셌다)', () => {
+  it('styles/*.css 의 @media 안 규칙을 @-규칙 안의 것으로 읽는다 (예전 정규식은 머리를 못 잡아 무조건 규칙으로 셌다)', () => {
     const heads = APP_RULES.filter((r) => r.atRule).map((r) => r.atRule);
     expect(heads).toContain('@media (max-width: 640px)');
     expect(heads).toContain('@media (prefers-color-scheme: dark)');

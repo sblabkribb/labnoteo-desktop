@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { declarations, literalColours, parseRules, SYSTEM_COLOURS } from './css';
+import { allCss, declarations, literalColours, parseRules, SYSTEM_COLOURS } from './css';
 
-const css = readFileSync('src/app.css', 'utf-8');
+/** 토큰 블록(:root, 라이트, 다크, 시스템 다크, 인쇄의 라이트 값)이 있는 파일. */
+const css = readFileSync('src/styles/tokens.css', 'utf-8');
+/** 앱 스타일 전부(불러오는 순서대로). 토큰 블록 밖의 규칙(선택 영역, 포커스 링, 고대비)과 날것의 색 검사는 이것을 읽는다. */
+const all = allCss();
 
 /** 중괄호 짝을 세어 `selector {` 로 시작하는 블록의 안쪽 본문을 꺼낸다. 못 찾으면 던진다(조용히 빈 값을 주지 않는다). */
 function block(selector: string, source = css): { body: string; start: number; end: number } {
@@ -176,10 +179,10 @@ describe('디자인 토큰', () => {
     expect(mediaExtras(smuggled)).toBe('.sidebar { background: #000000; }');
     // 블록 밖의 이름 있는 색과 새 색 함수
     for (const bad of ['gray', 'White', 'oklch(0.5 0.1 200)', 'lab(50% 0 0)', 'lch(50% 0 0)', 'hwb(0 0% 0%)', 'color-mix(in srgb, var(--accent), white)', 'color(display-p3 1 0 0)', 'Canvas']) {
-      expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`), { allowSystemIn: 'forced-colors' }), bad).not.toEqual([]);
+      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`), { allowSystemIn: 'forced-colors' }), bad).not.toEqual([]);
     }
     // 시스템 색은 forced-colors 블록 안에서만 통과한다
-    const inForced = (decl: string) => `${css}
+    const inForced = (decl: string) => `${all}
 @media (forced-colors: active) {
   .probe { ${decl} }
 }
@@ -188,9 +191,9 @@ describe('디자인 토큰', () => {
     expect(rawColoursOutside(inForced('outline-color: Highlight;'))).not.toEqual([]);
     expect(rawColoursOutside(inForced('outline: 2px solid #ffffff;'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
     expect(rawColoursOutside(inForced('outline-color: red;'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
-    expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', '.empty-state { color: Highlight; }'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
+    expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', '.empty-state { color: Highlight; }'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
     for (const ok of ['transparent', 'currentColor', 'inherit', 'none']) {
-      expect(rawColoursOutside(css.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`), { allowSystemIn: 'forced-colors' }), ok).toEqual([]);
+      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`), { allowSystemIn: 'forced-colors' }), ok).toEqual([]);
     }
   });
 
@@ -225,7 +228,7 @@ describe('디자인 토큰', () => {
 
   it('편집기 밖의 텍스트 선택도 글자색을 정한다: 흐린 글자·강조색·위험색이 선택 배경 위에서 4.5:1 아래로 내려가지 않게', () => {
     // 규칙에 실제로 쓰인 글자색·배경 토큰을 읽어 그 쌍을 잰다 (배경만 정하면 원래 글자색이 남아 3.5~4:1 로 떨어진다)
-    const rules = parseRules(css).filter((r) => !r.atRule && r.selectors.includes('::selection'));
+    const rules = parseRules(all).filter((r) => !r.atRule && r.selectors.includes('::selection'));
     expect(rules).toHaveLength(1);
     const decl = Object.fromEntries(declarations(rules[0].body).map((d) => [d.prop, d.value]));
     expect(decl.background).toBe('var(--bg-selection)');
@@ -251,28 +254,28 @@ describe('디자인 토큰', () => {
   });
 
   it('토큰 블록 밖에는 날것의 색 값이 없다', () => {
-    expect(rawColoursOutside(css, { allowSystemIn: 'forced-colors' })).toEqual([]);
+    expect(rawColoursOutside(all, { allowSystemIn: 'forced-colors' })).toEqual([]);
   });
 
   it('forced-colors block exists and system colours appear only inside it', () => {
-    const fc = parseRules(css)
+    const fc = parseRules(all)
       .filter((r) => r.atRule?.includes('forced-colors'))
       .flatMap((r) => r.selectors)
       .join(' ');
     expect(fc).toMatch(/\[aria-current\]/);
     expect(fc).toMatch(/\[aria-selected="true"\]/);
     expect(fc).toMatch(/:focus-visible/);
-    expect(rawColoursOutside(css, { allowSystemIn: 'forced-colors' })).toEqual([]);
+    expect(rawColoursOutside(all, { allowSystemIn: 'forced-colors' })).toEqual([]);
   });
 
   it('CDN 글꼴을 부르지 않는다', () => {
-    expect(css).not.toMatch(/@import/);
-    expect(css).not.toMatch(/url\(\s*['"]?https?:/);
-    expect(css).not.toMatch(/@font-face/);
+    expect(all).not.toMatch(/@import/);
+    expect(all).not.toMatch(/url\(\s*['"]?https?:/);
+    expect(all).not.toMatch(/@font-face/);
   });
 
   it('포커스 링 규칙이 있다', () => {
-    const rule = css.match(/:focus-visible\s*\{([^}]*)\}/);
+    const rule = all.match(/:focus-visible\s*\{([^}]*)\}/);
     expect(rule).not.toBeNull();
     expect(rule![1]).toMatch(/outline:\s*2px solid var\(--accent\)/);
   });

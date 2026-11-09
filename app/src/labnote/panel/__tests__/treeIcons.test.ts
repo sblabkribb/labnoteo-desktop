@@ -40,8 +40,8 @@ describe('TREE_ICON_CLASS', () => {
     expect(iconClass(undefined)).toBe('ti-none');
   });
 
-  it('every icon class draws a glyph in app.css', () => {
-    const css = readFileSync('src/app.css', 'utf-8');
+  it('every icon class draws a glyph in styles/tree.css', () => {
+    const css = readFileSync('src/styles/tree.css', 'utf-8');
     for (const cls of new Set(Object.values(TREE_ICON_CLASS))) expect(css, cls).toContain(`.${cls}::before`);
   });
 });

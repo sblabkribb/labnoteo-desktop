@@ -1,9 +1,27 @@
 /**
  * 테스트가 함께 쓰는 작은 CSS 도구: 규칙 나누기, 선언 나누기, 특이도, 날것의 색 찾기.
- * 브라우저의 CSS 파서가 아니다. app.css 와 CodeMirror 가 그림자 루트에 넣는 스타일 정도를 읽으려고 만들었다.
+ * 브라우저의 CSS 파서가 아니다. src/styles/*.css 와 CodeMirror 가 그림자 루트에 넣는 스타일 정도를 읽으려고 만들었다.
  * 던지는 경우는 이것뿐이다: 중괄호 짝이 안 맞을 때, 스타일 규칙 안에 블록이 또 있을 때(CSS 중첩 — 읽을 줄 모른다),
  * 콜론 없는 선언. 그 밖의 낯선 모양(이상한 선택자, 모르는 @-규칙)은 그대로 문자열로 돌려줄 뿐 검사하지 않는다.
  */
+
+import { readFileSync } from 'node:fs';
+
+/** 앱의 스타일 파일. main.tsx 가 이 순서로 불러온다: 같은 특이도에서는 뒤의 파일이 이긴다(styles.test.ts 가 그 순서를 지킨다). */
+export const STYLE_FILES = ['tokens', 'shell', 'tree', 'menus', 'dialogs', 'viewers'] as const;
+
+/** 스타일 파일들을 불러오는 순서대로. `file` 은 앱 폴더 기준 경로(src/styles/tokens.css …). */
+export function readStyles(): { file: string; text: string }[] {
+  return STYLE_FILES.map((name) => {
+    const file = `src/styles/${name}.css`;
+    return { file, text: readFileSync(file, 'utf-8') };
+  });
+}
+
+/** 스타일 파일 전부를 불러오는 순서대로 이어 붙인 글. 문서 하나의 계단식과 같은 순서다. */
+export function allCss(): string {
+  return readStyles().map((s) => s.text).join('\n');
+}
 
 /**
  * CSS 시스템 색(소문자): 운영체제가 정하는 색이라 토큰을 따르지 않는다. 고대비(forced-colors) 블록 안에서만 쓸 수 있다

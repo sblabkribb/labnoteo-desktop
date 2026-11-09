@@ -1,0 +1,31 @@
+/* 보기: 그림·CSV 보기, 파일 카드, 편집기 곁의 위젯(아직 없다).
+   이 파일은 맨 마지막에 읽힌다(main.tsx). 그래서 아래의 고대비와 인쇄 규칙이 여기 있다: 둘은 앞 파일들의 같은 특이도 규칙
+   (.editor-frame, :focus-visible, .toaster, .dialog-layer, .context-menu 의 display …)을 덮어야 하고, 같은 특이도에서는 뒤의 것이 이긴다. */
+
+/* 고대비(Windows 대비 테마, forced-colors): 운영체제가 배경·글자색을 바꾸고 상자 그림자를 지운다. 배경 색조와 안쪽 그림자로만
+   그리던 표시(열린 줄의 막대, 고른 탭·항목)가 사라지므로 시스템 색 테두리와 윤곽선으로 다시 그린다.
+   시스템 색(Highlight, CanvasText)은 이 블록 안에서만 쓴다(tokens.test.ts 가 그 밖에서는 막는다). */
+@media (forced-colors: active) {
+  [aria-current]:not([aria-current="false"]) { border-left: 3px solid CanvasText; }
+  [aria-selected="true"] { outline: 2px solid CanvasText; outline-offset: -2px; }
+  :focus-visible { outline: 2px solid Highlight; }
+  .editor-frame:focus-within { outline: 2px solid Highlight; }
+}
+
+/* 인쇄: 노트 본문만 종이에 남긴다. 창 틀(상단 바·사이드바·상태줄·알림·대화상자·메뉴)을 숨기고, 창 높이 격자와 본문의 스크롤을 풀어
+   긴 노트가 여러 쪽으로 이어지게 한다. 화면이 다크여도 종이에는 라이트 값으로 찍는다(그 토큰 블록은 tokens.css 끝).
+   편집기 그림자 루트 안의 표 도구 막대는 editorThemeSpec 의 '@media print' 키가 숨긴다. */
+@media print {
+  .topbar,
+  .sidebar,
+  .statusbar,
+  .notices,
+  .toaster,
+  .dialog-layer,
+  .context-menu,
+  .editor-path button { display: none; }
+  .shell { display: block; height: auto; min-height: 0; }
+  .content { overflow: visible; padding: 0; }
+  .editor-frame { border: none; }
+  .editor-frame:focus-within { outline: none; }
+}

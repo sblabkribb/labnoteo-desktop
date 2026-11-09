@@ -67,8 +67,8 @@ describe('노트 트리', () => {
     expect(screen.getByText('top.md').closest('[aria-current]')).toBeNull();
   });
 
-  it('열린 노트의 줄은 app.css 의 강조 막대 선택자와 맞는다: 열린 줄 하나만 걸린다', () => {
-    // app.css 는 .note-tree [role="treeitem"][aria-current="true"] 에 막대를 그린다. 마크업이 바뀌어 이 선택자가 빗나가면 단서가 조용히 사라진다.
+  it('열린 노트의 줄은 styles/tree.css 의 강조 막대 선택자와 맞는다: 열린 줄 하나만 걸린다', () => {
+    // styles/tree.css 는 .note-tree [role="treeitem"][aria-current="true"] 에 막대를 그린다. 마크업이 바뀌어 이 선택자가 빗나가면 단서가 조용히 사라진다.
     const { container } = render(<NoteTree entries={entries} selected="labnote/001/02.md" onSelect={() => {}} />);
     const rows = container.querySelectorAll('.note-tree [role="treeitem"][aria-current="true"]');
     expect(rows).toHaveLength(1);

@@ -1,0 +1,184 @@
+/* 디자인 토큰: 색(테마별), 간격, 둥글기, 글꼴, 쌓임 순서. 날것의 색 값(#hex, rgb(), 이름 있는 색)은 이 파일에만 쓴다(styles.test.ts).
+   나머지 styles/*.css 와 편집기 테마(editor/theme.ts)는 var(--…) 만 쓴다. 인라인 style 속성은 CSP(style-src self)가 막는다. */
+/* 시스템 설정을 따르되, 설정의 수동 선택(data-theme)이 항상 이긴다. */
+
+:root {
+  /* 라이트(기본값) */
+  --bg: #ffffff;
+  --bg-elevated: #f4f4f5;
+  --bg-hover: #ebebed;
+  --bg-selected: #c9ccf6;
+  --bg-selection: #b0b5f2;
+  --border: #d9d9de;
+  --border-strong: #8a8a94;
+  --text: #1f1f23;
+  --text-muted: #52525c;
+  --accent: #4338ca;
+  --accent-text: #ffffff;
+  --danger: #a31d15;
+  --warning: #8a5a00;
+  --success: #1f7a3a;
+  --shadow: rgba(0, 0, 0, 0.16);
+  --scrim: rgba(255, 255, 255, 0.6);
+  /* 샘플 종류 색(@labnoteo 플러그인과 같은 RGB) */
+  --sample-dna-bg: #FFB6C1;
+  --sample-rna-bg: #ADD8E6;
+  --sample-plasmid-bg: #98FB98;
+  --sample-reagent-bg: #FFD700;
+  --sample-primer-bg: #FF69B4;
+  --sample-protein-bg: #DDA0DD;
+  --sample-equip-bg: #FFA07A;
+  --sample-labware-bg: #D8BFD8;
+  --sample-other-bg: #B0BEC5;
+  --sample-custom-bg: #607D8B;
+  color-scheme: light;
+
+  /* 테마와 무관한 값 */
+  --radius: 6px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --indent: 0.75rem;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "D2Coding", "Malgun Gothic", ui-monospace, monospace;
+  --font-size: 14px;
+  --font-size-xs: 0.8em;
+  --font-size-sm: 0.9em;
+  --font-size-lg: 1.15rem;
+  /* 쌓임 순서: 편집기 그림자 루트 안(--z-widget, --z-widget-menu, --z-popover)은 .editor-frame 의 isolation 으로 그 틀 안에 갇힌다. 앱 층(대화상자·메뉴·알림)은 밝은 DOM 에 있다 */
+  --z-widget: 5;
+  --z-widget-menu: 10;
+  --z-popover: 600;
+  --z-dialog: 100;
+  --z-menu: 105;
+  --z-toast: 110;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1e1e;
+    --bg-elevated: #262626;
+    --bg-hover: #2d2d2d;
+    --bg-selected: #3a3a62;
+    --bg-selection: #4a4a86;
+    --border: #3a3a3a;
+    --border-strong: #787878;
+    --text: #dcddde;
+    --text-muted: #b0b0b0;
+    --accent: #a0a4ff;
+    --accent-text: #10102a;
+    --danger: #ff8a80;
+    --warning: #e0b050;
+    --success: #5cc27a;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --scrim: rgba(30, 30, 30, 0.6);
+    --sample-dna-bg: rgba(255, 182, 193, 0.35);
+    --sample-rna-bg: rgba(173, 216, 230, 0.35);
+    --sample-plasmid-bg: rgba(152, 251, 152, 0.35);
+    --sample-reagent-bg: rgba(255, 215, 0, 0.35);
+    --sample-primer-bg: rgba(255, 105, 180, 0.35);
+    --sample-protein-bg: rgba(221, 160, 221, 0.35);
+    --sample-equip-bg: rgba(255, 160, 122, 0.35);
+    --sample-labware-bg: rgba(216, 191, 216, 0.35);
+    --sample-other-bg: rgba(176, 190, 197, 0.35);
+    --sample-custom-bg: rgba(96, 125, 139, 0.35);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+    --bg: #1e1e1e;
+    --bg-elevated: #262626;
+    --bg-hover: #2d2d2d;
+    --bg-selected: #3a3a62;
+    --bg-selection: #4a4a86;
+    --border: #3a3a3a;
+    --border-strong: #787878;
+    --text: #dcddde;
+    --text-muted: #b0b0b0;
+    --accent: #a0a4ff;
+    --accent-text: #10102a;
+    --danger: #ff8a80;
+    --warning: #e0b050;
+    --success: #5cc27a;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --scrim: rgba(30, 30, 30, 0.6);
+    --sample-dna-bg: rgba(255, 182, 193, 0.35);
+    --sample-rna-bg: rgba(173, 216, 230, 0.35);
+    --sample-plasmid-bg: rgba(152, 251, 152, 0.35);
+    --sample-reagent-bg: rgba(255, 215, 0, 0.35);
+    --sample-primer-bg: rgba(255, 105, 180, 0.35);
+    --sample-protein-bg: rgba(221, 160, 221, 0.35);
+    --sample-equip-bg: rgba(255, 160, 122, 0.35);
+    --sample-labware-bg: rgba(216, 191, 216, 0.35);
+    --sample-other-bg: rgba(176, 190, 197, 0.35);
+    --sample-custom-bg: rgba(96, 125, 139, 0.35);
+    color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+    --bg: #ffffff;
+    --bg-elevated: #f4f4f5;
+    --bg-hover: #ebebed;
+    --bg-selected: #c9ccf6;
+    --bg-selection: #b0b5f2;
+    --border: #d9d9de;
+    --border-strong: #8a8a94;
+    --text: #1f1f23;
+    --text-muted: #52525c;
+    --accent: #4338ca;
+    --accent-text: #ffffff;
+    --danger: #a31d15;
+    --warning: #8a5a00;
+    --success: #1f7a3a;
+    --shadow: rgba(0, 0, 0, 0.16);
+    --scrim: rgba(255, 255, 255, 0.6);
+    --sample-dna-bg: #FFB6C1;
+    --sample-rna-bg: #ADD8E6;
+    --sample-plasmid-bg: #98FB98;
+    --sample-reagent-bg: #FFD700;
+    --sample-primer-bg: #FF69B4;
+    --sample-protein-bg: #DDA0DD;
+    --sample-equip-bg: #FFA07A;
+    --sample-labware-bg: #D8BFD8;
+    --sample-other-bg: #B0BEC5;
+    --sample-custom-bg: #607D8B;
+    color-scheme: light;
+}
+
+/* 인쇄: 화면이 다크여도 종이에는 라이트 값으로 찍는다. 이 블록은 두 다크 블록과 같은 특이도 (0,2,0) 이고 더 뒤에 있어 이긴다.
+   값은 :root 의 라이트 값과 같다(tokens.test.ts). 창 틀을 숨기는 인쇄 규칙은 viewers.css 끝에 있다. */
+@media print {
+  :root[data-theme], :root:not([data-theme]) {
+    --bg: #ffffff;
+    --bg-elevated: #f4f4f5;
+    --bg-hover: #ebebed;
+    --bg-selected: #c9ccf6;
+    --bg-selection: #b0b5f2;
+    --border: #d9d9de;
+    --border-strong: #8a8a94;
+    --text: #1f1f23;
+    --text-muted: #52525c;
+    --accent: #4338ca;
+    --accent-text: #ffffff;
+    --danger: #a31d15;
+    --warning: #8a5a00;
+    --success: #1f7a3a;
+    --shadow: rgba(0, 0, 0, 0.16);
+    --scrim: rgba(255, 255, 255, 0.6);
+    --sample-dna-bg: #FFB6C1;
+    --sample-rna-bg: #ADD8E6;
+    --sample-plasmid-bg: #98FB98;
+    --sample-reagent-bg: #FFD700;
+    --sample-primer-bg: #FF69B4;
+    --sample-protein-bg: #DDA0DD;
+    --sample-equip-bg: #FFA07A;
+    --sample-labware-bg: #D8BFD8;
+    --sample-other-bg: #B0BEC5;
+    --sample-custom-bg: #607D8B;
+    color-scheme: light;
+  }
+}

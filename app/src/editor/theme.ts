@@ -4,7 +4,7 @@ import { tags } from '@lezer/highlight';
 import type { Extension } from '@codemirror/state';
 
 /**
- * 편집기의 모양. 색은 한 곳에도 직접 쓰지 않고 전부 app.css 의 토큰을 `var(--…)` 로 읽는다.
+ * 편집기의 모양. 색은 한 곳에도 직접 쓰지 않고 전부 styles/tokens.css 의 토큰을 `var(--…)` 로 읽는다.
  * 편집기는 그림자 루트 안에 있지만 CSS 사용자 지정 속성은 그 경계를 넘어 상속되므로,
  * 테마 토글(data-theme)이나 시스템 설정이 바뀌면 사이드바와 같은 순간에 본문도 바뀐다.
  * 색을 박으면 본문만 테마를 안 따라간다 — 그래서 Editor.test.tsx 가 이 값들을 검사한다.
@@ -16,7 +16,7 @@ import type { Extension } from '@codemirror/state';
  * - 오늘 그려지는 요소에서 덮는 것: @codemirror/view 기본 테마의 라이트 캐럿 색(`&light .cm-content` 의 caret-color: black),
  *   포커스 윤곽선(`&.cm-focused` 의 1px dotted #212121 → none), 특수 문자(`&light .cm-specialChar` 의 red, highlightSpecialChars 가
  *   설치돼 있다). 선택 영역(`.cm-content ::selection`)은 기본 테마의 규칙이 아니라 브라우저 기본 선택 색을 바꾼다
- *   (문서의 app.css `::selection` 은 그림자 루트 안까지 오지 않는다).
+ *   (문서의 styles/shell.css `::selection` 은 그림자 루트 안까지 오지 않는다).
  * - 그 요소를 그리는 확장이 아직 없어서 미리 덮어 둔 것: 활성 줄과 거터의 활성 줄(highlightActiveLine·highlightActiveLineGutter),
  *   거터(lineNumbers 등), 패널·단추·입력 칸(검색 패널 등), 일반 툴팁과 화살표(툴팁을 쓰는 확장). 지금은 아무 요소에도 걸리지 않는다.
  * - 덮는 방법: 같은 특이도의 선택자로 다시 쓰고, 이 테마 모듈이 기본 테마보다 뒤에 붙으므로 이긴다(`&light` 는 EditorView.theme 에서
@@ -52,7 +52,7 @@ export const editorThemeSpec = {
     fontFamily: 'var(--font-ui)',
     fontSize: 'var(--font-size)',
   },
-  '&.cm-focused': { outline: 'none' }, // 바깥 포커스 링은 app.css 의 틀이 그린다
+  '&.cm-focused': { outline: 'none' }, // 바깥 포커스 링은 styles/shell.css 의 틀이 그린다
   '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.7' },
   '.cm-content': { padding: 'var(--space-3) 0', caretColor: 'var(--text)' },
   '.cm-line': { padding: '0 var(--space-3)' },
@@ -229,7 +229,7 @@ export const editorThemeSpec = {
   '.lno-sample-alias-stale.lno-sample-discarded': { textDecoration: 'line-through underline dotted var(--warning)' },
   '.lno-sample-option .cm-completionDetail': { color: 'var(--text-muted)' },
   '.lno-sample-option-discarded': { opacity: 0.6 },
-  // 표 격자(table/widget.ts). 그림자 루트 안이라 app.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
+  // 표 격자(table/widget.ts). 그림자 루트 안이라 styles/*.css 가 닿지 않는다: 모양은 모두 여기, 색은 토큰만.
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
   // 틀은 표 폭만큼만 차지해 도구 줄이 표 오른쪽 끝에 붙는다. 넓은 표는 100% 에서 멈추고 안쪽 틀이 스크롤한다.
@@ -371,7 +371,7 @@ export const editorThemeSpec = {
   '@media (forced-colors: active)': {
     '.lno-table .lno-cell-active': { outline: '2px solid Highlight', outlineOffset: '-2px' },
   },
-  // 인쇄: 표 도구 막대는 화면 조작용이라 종이에 남기지 않는다(앱 틀은 app.css 의 @media print 가 숨긴다)
+  // 인쇄: 표 도구 막대는 화면 조작용이라 종이에 남기지 않는다(앱 틀은 styles/viewers.css 의 @media print 가 숨긴다)
   '@media print': {
     '.lno-table-toolbar': { display: 'none' },
   },

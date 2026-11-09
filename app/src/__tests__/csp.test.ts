@@ -52,7 +52,7 @@ function tsx(dir: string): string[] {
 }
 
 describe('인라인 스타일', () => {
-  it('화면 컴포넌트는 style 속성을 쓰지 않는다 (모양은 app.css)', () => {
+  it('화면 컴포넌트는 style 속성을 쓰지 않는다 (모양은 styles/*.css)', () => {
     const offenders = tsx('src').filter((f) => /style=\{/.test(readFileSync(f, 'utf-8')));
     expect(offenders).toEqual([]);
   });

@@ -1,10 +1,8 @@
-import { readFileSync } from 'node:fs';
-
-import { declarations, parseRules } from './css';
+import { allCss, declarations, parseRules } from './css';
 import { INDENT_CAP, MAX_DEPTH } from '../tree/depth';
 import { editorThemeSpec } from '../editor/theme';
 
-const css = readFileSync('src/app.css', 'utf-8');
+const css = allCss();
 
 /** 선택자 목록에 `selector` 가 들어 있는 규칙의 선택자들과 본문. 없으면 null. */
 function ruleFor(selector: string): { selectors: string[]; body: string; decls: Record<string, string> } | null {
