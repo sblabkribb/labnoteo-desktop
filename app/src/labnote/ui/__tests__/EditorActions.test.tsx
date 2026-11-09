@@ -7,9 +7,12 @@ import { createTestHost, type TestHost } from '../../__tests__/testHost';
 import { mountEditor } from '../../__tests__/editorHarness';
 import { createWorkflow } from '../../commands/workflow';
 import { insertUnitOp } from '../../commands/unitOp';
+import { showBarcode } from '../../port/barcodeActions';
+import { coreT } from '../../i18n';
 import { EditorActions } from '../EditorActions';
 
 vi.mock('../../commands/unitOp', () => ({ insertUnitOp: vi.fn(async () => undefined), unitOpCommands: [] }));
+vi.mock('../../port/barcodeActions', () => ({ showBarcode: vi.fn(async () => undefined) }));
 vi.mock('../../commands/workflow', async (orig) => ({
   ...(await orig<typeof import('../../commands/workflow')>()),
   createWorkflow: vi.fn(async () => undefined),
@@ -25,6 +28,7 @@ beforeEach(() => {
   setLang('ko');
   vi.mocked(insertUnitOp).mockClear();
   vi.mocked(createWorkflow).mockClear();
+  vi.mocked(showBarcode).mockClear();
 });
 
 afterEach(() => {
@@ -47,7 +51,11 @@ describe('EditorActions', () => {
     await user.click(screen.getByRole('button', { name: '워크플로 생성' }));
     expect(createWorkflow).toHaveBeenCalledWith(h.ctx);
 
+    // 그 밖의 노트(.labnote.md)에는 바코드 단추만
     rerender(<EditorActions ctx={h.ctx} path="notes/a.labnote.md" disabled={false} />);
+    expect(screen.queryByRole('button', { name: '워크플로 생성' })).toBeNull();
+    expect(screen.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([coreT('Show note barcode')]);
+    rerender(<EditorActions ctx={h.ctx} path="notes/a.md" disabled={false} />);
     expect(container.innerHTML).toBe('');
 
     // 언어를 바꾸면 다시 그린다
@@ -55,6 +63,29 @@ describe('EditorActions', () => {
     act(() => setLang('en'));
     expect(screen.getByRole('button', { name: 'Insert unit operation' })).toBeTruthy();
     expect(container.querySelectorAll('[style]')).toHaveLength(0);
+  });
+
+  it('header shows the QR button on .labnote.md only, and it is disabled while busy', async () => {
+    const user = userEvent.setup();
+    h = createTestHost();
+    const { rerender } = render(<EditorActions ctx={h.ctx} path="e/01_x.labnote.md" disabled={false} />);
+    const qr = screen.getByRole('button', { name: coreT('Show note barcode') }) as HTMLButtonElement;
+    expect(qr.title).toBe(coreT('Show note barcode'));
+    expect(qr.classList.contains('editor-qr')).toBe(true);
+    expect(qr.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    await user.click(qr);
+    expect(showBarcode).toHaveBeenCalledWith(h.ctx, 'e/01_x.labnote.md');
+
+    rerender(<EditorActions ctx={h.ctx} path="e/README.md" disabled={false} />);
+    expect(screen.queryByRole('button', { name: coreT('Show note barcode') })).toBeNull();
+
+    rerender(<EditorActions ctx={h.ctx} path="e/01_x.labnote.md" disabled />);
+    expect((screen.getByRole('button', { name: coreT('Show note barcode') }) as HTMLButtonElement).disabled).toBe(true);
+    // 워크플로 노트와 README 에도 있다
+    rerender(<EditorActions ctx={h.ctx} path={WF_PATH} disabled={false} />);
+    expect(screen.getByRole('button', { name: coreT('Show note barcode') })).toBeTruthy();
+    rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled={false} />);
+    expect(screen.getByRole('button', { name: coreT('Show note barcode') })).toBeTruthy();
   });
 
   it('both buttons are disabled while busy', () => {

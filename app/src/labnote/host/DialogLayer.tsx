@@ -9,6 +9,7 @@ import { PromptDialog } from './PromptDialog';
 import { SampleDefinitionDialog } from '../../samples/SampleDefinitionDialog';
 import { SampleSettingsDialog } from '../../samples/SampleSettingsDialog';
 import { WorksheetDialog } from '../print/WorksheetDialog';
+import { BarcodeDialog } from '../port/barcodeDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -33,6 +34,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <SampleSettingsDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'worksheet':
       return <WorksheetDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'barcode':
+      return <BarcodeDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

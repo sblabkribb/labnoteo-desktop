@@ -12,7 +12,7 @@ import { registerAllCommands } from '../commands/registerAll';
 const VENDOR_SRC = 'vendor/labnoteo/src';
 const SOURCES = ['main.ts', 'barcode/barcodeFeature.ts'];
 
-/** SP2 가 등록하는 플러그인 명령. */
+/** 앱이 등록하는 플러그인 명령(SP2 부터; 바코드 넷은 SP7 Part A). */
 const PORTED = [
   'create-experiment',
   'create-workflow',
@@ -29,6 +29,10 @@ const PORTED = [
   'insert-experiment-samples-table',
   'open-sample-definition',
   'open-sample-view',
+  'show-note-barcode',
+  'assign-note-id',
+  'print-experiment-worksheet',
+  'print-whole-note',
 ] as const;
 
 /** 아직 옮기지 않은 플러그인 명령과 그것을 옮길 하위 프로젝트(계획의 "Deferred to later sub-projects"). */
@@ -47,10 +51,6 @@ const DEFERRED: Record<string, string> = {
   'ai-extract-samples': 'platform and integrations',
   'ai-ask-agent': 'platform and integrations',
   'toggle-mcp-server': 'platform and integrations',
-  'show-note-barcode': 'barcode',
-  'assign-note-id': 'barcode',
-  'print-experiment-worksheet': 'barcode',
-  'print-whole-note': 'barcode',
   'import-scanned-pages': 'barcode',
   'process-scan-folder': 'barcode',
   'assign-unmatched-scans': 'barcode',
@@ -75,12 +75,12 @@ describe('명령 목록(플러그인과 맞춰 보기)', () => {
     expect(PORTED.filter((id) => !registered.has(id))).toEqual([]);
   });
 
-  it('every registered id exists in vendor main.ts', () => {
+  it('every registered id exists in vendor main.ts or barcodeFeature.ts', () => {
     registerAllCommands();
-    const main = readFileSync(join(VENDOR_SRC, 'main.ts'), 'utf8');
+    const ids = vendorIds();
     const missing = commands()
       .map((c) => c.id)
-      .filter((id) => !main.includes(`id: '${id}'`));
+      .filter((id) => !ids.has(id));
     expect(missing).toEqual([]);
   });
 

@@ -1,4 +1,5 @@
 import { sampleCommands } from '../../samples/commands';
+import { barcodeCommands } from '../barcode/commands';
 import { catalogCommands } from './catalogs';
 import { editorInsertCommands } from './editorInserts';
 import { experimentCommands } from './experiment';
@@ -21,6 +22,8 @@ function allCommands(): Command[] {
     ...editorInsertCommands,
     ...sampleCommands,
     ...panelCommands,
+    // SP7 Part A
+    ...barcodeCommands,
   ];
 }
 

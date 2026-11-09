@@ -14,7 +14,7 @@ import { isSameSampleFolder, loadSampleLocationLookup, noteLabsamplesFolder } fr
 import { MIME, extOf } from '../../editor/live/imagePath';
 import { listVaultImages, readVaultImage } from '../../fs/vaultImage';
 import { createSampleEnv } from '../../samples/env';
-import { noteIds } from '../barcode/noteIdIndex';
+import { noteIds, type NoteRef } from '../barcode/noteIdIndex';
 import { appNoteIdSource, noteRef } from '../barcode/noteIdSource';
 import type { CommandContext } from '../commands/context';
 import { worksheetDialog } from '../host/dialogStore';
@@ -26,14 +26,22 @@ import { resolveNoteImages } from './noteBlocks';
 import { openInBrowser } from './openInBrowser';
 import { printPages } from './printRoot';
 
-/** 그 경로 노트의 ID. 없으면 하나 주고 돌려준다. 앞부분을 읽을 수 없거나 사용자가 취소하면 undefined. */
-async function ensureNoteId(ctx: CommandContext, path: string): Promise<string | undefined> {
+/**
+ * 노트 ID 색인(첫 빌드를 기다린 뒤) 위의 NoteIdService 와 그 경로의 NoteRef. 색인에 아직 없는 경로는 이름만으로 만든다.
+ * 바코드 명령(port/barcodeActions.ts)도 이것을 쓴다.
+ */
+export async function noteIdServiceFor(ctx: CommandContext, path: string): Promise<{ service: NoteIdService; file: NoteRef }> {
   const index = noteIds();
   await index.ready();
   const service = new NoteIdService(appNoteIdSource(index, ctx.host.fs), ctx.host);
   const name = path.slice(path.lastIndexOf('/') + 1);
-  const ref = noteRef(index, path) ?? { path, basename: name.replace(/\.md$/, ''), ctime: 0 };
-  return service.ensureId(ref);
+  return { service, file: noteRef(index, path) ?? { path, basename: name.replace(/\.md$/, ''), ctime: 0 } };
+}
+
+/** 그 경로 노트의 ID. 없으면 하나 주고 돌려준다. 앞부분을 읽을 수 없거나 사용자가 취소하면 undefined. */
+async function ensureNoteId(ctx: CommandContext, path: string): Promise<string | undefined> {
+  const { service, file } = await noteIdServiceFor(ctx, path);
+  return service.ensureId(file);
 }
 
 export function worksheetDeps(ctx: CommandContext): WorksheetDeps {
