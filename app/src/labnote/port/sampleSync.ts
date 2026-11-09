@@ -1,18 +1,17 @@
 // Ported from app/vendor/labnoteo/src/main.ts:3098-3151 sha256:41b727ae4c4b393c
 // labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); the plugin's private methods become functions over a per-session SampleSyncSession (timer map, aliasConflictsShown, the failure flag); window.setTimeout → setTimeout with the delay passed in; the sampleTrackingFor check moves to fire time (samples/sync.ts awaits samples.ready, D11), so scheduleSampleSync only filters *.labnote.md; vault.read → the caller passes the text (open buffer or fs.read); before saving, every Local and Global {Type}.json of the types in the text is checked with core loadSampleIds and an unreadable one stops the run with one app warning per session (t('samples.syncFailed', path), D12/D13) instead of console.warn; the write goes through env.fs (safeRegistryFs), whose RegistryUnreadableError gets the same warning; plugin.settings.globalSampleFolder → env.globalFolder(); sampleSuggest.clearCache + refreshSampleViews → env.changed(touched registry files); syncSamples returns the touched paths.
+// Changes: App/LabnotePlugin → SampleEnv (D5); the plugin's private methods become functions over a per-session SampleSyncSession (timer map, aliasConflictsShown, the failure flag); window.setTimeout → setTimeout with the delay passed in; the sampleTrackingFor check moves to fire time (samples/sync.ts awaits samples.ready, D11), so scheduleSampleSync only filters *.labnote.md; vault.read → the caller passes the text (open buffer or fs.read); before saving, every Local and Global {Type}.json of the types in the text is checked with assertRegistryReadable (an empty file is fine, as in safeRegistryFs) and an unreadable one stops the run with one app warning per session (t('samples.syncFailed', path), D12/D13) instead of console.warn; the write goes through env.fs (safeRegistryFs), whose RegistryUnreadableError gets the same warning; plugin.settings.globalSampleFolder → env.globalFolder(); sampleSuggest.clearCache + refreshSampleViews → env.changed(touched registry files); syncSamples returns the touched paths.
 import { maskAiCallouts } from '@labnoteo/core/lib/aiCallout';
 import {
   extractSampleInfoFromText,
   isSameSampleFolder,
-  loadSampleIds,
   noteLabsamplesFolder,
   saveSamplesFromDocument,
   type SampleAliasConflict,
 } from '@labnoteo/core/lib/sampleStorage';
 import { maskSampleListTables } from '@labnoteo/core/lib/sampleUtils';
 import { t as appT } from '../../i18n/t';
-import { RegistryUnreadableError, type SampleEnv } from '../../samples/env';
+import { assertRegistryReadable, RegistryUnreadableError, type SampleEnv } from '../../samples/env';
 import { sampleListHeaders } from './sampleListTable';
 
 /** The plugin's per-session sync state (its private fields). */
@@ -66,15 +65,8 @@ export async function syncSamples(env: SampleEnv, session: SampleSyncSession, pa
   const touched = sampleSyncTargets(env, path, content);
   if (touched.length === 0) return touched;
   try {
-    // A conflicted registry is read by core as `{}`: never save over one (D13).
-    for (const file of touched) {
-      const slash = file.lastIndexOf('/');
-      const type = file.slice(slash + 1, -'.json'.length);
-      if ((await loadSampleIds(env.fs, file.slice(0, slash), type)) === undefined) {
-        warnFailure(env, session, file);
-        return [];
-      }
-    }
+    // A conflicted registry is read by core as `{}`: never save over one (D13). An empty file is fine.
+    for (const file of touched) await assertRegistryReadable(env.fs, file);
     const conflicts = await saveSamplesFromDocument(
       env.fs,
       path,

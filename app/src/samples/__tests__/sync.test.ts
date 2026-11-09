@@ -153,11 +153,54 @@ describe('SampleSync', () => {
   it('Korean list-table rows are not synced', async () => {
     const th = setup();
     const s = sync();
-    const text = `${SAMPLE_VAULT[NOTE]}\n${koListHeader()}\n| DNA-77 | x | | | 로컬 | |\n`;
+    // Reagent-900 is in the Global catalog (Reagent_vendor.json): an unmasked row would seed the Local Reagent.json.
+    const text = `${SAMPLE_VAULT[NOTE]}\n${koListHeader()}\n| Reagent-900 | dNTP | | | 로컬 | |\n`;
     s.touch(NOTE, viewWith(text));
     await vi.advanceTimersByTimeAsync(800);
     await s.flush();
-    expect(json(th, `${LOCAL}/DNA.json`)['DNA-77']).toBeUndefined();
+    expect(th.vault.files()[`${LOCAL}/Reagent.json`]).toBeUndefined();
+    expect(registryWrites(th).some((e) => String(e.args.path).endsWith('/Reagent.json'))).toBe(false);
+  });
+
+  it('an empty registry file is not a conflict: sync writes into it', async () => {
+    const th = setup({ ...SAMPLE_VAULT, [`${LOCAL}/DNA.json`]: '  \n' });
+    const s = sync();
+    s.touch(NOTE, viewWith(`${SAMPLE_VAULT[NOTE]}\n@dna;DNA-2;a;b\n`));
+    await vi.advanceTimersByTimeAsync(800);
+    await s.flush();
+    expect(warns(th)).toEqual([]);
+    expect(json(th, `${LOCAL}/DNA.json`)['DNA-2']).toMatchObject({ alias: 'a', descriptions: ['b'] });
+  });
+
+  it('an unconfigured store reads the README: 062 (untracked) is not written', async () => {
+    const th = setup({ ...SAMPLE_VAULT, [RUN]: '# run\n\n@dna;DNA-3;a;b\n' });
+    samples.resetForTest();
+    const s = sync();
+    s.touchPath(RUN);
+    await vi.advanceTimersByTimeAsync(800);
+    await s.flush();
+    expect(registryWrites(th)).toHaveLength(0);
+  });
+
+  it('an unconfigured store still syncs a tracked note', async () => {
+    const th = setup({ ...SAMPLE_VAULT, [NOTE]: `${SAMPLE_VAULT[NOTE]}\n@dna;DNA-2;a;b\n` });
+    samples.resetForTest();
+    const s = sync();
+    s.touchPath(NOTE);
+    await vi.advanceTimersByTimeAsync(800);
+    await s.flush();
+    expect(json(th, `${LOCAL}/DNA.json`)['DNA-2']).toMatchObject({ alias: 'a' });
+  });
+
+  it('a closed editor (has dom, not an open note) is not read: the disk text is', async () => {
+    const th = setup({ ...SAMPLE_VAULT, [NOTE]: `${SAMPLE_VAULT[NOTE]}\n@dna;DNA-4;disk;d\n` });
+    const s = sync();
+    const closed = { ...viewWith(`${SAMPLE_VAULT[NOTE]}\n@dna;DNA-5;stale;s\n`), dom: document.createElement('div') };
+    s.touch(NOTE, closed);
+    await vi.advanceTimersByTimeAsync(800);
+    await s.flush();
+    expect(json(th, `${LOCAL}/DNA.json`)['DNA-4']).toMatchObject({ alias: 'disk' });
+    expect(json(th, `${LOCAL}/DNA.json`)['DNA-5']).toBeUndefined();
   });
 
   it('sync leaves an unparsable registry untouched', async () => {
