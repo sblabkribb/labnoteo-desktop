@@ -31,6 +31,7 @@ import { movesFor, type Move } from '../../links/rewrite';
 import { openNote, processNote } from '../openNotes';
 import { README } from '../paths';
 import { warnIfWindowsPathTooLong } from '../port/experiments';
+import { moveTableCsvs, offerTableCsvCleanupOnDelete } from '../port/tableCsvFiles';
 import type { CommandContext, LinkDeps } from './context';
 import { entryEvents, filesBefore, movedFiles } from './entryEvents';
 
@@ -393,11 +394,12 @@ async function renameLocked(
   const to = joinPath(parentOf(path), stem + ext);
   if (to === path) return undefined;
 
-  const finish = (): string => {
+  const finish = async (): Promise<string> => {
     // 폴더면 그 안에서 가장 긴 경로가 문제다
     const moved = [to, ...entries.filter((e) => lower(e.path).startsWith(`${lower(path)}/`)).map((e) => to + e.path.slice(path.length))];
     const longest = moved.reduce((a, b) => (b.length > a.length ? b : a));
     warnIfWindowsPathTooLong(host, ctx.vaultRoot, longest);
+    if (!isDir) await moveTableCsvsAfterRename(host, path, to);
     ctx.refresh();
     return to;
   };
@@ -407,7 +409,7 @@ async function renameLocked(
   if (linkKey(to) === linkKey(path) || !links) {
     const treeMoves = movesFor(path, to, isDir, entries.filter((e) => !e.isDir).map((e) => e.path));
     const done = links ? t('fileOps.renamed') : t('fileOps.renamed.linksNotUpdated');
-    return (await plainRename(ctx, path, to, isDir, treeMoves, done)) ? finish() : undefined;
+    return (await plainRename(ctx, path, to, isDir, treeMoves, done)) ? await finish() : undefined;
   }
 
   if (!(await waitForLinks(ctx, links))) {
@@ -443,7 +445,7 @@ async function renameLocked(
 
   // 색인이 준비된 채로 고칠 링크를 찾지 못했다: 묻지 않고 바꾼다
   if (plan.notes.length === 0) {
-    return (await plainRename(ctx, path, to, isDir, plan.moves, t('fileOps.renamed'))) ? finish() : undefined;
+    return (await plainRename(ctx, path, to, isDir, plan.moves, t('fileOps.renamed'))) ? await finish() : undefined;
   }
   if (plan.hasWikiRewrites && hasUnlinkableChars(baseName(to))) {
     host.notify('warn', t('links.rename.badName'));
@@ -458,7 +460,7 @@ async function renameLocked(
   );
   if (choice === undefined) return undefined;
   if (choice === 'skip') {
-    return (await plainRename(ctx, path, to, isDir, plan.moves, t('fileOps.renamed.linksNotUpdated'))) ? finish() : undefined;
+    return (await plainRename(ctx, path, to, isDir, plan.moves, t('fileOps.renamed.linksNotUpdated'))) ? await finish() : undefined;
   }
 
   let report: RenameReport;
@@ -472,9 +474,40 @@ async function renameLocked(
     host.notify('warn', t('fileOps.unsaved'));
     return undefined;
   }
-  const result = finish();
+  const result = await finish();
   await reportLinkUpdates(ctx, plan, report, links.journal, session);
   return result;
+}
+
+/**
+ * 이름을 바꾼 노트의 표 CSV(`<노트>_tableN.csv`)가 새 이름을 따라간다(플러그인 main.ts moveTableCsvsAfterRename, #60, A-R6).
+ * 앱의 이름 바꾸기는 같은 폴더 안이다. 새 이름이 이미 있는 CSV 는 옛 이름에 남기고 이름을 대며 알린다.
+ * 플러그인은 워크플로 노트만 보지만, 앱은 어느 .md 노트에서나 CSV 를 내보내므로 .md 면 모두 본다.
+ */
+async function moveTableCsvsAfterRename(host: CommandContext['host'], path: string, to: string): Promise<void> {
+  if (!/\.md$/i.test(path) || !/\.md$/i.test(to)) return;
+  const dir = parentOf(path);
+  try {
+    const { kept } = await moveTableCsvs(
+      host,
+      { from: dir, to: parentOf(to) },
+      { from: baseName(path), to: baseName(to) },
+      new Set(await host.fs.list(dir)),
+    );
+    if (kept.length > 0) {
+      host.notify(
+        'warn',
+        host.t(
+          'Kept {0} table CSV file(s) under the old name: {1}. A CSV of the new name was already there, holding another note\'s table, or the rename failed. Run "{2}" on this note to rewrite its CSVs and move the leftovers to the trash.',
+          String(kept.length),
+          kept.length > 3 ? host.t('{0} (+{1} more)', kept.slice(0, 3).join(', '), String(kept.length - 3)) : kept.join(', '),
+          host.t('Export tables to CSV'),
+        ),
+      );
+    }
+  } catch (e) {
+    console.warn('[labnoteo] could not move table CSVs after rename:', e);
+  }
 }
 
 /** README 체크리스트에서 지운 워크플로 노트의 항목을 뺀다(물어본 뒤). 열린 README 는 버퍼에 들어간다. */
@@ -528,6 +561,8 @@ export async function deleteEntry(ctx: CommandContext, path: string, isDir: bool
   entryEvents.emit({ kind: 'deleted', path, isDir, files });
   host.notify('info', t('fileOps.deleted', name));
   if (!isDir && isValidWorkflowPath(path)) await offerReadmeCleanup(ctx, path);
+  // 지운 노트의 표 CSV 를 휴지통으로 옮길지 묻는다(#75, A-R6). 폴더면 CSV 도 함께 갔다.
+  if (!isDir && /\.md$/i.test(path)) await offerTableCsvCleanupOnDelete(host, [path]);
   ctx.refresh();
   return true;
 }

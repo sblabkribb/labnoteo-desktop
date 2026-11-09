@@ -18,6 +18,7 @@ import { editorAwareFs } from '../../editorAwareFs';
 import { activeEditTarget, openNote } from '../../openNotes';
 import { parseRaw } from '../../../editor/documentIo';
 import { linkIndex } from '../../../links/linkIndex';
+import { coreT } from '../../i18n';
 import '../../__tests__/editorHarness'; // jsdom 의 CodeMirror 측정 보충
 import type { CommandContext } from '../context';
 import { useCommandContext, useNoteSwitcher } from '../useCommandContext';
@@ -448,5 +449,95 @@ describe('deleteEntry', () => {
     expect(await settle(deleteEntry(C(), 'notes', true))).toBe(false);
     expect(cmds('vault_trash')).toHaveLength(0);
     expect(notes).toEqual([{ kind: 'warn', message: t('fileOps.unsaved') }]);
+  });
+});
+
+describe('table CSVs follow the note (Task 6)', () => {
+  const D = 'notes';
+  const X = '001_X.labnote.md';
+  const csv = (stem: string, n: number) => `${D}/${stem}.labnote_table${n}.csv`;
+
+  it('renaming a note renames its table CSVs to the new name', async () => {
+    vault = installFakeVault({
+      [`${D}/${X}`]: 'x\n',
+      [csv('001_X', 1)]: '\uFEFFa\n',
+      [csv('001_X', 2)]: '\uFEFFb\n',
+    });
+    render(<Harness />);
+    primeLinks();
+    promptAnswers.push('001_Y');
+    expect(await settle(renameEntry(C(), `${D}/${X}`, false, []))).toBe(`${D}/001_Y.labnote.md`);
+    expect(vault.files()).toEqual({
+      [`${D}/001_Y.labnote.md`]: 'x\n',
+      [csv('001_Y', 1)]: '\uFEFFa\n',
+      [csv('001_Y', 2)]: '\uFEFFb\n',
+    });
+    expect(notes.filter((n) => n.kind === 'warn')).toEqual([]);
+  });
+
+  it('a CSV whose new name is taken stays under the old name and is named in a warning', async () => {
+    vault = installFakeVault({
+      [`${D}/${X}`]: 'x\n',
+      [csv('001_X', 1)]: 'mine\n',
+      [csv('001_Y', 1)]: 'other\n',
+    });
+    render(<Harness />);
+    primeLinks();
+    promptAnswers.push('001_Y');
+    await settle(renameEntry(C(), `${D}/${X}`, false, []));
+    expect(vault.files()[csv('001_X', 1)]).toBe('mine\n');
+    expect(vault.files()[csv('001_Y', 1)]).toBe('other\n');
+    const warn = notes.find((n) => n.kind === 'warn');
+    expect(warn?.message).toContain('001_X.labnote_table1.csv');
+  });
+
+  it('renaming a folder moves nothing extra (the CSVs went with it)', async () => {
+    vault = installFakeVault({ 'notes/sub/a.labnote.md': 'a\n', 'notes/sub/a.labnote_table1.csv': '1\n' });
+    render(<Harness />);
+    primeLinks();
+    promptAnswers.push('moved');
+    expect(await settle(renameEntry(C(), 'notes/sub', true, entriesOf([['notes/sub', true]])))).toBe('notes/moved');
+    expect(cmds('vault_rename')).toHaveLength(1);
+    expect(vault.files()).toEqual({ 'notes/moved/a.labnote.md': 'a\n', 'notes/moved/a.labnote_table1.csv': '1\n' });
+  });
+
+  it('deleting a note with 2 CSVs asks once more; accepting trashes both and says so', async () => {
+    vault = installFakeVault({
+      'notes/a.labnote.md': 'a\n',
+      'notes/a.labnote_table1.csv': '1\n',
+      'notes/a.labnote_table2.csv': '2\n',
+      'notes/b.labnote_table1.csv': 'b\n',
+    });
+    render(<Harness />);
+    confirmAnswers.push(true, true);
+    expect(await settle(deleteEntry(C(), 'notes/a.labnote.md', false))).toBe(true);
+    expect(confirms).toHaveLength(2);
+    expect(confirms[1].message).toContain('a.labnote_table1.csv\na.labnote_table2.csv');
+    expect(confirms[1].opts).toEqual({ confirmLabel: coreT('Move to trash'), destructive: true });
+    expect(vault.files()).toEqual({ 'notes/b.labnote_table1.csv': 'b\n' });
+    expect(vault.recycleBin.map((e) => e.path)).toEqual([
+      'notes/a.labnote.md',
+      'notes/a.labnote_table1.csv',
+      'notes/a.labnote_table2.csv',
+    ]);
+    expect(notes).toContainEqual({ kind: 'info', message: coreT('{0} CSV file(s) moved to the trash.', '2') });
+  });
+
+  it('declining the CSV cleanup keeps the CSVs', async () => {
+    vault = installFakeVault({ 'notes/a.labnote.md': 'a\n', 'notes/a.labnote_table1.csv': '1\n' });
+    render(<Harness />);
+    confirmAnswers.push(true, false);
+    expect(await settle(deleteEntry(C(), 'notes/a.labnote.md', false))).toBe(true);
+    expect(confirms).toHaveLength(2);
+    expect(vault.files()).toEqual({ 'notes/a.labnote_table1.csv': '1\n' });
+  });
+
+  it('a note without CSVs and a deleted folder ask nothing more', async () => {
+    vault = installFakeVault({ 'notes/a.labnote.md': 'a\n', 'other/b.labnote.md': 'b\n', 'other/b.labnote_table1.csv': '1\n' });
+    render(<Harness />);
+    confirmAnswers.push(true, true);
+    expect(await settle(deleteEntry(C(), 'notes/a.labnote.md', false))).toBe(true);
+    expect(await settle(deleteEntry(C(), 'other', true))).toBe(true);
+    expect(confirms).toHaveLength(2);
   });
 });
