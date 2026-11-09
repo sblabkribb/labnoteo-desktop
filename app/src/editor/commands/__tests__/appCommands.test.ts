@@ -63,6 +63,13 @@ describe('app-command registry', () => {
     expect(catalogs.en['cmd.integrationSettings']).toBe('Integration settings');
   });
 
+  it('registers the "Open labnoteO link" palette command', () => {
+    const c = appCommands().find((x) => x.id === 'app.open-labnoteo-link');
+    expect(c?.nameKey).toBe('cmd.openLabnoteoLink');
+    expect(catalogs.ko['cmd.openLabnoteoLink']).toBe('labnoteO 링크 열기');
+    expect(catalogs.en['cmd.openLabnoteoLink']).toBe('Open labnoteO link');
+  });
+
   it('displayKey turns CodeMirror keys into labels', () => {
     expect(displayKey('Mod-e')).toBe('Ctrl+E');
     expect(displayKey('Mod-Shift-.')).toBe('Ctrl+Shift+.');

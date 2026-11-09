@@ -1,0 +1,201 @@
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { searchScopeHint, searchScopeLabel, type PartbankSearchEntity } from '@labnoteo/core';
+import { t } from '../i18n/t';
+import { coreT } from '../labnote/i18n';
+import { DialogFrame, isComposing } from '../labnote/host/DialogFrame';
+import { openDialog, type DialogSpec } from '../labnote/host/dialogStore';
+import { SEARCH_LIMIT, type PartbankClient, type PartbankSearchHit } from '../labnote/port/partbankClient';
+import {
+  MIN_QUERY_CHARS,
+  SearchDebouncer,
+  describeHit,
+  partbankEmptyState,
+  truncationNotice,
+} from '../labnote/port/partbankSearch';
+
+/** "Search partbank" 창을 여는 값. `type` 은 부른 쪽의 시료 유형(없으면 null)이고, 찾을 대상은 `entities` 가 정한다. */
+export interface PartbankSearchOpts {
+  type: string | null;
+  initialQuery: string;
+  client: PartbankClient;
+  entities: PartbankSearchEntity[];
+  onError(err: unknown): void;
+  /** 테스트가 시계를 바꿔 끼울 때. 없으면 전역 setTimeout / clearTimeout. */
+  timers?: { set: typeof setTimeout; clear: typeof clearTimeout };
+}
+
+/** 검색해서 고른 항목, 닫으면 undefined. 대화상자 줄(dialogStore)에 들어간다. */
+export function searchPartbankDialog(opts: PartbankSearchOpts): Promise<PartbankSearchHit | undefined> {
+  return openDialog<PartbankSearchHit | undefined>({ kind: 'partbankSearch', opts }, undefined);
+}
+
+/** 아무것도 못 찾았을 때의 문장: 범위, 공개 항목은 찾지 않는다는 말, 그리고 빠진 범위를 찾는 법(있으면). 플러그인 partbankRegister.ts 와 같다. */
+function notFoundText(entities: readonly PartbankSearchEntity[]): string {
+  const hint = searchScopeHint(entities, coreT);
+  const notFound = `${coreT('Nothing found among partbank {0}.', searchScopeLabel(entities, coreT))} ${coreT(
+    'Only your own items and items shared with your groups are searched, not public ones.',
+  )}`;
+  return hint ? `${notFound} ${hint}` : notFound;
+}
+
+/**
+ * partbank 검색 창(플러그인의 SuggestModal 자리). 치는 동안 400 ms 쉼마다 한 번만 묻고, 지금 칸의 글자가 아닌 질문의
+ * 답은 버린다(SearchDebouncer). 한글 조합 중에는 묻지도 고르지도 닫지도 않는다: 조합 중의 input 은 글자만 바꾸고,
+ * compositionend 가 검색을 건다. 조합 중의 Enter 와 Escape 는 아무것도 하지 않는다.
+ */
+export function PartbankSearchDialog(props: {
+  spec: Extract<DialogSpec, { kind: 'partbankSearch' }>;
+  onDone: (value: unknown) => void;
+  onCancel: () => void;
+}) {
+  const { opts } = props.spec;
+  const [query, setQuery] = useState(opts.initialQuery);
+  const [hits, setHits] = useState<PartbankSearchHit[]>([]);
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [active, setActive] = useState(0);
+  const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const composing = useRef(false);
+  /** 검색을 건 마지막 글자(앞뒤 공백 뺀 것). '\0' 이라 첫 글자는 늘 다르다. 같은 글자로 다시 오는 input 은 묻지 않는다. */
+  const lastAsked = useRef('\u0000');
+  const id = useId();
+
+  const debouncer = useRef<SearchDebouncer<PartbankSearchHit>>();
+  if (!debouncer.current) {
+    // 질문마다 따로 둔다: 옛 답의 줄이 보이지 않게.
+    const notices = new Map<string, string | undefined>();
+    debouncer.current = new SearchDebouncer<PartbankSearchHit>({
+      search: async (q) => {
+        const { hits: found, typeCounts } = await opts.client.searchGlobal(q, opts.entities);
+        notices.set(q, truncationNotice(found, typeCounts, SEARCH_LIMIT, coreT));
+        return found;
+      },
+      onResults: (q, results) => {
+        setHits(results);
+        setActive(0);
+        setPending(false);
+        setNotice(notices.get(q));
+        notices.clear();
+      },
+      onError: (_q, err) => {
+        setPending(false);
+        setNotice(undefined);
+        opts.onError(err);
+      },
+      setTimer: (fn, ms) => (opts.timers?.set ?? setTimeout)(fn, ms) as unknown as number,
+      clearTimer: (h) => (opts.timers?.clear ?? clearTimeout)(h as unknown as ReturnType<typeof setTimeout>),
+    });
+  }
+
+  /** 칸의 글자가 바뀌었다(조합 중이 아닐 때). 글자가 실제로 바뀐 때만 검색을 건다. */
+  const ask = (text: string) => {
+    const trimmed = text.trim();
+    if (trimmed === lastAsked.current) return;
+    lastAsked.current = trimmed;
+    setPending(trimmed.length >= MIN_QUERY_CHARS);
+    debouncer.current?.query(text);
+  };
+
+  useEffect(() => {
+    input.current?.focus();
+    if (opts.initialQuery) ask(opts.initialQuery);
+    const d = debouncer.current;
+    return () => {
+      d?.cancel();
+      // StrictMode 의 두 번째 마운트가 같은 글자를 다시 묻게.
+      lastAsked.current = '\u0000';
+    };
+    // 처음 한 번만: initialQuery 는 열 때의 값이다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const current = Math.min(active, hits.length - 1);
+  useEffect(() => {
+    if (current < 0) return;
+    const el = list.current?.children[current] as HTMLElement | undefined;
+    el?.scrollIntoView?.({ block: 'nearest' });
+  }, [current]);
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (composing.current || isComposing(e)) return;
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (step !== undefined) {
+      e.preventDefault();
+      setActive(Math.max(0, Math.min(hits.length - 1, current + step)));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (current >= 0) props.onDone(hits[current]);
+    }
+  };
+
+  const state = partbankEmptyState(query, pending);
+  const status =
+    state === 'short'
+      ? coreT('Type at least {0} characters to search partbank.', String(MIN_QUERY_CHARS))
+      : state === 'searching'
+        ? coreT('Searching partbank…')
+        : notFoundText(opts.entities);
+  const optionId = (i: number) => `${id}-opt-${i}`;
+
+  return (
+    <DialogFrame title={coreT('Search partbank')} className="picker partbank-search" onCancel={props.onCancel}>
+      <input
+        ref={input}
+        type="text"
+        role="combobox"
+        aria-label={t('picker.label')}
+        aria-expanded="true"
+        aria-controls={`${id}-list`}
+        aria-autocomplete="list"
+        aria-activedescendant={current >= 0 ? optionId(current) : undefined}
+        placeholder={coreT('Search partbank')}
+        autoComplete="off"
+        spellCheck={false}
+        value={query}
+        onChange={(e) => {
+          const value = e.target.value;
+          setQuery(value);
+          if (composing.current || (e.nativeEvent as InputEvent).isComposing) return;
+          ask(value);
+        }}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={(e) => {
+          composing.current = false;
+          const value = e.currentTarget.value;
+          setQuery(value);
+          ask(value);
+        }}
+        onKeyDown={onKeyDown}
+      />
+      <ul ref={list} id={`${id}-list`} role="listbox" aria-label={t('picker.list')} className="picker-list">
+        {hits.map((hit, i) => {
+          const { title, detail } = describeHit(hit, coreT);
+          return (
+            <li
+              key={`${hit.type}:${hit.id}`}
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === current}
+              className="picker-option"
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseMove={() => i !== current && setActive(i)}
+              onClick={() => props.onDone(hit)}
+            >
+              <span className="picker-label">{title}</span>
+              {detail ? <small className="picker-desc">{detail}</small> : null}
+            </li>
+          );
+        })}
+      </ul>
+      {hits.length === 0 ? (
+        <p className="picker-note partbank-search-status" aria-live="polite">
+          {status}
+        </p>
+      ) : null}
+      {notice ? <p className="picker-note partbank-search-notice">{notice}</p> : null}
+    </DialogFrame>
+  );
+}

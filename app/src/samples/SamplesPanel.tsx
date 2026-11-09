@@ -25,6 +25,7 @@ import { deleteSampleInteractive } from '../labnote/port/sampleDelete';
 import { editSampleInteractive, setSampleDiscardedInteractive } from '../labnote/port/sampleEdit';
 import { hasLocalScope, localSampleFolder } from '../labnote/port/sampleFolders';
 import { insertSampleReference } from '../labnote/port/sampleInsert';
+import { partbankMenuItems } from '../labnote/port/partbankActions';
 import { changeSampleTypeInteractive, moveSampleInteractive } from '../labnote/port/sampleMove';
 import type { SampleScope } from '../labnote/port/sampleScope';
 import {
@@ -43,6 +44,7 @@ import {
 } from '../labnote/port/sampleView';
 import { openMenu, type MenuAnchor, type MenuItem } from '../labnote/ui/menuStore';
 import { copyText } from '../links/clipboard';
+import { partbank } from '../partbank/current';
 import { createSampleEnv, sampleEvents, type SampleEnv } from './env';
 import { samples } from './sampleStore';
 import { sampleTypeClass } from './typeClass';
@@ -333,5 +335,13 @@ function menuFor(env: SampleEnv, node: TreeNode, renderedLocal: string, activePa
         return { label: coreT('Delete sample'), run: () => deleteSampleInteractive(env, { folder, type, id }) };
     }
   };
-  return sampleMenuItems(node, renderedLocal, env.globalFolder()).map(action);
+  const items = sampleMenuItems(node, renderedLocal, env.globalFolder()).map(action);
+  // A linked sample also gets the partbank items, right after "View usages" as views/sampleView.ts:345 adds them.
+  // No key is needed (Open falls back to the link's origin); only the feature, which the app sets for an open vault.
+  const feature = partbank();
+  if (feature && record.source) {
+    const at = sampleMenuItems(node, renderedLocal, env.globalFolder()).indexOf('usages') + 1;
+    items.splice(at, 0, ...partbankMenuItems(env, feature, { type, id, folder, record }));
+  }
+  return items;
 }

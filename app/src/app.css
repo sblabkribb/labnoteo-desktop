@@ -553,6 +553,9 @@ button.sample-def-link:hover { text-decoration: underline; }
 .picker-option.dimmed .picker-label { color: var(--text-muted); }
 .picker-desc, .picker-detail { color: var(--text-muted); font-size: 0.9em; }
 .picker-note { margin: 0; color: var(--text-muted); font-size: 0.93em; }
+/* partbank 검색 창: 목록 아래의 상태 줄과 "처음 N개만" 줄 */
+.partbank-search .picker-list { max-height: 50vh; }
+.partbank-search-notice { font-style: italic; }
 
 /* 별칭 입력: 고칠 수 없는 [id 이름] 머리 오른쪽에 넓은 입력 칸 */
 .alias-about, .alias-description { margin: 0; }
