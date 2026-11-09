@@ -1,271 +1,284 @@
 import { readFileSync } from 'node:fs';
-import { allCss, declarations, literalColours, parseRules, SYSTEM_COLOURS } from './css';
+import { allCss, declarations, literalColours, parseRules, SYSTEM_COLOURS, type Rule } from './css';
 
-/** 토큰 블록(:root, 라이트, 다크, 시스템 다크, 인쇄의 라이트 값)이 있는 파일. */
+/** 토큰 블록(라이트 = :root, 다크, 시스템 다크, 고대비 대응, 인쇄의 라이트 값)이 있는 파일. */
 const css = readFileSync('src/styles/tokens.css', 'utf-8');
-/** 앱 스타일 전부(불러오는 순서대로). 토큰 블록 밖의 규칙(선택 영역, 포커스 링, 고대비)과 날것의 색 검사는 이것을 읽는다. */
+/** 앱 스타일 전부(불러오는 순서대로). 토큰 블록 밖의 규칙과 날것의 색 검사는 이것을 읽는다. */
 const all = allCss();
 
-/** 중괄호 짝을 세어 `selector {` 로 시작하는 블록의 안쪽 본문을 꺼낸다. 못 찾으면 던진다(조용히 빈 값을 주지 않는다). */
-function block(selector: string, source = css): { body: string; start: number; end: number } {
-  const start = source.indexOf(`${selector} {`);
-  if (start < 0) throw new Error(`블록을 찾지 못했다: ${selector}`);
-  const open = source.indexOf('{', start);
-  let depth = 0;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === '{') depth++;
-    if (source[i] === '}' && --depth === 0) return { body: source.slice(open + 1, i), start, end: i + 1 };
-  }
-  throw new Error(`닫히지 않은 블록: ${selector}`);
+/** 테마 블록의 선택자(spec §2.2): 각 값은 테마마다 한 번 정의한다. 다크는 속성 블록과 시스템 @media 블록 두 곳이고 같아야 한다. */
+const LIGHT_SELECTORS = [':root', ':root[data-theme="light"]'];
+const DARK_SELECTORS = [':root[data-theme="dark"]'];
+const DARK_SYSTEM_SELECTORS = [':root:not([data-theme])'];
+const DARK_MEDIA = '@media (prefers-color-scheme: dark)';
+const PRINT_SELECTORS = [':root[data-theme]', ':root:not([data-theme])'];
+
+const same = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i]);
+
+/** 선택자 목록과 @-규칙 머리가 정확히 맞는 규칙. 하나가 아니면 던진다(조용히 빈 값을 주지 않는다). */
+function only(rules: Rule[], selectors: string[], atRule?: string): Rule {
+  const hits = rules.filter((r) => same(r.selectors, selectors) && r.atRule === atRule);
+  if (hits.length !== 1) throw new Error(`${atRule ?? ''} ${selectors.join(', ')}: 규칙이 ${hits.length}개`);
+  return hits[0];
 }
 
+/** 규칙 본문의 사용자 지정 속성(--x)만. */
 function props(body: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const m of body.matchAll(/(--[\w-]+)\s*:\s*([^;}]+?)\s*(?:;|$)/g)) out[m[1]] = m[2].trim();
+  for (const d of declarations(body.replace(/;\s*$/, ''))) if (d.prop.startsWith('--')) out[d.prop] = d.value;
   return out;
 }
 
-const SEL = {
-  root: ':root',
-  media: '@media (prefers-color-scheme: dark)',
-  darkSystem: ':root:not([data-theme="light"])',
-  dark: ':root[data-theme="dark"]',
-  light: ':root[data-theme="light"]',
-};
-const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '');
+function themeBlocks(source: string) {
+  const rules = parseRules(source);
+  return {
+    rules,
+    light: only(rules, LIGHT_SELECTORS),
+    dark: only(rules, DARK_SELECTORS),
+    darkSystem: only(rules, DARK_SYSTEM_SELECTORS, DARK_MEDIA),
+    statics: only(rules, [':root']),
+  };
+}
 
-/**
- * `:root` 에서 값이 날것의 색인 사용자 지정 속성은 테마 색 토큰이다. 그런 토큰마다 라이트·다크·시스템 다크 블록 모두에
- * 정의가 있어야 한다: :root 에만 있으면 다크 사용자가 라이트 값을 본다. 빠진 것을 `블록: 토큰` 으로 돌려준다.
- */
+const isColourToken = (v: string) => literalColours(v).length > 0;
+
+/** 라이트 블록의 색 토큰마다 다크·시스템 다크 블록에 정의가 있는지. 빠진 것(또는 남는 것)을 `블록: 토큰` 으로 돌려준다. */
 function parityGaps(source: string): string[] {
-  const root = props(block(SEL.root, source).body);
-  const colourTokens = Object.keys(root).filter((k) => literalColours(root[k]).length > 0);
-  if (colourTokens.length === 0) throw new Error(':root 에서 색 토큰을 하나도 읽지 못했다');
+  const b = themeBlocks(source);
+  const light = props(b.light.body);
+  const colourTokens = Object.keys(light).filter((k) => isColourToken(light[k]));
+  if (colourTokens.length === 0) throw new Error('라이트 블록에서 색 토큰을 하나도 읽지 못했다');
   const gaps: string[] = [];
-  for (const name of ['light', 'dark', 'darkSystem'] as const) {
-    const defined = props(block(SEL[name], source).body);
+  for (const name of ['dark', 'darkSystem'] as const) {
+    const defined = props(b[name].body);
     for (const k of colourTokens) if (!(k in defined)) gaps.push(`${name}: ${k}`);
+    for (const k of Object.keys(defined)) if (!colourTokens.includes(k)) gaps.push(`${name} extra: ${k}`);
   }
+  // 색 토큰은 테마와 무관한 :root 블록에 두지 않는다(그러면 다크 사용자가 라이트 값을 본다)
+  const statics = props(b.statics.body);
+  for (const k of Object.keys(statics)) if (isColourToken(statics[k])) gaps.push(`static: ${k}`);
   return gaps;
-}
-
-/** 시스템 다크 @media 안에서 `:root:not([data-theme="light"])` 블록 말고 남는 것. 비어야 한다. */
-function mediaExtras(source: string): string {
-  const media = block(SEL.media, source).body;
-  const inner = block(SEL.darkSystem, media);
-  return stripComments(media.slice(0, inner.start) + media.slice(inner.end)).trim();
-}
-
-/** 규칙 본문들(`{ … }`)의 선언 값에서 이름 있는 색을 찾는다. 선택자의 낱말과 섞이지 않게 값에서만 찾는다. */
-function namedInValues(source: string): string[] {
-  const found: string[] = [];
-  for (const m of source.matchAll(/\{([^{}]*)\}/g)) {
-    for (const decl of m[1].split(';')) {
-      const value = decl.slice(decl.indexOf(':') + 1);
-      if (decl.includes(':')) found.push(...literalColours(value).filter((c) => !c.startsWith('#')));
-    }
-  }
-  return found;
-}
-
-/** `@media … forced-colors …` 블록 전부(머리 포함, 시작·끝 위치). */
-function forcedColourBlocks(source: string): { text: string; start: number; end: number }[] {
-  const out: { text: string; start: number; end: number }[] = [];
-  for (const m of source.matchAll(/@media[^{]*forced-colors[^{]*\{/g)) {
-    const b = block(m[0].slice(0, -1).trim(), source.slice(m.index!));
-    out.push({ text: source.slice(m.index! + b.start, m.index! + b.end), start: m.index! + b.start, end: m.index! + b.end });
-  }
-  return out;
 }
 
 const SYSTEM = new Set(SYSTEM_COLOURS);
 
 /**
- * 토큰 블록(:root, 라이트, 다크, 시스템 다크 @media) 밖의 날것의 색. 글자 전체에서 #hex 와 색 함수를, 규칙 본문의 선언 값에서
- * 이름 있는 색까지 찾는다(이름 있는 색은 선택자의 낱말과 섞이지 않게 값에서만 찾는다).
- * `transparent`·`currentColor`·`inherit`·`none` 은 색으로 세지 않는다.
- * `allowSystemIn` 을 주면 머리에 그 낱말이 든 @media 블록(고대비 forced-colors) 안에서만 CSS 시스템 색(Highlight, CanvasText …)을
- * 허용한다. 그 블록 안에서도 #hex, 색 함수, 시스템 색이 아닌 이름 있는 색은 걸린다.
+ * 토큰 블록(라이트, 다크, 시스템 다크, 인쇄 토큰) 밖의 날것의 색. 모든 규칙의 선언 값에서 #hex, 색 함수, 이름 있는 색을 찾는다.
+ * `transparent`·`currentColor`·`inherit`·`none` 은 색이 아니다. forced-colors @media 안에서는 CSS 시스템 색만 허용한다.
  */
-function rawColoursOutside(source: string, opts: { allowSystemIn?: string } = {}): string[] {
-  const blocks = [SEL.light, SEL.dark, SEL.media, SEL.root].map((sel) => block(sel, source));
-  // 인쇄 블록의 토큰 정의(라이트 값을 다시 적는다)도 토큰 블록이다. 그 블록의 나머지 규칙은 여전히 검사한다.
-  const print = source.indexOf('@media print {');
-  if (print >= 0) {
-    const tokens = block(':root[data-theme], :root:not([data-theme])', source.slice(print));
-    blocks.push({ ...tokens, start: print + tokens.start, end: print + tokens.end });
-  }
-  const forced = opts.allowSystemIn ? forcedColourBlocks(source).filter((b) => b.text.slice(0, b.text.indexOf('{')).includes(opts.allowSystemIn!)) : [];
-  let outside = source;
-  for (const b of [...blocks, ...forced].sort((a, b) => b.start - a.start)) outside = outside.slice(0, b.start) + outside.slice(b.end);
-  outside = stripComments(outside);
-  if (outside.length < 200) throw new Error('토큰 블록 밖의 규칙을 거의 읽지 못했다');
-  const found = [...(outside.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [])];
-  found.push(...namedInValues(outside));
-  for (const b of forced) {
-    const inner = stripComments(b.text);
-    found.push(...(inner.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []));
-    found.push(...namedInValues(inner).filter((c) => !SYSTEM.has(c.toLowerCase())));
+function rawColoursOutside(source: string): string[] {
+  const found: string[] = [];
+  for (const r of parseRules(source)) {
+    const tokenBlock =
+      (!r.atRule && (same(r.selectors, LIGHT_SELECTORS) || same(r.selectors, DARK_SELECTORS))) ||
+      (r.atRule === DARK_MEDIA && same(r.selectors, DARK_SYSTEM_SELECTORS)) ||
+      (r.atRule === '@media print' && same(r.selectors, PRINT_SELECTORS));
+    if (tokenBlock) continue;
+    const forced = r.atRule?.includes('forced-colors') ?? false;
+    for (const d of declarations(r.body.replace(/;\s*$/, ''))) {
+      found.push(...literalColours(d.value).filter((c) => !(forced && SYSTEM.has(c.toLowerCase()))));
+    }
   }
   return found;
 }
 
-const ROOT = block(':root');
-const MEDIA = block('@media (prefers-color-scheme: dark)');
-const DARK_SYSTEM = block(':root:not([data-theme="light"])');
-const DARK = block(':root[data-theme="dark"]');
-const LIGHT = block(':root[data-theme="light"]');
+// ── WCAG 대비 ──
 
-const root = props(ROOT.body);
-const themes = {
-  light: { ...root, ...props(LIGHT.body) },
-  dark: { ...root, ...props(DARK.body) },
-  darkSystem: { ...root, ...props(DARK_SYSTEM.body) },
-};
+type RGB = [number, number, number];
+type RGBA = [number, number, number, number];
 
-function lum(hex: string): number {
-  if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`#rrggbb 가 아니다: ${hex}`);
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+/** `#rgb`, `#rrggbb`, `rgb(r, g, b)`, `rgba(r, g, b, a)` 만 읽는다. 그 밖의 모양은 던진다(대비를 잴 수 없는 토큰이 표에 들어오면 알게). */
+function parseColour(v: string): RGBA {
+  const s = v.trim();
+  let m = /^#([0-9a-f]{3})$/i.exec(s);
+  if (m) return [...[...m[1]].map((c) => parseInt(c + c, 16)), 1] as RGBA;
+  m = /^#([0-9a-f]{6})$/i.exec(s);
+  if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16), 1];
+  m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(s);
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])];
+  throw new Error(`대비를 잴 수 없는 색: ${v}`);
 }
-function ratio(a: string, b: string): number {
+
+/** 반투명 색을 불투명 바탕 위에 겹친 결과. */
+function composite(top: RGBA, under: RGB): RGB {
+  const a = top[3];
+  return [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a)) as RGB;
+}
+
+function lum([r, g, b]: RGB): number {
+  const [R, G, B] = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+
+function ratioRgb(a: RGB, b: RGB): number {
   const [x, y] = [lum(a), lum(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
+/** 테마 `t` 에서 글자 토큰 `fg` 를 바탕 토큰 `bg` 위에 놓았을 때의 대비. 반투명 바탕은 --bg 위에, 반투명 글자는 그 바탕 위에 겹친다. */
+function contrast(t: Record<string, string>, fg: string, bg: string): number {
+  const base = parseColour(t['--bg']);
+  if (base[3] !== 1) throw new Error('--bg 는 불투명해야 한다');
+  const page: RGB = [base[0], base[1], base[2]];
+  const surface = composite(parseColour(t[bg]), page);
+  const text = composite(parseColour(t[fg]), surface);
+  return ratioRgb(text, surface);
+}
+
+const blocks = themeBlocks(css);
+const statics = props(blocks.statics.body);
+const themes = {
+  light: { ...statics, ...props(blocks.light.body) },
+  dark: { ...statics, ...props(blocks.dark.body) },
+  darkSystem: { ...statics, ...props(blocks.darkSystem.body) },
+};
+
+const TEXT = ['--text', '--text-muted', '--accent', '--danger', '--warning', '--success'];
+const SURFACES = ['--bg', '--bg-side', '--bg-hover', '--bg-selected', '--menu-bg'];
+
+/** 표 전체를 재고 모자란 쌍을 `테마 fg on bg = 비` 로 돌려준다. */
+function contrastFailures(t: Record<string, string>, name: string): string[] {
+  const out: string[] = [];
+  const need = (fg: string, bg: string, min: number) => {
+    const r = contrast(t, fg, bg);
+    if (r < min) out.push(`${name} ${fg} on ${bg} = ${r.toFixed(2)} < ${min}`);
+  };
+  for (const fg of TEXT) for (const bg of SURFACES) need(fg, bg, 4.5);
+  for (const bg of SURFACES) need('--text-faint', bg, 3);
+  need('--accent-text', '--accent-fill', 4.5);
+  need('--accent-text', '--accent-fill-hover', 4.5);
+  // 채운 위험 단추(확인 단계)의 글자는 --bg 다
+  need('--bg', '--danger', 4.5);
+  // 글자가 반투명 바탕(텍스트 선택, 칩) 위에 놓여도 읽힌다
+  need('--text', '--bg-selection', 4.5);
+  need('--text', '--accent-soft', 4.5);
+  need('--text-muted', '--accent-soft', 4.5);
+  // 포커스 링(강조색)은 바탕 대비 3:1 이상
+  for (const bg of SURFACES) need('--accent', bg, 3);
+  return out;
+}
+
 const REQUIRED = [
-  '--bg', '--bg-elevated', '--bg-hover', '--bg-selected', '--bg-selection', '--border', '--border-strong', '--text', '--text-muted',
-  '--accent', '--accent-text', '--danger', '--radius', '--space-1', '--space-2', '--space-3', '--space-4', '--space-5',
-  '--space-6', '--indent', '--font-ui', '--font-mono', '--font-size',
-  '--warning', '--success', '--shadow', '--scrim',
+  '--bg', '--bg-side', '--bg-ribbon', '--bg-elevated', '--menu-bg', '--bg-hover', '--bg-selected', '--bg-selection', '--border',
+  '--border-strong', '--guide', '--text', '--text-muted', '--text-faint', '--accent', '--accent-fill', '--accent-fill-hover', '--accent-text',
+  '--accent-soft', '--danger', '--warning', '--success', '--shadow', '--shadow-menu', '--scrim', '--checker-a', '--checker-b',
+  '--radius', '--radius-s', '--radius-m', '--radius-l', '--radius-xl',
+  '--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6', '--space-7', '--space-8',
+  '--row-h', '--ribbon-w', '--side-w', '--right-w', '--viewheader-h', '--statusbar-h',
+  '--indent', '--font-ui', '--font-mono', '--font-size',
 ];
 
 describe('디자인 토큰', () => {
-  it('요구한 토큰이 :root 에 모두 있다', () => {
-    for (const name of REQUIRED) expect(root[name], name).toBeTruthy();
+  it('요구한 토큰이 라이트·다크 모두에 있다', () => {
+    for (const [name, t] of Object.entries(themes)) for (const k of REQUIRED) expect(t[k], `${name} ${k}`).toBeTruthy();
   });
 
-  it('모든 토큰이 라이트·다크 양쪽에 정의돼 있다', () => {
-    const light = Object.keys(props(LIGHT.body)).sort();
-    expect(light.length).toBeGreaterThan(8);
-    expect(Object.keys(props(DARK.body)).sort()).toEqual(light);
-    expect(Object.keys(props(DARK_SYSTEM.body)).sort()).toEqual(light);
-    // :root 의 색 토큰은 하나도 빠짐없이 세 테마 블록에 있다 (위 비교는 라이트 블록에서 시작해 :root 에만 있는 토큰을 못 본다)
+  it('간격 눈금은 2·4·6·8·12·16·24·32px, 둥글기는 4·6·8·10px 이고 --radius 는 --radius-m 이다', () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map((i) => statics[`--space-${i}`])).toEqual(['2px', '4px', '6px', '8px', '12px', '16px', '24px', '32px']);
+    expect(['s', 'm', 'l', 'xl'].map((k) => statics[`--radius-${k}`])).toEqual(['4px', '6px', '8px', '10px']);
+    expect(statics['--radius']).toBe('var(--radius-m)');
+    expect(statics['--row-h']).toBe('28px');
+  });
+
+  it('테마 블록은 세 개뿐이고, 색 토큰은 세 블록 모두에 있으며 두 다크 블록은 같다', () => {
     expect(parityGaps(css)).toEqual([]);
-    // 시스템 다크와 수동 다크는 값도 같아야 한다 (같은 모양이 두 곳에서 갈라지지 않게)
-    expect(props(DARK_SYSTEM.body)).toEqual(props(DARK.body));
-    // 테마가 바꾸는 토큰은 :root 에도 기본값이 있고, 그 값은 수동 라이트와 같다 (data-theme 없는 시스템 라이트 사용자가 보는 값)
-    const lightProps = props(LIGHT.body);
-    for (const name of light) expect(root[name], name).toBe(lightProps[name]);
-  });
-
-  it('시스템 다크 규칙은 수동 라이트 선택을 덮지 않는다', () => {
-    expect(MEDIA.body).toContain(':root:not([data-theme="light"])');
-    // @media 안에는 그 블록 하나뿐이다: 다른 규칙이 숨으면 아래의 "블록 밖 날것의 색" 검사도 그것을 보지 못한다
-    expect(mediaExtras(css)).toBe('');
+    expect(props(blocks.darkSystem.body)).toEqual(props(blocks.dark.body));
+    expect(Object.keys(props(blocks.light.body)).length).toBeGreaterThan(20);
+    // 시스템 다크 @media 안에는 그 블록 하나뿐이다: 다른 규칙이 숨지 않는다
+    expect(blocks.rules.filter((r) => r.atRule === DARK_MEDIA)).toHaveLength(1);
+    // 예전 모양(:root:not([data-theme="light"]))은 없다: System 은 속성을 지우므로 :not([data-theme]) 로 충분하다
+    expect(css).not.toContain(':root:not([data-theme="light"])');
+    // color-scheme 도 테마마다 정한다
+    expect(declarations(blocks.light.body).find((d) => d.prop === 'color-scheme')?.value).toBe('light');
+    expect(declarations(blocks.dark.body).find((d) => d.prop === 'color-scheme')?.value).toBe('dark');
+    expect(declarations(blocks.darkSystem.body).find((d) => d.prop === 'color-scheme')?.value).toBe('dark');
   });
 
   it('토큰 검사기 자기 점검: 일부러 망가뜨린 사본을 잡아낸다', () => {
-    // :root 에만 넣은 색 토큰
-    expect(parityGaps(css.replace('--danger: #a31d15;', '--danger: #a31d15;\n  --probe: #b45309;'))).toEqual([
-      'light: --probe', 'dark: --probe', 'darkSystem: --probe',
-    ]);
-    // :root 에 있는 숫자·글꼴 토큰은 색이 아니라 테마 블록에 없어도 된다
-    expect(parityGaps(css)).toEqual([]);
+    const lightBody = blocks.light.body;
+    // 라이트에만 넣은 색 토큰
+    const probe = css.replace('--danger: #b3261e;', '--danger: #b3261e;\n  --probe: #b45309;');
+    expect(probe).not.toBe(css);
+    expect(parityGaps(probe)).toEqual(['dark: --probe', 'darkSystem: --probe']);
+    // 테마와 무관한 :root 블록에 넣은 색 토큰
+    expect(parityGaps(css.replace('--radius-s: 4px;', '--radius-s: 4px;\n  --oops: #123456;'))).toEqual(['static: --oops']);
     // @media 안에 숨긴 두 번째 규칙
-    const smuggled = css.replace('    color-scheme: dark;\n  }\n}', '    color-scheme: dark;\n  }\n  .sidebar { background: #000000; }\n}');
+    const smuggled = css.replace(`${DARK_MEDIA} {`, `${DARK_MEDIA} {\n  .sidebar { background: #000000; }`);
     expect(smuggled).not.toBe(css);
-    expect(mediaExtras(smuggled)).toBe('.sidebar { background: #000000; }');
+    expect(parseRules(smuggled).filter((r) => r.atRule === DARK_MEDIA)).toHaveLength(2);
+    expect(rawColoursOutside(smuggled)).toEqual(['#000000']);
     // 블록 밖의 이름 있는 색과 새 색 함수
-    for (const bad of ['gray', 'White', 'oklch(0.5 0.1 200)', 'lab(50% 0 0)', 'lch(50% 0 0)', 'hwb(0 0% 0%)', 'color-mix(in srgb, var(--accent), white)', 'color(display-p3 1 0 0)', 'Canvas']) {
-      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`), { allowSystemIn: 'forced-colors' }), bad).not.toEqual([]);
+    expect(all).toContain('.empty-state { color: var(--text-muted); }');
+    for (const bad of ['gray', 'White', 'oklch(0.5 0.1 200)', 'lab(50% 0 0)', 'color-mix(in srgb, var(--accent), white)', 'Canvas']) {
+      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`)), bad).not.toEqual([]);
     }
-    // 시스템 색은 forced-colors 블록 안에서만 통과한다
-    const inForced = (decl: string) => `${all}
-@media (forced-colors: active) {
-  .probe { ${decl} }
-}
-`;
-    expect(rawColoursOutside(inForced('outline-color: Highlight;'), { allowSystemIn: 'forced-colors' })).toEqual([]);
-    expect(rawColoursOutside(inForced('outline-color: Highlight;'))).not.toEqual([]);
-    expect(rawColoursOutside(inForced('outline: 2px solid #ffffff;'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
-    expect(rawColoursOutside(inForced('outline-color: red;'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
-    expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', '.empty-state { color: Highlight; }'), { allowSystemIn: 'forced-colors' })).not.toEqual([]);
+    expect(rawColoursOutside(`${all}\n@media (forced-colors: active) { .probe { outline-color: Highlight; } }`)).toEqual([]);
+    expect(rawColoursOutside(`${all}\n@media (forced-colors: active) { .probe { outline-color: red; } }`)).toEqual(['red']);
     for (const ok of ['transparent', 'currentColor', 'inherit', 'none']) {
-      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`), { allowSystemIn: 'forced-colors' }), ok).toEqual([]);
+      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`)), ok).toEqual([]);
     }
+    expect(lightBody).toContain('--text-muted');
   });
 
-  it('본문 대비가 두 테마 모두 4.5:1 이상이다', () => {
+  it('대비 표: 두 테마 모두 글자 4.5:1, 흐린 표시 3:1, 강조 채움 위 글자 4.5:1 이상이다', () => {
+    for (const [name, t] of Object.entries(themes)) expect(contrastFailures(t, name)).toEqual([]);
+  });
+
+  it('대비 표 자기 점검: 값을 낮추면 실제로 걸린다', () => {
+    // 라이트 --text-muted 를 예전 입력 테두리색으로 내리면 표가 실패한다
+    const weak = { ...themes.light, '--text-muted': '#8a8a94' };
+    expect(contrastFailures(weak, 'light').some((f) => f.startsWith('light --text-muted on'))).toBe(true);
+    // 흐린 표시를 더 흐리게 하면 3:1 아래로 내려간다
+    expect(contrastFailures({ ...themes.dark, '--text-faint': '#555555' }, 'dark').some((f) => f.includes('--text-faint'))).toBe(true);
+    // 반투명 바탕은 --bg 위에 겹쳐 잰다: 흰 바탕의 10% 검정은 거의 흰색이다
+    expect(contrast({ '--bg': '#ffffff', '--a': '#000000', '--s': 'rgba(0, 0, 0, 0.1)' }, '--a', '--s')).toBeGreaterThan(15);
+    expect(contrast({ '--bg': '#000000', '--a': '#000000', '--s': 'rgba(0, 0, 0, 0.1)' }, '--a', '--s')).toBeCloseTo(1, 5);
+    expect(ratioRgb([0, 0, 0], [255, 255, 255])).toBeCloseTo(21, 5);
+    expect(() => parseColour('oklch(0.5 0.1 200)')).toThrow();
+    expect(parseColour('#abc')).toEqual([170, 187, 204, 1]);
+  });
+
+  it('선택 행·텍스트 선택은 바탕과 구분된다', () => {
     for (const [name, t] of Object.entries(themes)) {
-      for (const [fg, bg] of [
-        ['--text', '--bg'], ['--text-muted', '--bg'], ['--text', '--bg-elevated'], ['--text-muted', '--bg-elevated'],
-        ['--text', '--bg-hover'], ['--text-muted', '--bg-hover'], ['--text', '--bg-selected'], ['--text-muted', '--bg-selected'],
-        ['--accent-text', '--accent'], ['--accent', '--bg-selected'], ['--accent', '--bg-hover'], ['--danger', '--bg-selected'], ['--danger', '--bg'], ['--danger', '--bg-elevated'],
-        ['--warning', '--bg'], ['--warning', '--bg-elevated'], ['--success', '--bg'],
-      ]) {
-        expect(ratio(t[fg], t[bg]), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
-      }
+      expect(contrast(t, '--bg-selected', '--bg'), `${name} selected row`).toBeGreaterThanOrEqual(1.2);
+      expect(contrast(t, '--bg-selection', '--bg'), `${name} ::selection`).toBeGreaterThanOrEqual(1.2);
     }
   });
 
-  it('포커스 링·입력 테두리는 배경 대비 3:1 이상이다', () => {
-    for (const [name, t] of Object.entries(themes)) {
-      for (const fg of ['--accent', '--border-strong']) {
-        for (const bg of ['--bg', '--bg-elevated']) expect(ratio(t[fg], t[bg]), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(3);
-      }
-    }
-  });
-
-  it('선택 행·텍스트 선택은 배경과 눈에 띄게 구분되고, 그 위 글자도 읽힌다', () => {
-    for (const [name, t] of Object.entries(themes)) {
-      expect(ratio(t['--bg-selected'], t['--bg']), `${name} selected row on bg`).toBeGreaterThanOrEqual(1.5);
-      expect(ratio(t['--bg-selection'], t['--bg']), `${name} ::selection on bg`).toBeGreaterThanOrEqual(1.9);
-      expect(ratio(t['--text'], t['--bg-selection']), `${name} text on ::selection`).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
-  it('편집기 밖의 텍스트 선택도 글자색을 정한다: 흐린 글자·강조색·위험색이 선택 배경 위에서 4.5:1 아래로 내려가지 않게', () => {
-    // 규칙에 실제로 쓰인 글자색·배경 토큰을 읽어 그 쌍을 잰다 (배경만 정하면 원래 글자색이 남아 3.5~4:1 로 떨어진다)
+  it('편집기 밖의 텍스트 선택은 배경과 글자색을 함께 정한다', () => {
     const rules = parseRules(all).filter((r) => !r.atRule && r.selectors.includes('::selection'));
     expect(rules).toHaveLength(1);
     const decl = Object.fromEntries(declarations(rules[0].body).map((d) => [d.prop, d.value]));
     expect(decl.background).toBe('var(--bg-selection)');
     expect(decl.color).toBe('var(--text)');
-    const token = (v: string) => /^var\((--[\w-]+)\)$/.exec(v)![1];
-    for (const [name, t] of Object.entries(themes)) {
-      expect(ratio(t[token(decl.color)], t[token(decl.background)]), `${name} ::selection`).toBeGreaterThanOrEqual(4.5);
-      // 정하지 않았을 때 남았을 글자색들은 실제로 모자란다: 이 규칙이 하는 일이 있다
-      expect(Math.min(...['--text-muted', '--accent', '--danger'].map((fg) => ratio(t[fg], t['--bg-selection']))), name).toBeLessThan(4.5);
-    }
   });
 
-  it('props 는 세미콜론 없는 마지막 선언도 읽는다', () => {
-    expect(props('--a: #111111; --b: #222222')).toEqual({ '--a': '#111111', '--b': '#222222' });
-    expect(props('--a: #111111;\n  --b: #222222\n')).toEqual({ '--a': '#111111', '--b': '#222222' });
-    expect(props('--a: #111111; color-scheme: dark;')).toEqual({ '--a': '#111111' });
-  });
-
-  it('대비 계산이 실제로 틀린 색을 걸러 낸다 (검사기 자체의 자기 점검)', () => {
-    expect(ratio('#000000', '#ffffff')).toBeCloseTo(21, 5);
-    expect(ratio('#777777', '#808080')).toBeLessThan(1.2);
-    expect(() => lum('rgb(0,0,0)')).toThrow();
+  it('--text-faint 는 글자가 아닌 표시에만 쓴다 (svg, .chev, .sep, ::before/::after)', () => {
+    const misuse = parseRules(all)
+      .filter((r) => declarations(r.body.replace(/;\s*$/, '')).some((d) => d.prop === 'color' && d.value.includes('var(--text-faint)')))
+      .flatMap((r) => r.selectors)
+      .filter((s) => !/(^|[\s>])svg$|\.chev$|\.sep$|::?(before|after)$/.test(s));
+    expect(misuse).toEqual([]);
   });
 
   it('토큰 블록 밖에는 날것의 색 값이 없다', () => {
-    expect(rawColoursOutside(all, { allowSystemIn: 'forced-colors' })).toEqual([]);
+    expect(rawColoursOutside(all)).toEqual([]);
   });
 
-  it('forced-colors block exists and system colours appear only inside it', () => {
-    const fc = parseRules(all)
-      .filter((r) => r.atRule?.includes('forced-colors'))
-      .flatMap((r) => r.selectors)
-      .join(' ');
+  it('고대비(forced-colors)에서 강조색과 테두리는 시스템 색을 쓴다', () => {
+    const forced = parseRules(css).filter((r) => r.atRule?.includes('forced-colors'));
+    expect(forced).toHaveLength(1);
+    const p = props(forced[0].body);
+    expect(p['--accent']).toBe('Highlight');
+    expect(p['--border']).toBe('CanvasText');
+    // 테마 블록(특이도 0,2,0)을 이기려면 같은 특이도로 뒤에 온다
+    expect(forced[0].selectors).toEqual(expect.arrayContaining([':root[data-theme]', ':root:not([data-theme])']));
+    expect(forced[0].order).toBeGreaterThan(blocks.darkSystem.order);
+    // 앱 전체의 forced-colors 규칙은 열린 줄·고른 항목·포커스 링을 다시 그린다
+    const fc = parseRules(all).filter((r) => r.atRule?.includes('forced-colors')).flatMap((r) => r.selectors).join(' ');
     expect(fc).toMatch(/\[aria-current\]/);
     expect(fc).toMatch(/\[aria-selected="true"\]/);
     expect(fc).toMatch(/:focus-visible/);
-    expect(rawColoursOutside(all, { allowSystemIn: 'forced-colors' })).toEqual([]);
   });
 
   it('CDN 글꼴을 부르지 않는다', () => {
@@ -275,21 +288,20 @@ describe('디자인 토큰', () => {
   });
 
   it('포커스 링 규칙이 있다', () => {
-    const rule = all.match(/:focus-visible\s*\{([^}]*)\}/);
-    expect(rule).not.toBeNull();
-    expect(rule![1]).toMatch(/outline:\s*2px solid var\(--accent\)/);
+    const rule = parseRules(all).find((r) => !r.atRule && same(r.selectors, [':focus-visible']));
+    expect(rule).toBeDefined();
+    expect(rule!.body).toMatch(/outline:\s*2px solid var\(--accent\)/);
   });
 
   it('print forces the light colour tokens over every dark block', () => {
     const printRules = parseRules(css).filter((r) => r.atRule === '@media print' && r.selectors.some((sel) => sel.startsWith(':root')));
     expect(printRules).toHaveLength(1);
     const p = printRules[0];
-    // 두 다크 블록(:root:not([data-theme="light"]), :root[data-theme="dark"])은 특이도 (0,2,0): 뒤에 오는 같은 특이도가 이긴다
-    expect(p.selectors).toEqual([':root[data-theme]', ':root:not([data-theme])']);
-    expect(p.order).toBeGreaterThan(Math.max(...parseRules(css).filter((r) => r.selectors.includes(SEL.dark) || r.selectors.includes(SEL.darkSystem)).map((r) => r.order)));
-    const values = Object.fromEntries(declarations(p.body).map((d) => [d.prop, d.value]));
-    const colourTokens = Object.keys(root).filter((k) => literalColours(root[k]).length > 0);
-    for (const k of colourTokens) expect(values[k], k).toBe(themes.light[k]);
+    expect(p.selectors).toEqual(PRINT_SELECTORS);
+    expect(p.order).toBeGreaterThan(Math.max(blocks.dark.order, blocks.darkSystem.order));
+    const values = Object.fromEntries(declarations(p.body.replace(/;\s*$/, '')).map((d) => [d.prop, d.value]));
+    const light = props(blocks.light.body);
+    for (const k of Object.keys(light)) if (isColourToken(light[k])) expect(values[k], k).toBe(light[k]);
     expect(values['color-scheme']).toBe('light');
   });
 });

@@ -27,15 +27,17 @@
 [data-depth="24"] { padding-left: calc(var(--indent) * 24); }
 
 /* 검색 결과: 한 건이 사이드바 폭 안에서 줄바꿈된다 */
-.search-results { --button-bg: var(--bg); }
-.search-results li { margin-top: var(--space-1); }
+.search-results li { margin-top: var(--space-2); }
 .search-results li > button {
   display: block;
   width: 100%;
   min-width: 0;
   text-align: left;
   overflow-wrap: anywhere;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
 }
+.search-results li > button:hover:not(:disabled) { background: var(--bg-hover); }
 /* 한 건 = 제목 · 경로 · 스니펫 세 줄. 마크업의 <br> 은 줄 구분이 이미 있으니 감춘다. */
 .search-results li > button > strong,
 .search-results li > button > small,
@@ -43,11 +45,11 @@
 .search-results li > button > br { display: none; }
 .search-results li > button > strong { font-weight: 600; }
 .search-results li > button > small { color: var(--text-muted); font-size: 0.86em; }
-.search-results li > button > span { margin-top: var(--space-1); color: var(--text-muted); }
+.search-results li > button > span { margin-top: var(--space-2); color: var(--text-muted); }
 
 /* 노트 트리: TreeView(role=tree, treeitem 은 .wf-tree-row)가 그린다. 줄의 기본 모양(접기 표시, 아이콘, hover)은
    .wf-tree-row 규칙이 정하고, 여기에는 노트 트리만의 것을 둔다. */
-.note-tree { padding-left: var(--space-2); }
+.note-tree { padding-left: var(--space-4); }
 .note-tree [role="treeitem"] {
   min-width: 0;
   /* 긴 이름은 사이드바를 밀지 않고 한 줄에서 말줄임. 전체 이름은 줄의 title 로 본다(NoteTree) */
@@ -73,26 +75,26 @@
 .note-tree [role="treeitem"][aria-current="true"]:hover { background: var(--bg-selection); }
 
 /* Workflows 패널: 찾기, 묶는 기준, 새 실험, 실험 트리, 카탈로그 트리 */
-.workflows-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+.workflows-panel { display: flex; flex-direction: column; gap: var(--space-4); }
 .workflows-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
 }
 .workflows-search { flex: 1 1 100%; min-width: 0; }
 .workflows-group-by { flex: 1 1 auto; min-width: 0; }
-.workflows-hint { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); }
+.workflows-hint { margin: 0; padding: 0 var(--space-5); color: var(--text-muted); }
 
-.wf-tree { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
+.wf-tree { margin: 0; padding: 0 0 0 var(--space-4); list-style: none; }
 .wf-tree-row {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   min-width: 0;
-  padding-top: var(--space-1);
-  padding-bottom: var(--space-1);
-  padding-right: var(--space-3);
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  padding-right: var(--space-5);
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -116,9 +118,9 @@
 .wf-tree-row:not([aria-expanded])::before { content: ""; flex: none; width: 1em; }
 
 /* Samples 패널(SP5 Task 25): 찾기, 도움말, Local·Global 트리. 종류 줄의 견본은 편집기의 종류 색 토큰으로 칠한다 */
-.samples-panel { display: flex; flex-direction: column; gap: var(--space-2); }
-.samples-search { margin: 0 var(--space-3); min-width: 0; }
-.samples-hint { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); font-size: var(--font-size-sm); }
+.samples-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.samples-search { margin: 0 var(--space-5); min-width: 0; }
+.samples-hint { margin: 0; padding: 0 var(--space-5); color: var(--text-muted); font-size: var(--font-size-sm); }
 .sample-swatch {
   flex: none;
   width: 0.75em;
@@ -138,17 +140,17 @@
 .sample-swatch.lno-sample-t-custom { background: var(--sample-custom-bg); }
 
 /* 링크 패널(SP4 Task 17): 백링크 묶음(출처 노트 머리, 흐린 폴더), 링크 부분을 mark 로 칠한 맥락 줄 */
-.links-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); }
-.links-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.links-panel { display: flex; flex-direction: column; gap: var(--space-5); padding: 0 var(--space-5) var(--space-5); }
+.links-section { display: flex; flex-direction: column; gap: var(--space-4); }
 .links-heading { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted); }
 .links-empty { margin: 0; color: var(--text-muted); }
-.links-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.links-group { display: flex; flex-direction: column; gap: var(--space-2); }
 .links-source,
 .links-context {
   display: block;
   width: 100%;
   min-width: 0;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 0;
   border-radius: var(--radius);
@@ -157,7 +159,7 @@
   text-align: left;
   cursor: pointer;
 }
-.links-source { display: flex; align-items: baseline; gap: var(--space-2); font-weight: 600; }
+.links-source { display: flex; align-items: baseline; gap: var(--space-4); font-weight: 600; }
 .links-source:hover,
 .links-context:hover { background: var(--bg-hover); }
 .links-source:focus-visible,
@@ -173,15 +175,15 @@
   font-size: var(--font-size-sm);
   font-weight: 400;
 }
-.links-list { margin: 0; padding: 0 0 0 var(--space-2); list-style: none; }
+.links-list { margin: 0; padding: 0 0 0 var(--space-4); list-style: none; }
 .links-context { font-size: var(--font-size-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 .links-context mark { background: var(--bg-selection); color: var(--text); border-radius: var(--radius); }
 .links-unlinked > summary { cursor: pointer; }
-.links-mention { display: flex; align-items: flex-start; gap: var(--space-1); }
+.links-mention { display: flex; align-items: flex-start; gap: var(--space-2); }
 .links-mention .links-context { flex: 1 1 auto; }
 .links-mention-link {
   flex: none;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -195,7 +197,7 @@
   display: block;
   width: 100%;
   min-width: 0;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 0;
   border-radius: var(--radius);
@@ -209,7 +211,7 @@ button.links-target:hover { background: var(--bg-hover); }
 button.links-target:focus-visible { outline-offset: -2px; }
 .links-target-unresolved { color: var(--text-muted); }
 .links-target-unknown { color: var(--text); cursor: default; }
-.links-unresolved-mark { margin-left: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); }
+.links-unresolved-mark { margin-left: var(--space-2); color: var(--text-muted); font-size: var(--font-size-sm); }
 
 /* 트리 아이콘(treeIcons.ts): CSS 글리프만, 토큰 색 */
 .tree-icon { flex: none; width: 1.2em; text-align: center; color: var(--text-muted); }

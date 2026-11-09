@@ -91,8 +91,8 @@ describe('앱 셸 CSS 계약', () => {
     // 영역별 hover 규칙은 없다: 전역 button:hover 와, 그보다 특이도가 높은 button.primary:hover 가 정한다
     expect(ruleFor('.topbar button:hover:not(:disabled)')).toBeNull();
     expect(ruleFor('.topbar button:not(.primary):hover:not(:disabled)')).toBeNull();
-    expect(ruleFor('button:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--bg-hover\)/);
-    expect(ruleFor('button.primary:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--accent\)/);
+    expect(ruleFor('button:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--bg-selected\)/);
+    expect(ruleFor('button.primary:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--accent-fill-hover\)/);
   });
 
   it('열린 줄의 색조는 :has() 없이 걸리고, 열린 줄도 hover 에 반응한다', () => {

@@ -60,7 +60,11 @@ describe('styles/*.css', () => {
   it('예전 app.css 의 선택자는 하나도 빠짐없이 옮겨졌다', () => {
     expect(OLD_APP_CSS_SELECTORS.length).toBeGreaterThan(300);
     const now = selectorKeys(allCss());
-    expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s))).toEqual([]);
+    // 새 팔레트(Task 2)가 일부러 없앤 것: 예전 시스템 다크 선택자(이제 :root:not([data-theme])),
+    // 컨테이너마다 단추 바탕을 되돌리던 --button-bg 규칙, 상단 바 select 의 바탕 덮기(입력은 이제 모두 --bg)
+    const RETIRED = ['@media (prefers-color-scheme: dark) :root:not([data-theme="light"])', '.topbar select', '.search-results'];
+    expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
+    for (const s of RETIRED) expect(now.has(s), s).toBe(false);
   });
 
   it('고대비와 인쇄의 창 틀 규칙은 맨 마지막 파일에 있다: 앞 파일들의 같은 특이도 규칙을 덮는다', () => {
@@ -69,7 +73,8 @@ describe('styles/*.css', () => {
     const heads = (text: string) => parseRules(text).filter((r) => r.atRule).map((r) => `${r.atRule} ${r.selectors.join(', ')}`);
     expect(heads(last.text)).toEqual(expect.arrayContaining(['@media (forced-colors: active) :focus-visible', '@media print .shell']));
     for (const s of styles.slice(0, -1)) {
-      expect(heads(s.text).filter((h) => h.includes('forced-colors')), s.file).toEqual([]);
+      // 앞 파일의 고대비 규칙은 tokens.css 의 토큰 대응 블록(:root …)뿐이다
+      expect(heads(s.text).filter((h) => h.includes('forced-colors') && !h.includes(':root')), s.file).toEqual([]);
       // 앞 파일의 인쇄 규칙은 tokens.css 의 라이트 토큰 블록뿐이다
       expect(heads(s.text).filter((h) => h.startsWith('@media print') && !h.includes(':root')), s.file).toEqual([]);
     }

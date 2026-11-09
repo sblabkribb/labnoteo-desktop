@@ -2,10 +2,9 @@
 
 /* 첫 실행 화면: 가운데 정렬 카드, 선택지 둘을 나란히 */
 .first-run {
-  --button-bg: var(--bg);
   max-width: 36rem;
-  margin: var(--space-6) auto;
-  padding: var(--space-5);
+  margin: var(--space-8) auto;
+  padding: var(--space-7);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -15,12 +14,12 @@
 .first-run-choices {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-5);
-  margin-top: var(--space-4);
+  gap: var(--space-7);
+  margin-top: var(--space-6);
 }
 .first-run-choices > div { flex: 1 1 12rem; min-width: 0; }
-.first-run-choices p { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 0.93em; }
-.first-run > [role="alert"] { margin: var(--space-4) 0 0; }
+.first-run-choices p { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: 0.93em; }
+.first-run > [role="alert"] { margin: var(--space-6) 0 0; }
 
 /* 대화상자(고르기, 입력, 확인): .shell 밖의 층. 열려 있는 동안 .shell 은 inert 다 */
 .dialog-layer {
@@ -30,7 +29,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 12vh var(--space-4) var(--space-4);
+  padding: 12vh var(--space-6) var(--space-6);
 }
 .dialog-backdrop {
   position: absolute;
@@ -41,71 +40,72 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-4);
   width: min(36rem, 100%);
   max-height: 76vh;
-  padding: var(--space-3) var(--space-4) var(--space-4);
-  background: var(--bg-elevated);
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  background: var(--bg);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-menu);
   color: var(--text);
 }
-.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .dialog-head h2 { margin: 0; font-size: 1.05em; font-weight: 600; }
-.dialog-close { padding: 0 var(--space-2); background: transparent; border: 0; color: var(--text-muted); }
+.dialog-close { padding: 0 var(--space-4); background: transparent; border: 0; color: var(--text-muted); }
 .dialog-close::before { content: "×"; content: "×" / ""; }
 .dialog > input, .picker-body > input { width: 100%; box-sizing: border-box; }
-.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-4); }
 
 .prompt-question { color: var(--text); }
 .prompt-hint { margin: 0; color: var(--text-muted); font-size: 0.93em; }
 .prompt-hint.warn { color: var(--warning); font-weight: 600; }
 .prompt-error { margin: 0; }
-.confirm-message p { margin: 0 0 var(--space-2); white-space: pre-wrap; }
+.confirm-message p { margin: 0 0 var(--space-4); white-space: pre-wrap; }
 
 /* 진행 창(SP6 Task 12): 줄 목록만 스크롤한다. 긴 줄은 감싼다 */
 .progress-lines { margin: 0; padding: 0; list-style: none; min-height: 0; max-height: 40vh; overflow-y: auto; color: var(--text-muted); font-size: 0.93em; }
 .progress-line { padding: 1px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.ai-answer { margin: 0 0 var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; font: inherit; }
+.ai-answer { margin: 0 0 var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; font: inherit; }
 
 /* 연동 설정(SP6 Task 13, D17): 본문만 스크롤하고 닫기 줄은 남는다. 주소·키 칸은 너비를 다 쓴다(플러그인의 width: 100%) */
 .dialog.integration-settings { width: min(42rem, 100%); }
-.integration-body { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; overflow-y: auto; }
-.integration-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.integration-body { display: flex; flex-direction: column; gap: var(--space-5); min-height: 0; overflow-y: auto; }
+.integration-section { display: flex; flex-direction: column; gap: var(--space-4); }
 .integration-section h3 { margin: 0; font-size: 1em; }
-.integration-group { display: flex; flex-direction: column; gap: var(--space-2); }
-.integration-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.integration-group { display: flex; flex-direction: column; gap: var(--space-4); }
+.integration-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .integration-field input[type="text"], .integration-field input[type="password"] { width: 100%; box-sizing: border-box; }
-.integration-key-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.integration-key-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
 .integration-key-state { color: var(--text-muted); font-size: 0.93em; }
 .integration-key-state.set { color: var(--text); font-weight: 600; }
-.integration-key-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.integration-key-row { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .integration-key-row input[type="password"] { flex: 1 1 12rem; width: auto; min-width: 0; }
 .integration-allow { color: var(--text); font-size: 0.93em; }
-.integration-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.integration-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-4); }
 
 /* 샘플 정의 창(SP5 Task 23): 짧은 이름 칸과 넓은 값 칸(JSON 경로가 길다). 본문만 스크롤하고 단추 줄은 감싼다(#283) */
 .dialog.sample-def { width: min(44rem, 100%); }
-.sample-def-body { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; overflow-y: auto; }
-.sample-def-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; }
+.sample-def-body { display: flex; flex-direction: column; gap: var(--space-5); min-height: 0; overflow-y: auto; }
+.sample-def-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-5); margin: 0; }
 .sample-def-row { display: contents; }
 .sample-def-row dt { color: var(--text-muted); }
 .sample-def-row dd { display: flex; flex-direction: column; margin: 0; min-width: 0; }
 .sample-def-value { white-space: pre-wrap; overflow-wrap: anywhere; }
 .sample-def-from { color: var(--text-muted); font-size: 0.9em; }
-.sample-def-section h3 { margin: 0 0 var(--space-1); font-size: 1em; }
+.sample-def-section h3 { margin: 0 0 var(--space-2); font-size: 1em; }
 .sample-def-usages p { margin: 0; color: var(--text-muted); }
 .sample-def-usage-group summary { cursor: pointer; }
-.sample-def-usage-group ul { margin: 0; padding-left: var(--space-4); }
+.sample-def-usage-group ul { margin: 0; padding-left: var(--space-6); }
 button.sample-def-link { padding: 0; background: transparent; border: 0; color: var(--accent); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 button.sample-def-link:hover { text-decoration: underline; }
 .sample-def-notice { margin: 0; color: var(--text-muted); font-size: 0.93em; }
 
-.picker-body { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.picker-body { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; }
 .picker-list { margin: 0; padding: 0; list-style: none; overflow-y: auto; min-height: 0; }
-.picker-option { display: flex; flex-direction: column; padding: var(--space-1) var(--space-2); border-radius: var(--radius); cursor: pointer; }
+.picker-option { display: flex; flex-direction: column; padding: var(--space-2) var(--space-4); border-radius: var(--radius); cursor: pointer; }
 .picker-option[aria-selected="true"] { background: var(--bg-selected); }
-.picker-option label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); cursor: pointer; }
+.picker-option label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-4); cursor: pointer; }
 .picker-option.dimmed .picker-label { color: var(--text-muted); }
 .picker-desc, .picker-detail { color: var(--text-muted); font-size: 0.9em; }
 .picker-note { margin: 0; color: var(--text-muted); font-size: 0.93em; }
@@ -116,19 +116,19 @@ button.sample-def-link:hover { text-decoration: underline; }
 /* 별칭 입력: 고칠 수 없는 [id 이름] 머리 오른쪽에 넓은 입력 칸 */
 .alias-about, .alias-description { margin: 0; }
 .alias-description { color: var(--text-muted); font-size: 0.93em; }
-.alias-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.alias-row { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
 .alias-prefix { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-family: var(--font-mono); }
 .alias-input { flex: 1 1 auto; min-width: 0; }
 
 /* SP7 Part A: print and barcode */
 /* 실험 워크시트 창(Task 8): 유닛 오퍼레이션 체크박스 목록(길면 이 목록만 스크롤), 줄마다 실험실/소프트웨어 표시, 용지 고르기 */
 .dialog.worksheet { width: min(40rem, 100%); }
-.worksheet-body { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
-.worksheet-ops { display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; max-height: 40vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
-.worksheet-ops li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
-.worksheet-ops label { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.worksheet-body { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; }
+.worksheet-ops { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; max-height: 40vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.worksheet-ops li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
+.worksheet-ops label { display: flex; align-items: baseline; gap: var(--space-4); min-width: 0; overflow-wrap: anywhere; }
 .worksheet-kind { flex: none; color: var(--text-muted); font-size: 0.93em; }
-.worksheet-paper { display: flex; align-items: center; gap: var(--space-2); }
+.worksheet-paper { display: flex; align-items: center; gap: var(--space-4); }
 /* 노트 바코드 창(Task 11): 화면에서 찍을 수 있는 크기의 QR(조용한 여백은 그림 안), 그 아래 고정폭 ID */
 .dialog.barcode { width: min(28rem, 100%); }
 .barcode-title { margin: 0; overflow-wrap: anywhere; }
@@ -142,7 +142,7 @@ button.sample-def-link:hover { text-decoration: underline; }
 .scan-drop {
   display: block;
   width: 100%;
-  padding: var(--space-6) var(--space-4);
+  padding: var(--space-8) var(--space-6);
   background: transparent;
   border: 2px dashed var(--border-strong);
   border-radius: var(--radius);
@@ -151,28 +151,28 @@ button.sample-def-link:hover { text-decoration: underline; }
   cursor: pointer;
 }
 .scan-drop.over { border-color: var(--accent); color: var(--text); }
-.scan-import-folder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.scan-import-folder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .scan-import-folder .prompt-hint { flex: 1 1 16rem; margin: 0; }
 /* 스캔 결과 창(Task 25): 페이지마다 한 줄(이름과 설명, 오른쪽에 단추), 길면 이 목록만 스크롤 */
 .dialog.scan-results-dialog { width: min(44rem, 100%); }
-.scan-results { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; max-height: 55vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
-.scan-results li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.scan-results { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; max-height: 55vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.scan-results li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
 .scan-result-text { display: flex; flex: 1 1 18rem; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .scan-result-desc { color: var(--text-muted); font-size: 0.93em; }
-.scan-result-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.scan-result-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 /* 미분류 스캔 대기열(Task 26): 줄마다 이름·이유·작은 그림, 오른쪽에 넣기와 지우기. 그림을 누르면 창 안에서 크게(.scan-zoom) */
 .dialog.scan-unmatched-dialog { width: min(44rem, 100%); }
-.scan-unmatched { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; max-height: 60vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
-.scan-unmatched li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
-.scan-thumb-button { align-self: flex-start; margin-top: var(--space-1); padding: 0; background: transparent; border: 0; cursor: zoom-in; }
+.scan-unmatched { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; max-height: 60vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.scan-unmatched li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
+.scan-thumb-button { align-self: flex-start; margin-top: var(--space-2); padding: 0; background: transparent; border: 0; cursor: zoom-in; }
 .scan-thumb { display: block; max-width: 220px; max-height: 220px; }
 .scan-zoom { display: block; width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-out; }
 .scan-zoom img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
 /* 바코드와 스캔 설정(Task 29): 스캔 폴더 경로는 읽기 전용 고정폭 글(길면 줄바꿈), 단추 줄, 화질 막대와 그 값, Slack 앱 만드는 법은 줄마다 */
-.scan-folder-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.scan-folder-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 .scan-folder-path { flex: 1 1 14rem; min-width: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
 .scan-number { width: 8rem; }
-.scan-quality { display: flex; align-items: center; gap: var(--space-2); }
+.scan-quality { display: flex; align-items: center; gap: var(--space-4); }
 .scan-quality input[type="range"] { flex: 1 1 12rem; min-width: 0; }
 .scan-quality output { flex: none; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .scan-howto summary { cursor: pointer; }
@@ -182,9 +182,9 @@ button.sample-def-link:hover { text-decoration: underline; }
 /* 연동 설정의 MCP 묶음(Task 37): 포트 칸은 좁게, 토큰은 번호만, 단추는 한 줄에 */
 .integration-field input.mcp-port { width: 8rem; }
 .mcp-token-state { margin: 0; color: var(--text); font-weight: 600; }
-.mcp-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.mcp-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 /* 클라이언트 연결: 클라이언트마다 이름과 복사 단추, 그 아래 <token> 자리 표시가 든 설정 글(길면 이 상자만 가로로 스크롤) */
-.mcp-client { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
-.mcp-client-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.mcp-client { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.mcp-client-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
 .mcp-client-name { font-weight: 600; }
-.mcp-snippet { margin: 0; padding: var(--space-2); max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: 0.85em; white-space: pre; user-select: text; }
+.mcp-snippet { margin: 0; padding: var(--space-4); max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-elevated); color: var(--text); font-family: var(--font-mono); font-size: 0.85em; white-space: pre; user-select: text; }

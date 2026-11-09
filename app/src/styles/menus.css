@@ -3,23 +3,24 @@
 /* 알림(토스트): .shell 과 대화상자 층 밖, 오른쪽 아래. 대화상자가 .shell 을 inert 로 막아도 닫을 수 있다 */
 .toaster {
   position: fixed;
-  right: var(--space-4);
-  bottom: var(--space-4);
+  right: var(--space-6);
+  bottom: var(--space-6);
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: var(--space-2);
-  max-width: min(28rem, calc(100vw - 2 * var(--space-4)));
+  gap: var(--space-4);
+  max-width: min(28rem, calc(100vw - 2 * var(--space-6)));
   pointer-events: none;
 }
 .toast {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-elevated);
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--menu-bg);
   border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-menu);
   border-left-width: 4px;
   border-radius: var(--radius);
   color: var(--text);
@@ -28,10 +29,10 @@
 .toast.warn { border-left-color: var(--warning); }
 .toast.error { border-left-color: var(--danger); }
 .toast-message { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
-.toast-close { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--text-muted); }
+.toast-close { flex: none; padding: 0 var(--space-2); background: transparent; border: 0; color: var(--text-muted); }
 .toast-close::before { content: "×"; content: "×" / ""; }
 /* 알림 안의 단추("자세히", "결과 다시 보기"): 글자 단추처럼 */
-.toast-action { flex: none; padding: 0 var(--space-1); background: transparent; border: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.toast-action { flex: none; padding: 0 var(--space-2); background: transparent; border: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
 
 /* 맥락 메뉴: .shell 밖의 층. 위치(left, top)는 ContextMenu 가 CSSOM 으로 정한다 */
 .context-menu {
@@ -42,17 +43,18 @@
   display: flex;
   flex-direction: column;
   min-width: 12rem;
-  max-width: min(24rem, calc(100vw - 2 * var(--space-2)));
-  max-height: calc(100vh - 2 * var(--space-2));
+  max-width: min(24rem, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100vh - 2 * var(--space-4));
   overflow-y: auto;
-  padding: var(--space-1);
-  background: var(--bg-elevated);
+  padding: var(--space-2);
+  background: var(--menu-bg);
   border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-menu);
   border-radius: var(--radius);
   color: var(--text);
 }
 .context-menu-item {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 0;
   border-radius: var(--radius);
@@ -61,4 +63,4 @@
 }
 .context-menu-item:hover:not(:disabled), .context-menu-item:focus { background: var(--bg-selected); }
 .context-menu-item:disabled { color: var(--text-muted); }
-.context-menu-separator { flex: none; height: 1px; margin: var(--space-1) 0; background: var(--border); }
+.context-menu-separator { flex: none; height: 1px; margin: var(--space-2) 0; background: var(--border); }

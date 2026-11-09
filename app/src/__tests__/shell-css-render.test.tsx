@@ -162,7 +162,7 @@ describe('열린 노트의 강조 막대', () => {
   });
 });
 
-describe('단추 배경은 --button-bg 하나로 정한다', () => {
+describe('단추는 평평하다: 보조는 회색 채움, 주된 것은 강조 채움, 테두리 없음', () => {
   /** 컨테이너 선택자를 실제 마크업으로 세운다. 그 안에 보통 단추와 주된 단추를 하나씩 둔다. */
   const MARKUP: Record<string, string> = {
     '.topbar': '<header class="topbar"><button>a</button><button class="primary">b</button></header>',
@@ -170,17 +170,46 @@ describe('단추 배경은 --button-bg 하나로 정한다', () => {
     '.notices > aside': '<div class="notices"><aside><button>a</button><button class="primary">b</button></aside></div>',
   };
 
-  it.each(['.topbar', '.first-run', '.notices > aside'])('%s: plain button uses --button-bg, primary keeps accent', (c) => {
+  it.each(['.topbar', '.first-run', '.notices > aside'])('%s: plain button is --bg-hover, primary is --accent-fill', (c) => {
     document.body.innerHTML = MARKUP[c];
-    expect(winning(document.querySelector(c)!, '--button-bg')).toBe('var(--bg)');
-    expect(winning(document.querySelector(`${c} button:not(.primary)`)!, 'background')).toBe('var(--button-bg, var(--bg-elevated))');
-    expect(winning(document.querySelector(`${c} button.primary`)!, 'background')).toBe('var(--accent)');
+    const plain = document.querySelector(`${c} button:not(.primary)`)!;
+    const primary = document.querySelector(`${c} button.primary`)!;
+    expect(winning(plain, 'background')).toBe('var(--bg-hover)');
+    expect(winning(plain, 'border')).toBe('0');
+    expect(winning(plain, 'min-height')).toBe('28px');
+    expect(winning(primary, 'background')).toBe('var(--accent-fill)');
+    expect(winning(primary, 'color')).toBe('var(--accent-text)');
   });
 
-  it('검색 결과 단추도 컨테이너의 --button-bg 를 쓴다', () => {
+  it('.btn 클래스도 같은 모양이고, ghost 는 투명, ibtn 은 테두리 없는 아이콘 단추다', () => {
+    document.body.innerHTML = '<span class="btn">a</span><span class="btn primary">b</span><span class="btn ghost">c</span><span class="ibtn">d</span>';
+    expect(winning(document.querySelector('.btn:not(.primary):not(.ghost)')!, 'background')).toBe('var(--bg-hover)');
+    expect(winning(document.querySelector('.btn.primary')!, 'background')).toBe('var(--accent-fill)');
+    expect(winning(document.querySelector('.btn.ghost')!, 'background')).toBe('transparent');
+    const ibtn = document.querySelector('.ibtn')!;
+    expect(winning(ibtn, 'background')).toBe('transparent');
+    expect(winning(ibtn, 'border')).toBe('0');
+    expect(winning(ibtn, 'color')).toBe('var(--text-muted)');
+  });
+
+  it('입력은 28px, --bg 바탕, 1px --border 테두리다 (예전 진한 #8a8a94 테두리 없음); 체크박스는 높이를 받지 않는다', () => {
+    document.body.innerHTML = '<input type="text"><select></select><input type="checkbox"><textarea></textarea>';
+    const text = document.querySelector('input[type="text"]')!;
+    expect(winning(text, 'border')).toBe('1px solid var(--border)');
+    expect(winning(text, 'background')).toBe('var(--bg)');
+    expect(winning(text, 'min-height')).toBe('28px');
+    expect(winning(document.querySelector('select')!, 'min-height')).toBe('28px');
+    expect(winning(document.querySelector('input[type="checkbox"]')!, 'min-height')).toBeUndefined();
+    expect(winning(document.querySelector('textarea')!, 'min-height')).toBeUndefined();
+  });
+
+  it('--button-bg 되돌리기 장치는 없다', () => {
+    expect(allCss()).not.toContain('--button-bg');
+  });
+
+  it('검색 결과 단추는 줄처럼 투명하고 hover 에만 채운다', () => {
     document.body.innerHTML = '<ul class="plain-list search-results"><li><button>x</button></li></ul>';
-    expect(winning(document.querySelector('.search-results')!, '--button-bg')).toBe('var(--bg)');
-    expect(winning(document.querySelector('button')!, 'background')).toBe('var(--button-bg, var(--bg-elevated))');
+    expect(winning(document.querySelector('button')!, 'background')).toBe('transparent');
   });
 
   it('alert inside .sidebar-panel > section stays danger', () => {

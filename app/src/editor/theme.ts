@@ -41,8 +41,8 @@ import type { Extension } from '@codemirror/state';
  * - 위젯 기본 클래스: 편집기 안의 위젯은 `.lno-widget`(틀), `.lno-btn`(단추: hover·disabled·focus-visible),
  *   `.lno-popover`(뜨는 메뉴·창, z-index 는 --z-popover), `.lno-chip`(작은 꼬리표)을 달고, 위젯 고유의 규칙은 그 뒤에 덧쓴다.
  */
-const panel = { backgroundColor: 'var(--bg-elevated)', color: 'var(--text)' };
-const arrow = (side: 'Top' | 'Bottom', fill: 'var(--border-strong)' | 'var(--bg-elevated)') => ({ [`border${side}`]: `7px solid ${fill}` });
+const panel = { backgroundColor: 'var(--bg-side)', color: 'var(--text)' };
+const arrow = (side: 'Top' | 'Bottom', fill: 'var(--border-strong)' | 'var(--menu-bg)') => ({ [`border${side}`]: `7px solid ${fill}` });
 
 export const editorThemeSpec = {
   '&': {
@@ -50,74 +50,75 @@ export const editorThemeSpec = {
     backgroundColor: 'var(--bg)',
     minHeight: '50vh',
     fontFamily: 'var(--font-ui)',
-    fontSize: 'var(--font-size)',
+    fontSize: 'var(--font-size-editor)',
   },
   '&.cm-focused': { outline: 'none' }, // 바깥 포커스 링은 styles/shell.css 의 틀이 그린다
   '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.7' },
-  '.cm-content': { padding: 'var(--space-3) 0', caretColor: 'var(--text)' },
-  '.cm-line': { padding: '0 var(--space-3)' },
+  '.cm-content': { padding: 'var(--space-5) 0', caretColor: 'var(--text)' },
+  '.cm-line': { padding: '0 var(--space-5)' },
   // 네이티브 선택(drawSelection 을 쓰지 않는다). 글자색도 정해, 강조색·흐린 글자가 선택 배경 위에서 대비를 잃지 않게 한다.
   '.cm-content ::selection': { background: 'var(--bg-selection)', color: 'var(--text)' },
   '.cm-specialChar': { color: 'var(--text-muted)' },
   '.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
-  '.cm-gutters': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-muted)', border: '0px solid var(--border)' },
+  '.cm-gutters': { backgroundColor: 'var(--bg)', color: 'var(--text-muted)', border: '0px solid var(--border)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)' },
   '.cm-panels': panel,
   '.cm-panels-top': { borderBottom: '1px solid var(--border)' },
   '.cm-panels-bottom': { borderTop: '1px solid var(--border)' },
   '.cm-button': {
     backgroundImage: 'none',
-    backgroundColor: 'var(--bg-elevated)',
-    border: '1px solid var(--border-strong)',
+    backgroundColor: 'var(--bg-hover)',
+    border: '1px solid var(--bg-hover)',
     '&:active': { backgroundImage: 'none', backgroundColor: 'var(--bg-hover)' },
   },
-  '.cm-textfield': { backgroundColor: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border-strong)' },
-  '.cm-tooltip': { border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text)' },
+  '.cm-textfield': { backgroundColor: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)' },
+  '.cm-tooltip': { border: '1px solid var(--border-strong)', backgroundColor: 'var(--menu-bg)', color: 'var(--text)', boxShadow: 'var(--shadow-menu)' },
   '.cm-tooltip-section:not(:first-child)': { borderTop: '1px solid var(--border-strong)' },
   '.cm-tooltip-arrow': {
     '.cm-tooltip-above &': {
       '&:before': arrow('Top', 'var(--border-strong)'),
-      '&:after': arrow('Top', 'var(--bg-elevated)'),
+      '&:after': arrow('Top', 'var(--menu-bg)'),
     },
     '.cm-tooltip-below &': {
       '&:before': arrow('Bottom', 'var(--border-strong)'),
-      '&:after': arrow('Bottom', 'var(--bg-elevated)'),
+      '&:after': arrow('Bottom', 'var(--menu-bg)'),
     },
   },
   // 자동 완성(@codemirror/autocomplete 6.20.4). 그 기본 테마의 선택자를 글자 그대로 다시 쓴다: 특이도가 같고 이 테마 모듈이 뒤에
   // 붙으므로 이긴다. 덮는 색: `&light … li[aria-selected]` 의 #17c/white, 비활성 목록의 #777, 구역 머리의 silver 밑줄,
   // 스니펫 칸의 #00000022 와 #888 점선. `&.cm-editor` 를 앞에 붙이지 않는다: theme-guard 는 같은 선택자 글자만 덮은 것으로 친다.
-  '& .cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent)', color: 'var(--accent-text)' },
+  '& .cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent-fill)', color: 'var(--accent-text)' },
   '& .cm-tooltip-autocomplete-disabled ul li[aria-selected]': { background: 'var(--text-muted)' },
   '& .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': { borderBottomColor: 'var(--border)' },
   '& .cm-snippetField': { backgroundColor: 'var(--bg-selection)' },
   '& .cm-snippetFieldPosition': { borderLeftColor: 'var(--text-muted)' },
-  '& .cm-tooltip-autocomplete': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' },
+  '& .cm-tooltip-autocomplete': { backgroundColor: 'var(--menu-bg)', color: 'var(--text)', border: '1px solid var(--border)' },
   // 위젯 기본 클래스. 위젯 고유의 규칙(.lno-table-tool 등)은 같은 특이도로 이 뒤에 오므로 여기 값을 덧쓴다.
   '.lno-widget': { fontFamily: 'var(--font-ui)', color: 'var(--text)' },
   '.lno-btn': {
     font: 'inherit',
     color: 'var(--text)',
-    backgroundColor: 'var(--bg-elevated)',
-    border: '1px solid var(--border-strong)',
+    backgroundColor: 'var(--bg-hover)',
+    border: '1px solid var(--bg-hover)',
     borderRadius: 'var(--radius)',
-    padding: '0 var(--space-2)',
+    padding: '0 var(--space-4)',
     cursor: 'pointer',
-    '&:hover:not(:disabled)': { backgroundColor: 'var(--bg-hover)' },
+    '&:hover:not(:disabled)': { backgroundColor: 'var(--bg-selected)', borderColor: 'var(--bg-selected)' },
     '&:disabled': { color: 'var(--text-muted)', cursor: 'default' },
     '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
   },
   '.lno-popover': {
     position: 'absolute',
     zIndex: 'var(--z-popover)',
-    padding: 'var(--space-1)',
-    backgroundColor: 'var(--bg-elevated)',
+    padding: 'var(--space-2)',
+    backgroundColor: 'var(--menu-bg)',
     border: '1px solid var(--border-strong)',
-    borderRadius: 'var(--radius)',
+    borderRadius: 'var(--radius-l)',
+    boxShadow: 'var(--shadow-menu)',
   },
   '.lno-chip': {
     display: 'inline-block',
-    padding: '0 var(--space-1)',
+    padding: '0 var(--space-2)',
     fontSize: '0.85em',
     lineHeight: '1.4',
     color: 'var(--text-muted)',
@@ -153,20 +154,20 @@ export const editorThemeSpec = {
     fontStyle: 'italic',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
-    padding: '0 var(--space-1)',
+    padding: '0 var(--space-2)',
   },
   // 목록: 글머리 점(BulletWidget)과 번호. 깊이마다 왼쪽 여백을 늘리고 같은 만큼 첫 줄을 당겨(textIndent) 걸친 줄이
   // 항목의 글 첫 칸에 맞는다(내어쓰기). 줄 앞의 들임 공백은 글자 그대로 남아 첫 줄을 그 깊이로 민다.
   '.lno-bullet': { display: 'inline-block', minWidth: '2ch', textIndent: '0', color: 'var(--text-muted)' },
   '.lno-ol-mark': { color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' },
-  '.lno-li-d1': { paddingLeft: 'calc(var(--space-3) + 2ch)', textIndent: '-2ch' },
-  '.lno-li-d2': { paddingLeft: 'calc(var(--space-3) + 4ch)', textIndent: '-4ch' },
-  '.lno-li-d3': { paddingLeft: 'calc(var(--space-3) + 6ch)', textIndent: '-6ch' },
-  '.lno-li-d4': { paddingLeft: 'calc(var(--space-3) + 8ch)', textIndent: '-8ch' },
-  '.lno-li-d5': { paddingLeft: 'calc(var(--space-3) + 10ch)', textIndent: '-10ch' },
-  '.lno-li-d6': { paddingLeft: 'calc(var(--space-3) + 12ch)', textIndent: '-12ch' },
-  '.lno-li-d7': { paddingLeft: 'calc(var(--space-3) + 14ch)', textIndent: '-14ch' },
-  '.lno-li-d8': { paddingLeft: 'calc(var(--space-3) + 16ch)', textIndent: '-16ch' },
+  '.lno-li-d1': { paddingLeft: 'calc(var(--space-5) + 2ch)', textIndent: '-2ch' },
+  '.lno-li-d2': { paddingLeft: 'calc(var(--space-5) + 4ch)', textIndent: '-4ch' },
+  '.lno-li-d3': { paddingLeft: 'calc(var(--space-5) + 6ch)', textIndent: '-6ch' },
+  '.lno-li-d4': { paddingLeft: 'calc(var(--space-5) + 8ch)', textIndent: '-8ch' },
+  '.lno-li-d5': { paddingLeft: 'calc(var(--space-5) + 10ch)', textIndent: '-10ch' },
+  '.lno-li-d6': { paddingLeft: 'calc(var(--space-5) + 12ch)', textIndent: '-12ch' },
+  '.lno-li-d7': { paddingLeft: 'calc(var(--space-5) + 14ch)', textIndent: '-14ch' },
+  '.lno-li-d8': { paddingLeft: 'calc(var(--space-5) + 16ch)', textIndent: '-16ch' },
   // 할 일 체크박스: 숨긴 `- [ ]` 자리에 선다. 체크 색은 강조색.
   '.lno-task': {
     width: '1em',
@@ -174,13 +175,13 @@ export const editorThemeSpec = {
     margin: '0',
     textIndent: '0',
     verticalAlign: 'middle',
-    accentColor: 'var(--accent)',
+    accentColor: 'var(--accent-fill)',
     cursor: 'pointer',
   },
   '.lno-task-done': { color: 'var(--text-muted)', textDecorationLine: 'line-through' },
   // 인용(live/inline.ts): 왼쪽 선과 흐린 글. 콜아웃은 종류별 선 색과 옅은 바탕, 첫 줄의 제목은 굵게.
   '.lno-quote': { borderLeft: '3px solid var(--border-strong)', color: 'var(--text-muted)' },
-  '.lno-callout': { borderLeft: '3px solid var(--border)', backgroundColor: 'var(--bg-elevated)' },
+  '.lno-callout': { borderLeft: '3px solid var(--border)', backgroundColor: 'var(--bg-side)' },
   '.lno-callout-note': { borderLeftColor: 'var(--accent)' },
   '.lno-callout-info': { borderLeftColor: 'var(--accent)' },
   '.lno-callout-tip': { borderLeftColor: 'var(--success)' },
@@ -188,7 +189,7 @@ export const editorThemeSpec = {
   '.lno-callout-danger': { borderLeftColor: 'var(--danger)' },
   '.lno-callout-title': { fontWeight: '700' },
   // 울타리 코드 블록: 고정폭 글꼴과 바탕. 첫·끝 줄만 모서리를 둥글린다. 울타리 줄(```)은 숨기지 않고 흐리게.
-  '.lno-codeblock': { backgroundColor: 'var(--bg-elevated)', fontFamily: 'var(--font-mono)', fontSize: '0.93em' },
+  '.lno-codeblock': { backgroundColor: 'var(--bg-side)', fontFamily: 'var(--font-mono)', fontSize: '0.93em' },
   '.lno-codeblock-first': { borderTopLeftRadius: 'var(--radius)', borderTopRightRadius: 'var(--radius)' },
   '.lno-codeblock-last': { borderBottomLeftRadius: 'var(--radius)', borderBottomRightRadius: 'var(--radius)' },
   '.lno-fence': { color: 'var(--text-muted)' },
@@ -197,8 +198,8 @@ export const editorThemeSpec = {
   '.lno-hr::before': {
     content: '""',
     position: 'absolute',
-    left: 'var(--space-3)',
-    right: 'var(--space-3)',
+    left: 'var(--space-5)',
+    right: 'var(--space-5)',
     top: '50%',
     borderTop: '1px solid var(--border-strong)',
     pointerEvents: 'none',
@@ -234,21 +235,21 @@ export const editorThemeSpec = {
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
   // 틀은 표 폭만큼만 차지해 도구 줄이 표 오른쪽 끝에 붙는다. 넓은 표는 100% 에서 멈추고 안쪽 틀이 스크롤한다.
   // 속성(머리말) 격자: 키와 값 두 칸. 값 칸의 글은 줄을 넘기면 감싼다.
-  '.lno-props-wrap': { padding: 'var(--space-2) var(--space-3)' },
+  '.lno-props-wrap': { padding: 'var(--space-4) var(--space-5)' },
   '.lno-props': {
-    padding: 'var(--space-1) var(--space-2)',
+    padding: 'var(--space-2) var(--space-4)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
     backgroundColor: 'var(--bg-elevated)',
   },
-  '.lno-props-head': { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)', padding: 'var(--space-1) 0' },
+  '.lno-props-head': { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-4)', padding: 'var(--space-2) 0' },
   '.lno-props-title': { fontWeight: '700', color: 'var(--text-muted)' },
   '.lno-props-row': {
     display: 'grid',
     gridTemplateColumns: 'minmax(8em, 30%) 1fr auto',
     alignItems: 'baseline',
-    gap: 'var(--space-2)',
-    padding: 'var(--space-1) 0',
+    gap: 'var(--space-4)',
+    padding: 'var(--space-2) 0',
     borderTop: '1px solid var(--border)',
   },
   '.lno-props-key': { color: 'var(--text-muted)', overflowWrap: 'anywhere' },
@@ -258,7 +259,7 @@ export const editorThemeSpec = {
   '.lno-props-linkcell': { minWidth: '0' },
   '.lno-prop-links': {
     cursor: 'text',
-    padding: '0 var(--space-1)',
+    padding: '0 var(--space-2)',
     border: '1px solid var(--bg-elevated)', // 입력 칸과 같은 자리: 고치기로 바뀔 때 칸이 움직이지 않는다
     borderRadius: 'var(--radius)',
     '&:hover': { borderColor: 'var(--border)' },
@@ -272,7 +273,7 @@ export const editorThemeSpec = {
     minWidth: '0',
     width: '100%',
     boxSizing: 'border-box',
-    padding: '0 var(--space-1)',
+    padding: '0 var(--space-2)',
     color: 'var(--text)',
     backgroundColor: 'var(--bg-elevated)',
     border: '1px solid var(--bg-elevated)', // 배경과 같은 색: 테두리가 드러날 때 칸이 움직이지 않는다
@@ -283,16 +284,16 @@ export const editorThemeSpec = {
   },
   '.lno-props-input.lno-props-key': { color: 'var(--text-muted)' },
   '.lno-props-status': { cursor: 'pointer', justifySelf: 'start' },
-  '.lno-props-actions': { display: 'inline-flex', gap: 'var(--space-1)' },
+  '.lno-props-actions': { display: 'inline-flex', gap: 'var(--space-2)' },
   '.lno-props-add': {
     display: 'grid',
     gridTemplateColumns: 'minmax(8em, 30%) 1fr auto',
     alignItems: 'baseline',
-    gap: 'var(--space-2)',
-    padding: 'var(--space-1) 0',
+    gap: 'var(--space-4)',
+    padding: 'var(--space-2) 0',
     borderTop: '1px solid var(--border)',
   },
-  '.lno-table-wrap': { position: 'relative', padding: 'var(--space-2) var(--space-3)', width: 'fit-content', maxWidth: '100%', boxSizing: 'border-box' },
+  '.lno-table-wrap': { position: 'relative', padding: 'var(--space-4) var(--space-5)', width: 'fit-content', maxWidth: '100%', boxSizing: 'border-box' },
   '.lno-table-scroll': { overflowX: 'auto' },
   // 칸 사이 선이 겹치지 않게: 칸은 오른쪽·아래 선만, 표가 왼쪽·위 선을 긋는다(border-collapse 의 값이 색 이름 검사에 걸린다)
   '.lno-table': {
@@ -305,7 +306,7 @@ export const editorThemeSpec = {
   '.lno-table th, .lno-table td': {
     borderRight: '1px solid var(--border)',
     borderBottom: '1px solid var(--border)',
-    padding: 'var(--space-1) var(--space-2)',
+    padding: 'var(--space-2) var(--space-4)',
     verticalAlign: 'top',
     textAlign: 'left',
     minWidth: '3em',
@@ -326,8 +327,8 @@ export const editorThemeSpec = {
   // 가리키거나 포커스가 들어올 때만 보이고(키보드로도 닿는다), 숨었을 때는 앞 줄을 누르는 것을 가로채지 않는다.
   '.lno-table-toolbar': {
     position: 'absolute',
-    bottom: 'calc(100% - var(--space-2))',
-    right: 'var(--space-3)',
+    bottom: 'calc(100% - var(--space-4))',
+    right: 'var(--space-5)',
     zIndex: 'var(--z-widget)',
     display: 'flex',
     gap: '2px',
@@ -338,7 +339,7 @@ export const editorThemeSpec = {
   '.lno-table-toolbar .lno-table-strip-tool': {
     minWidth: '1.75em',
     lineHeight: '1.4',
-    padding: '0 var(--space-1)',
+    padding: '0 var(--space-2)',
     textAlign: 'center',
   },
   // 셀 편집기(table/cellEditor.ts): 칸 안에 뜨는 작은 CodeMirror. 바깥 편집기의 줄·본문 여백을 걷고, 포커스는 칸의 윤곽선으로 보인다

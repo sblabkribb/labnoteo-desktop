@@ -54,6 +54,15 @@ describe('테마 부트 스크립트', () => {
     }
   });
 
+  it('System(또는 모르는 값)이면 이미 걸린 data-theme 을 지운다: tokens.css 의 시스템 다크 블록은 :root:not([data-theme]) 에만 걸린다', () => {
+    for (const stored of ['system', 'sepia', undefined]) {
+      html.setAttribute('data-theme', 'light');
+      vi.stubGlobal('localStorage', memoryStorage(stored === undefined ? {} : { [THEME_KEY]: stored }));
+      run();
+      expect(html.hasAttribute('data-theme'), String(stored)).toBe(false);
+    }
+  });
+
   it('저장소가 없거나, 읽기가 던지거나, 저장소에 닿기만 해도 던져도 조용히 넘어간다', () => {
     const deny = () => {
       throw new Error('denied');
