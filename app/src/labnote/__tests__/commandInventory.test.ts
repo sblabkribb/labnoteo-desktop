@@ -27,6 +27,7 @@ const PORTED = [
   'sync-workflow-checklist',
   'open-workflow-view',
   'insert-experiment-samples-table',
+  'open-sample-definition',
 ] as const;
 
 /** 아직 옮기지 않은 플러그인 명령과 그것을 옮길 하위 프로젝트(계획의 "Deferred to later sub-projects"). */
@@ -36,7 +37,6 @@ const DEFERRED: Record<string, string> = {
   'export-experiment-tables-csv': 'exports and automation',
   'open-user-guide': 'exports and automation',
   'renumber-workflows': 'rename and links',
-  'open-sample-definition': 'samples',
   'open-sample-view': 'samples',
   'download-partbank-catalog': 'platform and integrations',
   'refresh-partbank-locations': 'platform and integrations',

@@ -211,7 +211,9 @@ describe('Open link and Copy link', () => {
 describe('editorMenu', () => {
   it('the editor menu on a workflow note offers Insert unit operation', () => {
     h = createTestHost();
+    // 샘플 추적이 켜져 있으면(기본) 어느 노트든 샘플 추가가 노트 항목 앞에 온다(플러그인 editor-menu 의 순서, SP5 Task 24)
     expect(labels(head(editorMenu(h.ctx, WF_PATH)))).toEqual([
+      'samples.menu.addSample',
       coreT('Insert unit operation'),
       coreT('Insert date'),
       coreT('Insert date and time'),
@@ -219,6 +221,7 @@ describe('editorMenu', () => {
     ]);
     expect(coreT('Insert unit operation')).toBe('유닛 오퍼레이션 삽입');
     expect(labels(head(editorMenu(h.ctx, 'notes/a.labnote.md')))).toEqual([
+      'samples.menu.addSample',
       coreT('Insert date'),
       coreT('Insert date and time'),
       coreT('Insert issue marker'),
@@ -228,6 +231,7 @@ describe('editorMenu', () => {
   it('the editor menu on a README offers Insert workflow, and running it inserts no link', async () => {
     h = createTestHost({ [README_PATH]: readme() });
     expect(labels(head(editorMenu(h.ctx, README_PATH)))).toEqual([
+      'samples.menu.addSample',
       coreT('Insert workflow'),
       coreT('Sync workflow checklist with folder'),
       coreT('Change experiment status'),
@@ -253,7 +257,9 @@ describe('editorMenu', () => {
   it('editorMenu for a plain note now has the Format items', () => {
     h = createTestHost();
     const items = editorMenu(h.ctx, 'notes/plain.md');
-    expect(items[0].separator).toBe(true);
+    expect(labels(head(items))).toEqual(['samples.menu.addSample']);
+    // 샘플 추적을 끄면 서식 항목만 남는다
+    expect(editorMenu(createTestHost({}, { sampleTracking: false }).ctx, 'notes/plain.md')[0].separator).toBe(true);
     // 서식 항목은 labelKey(그릴 때 번역)다: 메뉴를 연 채 언어를 바꿔도 따라간다
     const keys = items.filter((i) => !i.separator).map((i) => i.labelKey);
     expect(keys).toEqual(expect.arrayContaining(['cmd.format.bold', 'cmd.format.codeBlock']));
@@ -302,7 +308,7 @@ describe('editorMenu', () => {
     render(<ContextMenu />);
     act(() => openMenu(h.ctx, { x: 10, y: 10 }, editorMenu(h.ctx, 'notes/a.labnote.md')));
     expect(screen.getAllByRole('separator')).toHaveLength(1);
-    expect(screen.getAllByRole('menuitem')).toHaveLength(3 + 18);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1 + 3 + 18); // 샘플 추가, 넣기 명령, 서식
     for (const el of document.querySelectorAll('[role="separator"]')) expect(el.hasAttribute('style')).toBe(false);
   });
 

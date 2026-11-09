@@ -5,6 +5,7 @@
 import { t } from '../i18n/t';
 import type { CommandContext } from '../labnote/commands/context';
 import type { Command } from '../labnote/commands/registry';
+import { openSampleDefinitionCommand } from '../labnote/port/sampleCommands';
 import { insertExperimentSamplesTable } from '../labnote/port/sampleInsert';
 import { createSampleEnv } from './env';
 import { samples } from './sampleStore';
@@ -34,6 +35,15 @@ export const sampleCommands: Command[] = [
     run: async (ctx) => {
       if (!(await sampleTrackingOrExplain(ctx))) return false;
       return insertExperimentSamplesTable(createSampleEnv(ctx));
+    },
+  },
+  {
+    id: 'open-sample-definition',
+    nameKey: 'Open sample definition',
+    run: async (ctx) => {
+      // 원인을 말하는 문장은 옮겨 온 명령이 한다. README 의 sample_tracking 은 그 전에 읽어 둔다(D11).
+      if (samples.configured) await samples.ready(ctx.activePath());
+      await openSampleDefinitionCommand(createSampleEnv(ctx));
     },
   },
 ];

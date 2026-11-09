@@ -246,6 +246,8 @@ const ko: Record<string, string> = {
   'samples.registryUnreadable': '샘플 대장 {0}을(를) 읽을 수 없어 바꾸지 않았습니다. 파일의 충돌 표시나 JSON 오류를 먼저 고쳐 주세요.',
   'samples.insertDropped': '입력 위치가 바뀌어 {0}을(를) 넣지 않고 클립보드에 복사했습니다.',
   'samples.syncFailed': '샘플 대장 {0}을(를) 읽을 수 없어 이 노트의 샘플을 저장하지 않았습니다. 파일을 고친 뒤 다시 편집하면 저장됩니다.',
+  'samples.menu.goToDefinition': '정의로 이동',
+  'samples.menu.addSample': '샘플 추가',
   'syncChecklist.partial': '목록에서 빼거나 고칠 항목도 있습니다. 그 정리는 이름 바꾸기 기능과 함께 추가됩니다.',
   'workflow.readmeNotUpdated':
     'README.labnote.md 를 지금 바꿀 수 없어 워크플로를 체크리스트에 넣지 못했을 수 있습니다. 편집기의 README 를 정리한 뒤 "{0}"을(를) 실행하세요.',
@@ -522,6 +524,8 @@ const en: Record<string, string> = {
   'samples.registryUnreadable': 'Left {0} unchanged: the sample registry cannot be read. Fix the conflict markers or JSON error in it first.',
   'samples.insertDropped': 'The text at the trigger changed, so {0} was copied to the clipboard instead of inserted.',
   'samples.syncFailed': "Did not save this note's samples: the sample registry {0} cannot be read. Fix the file and edit the note again to save them.",
+  'samples.menu.goToDefinition': 'Go to definition',
+  'samples.menu.addSample': 'Add sample',
   'syncChecklist.partial': 'Some entries also need removing or fixing; that cleanup arrives with the rename feature.',
   'workflow.readmeNotUpdated':
     'README.labnote.md could not be updated right now, so the workflow may be missing from its checklist. Once the README in the editor is settled, run "{0}".',

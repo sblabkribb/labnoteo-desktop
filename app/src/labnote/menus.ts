@@ -6,6 +6,7 @@ import * as posix from '@labnoteo/core/posix';
 import { diagnoseExperimentPath } from '@labnoteo/core/lib/labnoteStructure';
 import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
+import { createSampleEnv } from '../samples/env';
 import { FORMAT_KEYS, runFormatCommand } from '../editor/commands/formatCommands';
 import type { LinkHit } from '../editor/live/links';
 import { copyText, noteLinkText } from '../links/clipboard';
@@ -18,6 +19,7 @@ import { syncWorkflowChecklist } from './commands/syncChecklist';
 import { insertUnitOp } from './commands/unitOp';
 import { createWorkflowIn, insertWorkflowOnReadme, isExperimentReadme } from './commands/workflow';
 import { coreT } from './i18n';
+import { sampleEditorMenuItems } from './port/sampleCommands';
 import { README } from './paths';
 import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
 
@@ -84,9 +86,16 @@ function formatItems(ctx: CommandContext): MenuItem[] {
  * - 실험 README: 워크플로 삽입(만들고 체크리스트에 등록, 커서에는 링크를 넣지 않는다), 체크리스트 맞추기,
  *   실험 상태 변경, 논의 표시 전환, 그리고 넣기 명령.
  * - 그 밖의 .labnote.md: 넣기 명령. 일반 .md 는 서식 항목만.
+ * 샘플 추적이 켜진 노트면(어느 .md 든) 노트 항목 앞에 샘플 항목이 온다: 커서가 샘플 참조 위면 정의로 이동, 그리고 늘 샘플 추가
+ * (플러그인 editor-menu 의 순서).
  */
 export function editorMenu(ctx: CommandContext, path: string, link?: { hit: LinkHit; text: string; open(): void }): MenuItem[] {
-  return [...(link ? linkItems(ctx, link) : []), ...noteItems(ctx, path), ...formatItems(ctx)];
+  return [
+    ...(link ? linkItems(ctx, link) : []),
+    ...sampleEditorMenuItems(createSampleEnv(ctx), path, ctx.activeView()?.state),
+    ...noteItems(ctx, path),
+    ...formatItems(ctx),
+  ];
 }
 
 /** 커서 아래 링크의 항목(SP4 Task 12): 열기, 그리고 복사(위키링크는 원문 그대로, Markdown 링크는 주소). */
