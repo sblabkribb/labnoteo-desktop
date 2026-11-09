@@ -6,6 +6,10 @@ import { deepActiveElement } from '../../ui/returnFocus';
 import type { SampleSettingsValue } from '../../samples/SampleSettingsDialog';
 import type { IntegrationDeps } from '../../integrations/IntegrationSettingsDialog';
 import type { PartbankSearchOpts } from '../../partbank/PartbankSearchDialog';
+import type { WorksheetUnitOp } from '@labnoteo/core/lib/worksheet';
+import type { WorksheetPaperSize } from '../../../vendor/labnoteo/src/settings';
+import type { WorksheetChoice } from '../port/worksheetPrint';
+import type { BarcodePrintActions } from '../port/barcodeDialog';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -20,18 +24,36 @@ export { deepActiveElement };
  * 마지막 대화상자가 닫히면 DialogLayer 가 .shell 의 inert 를 푼 뒤 그 요소로 초점을 돌려준다.
  */
 export type DialogSpec =
-  | { kind: 'pick'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string; selected?: unknown }
+  | {
+      kind: 'pick';
+      items: readonly PickItem<unknown>[];
+      title?: string;
+      placeholder?: string;
+      selected?: unknown;
+      /** 사용자가 부르지 않은 질문(A9): 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
+      unsolicited?: boolean;
+    }
   | { kind: 'pickMany'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string }
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
-  | { kind: 'confirm'; message: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean }
-  | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[] }
+  | {
+      kind: 'confirm';
+      message: string;
+      confirmLabel?: string;
+      signal?: AbortSignal;
+      destructive?: boolean;
+      /** 사용자가 부르지 않은 질문(A9): 취소 단추에 초점, 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
+      unsolicited?: boolean;
+    }
+  | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[]; unsolicited?: boolean }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'sampleSettings'; value: SampleSettingsValue }
   | { kind: 'progress'; id: number }
   | { kind: 'integrationSettings'; deps: IntegrationDeps }
   | { kind: 'partbankSearch'; opts: PartbankSearchOpts }
-  | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> };
+  | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> }
+  | { kind: 'worksheet'; unitOps: readonly WorksheetUnitOp[]; paper: WorksheetPaperSize }
+  | { kind: 'barcode'; title: string; id: string; actions: BarcodePrintActions };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {
@@ -144,7 +166,7 @@ export function useDialogOpen(): boolean {
 
 export function pickDialog<T>(
   items: readonly PickItem<T>[],
-  opts: { title?: string; placeholder?: string; selected?: T } = {},
+  opts: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean } = {},
 ): Promise<T | undefined> {
   return openDialog<T | undefined>({ kind: 'pick', items, ...opts }, undefined);
 }
@@ -164,7 +186,7 @@ export function aliasDialog(opts: AliasOpts): Promise<string | undefined> {
 
 export function confirmDialog(
   message: string,
-  opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean } = {},
+  opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean } = {},
 ): Promise<boolean> {
   return openDialog<boolean>({ kind: 'confirm', message, ...opts }, false);
 }
@@ -173,7 +195,7 @@ export function confirmDialog(
 export function choiceDialog<T>(
   message: string,
   choices: readonly ChoiceItem<T>[],
-  opts: { title?: string } = {},
+  opts: { title?: string; unsolicited?: boolean } = {},
 ): Promise<T | undefined> {
   return openDialog<T | undefined>({ kind: 'choice', message, choices, ...opts }, undefined);
 }
@@ -184,4 +206,9 @@ export function choiceDialog<T>(
  */
 export function openSampleDefinitionDialog(model: SampleDefinitionModel, usages: Promise<UsageGroup[]>): Promise<SampleDefinitionResult> {
   return openDialog<SampleDefinitionResult>({ kind: 'sampleDefinition', model, usages }, undefined);
+}
+
+/** 실험 워크시트 창(SP7 Task 8): 찍을 유닛 오퍼레이션, 용지, 출력 또는 브라우저. 닫으면 undefined. */
+export function worksheetDialog(unitOps: readonly WorksheetUnitOp[], paper: WorksheetPaperSize): Promise<WorksheetChoice | undefined> {
+  return openDialog<WorksheetChoice | undefined>({ kind: 'worksheet', unitOps, paper }, undefined);
 }

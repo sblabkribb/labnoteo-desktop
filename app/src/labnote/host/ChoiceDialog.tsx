@@ -18,7 +18,14 @@ export function ChoiceDialog(props: {
   useEffect(() => first.current?.focus(), []);
 
   return (
-    <DialogFrame role="alertdialog" title={spec.title} className="confirm" describedBy={`${id}-message`} onCancel={props.onCancel}>
+    <DialogFrame
+      role="alertdialog"
+      title={spec.title}
+      className="confirm"
+      describedBy={`${id}-message`}
+      onCancel={props.onCancel}
+      unsolicited={spec.unsolicited}
+    >
       <div id={`${id}-message`} className="confirm-message">
         {spec.message.split(/\n\n+/).map((paragraph, i) => (
           <p key={i}>{paragraph}</p>

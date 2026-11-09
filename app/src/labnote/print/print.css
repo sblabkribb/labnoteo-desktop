@@ -1,0 +1,135 @@
+/* Printed pages (worksheet and whole note): the plugin's pageCss (vendor src/print/printPages.ts:52-111) made static.
+   Ported from labnoteO 0.140.2, Apache-2.0.
+   Changes: named pages a4/letter instead of one generated @page; the page is a grid (head, body, foot) whose padding
+   reserves the two QR corners, so a header that wraps pushes the body down by layout; the body shrinks by class
+   (.body.fit-95 ... .body.fit-70); every rule is scoped under .print-root except @page and the body rules.
+   Sizes in mm: QR inset 10, QR size 26, body top 44 (10 + 26 + 8), body bottom 42 (10 + 26 + 6), sides 14.
+   The app's own root (#labnote-print-root) sits off view on screen so it can be measured; the standalone copy
+   opened in a browser (a .print-root without that id) shows its pages on a grey desk. */
+
+@page a4 { size: 210mm 297mm; margin: 0; }
+@page letter { size: 215.9mm 279.4mm; margin: 0; }
+
+body.printing-pages { margin: 0; padding: 0; }
+
+@media screen {
+  #labnote-print-root.print-root { position: fixed; left: -100000px; top: 0; }
+  .print-root:not(#labnote-print-root) { background: #888; padding: 1px 0; }
+  .print-root:not(#labnote-print-root) .page { margin: 8mm auto; box-shadow: 0 1mm 4mm rgba(0, 0, 0, 0.4); }
+}
+
+@media print {
+  body.printing-pages > :not(.print-root) { display: none !important; }
+  body.printing-pages { height: auto; background: #fff; }
+  body.printing-pages .print-root { position: static; left: auto; top: auto; }
+  body:not(.printing-pages) .print-root { display: none; }
+}
+
+.print-root {
+  background: #fff;
+  color: #000;
+  font-family: "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  font-size: 10pt;
+  line-height: 1.5;
+  text-align: left;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.print-root * { box-sizing: border-box; }
+
+.print-root .page {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 12mm 14mm 11mm 14mm;
+  overflow: hidden;
+  background: #fff;
+  color: #000;
+  break-after: page;
+  page-break-after: always;
+}
+.print-root .page.a4 { page: a4; width: 210mm; height: 297mm; }
+.print-root .page.letter { page: letter; width: 215.9mm; height: 279.4mm; }
+.print-root .page:last-child { break-after: auto; page-break-after: auto; }
+
+.print-root .qr { position: absolute; width: 26mm; text-align: center; font: 6.5pt/1.2 ui-monospace, Consolas, monospace; }
+.print-root .qr svg { display: block; width: 26mm; height: 26mm; }
+.print-root .qr.tr { top: 10mm; right: 10mm; }
+.print-root .qr.bl { bottom: 10mm; left: 10mm; }
+.print-root .qr .label { margin-top: 0.8mm; }
+
+/* Head: from 12mm down, clear of the top-right QR (42mm from the right); at least 32mm tall so the body starts at 44mm. */
+.print-root .head { min-height: 32mm; margin-right: 28mm; padding-bottom: 1mm; font-size: 9pt; line-height: 1.35; }
+.print-root .head .title { font-size: 13pt; font-weight: 700; margin: 1mm 0; }
+.print-root .head .muted,
+.print-root .foot { color: #444; }
+/* Body: 14mm sides, down to 42mm above the paper edge. */
+.print-root .body { min-height: 0; overflow: hidden; font-size: 10pt; line-height: 1.5; }
+.print-root .body.fit-95 { font-size: calc(10pt * 0.95); }
+.print-root .body.fit-90 { font-size: calc(10pt * 0.9); }
+.print-root .body.fit-85 { font-size: calc(10pt * 0.85); }
+.print-root .body.fit-80 { font-size: calc(10pt * 0.8); }
+.print-root .body.fit-75 { font-size: calc(10pt * 0.75); }
+.print-root .body.fit-70 { font-size: calc(10pt * 0.7); }
+/* Foot: 31mm tall (42mm - 11mm), text at its bottom, clear of the bottom-left QR (42mm from the left). */
+.print-root .foot {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 31mm;
+  margin-left: 28mm;
+  font-size: 8pt;
+  line-height: 1.35;
+}
+
+.print-root .ws { display: flex; flex-direction: column; min-height: 100%; }
+.print-root .ws > .sec.g1,
+.print-root .ws > .sec.g2 { display: flex; flex-direction: column; flex-shrink: 0; }
+.print-root .ws > .sec.g1 { flex-grow: 1; }
+.print-root .ws > .sec.g2 { flex-grow: 2; }
+/* Faint rules to write on, thin enough to disappear in a photocopy. */
+.print-root .ws .fill {
+  flex: 1 1 auto;
+  min-height: 3em;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.5em - 0.2mm), #d8d8d8 calc(1.5em - 0.2mm), #d8d8d8 1.5em);
+}
+.print-root .sec { margin: 0 0 2.5mm; break-inside: avoid; }
+.print-root .sec h3 { font-size: 10.5pt; margin: 0 0 1mm; padding-bottom: 0.5mm; border-bottom: 0.3mm solid #000; }
+.print-root .meta { border-collapse: collapse; width: 100%; }
+.print-root .meta td { padding: 0.6mm 1mm; vertical-align: bottom; }
+.print-root .meta td.k { width: 30mm; color: #333; white-space: nowrap; }
+.print-root .meta td.v { border-bottom: 0.2mm solid #999; }
+.print-root .steps { list-style: none; margin: 0; padding: 0; }
+.print-root .steps li { display: flex; gap: 2mm; margin: 0.8mm 0; }
+.print-root .steps .box { flex: none; width: 3.6mm; height: 3.6mm; margin-top: 0.9mm; border: 0.3mm solid #000; }
+.print-root .steps .box.done::after { content: '✓'; display: block; line-height: 3.6mm; text-align: center; font-size: 8pt; }
+.print-root .steps .n { flex: none; min-width: 5mm; }
+.print-root .steps .s { flex: 1 1 auto; min-width: 0; }
+.print-root .steps .sub { margin: 0.4mm 0 0; padding-left: 5mm; }
+.print-root .steps .sub li { display: list-item; margin: 0.2mm 0; }
+.print-root .bul { margin: 0; padding-left: 4mm; }
+.print-root .bul li { margin: 0.2mm 0; }
+.print-root .bul li.d1 { margin-left: 4mm; }
+.print-root .bul li.d2 { margin-left: 8mm; }
+.print-root .bul li.d3 { margin-left: 12mm; }
+.print-root .sec .grid { border-collapse: collapse; margin: 0.8mm 0; }
+.print-root .sec .grid th,
+.print-root .sec .grid td { border: 0.2mm solid #999; padding: 0.4mm 1.4mm; text-align: left; }
+.print-root .text p { margin: 0; white-space: pre-wrap; }
+.print-root .ws pre.code { margin: 0.8mm 0; white-space: pre-wrap; font: 8.5pt/1.4 ui-monospace, Consolas, monospace; }
+.print-root .ws .quote { margin: 0.8mm 0; padding-left: 2mm; border-left: 0.6mm solid #999; white-space: pre-wrap; }
+.print-root .ws .callout { margin: 0.8mm 0; padding: 0.6mm 1.6mm; border: 0.3mm solid #666; white-space: pre-wrap; }
+.print-root .ws .callout-title { margin-bottom: 0.3mm; }
+.print-root .ws mark { background: none; color: inherit; text-decoration: underline; }
+.print-root .note-body img { max-width: 100%; }
+.print-root .note-body table { border-collapse: collapse; }
+.print-root .note-body th,
+.print-root .note-body td { border: 0.2mm solid #999; padding: 0.5mm 1.5mm; }
+.print-root .note-body pre { white-space: pre-wrap; font-size: 8.5pt; }
+
+/* Whole-note measuring box (print/measure.ts): the page body's width (bodyBox), 10pt / 1.5, laid out but hidden
+   inside the off-view root, and removed once the blocks are measured. */
+.print-root .print-measure { position: absolute; left: 0; top: 0; visibility: hidden; font-size: 10pt; line-height: 1.5; }
+.print-root .print-measure.a4 { width: 182mm; }
+.print-root .print-measure.letter { width: 187.9mm; }

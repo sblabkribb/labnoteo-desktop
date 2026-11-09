@@ -66,7 +66,7 @@ export function Picker(props: {
   };
 
   return (
-    <DialogFrame title={spec.title} className="picker" onCancel={props.onCancel}>
+    <DialogFrame title={spec.title} className="picker" onCancel={props.onCancel} unsolicited={spec.unsolicited}>
       <input
         ref={input}
         type="text"

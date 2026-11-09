@@ -1,4 +1,4 @@
-import type { EditTarget, LabnoteHost } from '@labnoteo/core';
+import type { EditTarget, LabnoteHost, PickItem } from '@labnoteo/core';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { coreT } from '../i18n';
 import type { AliasOpts } from './AliasDialog';
@@ -13,7 +13,21 @@ export interface AppHost extends LabnoteHost {
   /** '' = 빈 채로 냈다, undefined = 닫았다. */
   alias(opts: AliasOpts): Promise<string | undefined>;
   /** confirm 과 같지만 단추가 셋 이상이다. 고른 단추의 값, 닫으면 undefined. */
-  choose<T>(message: string, choices: readonly ChoiceItem<T>[], opts?: { title?: string }): Promise<T | undefined>;
+  choose<T>(
+    message: string,
+    choices: readonly ChoiceItem<T>[],
+    opts?: { title?: string; unsolicited?: boolean },
+  ): Promise<T | undefined>;
+  /** 코어의 고르기에 `unsolicited`(A9, whenNotComposing.ts 의 unsolicitedHost 가 단다)를 더한다. */
+  pick<T>(
+    items: PickItem<T>[],
+    opts?: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean },
+  ): Promise<T | undefined>;
+  /** 코어의 확인에 `unsolicited`(A9)를 더한다. */
+  confirm(
+    message: string,
+    opts?: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean },
+  ): Promise<boolean>;
 }
 
 /**

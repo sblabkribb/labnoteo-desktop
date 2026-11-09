@@ -376,6 +376,24 @@ title: 실험
     assert_eq!(ok("vault_list_images", args("vault_list_images", vec![])), json!(["a.png"]));
     std::fs::remove_file(dir.join("vault").join("a.png")).unwrap();
 
+    // Creation times: one entry per path, `null` for a missing file; too many
+    // paths is a malformed argument (`badInput`), not an io error.
+    let times = ok("vault_created_times", args("vault_created_times", vec![json!(["a.md"])]));
+    assert_eq!(times.as_array().map(Vec::len), Some(1), "{times}");
+    let many: Vec<Value> = (0..20_001).map(|i| json!(format!("n{i}.md"))).collect();
+    assert_eq!(
+        call("vault_created_times", args("vault_created_times", vec![Value::Array(many)])).unwrap_err()["kind"],
+        "badInput"
+    );
+
+    // Print "Open in browser": a note ID that is not LN- plus 8 characters is
+    // refused as badInput before anything is written or opened.
+    assert_eq!(
+        call("print_open_in_browser", args("print_open_in_browser", vec![json!("note"), json!("bad"), json!("<p>")]))
+            .unwrap_err()["kind"],
+        "badInput"
+    );
+
     // Image write: a raw body, so the fixture lists header names instead of
     // JSON argument names. Values are percent-encoded (`encodeURIComponent`),
     // because a header value must be ASCII and a Korean name is not.
@@ -486,7 +504,8 @@ fn error_kinds_match_the_typescript_side() {
         | FsError::PathTooLong(_)
         | FsError::Exists
         | FsError::NotImage
-        | FsError::TooLarge => (),
+        | FsError::TooLarge
+        | FsError::BadInput(_) => (),
     };
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(ERRORS).unwrap();
     let actual: std::collections::BTreeMap<String, String> = [
@@ -500,6 +519,7 @@ fn error_kinds_match_the_typescript_side() {
         ("exists", kind(FsError::Exists)),
         ("notImage", kind(FsError::NotImage)),
         ("tooLarge", kind(FsError::TooLarge)),
+        ("badInput", kind(FsError::BadInput("x".into()))),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

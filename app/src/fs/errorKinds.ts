@@ -16,6 +16,8 @@ export const ERROR_KINDS = {
   notImage: 'notImage',
   /** `vault_read_image` 대상이 20 MiB 를 넘는다. */
   tooLarge: 'tooLarge',
+  /** 인자가 잘못됐다(예: `vault_created_times` 에 경로가 `MAX_CREATED_TIMES` 보다 많다). */
+  badInput: 'badInput',
   io: 'io',
 } as const;
 

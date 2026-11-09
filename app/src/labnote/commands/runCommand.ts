@@ -3,6 +3,7 @@ import { t } from '../../i18n/t';
 import { ERROR_KINDS, hasErrorKind } from '../../fs/errorKinds';
 import { linkOps } from '../../links/renameWithLinks';
 import { RegistryUnreadableError } from '../../samples/env';
+import { NoNoteIdIndexError } from '../barcode/noteIdIndex';
 import { coreT } from '../i18n';
 import { NoteBusyError, NoteChangedError, NoteGoneError, NoteSaveError } from '../noteErrors';
 import type { CommandContext } from './context';
@@ -47,6 +48,9 @@ export async function runCommand(ctx: CommandContext, c: Command | (() => Promis
       host.notify('warn', t('command.noteChanged'));
     } else if (err instanceof NoteGoneError) {
       host.notify('warn', t('command.noteGone'));
+    } else if (err instanceof NoNoteIdIndexError) {
+      // 보관함을 연 직후, 노트 ID 색인이 아직 서지 않았다(App.tsx 가 linkIndex.whenReady 뒤에 놓는다)
+      host.notify('warn', t('command.noteIdsLoading'));
     } else if (err instanceof RegistryUnreadableError) {
       host.notify('warn', t('samples.registryUnreadable', err.path));
     } else {

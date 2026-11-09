@@ -27,6 +27,7 @@ export type AppSettings = Pick<
   | 'llmEndpointOllama'
   | 'llmEndpointOpenai'
   | 'llmModel'
+  | 'worksheetPaperSize'
 > & {
   schemaVersion: number;
   importedFromPlugin?: boolean;
@@ -106,6 +107,8 @@ const KEYS = [
   'bfwUrl',
   'bfwConnection',
   'allowHttpOrigins',
+  // SP7 Part A: 실험 워크시트 용지(a4 | letter). 플러그인 migrateSettings 가 기본값과 검사를 맡는다.
+  'worksheetPaperSize',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */

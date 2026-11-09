@@ -12,6 +12,8 @@ import { ProgressDialog } from '../../integrations/ProgressDialog';
 import { IntegrationSettingsDialog } from '../../integrations/IntegrationSettingsDialog';
 import { PartbankSearchDialog } from '../../partbank/PartbankSearchDialog';
 import { AiAnswerDialog } from '../port/aiAnswerDialog';
+import { WorksheetDialog } from '../print/WorksheetDialog';
+import { BarcodeDialog } from '../port/barcodeDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -42,6 +44,10 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <PartbankSearchDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'aiAnswer':
       return <AiAnswerDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'worksheet':
+      return <WorksheetDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'barcode':
+      return <BarcodeDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

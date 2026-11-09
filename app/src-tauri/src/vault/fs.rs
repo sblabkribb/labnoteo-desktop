@@ -48,6 +48,9 @@ pub enum FsError {
     NotImage,
     /// `vault_read_image` on a file, or `vault_write_image` on bytes, over `MAX_IMAGE_BYTES`.
     TooLarge,
+    /// A malformed argument (too many paths, a value out of range). The
+    /// message says which; callers branch on the kind `badInput` only.
+    BadInput(String),
 }
 
 /// `ERROR_FILENAME_EXCED_RANGE`: a component over 255 characters, or a long path
@@ -69,6 +72,7 @@ impl fmt::Display for FsError {
             FsError::Exists => write!(f, "the target already exists"),
             FsError::NotImage => write!(f, "not an image file"),
             FsError::TooLarge => write!(f, "the image is larger than {} bytes", MAX_IMAGE_BYTES),
+            FsError::BadInput(m) => write!(f, "{m}"),
         }
     }
 }
@@ -76,7 +80,7 @@ impl fmt::Display for FsError {
 impl std::error::Error for FsError {}
 
 /// Wire shape of errors: `{kind: "forbidden" | "escape" | "vaultNotFound" |
-/// "noVault" | "notFound" | "pathTooLong" | "exists" | "notImage" | "tooLarge" | "io", message}`. `notFound` is a missing file or
+/// "noVault" | "notFound" | "pathTooLong" | "exists" | "notImage" | "tooLarge" | "badInput" | "io", message}`. `notFound` is a missing file or
 /// directory; `vaultNotFound` is a missing vault root. `message` is for
 /// display only; callers branch on `kind`.
 impl Serialize for FsError {
@@ -91,6 +95,7 @@ impl Serialize for FsError {
             FsError::Exists => "exists",
             FsError::NotImage => "notImage",
             FsError::TooLarge => "tooLarge",
+            FsError::BadInput(_) => "badInput",
             FsError::Vault(VaultError::Io(e)) | FsError::Io(e) => {
                 if is_too_long(e) {
                     "pathTooLong"
@@ -901,6 +906,48 @@ pub async fn vault_write_image(
         .map_err(join_error)?
 }
 
+/// Most paths `vault_created_times` takes in one call.
+pub const MAX_CREATED_TIMES: usize = 20_000;
+
+/// Creation time of each vault-relative path, in milliseconds since the epoch
+/// (`metadata().created()`), in the order given. A path that fails `confine`,
+/// is missing, is a folder, or whose creation time the filesystem does not
+/// keep gives `None`; one bad path never fails the others.
+pub fn created_times(root: &Path, paths: &[String]) -> Vec<Option<f64>> {
+    paths
+        .iter()
+        .map(|rel| {
+            let abs = confine(root, rel).ok()?;
+            let meta = std::fs::metadata(abs).ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            let ms = meta.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+            Some(ms as f64)
+        })
+        .collect()
+}
+
+/// Creation times for the note-ID index (`created_times`). Async and off the
+/// main thread: the first build asks for every note at once. More than
+/// `MAX_CREATED_TIMES` paths is `badInput`.
+#[tauri::command]
+pub async fn vault_created_times(
+    state: tauri::State<'_, super::VaultState>,
+    paths: Vec<String>,
+) -> Result<Vec<Option<f64>>, FsError> {
+    if paths.len() > MAX_CREATED_TIMES {
+        return Err(FsError::BadInput(format!(
+            "too many paths: {} (at most {MAX_CREATED_TIMES})",
+            paths.len()
+        )));
+    }
+    let root = state.root()?;
+    tauri::async_runtime::spawn_blocking(move || created_times(&root, &paths))
+        .await
+        .map_err(join_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1666,5 +1713,24 @@ mod tests {
         assert!(percent_decode("%").is_err());
         assert!(percent_decode("%zz").is_err());
         assert!(percent_decode("%FF").is_err(), "not UTF-8");
+    }
+
+    #[test]
+    fn created_times_for_files_and_none_for_escapes() {
+        let t = Tmp::new();
+        std::fs::write(t.0.join("a.labnote.md"), "x").unwrap();
+        std::fs::create_dir(t.0.join("d")).unwrap();
+        let v = created_times(&t.0, &["a.labnote.md".into(), "../x".into(), "missing.md".into(), "d".into()]);
+        assert!(v[0].unwrap() > 1.6e12);
+        assert_eq!(v[1], None);
+        assert_eq!(v[2], None);
+        assert_eq!(v[3], None);
+    }
+
+    #[test]
+    fn bad_input_serializes_with_its_kind() {
+        let v = serde_json::to_value(FsError::BadInput("too many paths".into())).unwrap();
+        assert_eq!(v["kind"], "badInput");
+        assert_eq!(v["message"], "too many paths");
     }
 }
