@@ -1,8 +1,8 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:135-302 sha256:761dd04f9905e600
-// labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m) → env.host.notify('info', m); pickModal(app, items, { title }) → env.host.pick(items, { title }); plugin.host.editTarget() → env.editTarget(); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.markUserEdit removed. insertSampleReference takes `target: EditTarget | undefined` and goes through env.insertAtCursor (cell-aware, D20) when there is no target or a table cell editor is active in the target's note. insertExperimentSamplesTable reads the caret as the end of the table being edited when a cell editor is active (the vendor's "below the table" rule for a table cursor), and makes every edit inside one env.editTarget().batch (one undo step); the batch re-reads the note's text and the list-table ranges after the picker in the Replace branch too, not only in the Insert-one-more branch.
-import { isOffsetBeforeBody, maskAiCallouts, planReferenceInsert, type EditTarget } from '@labnoteo/core';
-import { caretIn } from '@labnoteo/core/lib/caret';
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:137-316 sha256:d3da8d7a327b0f49
+// labnoteO 0.140.2, Apache-2.0.
+// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m) → env.host.notify('info', m); pickModal(app, items, { title }) → env.host.pick(items, { title }); plugin.host.editTarget() → env.editTarget(); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.markUserEdit removed. insertSampleReference takes `target: EditTarget | undefined` and goes through env.insertAtCursor (cell-aware, D20) when there is no target or a table cell editor is active in the target's note, in place of the vendor's tableCellEditorOf/writeIntoCell (#543); the cell's own text before its cursor decides the space writeIntoCell puts before a reference after an aliased one (endsAliasedReference). insertExperimentSamplesTable reads the caret as the end of the table being edited when a cell editor is active (the vendor's "below the table" rule for a table cursor), and makes every edit inside one env.editTarget().batch (one undo step); the batch re-reads the note's text and the list-table ranges after the picker in the Replace branch too, not only in the Insert-one-more branch.
+import { endsAliasedReference, isOffsetBeforeBody, maskAiCallouts, planReferenceInsert, type EditTarget } from '@labnoteo/core';
+import { caretBeforeModal, caretIn } from '@labnoteo/core/lib/caret';
 import {
   buildMarkdownTable,
   compareSamples,
@@ -27,13 +27,19 @@ import { openNote } from '../openNotes';
 import { listSome, sampleListHeaders, sampleListRow, unregisteredReferences } from './sampleListTable';
 import { loadCatalogSamples, notesInSampleScope, type SampleScope } from './sampleScope';
 
-/** The open editor of `path` when a table cell editor is active in it, else undefined. */
-function cellEditing(path: string): { tableEnd: number } | undefined {
+/**
+ * The open editor of `path` when a table cell editor is active in it, else undefined:
+ * the end of the table being edited, and the cell's line up to its cursor.
+ */
+function cellEditing(path: string): { tableEnd: number; lineBefore: string } | undefined {
   const view = openNote(path)?.view();
-  if (!view || !activeCellView(view)) return undefined;
+  const cell = view ? activeCellView(view) : undefined;
+  if (!view || !cell) return undefined;
   const ac = view.state.field(activeCell, false);
   const span = ac ? findTables(view.state).find((s) => s.from === ac.tableFrom) : undefined;
-  return { tableEnd: span ? span.to : view.state.selection.main.from };
+  const head = cell.state.selection.main.from;
+  const lineBefore = cell.state.sliceDoc(cell.state.doc.lineAt(head).from, head);
+  return { tableEnd: span ? span.to : view.state.selection.main.from, lineBefore };
 }
 
 /**
@@ -51,8 +57,13 @@ export async function insertSampleReference(
   ref: string,
   caret?: number,
 ): Promise<void> {
-  if (!target || (target.path === env.activePath() && cellEditing(target.path))) {
-    env.insertAtCursor(ref);
+  const types = getSampleDisplayMeta(env.settings().customSampleTypes).types;
+  // A reference holds no newline, so a focused table cell takes it (#543): into
+  // the cell, not below the table. Only the cell's text is read, so a reference
+  // whose alias runs up to whitespace needs a space before this one (#464, #479).
+  const cell = target && target.path === env.activePath() ? cellEditing(target.path) : undefined;
+  if (!target || cell) {
+    env.insertAtCursor(cell && endsAliasedReference(cell.lineBefore, types) ? ` ${ref}` : ref);
     return;
   }
   // Hosts without cursor tracking (none today) fall back to a plain insert.
@@ -65,7 +76,6 @@ export async function insertSampleReference(
   // Source-mode editor no longer reports correctly (#544).
   const cursor = caret === undefined ? await target.getCursorOffset() : caretIn(caret, text);
   const selection = caret === undefined ? await target.getSelectionRange?.() : undefined;
-  const types = getSampleDisplayMeta(env.settings().customSampleTypes).types;
   const plan = planReferenceInsert(text, cursor, ref, types, selection?.end);
   await target.replaceRange(plan.offset, plan.end ?? plan.offset, plan.text);
   await target.revealOffset?.(plan.offset + plan.text.length);
@@ -152,7 +162,7 @@ export async function insertExperimentSamplesTable(env: SampleEnv): Promise<bool
   // mode the editor then reports the cursor at the start of the note (#450).
   // From a table cell, the outer cursor says nothing about the cell: below the table being edited.
   const cell = cellEditing(target.path);
-  const caret = cell ? cell.tableEnd : target.getCursorOffset ? await target.getCursorOffset() : undefined;
+  const caret = cell ? cell.tableEnd : await caretBeforeModal(target);
   const tables0 = findSampleListTableRanges(before0, headers);
   let choice: 'replace' | 'add' | 'cancel' | undefined;
   if (tables0.length > 0) {
@@ -197,7 +207,7 @@ export async function insertExperimentSamplesTable(env: SampleEnv): Promise<bool
       await b.revealOffset?.(below);
       return 'replaced' as const;
     }
-    const cursor = caret === undefined ? text.length : Math.min(caret, text.length);
+    const cursor = caretIn(caret, text);
     // In the front matter or above the title the table would break the
     // properties, so it goes at the end like a sample reference does (#360).
     const end = cursor !== text.length && isOffsetBeforeBody(text, cursor);

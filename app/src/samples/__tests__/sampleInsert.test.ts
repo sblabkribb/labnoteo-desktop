@@ -105,6 +105,28 @@ describe('insertSampleReference', () => {
     expect(row).toBe('| xDNA-1;a\\|b | y |');
     expect(row.split(/(?<!\\)\|/).length).toBe('| x | y |'.split('|').length);
   });
+
+  // #543 (vendor 0.140.2 writeIntoCell): only the cell's text is read, so after an
+  // aliased reference the new one needs a space, or it would join the alias.
+  it('into an active cell after an aliased reference, puts a space before the reference', async () => {
+    const th = host({ ...SAMPLE_VAULT, [NOTE]: '| a | b |\n|---|---|\n| DNA-2;pET | y |\n' });
+    const m = await th.mount(NOTE);
+    act(() => void focusCell(m.view(), 0, 1, 0, 'end'));
+    expect(activeCellView(m.view())?.state.doc.toString()).toBe('DNA-2;pET');
+    const e = createSampleEnv(th.ctx);
+    await act(async () => void (await insertSampleReference(e, e.editTarget(), 'RNA-1;siKIF')));
+    expect(m.view().state.doc.toString().split('\n')[2]).toBe('| DNA-2;pET RNA-1;siKIF | y |');
+  });
+
+  // #544: a dialog left the editor reporting the start of the note, which put the
+  // reference in the properties.
+  it('uses the cursor read before a dialog over the one the editor reports after it', async () => {
+    const doc = '---\nstatus: planned\n---\n\n## Samples\nbefore\n';
+    const { target, state } = makeTarget(doc, 0); // what the editor says once the dialog closed
+    const saved = doc.indexOf('before') + 'before'.length;
+    await insertSampleReference(env(), target, 'RNA-1;siKIF', saved);
+    expect(state.text).toBe('---\nstatus: planned\n---\n\n## Samples\nbefore RNA-1;siKIF\n');
+  });
 });
 
 describe('insert-experiment-samples-table', () => {
