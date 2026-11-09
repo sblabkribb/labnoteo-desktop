@@ -294,6 +294,18 @@ describe('IntegrationSettingsDialog', () => {
     expect(screen.getByText(t('ai.schemeHint'))).toBeTruthy();
   });
 
+  it('the OpenAI endpoint shows the /v1 hint too; Ollama only the scheme hint', async () => {
+    show(fakeDeps({ llmProvider: 'openai' }));
+    expect(await screen.findByLabelText(coreT('OpenAI endpoint'))).toBeTruthy();
+    expect(screen.getByText(t('ai.schemeHint'))).toBeTruthy();
+    expect(screen.getByText(t('ai.openaiEndpointHint'))).toBeTruthy();
+    cleanup();
+    show(fakeDeps({ llmProvider: 'ollama' }));
+    expect(await screen.findByLabelText(coreT('Ollama endpoint'))).toBeTruthy();
+    expect(screen.getByText(t('ai.schemeHint'))).toBeTruthy();
+    expect(screen.queryByText(t('ai.openaiEndpointHint'))).toBeNull();
+  });
+
   it('provider Disabled hides endpoint, model and key rows', async () => {
     const deps = fakeDeps({ llmProvider: 'openai' });
     show(deps);

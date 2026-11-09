@@ -80,6 +80,9 @@ const ko: Record<string, string> = {
     'partbank의 DNA 부품·플라스미드·프라이머를 시료로 등록하고, 보관 위치를 가져오고, partbank에서 열 수 있습니다. API 키는 partbank의 Profile → API Keys에서 발급하며, 보관함이 아니라 이 PC의 Windows 자격 증명 관리자에만 저장합니다.',
   'integrations.keyKeptHere': '이 PC의 Windows 자격 증명 관리자에만 보관하며 보관함에는 쓰지 않습니다.',
   'ai.schemeHint': 'http:// 나 https:// 없이 쓰면 https:// 를 붙입니다(이 PC 주소면 http://).',
+  'ai.openaiEndpointHint': 'https://host 와 https://host/v1 둘 다 됩니다.',
+  'ai.notFoundOpenai':
+    '{0} 에 그런 주소가 없습니다(404). {1} 을(를) 확인해 주세요: 서버 주소만 넣거나 /v1 까지 넣습니다(예: https://host 또는 https://host/v1).',
   'ai.configureFirst': '연동 설정에서 AI 제공자를 먼저 설정하세요.',
   'integrations.allowHttp': '이 주소로 암호화 없이 키 보내기 허용',
   'integrations.bfw.heading': 'bfworkflow',
@@ -522,6 +525,9 @@ const en: Record<string, string> = {
     'Register DNA parts, plasmids and primers from partbank as samples, read their storage location, and open them in partbank. Issue an API key in partbank under Profile - API Keys; it is kept only in Windows Credential Manager on this PC, not in the vault.',
   'integrations.keyKeptHere': 'Kept only in Windows Credential Manager on this PC, never written to the vault.',
   'ai.schemeHint': 'Without http:// or https://, https:// is added (http:// for an address on this PC).',
+  'ai.openaiEndpointHint': 'Both https://host and https://host/v1 work.',
+  'ai.notFoundOpenai':
+    '{0} has no such address (404). Check {1}: enter the server address, with or without /v1 (for example https://host or https://host/v1).',
   'ai.configureFirst': 'Configure an AI provider in Integration settings first.',
   'integrations.allowHttp': 'Allow sending the key to this address without encryption',
   'integrations.bfw.heading': 'bfworkflow',

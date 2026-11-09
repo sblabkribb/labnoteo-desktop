@@ -13,6 +13,7 @@ import { LlmHttpError } from '../../labnote/port/llmError';
 import {
   createLlmProvider,
   joinUrl,
+  openaiBase,
   parseToolArguments,
   type ChatMessage,
   type ChatResult,
@@ -38,6 +39,29 @@ function chatBody(calls: Array<[string, Record<string, unknown>]>, n = 0): Recor
   // Tauri 는 인자를 JSON 으로 보낸다: undefined 필드는 사라진다
   return JSON.parse(JSON.stringify(c[1].body)) as Record<string, unknown>;
 }
+
+describe('openaiBase', () => {
+  it('drops one final /v1 segment, with or without a trailing slash (C-R1)', () => {
+    expect(openaiBase('https://h/v1/')).toBe('https://h');
+    expect(openaiBase('https://h/v1')).toBe('https://h');
+    expect(openaiBase(' https://gw.lab.kr/openai/v1 ')).toBe('https://gw.lab.kr/openai');
+    expect(joinUrl(openaiBase('https://h/v1'), '/v1/models')).toBe('https://h/v1/models');
+    expect(joinUrl(openaiBase('h.lab/v1'), '/v1/chat/completions')).toBe('http://h.lab/v1/chat/completions');
+  });
+
+  it('leaves everything else alone', () => {
+    expect(openaiBase('https://h')).toBe('https://h');
+    expect(openaiBase('https://h/')).toBe('https://h');
+    expect(openaiBase('https://h/v1x')).toBe('https://h/v1x');
+    expect(openaiBase('https://h/api/v10')).toBe('https://h/api/v10');
+    expect(openaiBase('https://h/V1')).toBe('https://h/V1');
+    expect(openaiBase('https://h/v1/v1')).toBe('https://h/v1');
+    expect(openaiBase('https://h/v1/chat/completions')).toBe('https://h/v1/chat/completions');
+    // The host is never a path segment.
+    expect(openaiBase('https://v1')).toBe('https://v1');
+    expect(openaiBase('v1')).toBe('v1');
+  });
+});
 
 describe('joinUrl', () => {
   it('inserts exactly one slash regardless of how each side is punctuated', () => {

@@ -67,10 +67,31 @@ describe('describeLlmError', () => {
     ).toBe(`Model llama3.1 was not found. Check ${path('Model')}.`);
   });
 
-  it('other 404 says to enter only the server address', () => {
-    const s = settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://api.openai.com/v1' });
-    expect(describeLlmError(new LlmHttpError('OpenAI', 404, '404 page not found'), s, id)).toBe(
-      `https://api.openai.com/v1 has no such address (404). Check ${path('OpenAI endpoint')}: enter only the server address, without a path such as /v1 or /api.`,
+  it('other OpenAI 404 says the address works with or without /v1 (app key, C-R3)', () => {
+    const s = settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://gw.lab.kr/openai/v1/chat/completions' });
+    const msg = describeLlmError(new LlmHttpError('OpenAI', 404, '404 page not found'), s, id);
+    expect(msg).toBe(t('ai.notFoundOpenai', 'https://gw.lab.kr/openai/v1/chat/completions', path('OpenAI endpoint')));
+    expect(msg).toContain('https://host/v1');
+    expect(msg).not.toContain('without a path such as /v1');
+  });
+
+  it('a NetError status 404 for OpenAI gives the same app sentence', () => {
+    const s = settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://gw.example/x' });
+    expect(describeLlmError(netError('status', { status: 404, body: 'nope' }), s, id)).toBe(
+      t('ai.notFoundOpenai', 'https://gw.example/x', path('OpenAI endpoint')),
+    );
+  });
+
+  it('other Ollama 404 keeps the vendor sentence', () => {
+    const s = settingsOf({ llmEndpointOllama: 'http://localhost:11434/api' });
+    expect(describeLlmError(new LlmHttpError('Ollama', 404, '404 page not found'), s, id)).toBe(
+      `http://localhost:11434/api has no such address (404). Check ${path('Ollama endpoint')}: enter only the server address, without a path such as /v1 or /api.`,
+    );
+  });
+
+  it('OpenAI 404 with "model" in the body still says the model was not found', () => {
+    expect(describeLlmError(new LlmHttpError('OpenAI', 404, '{"error":{"message":"The model gpt-x does not exist"}}'), openai, id)).toBe(
+      `Model llama3.1 was not found. Check ${path('Model')}.`,
     );
   });
 

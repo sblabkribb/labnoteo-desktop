@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/llm/provider.ts:27-267 sha256:50318941b2f8b631
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. The JSON body is built and the reply parsed as in the vendor file.
+// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. The JSON body is built and the reply parsed as in the vendor file.
 import type { ToolDef } from '@labnoteo/core';
 import { llmChat, NetError, type InvokeFn } from '../../integrations/netIpc';
 import type { AppSettings } from '../settings';
@@ -71,6 +71,23 @@ export function joinUrl(base: string, path: string): string {
   const trimmed = base.trim().replace(/\/+$/, '');
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   return withScheme + '/' + path.replace(/^\/+/, '');
+}
+
+/**
+ * The base of an OpenAI-compatible endpoint, as Rust's `openai_base` takes it
+ * (C-R1): one final path segment exactly `v1` (case-sensitive, with or without
+ * a trailing `/`) is dropped, so `https://host/v1` and `https://host` name the
+ * same server. Trailing slashes go too; the host is never taken for a segment.
+ * Anything else, a pasted `/v1/chat/completions` included, is left as typed.
+ */
+export function openaiBase(endpoint: string): string {
+  const trimmed = endpoint.trim().replace(/\/+$/, '');
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(trimmed)?.[0] ?? '';
+  const rest = trimmed.slice(scheme.length);
+  const slash = rest.indexOf('/');
+  if (slash < 0) return trimmed;
+  const path = rest.slice(slash);
+  return path.endsWith('/v1') ? scheme + rest.slice(0, slash) + path.slice(0, -'/v1'.length) : trimmed;
 }
 
 /** True when the reply has reasoning text but no answer. */

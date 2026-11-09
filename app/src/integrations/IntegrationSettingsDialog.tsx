@@ -403,7 +403,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
               <UrlField
                 key={endpointKey}
                 label={provider === 'ollama' ? coreT('Ollama endpoint') : coreT('OpenAI endpoint')}
-                hints={[overrideOr('ai.schemeHint')]}
+                hints={provider === 'openai' ? [overrideOr('ai.schemeHint'), t('ai.openaiEndpointHint')] : [overrideOr('ai.schemeHint')]}
                 value={draft[endpointKey]}
                 onChange={(v) => {
                   setDraft(endpointKey, v);
