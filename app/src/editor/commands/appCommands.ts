@@ -12,6 +12,10 @@ import { runSampleSettings } from '../../samples/SampleSettingsDialog';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
 import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDialog';
 import { runOpenLabnoteoLink } from '../../partbank/linkCommand';
+import { bfwReady } from '../../bfworkflow/bfwApp';
+import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
+import { runNotesFromDesign } from '../../bfworkflow/notesFromDesign';
+import { runDesignUsage, runOpenDesign } from '../../bfworkflow/openDesign';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -156,8 +160,52 @@ const openLabnoteoLink: AppCommand = {
   run: (ctx) => runOpenLabnoteoLink(ctx),
 };
 
+/**
+ * bfworkflow 카탈로그 동기화(SP6 D16): 서버 카탈로그가 같은 id 의 보관함 항목을 이기고, 보관함에만 있는 항목은 남긴다.
+ * 지금 연결(서버 또는 데스크톱 앱)의 키가 설정됐을 때만 보인다.
+ */
+const bfwSyncCatalogs: AppCommand = {
+  id: 'app.bfw-sync-catalogs',
+  nameKey: 'cmd.bfwSyncCatalogs',
+  run: (ctx) => runBfwSyncCatalogs(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
+/**
+ * bfworkflow 설계에서 노트 만들기(SP6 Task 40): 서버에 저장된 노트를 쓰거나 SSE 로 새로 만들어 실험 폴더에 쓴다.
+ * 있는 노트는 묻지 않고 덮어쓰지 않는다. 지금 연결의 키가 설정됐을 때만 보인다.
+ */
+const bfwNotesFromDesign: AppCommand = {
+  id: 'app.bfw-notes-from-design',
+  nameKey: 'cmd.bfwNotesFromDesign',
+  run: (ctx) => runNotesFromDesign(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
+/**
+ * bfworkflow 설계를 기본 브라우저에서 열기(SP6 Task 41): 워크플로 노트에서는 그 워크플로를 쓰는 설계 중에서,
+ * 아니면 모든 설계 중에서 고른다. 지금 연결의 키가 설정됐을 때만 보인다.
+ */
+const bfwOpenDesign: AppCommand = {
+  id: 'app.bfw-open-design',
+  nameKey: 'cmd.bfwOpenDesign',
+  run: (ctx) => runOpenDesign(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
+/**
+ * 이 워크플로를 쓰는 bfworkflow 설계(SP6 Task 41, 읽기 전용): 설계마다 코드와 노트의 UO 사용 횟수를 보이고,
+ * 고르면 설계 페이지를 연다. 사용처를 bfworkflow 로 보내는 것은 서버 엔드포인트가 생길 때까지 미룬다(D3).
+ */
+const bfwDesignUsage: AppCommand = {
+  id: 'app.bfw-design-usage',
+  nameKey: 'cmd.bfwDesignUsage',
+  run: (ctx) => runDesignUsage(ctx),
+  available: (ctx) => bfwReady(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, openLabnoteoLink];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

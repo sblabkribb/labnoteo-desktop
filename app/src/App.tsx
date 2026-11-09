@@ -42,6 +42,7 @@ import { DialogLayer } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
 import { cancelAllRequests } from './integrations/netIpc';
+import { startBfworkflow } from './bfworkflow/bfwApp';
 import { editorAwareFs } from './labnote/editorAwareFs';
 import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
@@ -380,6 +381,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       live = false;
     };
   }, [hasCtx]);
+  // bfworkflow(SP6 Part C): 보관함마다 키 상태를 읽고 연결 시험을 등록한다. 키를 저장하거나 주소를 바꾸면 명령이 따라 보인다.
+  useEffect(() => (hasCtx && recoverCtx.current ? startBfworkflow(recoverCtx.current) : undefined), [hasCtx, vault.root]);
   const flush = async () => !editor.current || (await editor.current.flush());
   // 맥락 메뉴: 항목은 여는 순간 만든다. 명령 맥락이 아직 없으면(설정을 읽는 중) 기본 동작 그대로다.
   const onTreeMenu = ctx
