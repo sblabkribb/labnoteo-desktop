@@ -41,6 +41,26 @@ export function ResultsDialog(props: {
   // The CTA when there is one, otherwise the first row's first button: the user asked for this dialog.
   useEffect(() => (first.current ?? list.current?.querySelector('button'))?.focus(), []);
 
+  // A spent (disabled) or removed button drops focus to <body>, outside the dialog, where Escape no longer reaches
+  // it: once the buttons settle after Undo or Delete earlier scan, focus goes back in, to the row's next button, the
+  // CTA, another row's button or the close button.
+  const focusRow = useRef<number | null>(null);
+  useEffect(() => {
+    const row = focusRow.current;
+    const dialog = list.current?.closest<HTMLElement>('.dialog');
+    if (row === null || !dialog || working.size > 0) return;
+    focusRow.current = null;
+    const active = document.activeElement as HTMLButtonElement | null;
+    if (active && active !== document.body && dialog.contains(active) && !active.disabled) return;
+    const enabled = 'button:not([disabled])';
+    const target =
+      list.current?.children[row]?.querySelector<HTMLElement>(enabled) ??
+      first.current ??
+      list.current?.querySelector<HTMLElement>(enabled) ??
+      dialog.querySelector<HTMLElement>('.dialog-close');
+    target?.focus();
+  }, [undone, cleared, working]);
+
   const busy = (r: ScanResult, on: boolean) =>
     setWorking((s) => {
       const next = new Set(s);
@@ -50,6 +70,7 @@ export function ResultsDialog(props: {
     });
 
   const removePrevious = async (r: ScanResult) => {
+    focusRow.current = rows.indexOf(r);
     busy(r, true);
     try {
       const n = await pipeline.removePrevious(r);
@@ -63,6 +84,7 @@ export function ResultsDialog(props: {
   };
 
   const undo = async (r: ScanResult) => {
+    focusRow.current = rows.indexOf(r);
     busy(r, true);
     try {
       const ok = await pipeline.undo(r);

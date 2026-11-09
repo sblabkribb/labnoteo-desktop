@@ -254,6 +254,32 @@ describe('results dialog', () => {
     expect(styleAttributes()).toEqual([]);
   });
 
+  // BUG-2: Undo removes the focused button; focus must stay in the dialog so Escape still closes it.
+  it('after Undo and after Delete earlier scan, focus stays in the dialog and Escape closes it', async () => {
+    renderLayer();
+    pipeline = fakePipeline();
+    const result = filed({ previous: [{ hash: 'cd34', embed: '![[old.jpg|200]]' }] });
+    const feature = makeFeature();
+    act(() => feature.report([result], true));
+    const dialog = screen.getByRole('dialog', { name: coreT('Scan results') });
+    const del = screen.getByRole('button', { name: coreT('Delete earlier scan') });
+    del.focus();
+    await act(async () => {
+      fireEvent.click(del);
+    });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(del);
+    const undo = screen.getByRole('button', { name: coreT('Undo') });
+    undo.focus();
+    await act(async () => {
+      fireEvent.click(undo);
+    });
+    expect(undo.isConnected).toBe(false);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(currentDialog()).toBeNull();
+  });
+
   it('a duplicate row has only Open note; an unmatched result offers Assign unmatched scans', () => {
     renderLayer();
     const feature = makeFeature();
