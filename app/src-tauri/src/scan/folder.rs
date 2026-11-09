@@ -4,9 +4,12 @@
 //!
 //! Only top-level files whose names pass `scan_name_ok` are ever listed,
 //! read or moved, plus the two subfolders `labnote-processed` and
-//! `labnote-failed`. A symlink or junction (a reparse point) is never
-//! followed: `read` checks the opened handle, `move_original` the subfolder
-//! and the source. A move never replaces a file.
+//! `labnote-failed`. A symlink or junction (a name-surrogate reparse point)
+//! is never followed: `read` checks the opened handle, `move_original` the
+//! subfolder and the source. Other reparse points are ordinary files here: a
+//! OneDrive or Dropbox placeholder keeps `FILE_ATTRIBUTE_REPARSE_POINT` even
+//! when downloaded, and a scan folder on a cloud drive is common. A move
+//! never replaces a file.
 
 use std::io::{ErrorKind, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -29,9 +32,13 @@ const CONFIG_FILE: &str = "folder.json";
 /// `FILE_FLAG_OPEN_REPARSE_POINT`: open a link itself, never its target.
 #[cfg(windows)]
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-/// `FILE_ATTRIBUTE_REPARSE_POINT`: a symlink, junction or other reparse point.
-#[cfg(windows)]
+/// `FILE_ATTRIBUTE_REPARSE_POINT`: a symlink, junction, cloud placeholder or
+/// other reparse point.
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+/// `FILE_SHARE_READ | FILE_SHARE_WRITE`, without `FILE_SHARE_DELETE`: while a
+/// handle opened so is held, the name cannot be renamed or removed.
+#[cfg(windows)]
+const SHARE_NO_DELETE: u32 = 0x1 | 0x2;
 
 /// How many `_N` suffixes a move tries before giving up.
 const MAX_SUFFIX: u32 = 10_000;
@@ -141,15 +148,42 @@ fn ms(t: std::io::Result<std::time::SystemTime>) -> Option<f64> {
     Some(d.as_secs_f64() * 1000.0)
 }
 
-#[cfg(windows)]
-fn is_reparse(m: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 || m.file_type().is_symlink()
+#[derive(PartialEq, Debug, Clone, Copy)]
+enum Reparse {
+    None,
+    /// A symlink, junction or mount point: never followed.
+    Link,
+    /// A non-surrogate reparse point (cloud placeholder, dedup, ...): a file.
+    Other,
 }
 
-#[cfg(not(windows))]
-fn is_reparse(m: &std::fs::Metadata) -> bool {
-    m.file_type().is_symlink()
+/// `is_symlink` is std's `FileType::is_symlink()`, which on Windows is "a
+/// reparse point whose tag is a name surrogate" (the tag is read from the
+/// handle with `FileAttributeTagInfo`), so junctions count and cloud
+/// placeholders do not.
+fn classify(attrs: u32, is_symlink: bool) -> Reparse {
+    if is_symlink {
+        Reparse::Link
+    } else if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        Reparse::Other
+    } else {
+        Reparse::None
+    }
+}
+
+fn reparse_of(m: &std::fs::Metadata) -> Reparse {
+    #[cfg(windows)]
+    let attrs = {
+        use std::os::windows::fs::MetadataExt;
+        m.file_attributes()
+    };
+    #[cfg(not(windows))]
+    let attrs = 0;
+    classify(attrs, m.file_type().is_symlink())
+}
+
+fn is_link(m: &std::fs::Metadata) -> bool {
+    reparse_of(m) == Reparse::Link
 }
 
 /// Top-level regular files passing `scan_name_ok`, sorted by name. Links and
@@ -164,7 +198,7 @@ pub fn list(dir: &Path) -> Result<Vec<ScanEntry>, NetError> {
         }
         // Not followed: a link is neither a file nor listed.
         let Ok(meta) = std::fs::symlink_metadata(entry.path()) else { continue };
-        if !meta.is_file() || is_reparse(&meta) {
+        if !meta.is_file() || is_link(&meta) {
             continue;
         }
         out.push(ScanEntry {
@@ -227,16 +261,53 @@ fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
     opts.open(path)
 }
 
+/// `open_no_follow` that also holds the name in place (no delete sharing).
+fn open_pin(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).share_mode(SHARE_NO_DELETE);
+    }
+    opts.open(path)
+}
+
+/// For a non-link reparse point (a cloud placeholder): a handle opened with
+/// `FILE_FLAG_OPEN_REPARSE_POINT` does not ask the provider to download the
+/// file, so the data is read through a normal open. A pin on the name, checked
+/// to be no link, is held across that open, so the name cannot be swapped for
+/// a link in between.
+fn open_pinned_followed(path: &Path) -> Result<std::fs::File, NetError> {
+    let pin = open_pin(path).map_err(|e| io("read", e))?;
+    let meta = pin.metadata().map_err(|e| io("read", e))?;
+    if is_link(&meta) {
+        return Err(forbidden());
+    }
+    if !meta.is_file() {
+        return Err(io("read", "not a file"));
+    }
+    let file = std::fs::File::open(path).map_err(|e| io("read", e))?;
+    drop(pin);
+    Ok(file)
+}
+
 /// Opens a top-level scan file for reading: refused when the opened handle
-/// is a reparse point or not a regular file, or over the cap.
+/// is a link or junction or not a regular file, or over the cap.
 fn open_scan(dir: &Path, name: &str) -> Result<(std::fs::File, u64), NetError> {
     if !scan_name_ok(name) {
         return Err(bad_name());
     }
-    let file = open_no_follow(&dir.join(name)).map_err(|e| io("read", e))?;
-    let meta = file.metadata().map_err(|e| io("read", e))?;
-    if is_reparse(&meta) {
-        return Err(forbidden());
+    let path = dir.join(name);
+    let mut file = open_no_follow(&path).map_err(|e| io("read", e))?;
+    let mut meta = file.metadata().map_err(|e| io("read", e))?;
+    match reparse_of(&meta) {
+        Reparse::Link => return Err(forbidden()),
+        Reparse::Other if meta.is_file() => {
+            file = open_pinned_followed(&path)?;
+            meta = file.metadata().map_err(|e| io("read", e))?;
+        }
+        _ => {}
     }
     if !meta.is_file() {
         return Err(io("read", "not a file"));
@@ -289,7 +360,7 @@ pub fn move_original_with(
     }
     let src = dir.join(name);
     let meta = std::fs::symlink_metadata(&src).map_err(|e| io("move", e))?;
-    if is_reparse(&meta) {
+    if is_link(&meta) {
         return Err(forbidden());
     }
     if !meta.is_file() {
@@ -297,7 +368,7 @@ pub fn move_original_with(
     }
     let sub = dir.join(outcome.dir());
     match std::fs::symlink_metadata(&sub) {
-        Ok(m) if is_reparse(&m) => return Err(forbidden()),
+        Ok(m) if is_link(&m) => return Err(forbidden()),
         Ok(m) if !m.is_dir() => return Err(io("move", "the target subfolder is not a folder")),
         Ok(_) => {}
         Err(e) if e.kind() == ErrorKind::NotFound => std::fs::create_dir(&sub).map_err(|e| io("move", e))?,
@@ -415,4 +486,55 @@ pub fn status_at(dirs: &Path, root: &Path) -> Result<ScanFolderStatus, NetError>
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_name_surrogates_are_links_and_a_cloud_placeholder_is_accepted() {
+        // A OneDrive/Dropbox placeholder keeps FILE_ATTRIBUTE_REPARSE_POINT
+        // (IO_REPARSE_TAG_CLOUD_*, no name-surrogate bit) even when hydrated.
+        assert_eq!(classify(0x400 | 0x20, false), Reparse::Other);
+        assert_eq!(classify(0x400 | 0x10, false), Reparse::Other, "a placeholder folder");
+        // Symlinks and junctions are name surrogates: std reports them as symlinks.
+        assert_eq!(classify(0x400, true), Reparse::Link);
+        assert_eq!(classify(0x20, false), Reparse::None);
+    }
+
+    fn tmp() -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let p = std::env::temp_dir().join(format!("labnoteo-scanf-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_pinned_reopen_reads_the_same_file_and_never_a_link() {
+        let t = tmp();
+        let elsewhere = tmp();
+        std::fs::write(t.join("a.jpg"), "abc").unwrap();
+        std::fs::write(elsewhere.join("secret.jpg"), "secret").unwrap();
+        let mut f = open_pinned_followed(&t.join("a.jpg")).unwrap();
+        let mut s = String::new();
+        f.read_to_string(&mut s).unwrap();
+        assert_eq!(s, "abc");
+        drop(f);
+        // While the pin is held the name cannot be renamed or removed away.
+        #[cfg(windows)]
+        {
+            let pin = open_pin(&t.join("a.jpg")).unwrap();
+            assert!(std::fs::rename(t.join("a.jpg"), t.join("b.jpg")).is_err());
+            assert!(std::fs::remove_file(t.join("a.jpg")).is_err());
+            drop(pin);
+            match std::os::windows::fs::symlink_file(elsewhere.join("secret.jpg"), t.join("l.jpg")) {
+                Ok(()) => assert_eq!(open_pinned_followed(&t.join("l.jpg")).unwrap_err().kind, NetErrorKind::ForbiddenPath),
+                Err(e) => println!("note: no symlink here ({e}); that half was skipped"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&t);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
 }

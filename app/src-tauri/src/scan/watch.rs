@@ -56,3 +56,55 @@ fn run(rx: Receiver<notify::Result<Event>>, sink: &mut dyn FnMut(), quiet: Durat
         sink();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::Sender;
+
+    fn modify() -> notify::Result<Event> {
+        Ok(Event::new(EventKind::Modify(notify::event::ModifyKind::Any)))
+    }
+
+    fn spawn(quiet: Duration, max_wait: Duration) -> (Sender<notify::Result<Event>>, Receiver<()>, std::thread::JoinHandle<()>) {
+        let (tx, rx) = channel();
+        let (out_tx, out_rx) = channel();
+        let h = std::thread::spawn(move || {
+            let mut sink = move || {
+                let _ = out_tx.send(());
+            };
+            run(rx, &mut sink, quiet, max_wait)
+        });
+        (tx, out_rx, h)
+    }
+
+    #[test]
+    fn a_burst_settles_into_one_call_and_reads_are_ignored() {
+        let (tx, out, h) = spawn(Duration::from_millis(50), Duration::from_secs(60));
+        tx.send(Ok(Event::new(EventKind::Access(notify::event::AccessKind::Any)))).unwrap();
+        for _ in 0..5 {
+            tx.send(modify()).unwrap();
+        }
+        out.recv_timeout(Duration::from_secs(10)).expect("one call after the burst");
+        assert!(out.recv_timeout(Duration::from_millis(200)).is_err(), "only one call");
+        tx.send(modify()).unwrap();
+        out.recv_timeout(Duration::from_secs(10)).expect("a later burst calls again");
+        drop(tx);
+        h.join().unwrap();
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_burst_that_never_settles_is_cut_at_max_wait_and_a_close_mid_burst_is_silent() {
+        let (tx, out, h) = spawn(Duration::from_secs(60), Duration::from_millis(50));
+        tx.send(modify()).unwrap();
+        out.recv_timeout(Duration::from_secs(10)).expect("max_wait ends the burst");
+        let (tx2, out2, h2) = spawn(Duration::from_secs(60), Duration::from_secs(60));
+        tx2.send(modify()).unwrap();
+        drop(tx2);
+        h2.join().unwrap();
+        assert!(out2.try_recv().is_err());
+        drop(tx);
+        h.join().unwrap();
+    }
+}

@@ -9,7 +9,7 @@ pub mod folder;
 pub mod watch;
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tauri::State;
 
@@ -31,18 +31,27 @@ pub fn folder_changed_payload() -> serde_json::Value {
 /// (the IPC test), like `WatcherState::inert()`.
 pub struct ScanFolderState {
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// Held around every load-modify-save of `folder.json`, so a prune on a
+    /// watcher tick never writes back a config that a mode change, a choose
+    /// or a clear has just replaced.
+    config: Arc<Mutex<()>>,
     inert: bool,
 }
 
 impl Default for ScanFolderState {
     fn default() -> Self {
-        ScanFolderState { watcher: Mutex::new(None), inert: false }
+        ScanFolderState { watcher: Mutex::new(None), config: Arc::default(), inert: false }
     }
 }
 
 impl ScanFolderState {
     pub fn inert() -> Self {
-        ScanFolderState { watcher: Mutex::new(None), inert: true }
+        ScanFolderState { watcher: Mutex::new(None), config: Arc::default(), inert: true }
+    }
+
+    /// The `folder.json` lock, to move into a blocking closure.
+    fn config_lock(&self) -> Arc<Mutex<()>> {
+        self.config.clone()
     }
 
     /// Stops the running watcher, then watches `folder` (when there is one)
@@ -111,6 +120,10 @@ fn configured(dirs: &Path, root: &Path) -> Result<FolderConfig, NetError> {
     load_config(dirs, root)?.ok_or_else(no_folder)
 }
 
+fn lock(m: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Folder work can block (a slow share, a 200 MB scan): keep it off the async runtime.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, NetError> + Send + 'static) -> Result<T, NetError> {
     tauri::async_runtime::spawn_blocking(f)
@@ -120,7 +133,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, NetError> + S
 
 /// Picks a folder in Rust's own dialog and stores it with its baseline.
 /// Cancel keeps the old folder. The vault folder itself is refused, and a
-/// folder inside the vault is stored as Shared.
+/// folder inside the vault is stored as Shared. The picker is modal to the
+/// main window; a pick made after another vault was opened is dropped.
 #[tauri::command]
 pub async fn scan_folder_choose<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -128,12 +142,22 @@ pub async fn scan_folder_choose<R: tauri::Runtime>(
     dirs: State<'_, IntegrationDirs>,
     state: State<'_, ScanFolderState>,
 ) -> Result<ScanFolderStatus, NetError> {
+    use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;
     let (dirs, root) = paths(&vault, &dirs)?;
     let dialog_app = app.clone();
-    let picked = tauri::async_runtime::spawn_blocking(move || dialog_app.dialog().file().blocking_pick_folder())
-        .await
-        .map_err(|e| NetError::new(NetErrorKind::Io, format!("folder picker failed: {e}")))?;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut builder = dialog_app.dialog().file();
+        if let Some(window) = dialog_app.get_webview_window("main") {
+            builder = builder.set_parent(&window);
+        }
+        builder.blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| NetError::new(NetErrorKind::Io, format!("folder picker failed: {e}")))?;
+    if vault.root().ok().as_deref() != Some(root.as_path()) {
+        return Err(NetError::new(NetErrorKind::BadInput, "another vault was opened while the folder picker was up"));
+    }
     let Some(picked) = picked else {
         let (d, r) = (dirs.clone(), root.clone());
         return blocking(move || status_at(&d, &r)).await;
@@ -141,8 +165,9 @@ pub async fn scan_folder_choose<R: tauri::Runtime>(
     let folder = picked
         .into_path()
         .map_err(|_| NetError::new(NetErrorKind::BadInput, "the chosen folder is not a local path"))?;
-    let (d, r, f) = (dirs.clone(), root.clone(), folder.clone());
+    let (d, r, f, l) = (dirs.clone(), root.clone(), folder.clone(), state.config_lock());
     let status = blocking(move || {
+        let _held = lock(&l);
         if is_vault_root(&r, &f) {
             return Err(NetError::new(NetErrorKind::BadInput, "the vault folder itself cannot be the scan folder"));
         }
@@ -164,7 +189,12 @@ pub async fn scan_folder_clear(
     state: State<'_, ScanFolderState>,
 ) -> Result<(), NetError> {
     let (dirs, root) = paths(&vault, &dirs)?;
-    blocking(move || clear_config(&dirs, &root)).await?;
+    let l = state.config_lock();
+    blocking(move || {
+        let _held = lock(&l);
+        clear_config(&dirs, &root)
+    })
+    .await?;
     state.stop();
     Ok(())
 }
@@ -174,10 +204,13 @@ pub async fn scan_folder_clear(
 pub async fn scan_folder_set_mode(
     vault: State<'_, VaultState>,
     dirs: State<'_, IntegrationDirs>,
+    state: State<'_, ScanFolderState>,
     mode: ScanMode,
 ) -> Result<(), NetError> {
     let (dirs, root) = paths(&vault, &dirs)?;
+    let l = state.config_lock();
     blocking(move || {
+        let _held = lock(&l);
         let cfg = configured(&dirs, &root)?;
         let next = with_mode(&cfg, mode, is_inside(&root, Path::new(&cfg.path)))?;
         save_config(&dirs, &root, &next)
@@ -209,10 +242,13 @@ pub async fn scan_folder_list(
 pub async fn scan_folder_prune_baseline(
     vault: State<'_, VaultState>,
     dirs: State<'_, IntegrationDirs>,
+    state: State<'_, ScanFolderState>,
     present: Vec<String>,
 ) -> Result<Option<Vec<String>>, NetError> {
     let (dirs, root) = paths(&vault, &dirs)?;
+    let l = state.config_lock();
     blocking(move || {
+        let _held = lock(&l);
         let cfg = configured(&dirs, &root)?;
         match prune_baseline(&cfg, &present) {
             Some(next) => {
@@ -584,7 +620,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(15));
         }
         std::thread::sleep(Duration::from_millis(1500));
-        assert_eq!(count.load(Ordering::SeqCst), 1);
+        // A late OS event on a loaded machine may open a second burst; the
+        // exact debounce is pinned in `watch::tests` on a synthetic channel.
+        let n = count.load(Ordering::SeqCst);
+        assert!((1..=2).contains(&n), "{n} events");
         drop(w);
     }
 
