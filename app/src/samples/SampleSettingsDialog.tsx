@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { isSameSampleFolder } from '@labnoteo/core/lib/sampleStorage';
-import { suggestSampleTypeName } from '@labnoteo/core/lib/sampleUtils';
+import { getSampleDisplayMeta, suggestSampleTypeName } from '@labnoteo/core/lib/sampleUtils';
 import { t } from '../i18n/t';
 import { coreT } from '../labnote/i18n';
 import type { CommandContext } from '../labnote/commands/context';
@@ -60,7 +60,12 @@ export async function applySampleSettings(env: SampleEnv, ctx: CommandContext, b
   };
   const from = normalizeSampleFolder(before.globalSampleFolder);
   const to = normalizeSampleFolder(after.globalSampleFolder);
-  if (!isSameSampleFolder(from, to)) await offerGlobalSampleFolderMove(live, from, to);
+  if (!isSameSampleFolder(from, to)) {
+    // 함께 지운 사용자 종류의 샘플도 옛 폴더에 남지 않게 옮긴다: 그래야 뒤이은 되돌리기 제안이 새 폴더에서 그것들을 센다.
+    const union = [...after.customSampleTypes, ...before.customSampleTypes.filter((ty) => !after.customSampleTypes.includes(ty))];
+    const moveTypes = getSampleDisplayMeta(union).types;
+    await offerGlobalSampleFolderMove({ ...live, types: () => moveTypes }, from, to);
+  }
   const removed = removedCustomSampleTypes(before.customSampleTypes, after.customSampleTypes);
   if (removed.length > 0) await offerToRestoreSampleTypes(live, removed, (customSampleTypes) => save({ customSampleTypes }));
 }
@@ -171,28 +176,48 @@ export function SampleSettingsDialog(props: {
   const [folderNotice, setFolderNotice] = useState<string | undefined>(undefined);
   const first = useRef<HTMLInputElement>(null);
   const legacy = useRef(legacyWarnings(stored)).current;
+  // 칸을 떠날 때 거절한 뒤 아직 고치지 않았다: 브라우저에서는 저장 단추를 누르면 칸이 먼저 blur 되므로, 저장은 이것을 보고
+  // 대화상자를 연 채로 둔다(까닭이 함께 사라지지 않게). 한 번 멈추면 지운다 — 다시 누른 저장은 되돌린 값으로 저장한다.
+  const refused = useRef({ folder: false, types: false });
 
   useEffect(() => first.current?.focus(), []);
 
   const leaveTypes = () => {
     const next = typeNotices(types, stored);
     setNotices(next);
-    if (next.length > 0) setTypes(partitionCustomSampleTypes(types, stored).save.join(', '));
+    if (next.length > 0) {
+      setTypes(partitionCustomSampleTypes(types, stored).save.join(', '));
+      refused.current.types = true;
+    }
   };
 
-  /** 칸의 폴더를 검사한다. 거절되면 까닭을 보이고 칸을 앞 값으로 되돌린다. 남길 폴더를 돌려준다(거절이면 undefined). */
-  const leaveFolder = (): string | undefined => {
+  /** 칸의 폴더를 검사한다. 거절되면 까닭을 보이고 칸을 앞 값으로 되돌린다. 남길 폴더를 돌려준다. */
+  const leaveFolder = (): string => {
     const r = commitGlobalFolder(coreT, folder, committed);
     setFolder(r.value);
     setCommitted(r.value);
-    setFolderNotice(r.notice);
-    return r.notice ? undefined : r.value;
+    if (r.notice) {
+      setFolderNotice(r.notice);
+      refused.current.folder = true;
+    }
+    return r.value;
   };
 
+  /** 거절이 있으면(지금 또는 칸을 떠날 때) 까닭을 보인 채 열어 둔다. 앞서 보인 까닭은 지우지 않는다. */
   const save = () => {
     const kept = leaveFolder();
-    if (kept === undefined) return;
-    props.onDone({ sampleTracking: tracking, customSampleTypes: partitionCustomSampleTypes(types, stored).save, globalSampleFolder: kept });
+    const next = typeNotices(types, stored);
+    const keptTypes = partitionCustomSampleTypes(types, stored).save;
+    if (next.length > 0) {
+      setNotices(next);
+      setTypes(keptTypes.join(', '));
+      refused.current.types = true;
+    }
+    if (refused.current.folder || refused.current.types) {
+      refused.current = { folder: false, types: false };
+      return;
+    }
+    props.onDone({ sampleTracking: tracking, customSampleTypes: keptTypes, globalSampleFolder: kept });
   };
 
   return (
@@ -226,6 +251,7 @@ export function SampleSettingsDialog(props: {
           onChange={(e) => {
             setTypes(e.target.value);
             setNotices([]);
+            refused.current.types = false;
           }}
           onBlur={leaveTypes}
         />
@@ -247,6 +273,7 @@ export function SampleSettingsDialog(props: {
           onChange={(e) => {
             setFolder(e.target.value);
             setFolderNotice(undefined);
+            refused.current.folder = false;
           }}
           onBlur={() => void leaveFolder()}
         />

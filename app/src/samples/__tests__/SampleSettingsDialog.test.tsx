@@ -80,6 +80,63 @@ describe('SampleSettingsDialog', () => {
     // 저장할 수 없는 이름은 칸에서 빠진다(플러그인의 t.setValue(s.customSampleTypes.join(', '))).
     expect(input.value).toBe('');
     fireEvent.change(input, { target: { value: 'CellLine, Cell Line' } });
+    // Save shows why a name is dropped and stays open; a second Save keeps the names that can be saved.
+    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
+    expect(document.querySelector('.sample-settings')).not.toBeNull();
+    expect(input.value).toBe('CellLine');
+    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
+    await expect(result).resolves.toEqual({ ...BASE, customSampleTypes: ['CellLine'] });
+  });
+
+  const settled = (p: Promise<unknown>) => {
+    const s = { done: false };
+    void p.then(() => {
+      s.done = true;
+    });
+    return s;
+  };
+
+  it('a refused Global folder: change, blur, Save keeps the dialog open with the reason (browser order)', async () => {
+    render(<DialogLayer />);
+    let result: Promise<SampleSettingsValue | undefined> | undefined;
+    act(() => {
+      result = openSampleSettings(BASE);
+    });
+    const done = settled(result!);
+    const folder = screen.getByLabelText(coreT('Global sample folder')) as HTMLInputElement;
+    const notice = commitGlobalFolder(coreT, 'a/con', GLOBAL).notice!;
+    fireEvent.change(folder, { target: { value: 'a/con' } });
+    fireEvent.blur(folder);
+    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
+    await act(async () => {});
+    expect(done.done).toBe(false);
+    expect(document.querySelector('.sample-settings')).not.toBeNull();
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(folder.value).toBe(GLOBAL);
+    // Seen: Save again keeps the folder it was set back to.
+    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
+    await expect(result).resolves.toEqual(BASE);
+  });
+
+  it('a refused custom type: change, blur, Save keeps the dialog open with the reason (browser order)', async () => {
+    render(<DialogLayer />);
+    let result: Promise<SampleSettingsValue | undefined> | undefined;
+    act(() => {
+      result = openSampleSettings(BASE);
+    });
+    const done = settled(result!);
+    const input = screen.getByLabelText(coreT('Custom sample types')) as HTMLInputElement;
+    const notice = coreT('{0}: a space or - keeps a type from autocompleting, so it was not saved. Use {1} instead.', 'Cell Line', 'Cell_Line');
+    fireEvent.change(input, { target: { value: 'Cell Line' } });
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
+    await act(async () => {});
+    expect(done.done).toBe(false);
+    expect(document.querySelector('.sample-settings')).not.toBeNull();
+    expect(screen.getByText(notice)).toBeTruthy();
+    // Editing the field again clears the stop; a valid name then saves at once.
+    fireEvent.change(input, { target: { value: 'CellLine' } });
+    fireEvent.blur(input);
     fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
     await expect(result).resolves.toEqual({ ...BASE, customSampleTypes: ['CellLine'] });
   });
@@ -218,6 +275,29 @@ describe('applySampleSettings', () => {
     expect(th.vault.files()[`${GLOBAL}/Reagent.json`]).toBe(SAMPLE_VAULT[`${GLOBAL}/Reagent.json`]);
     expect(th.vault.recycleBin).toHaveLength(0);
     expect(th.notes.at(-1)).toEqual({ kind: 'warn', message: t('samples.registryUnreadable', `${SHARED}/Reagent.json`) });
+  });
+
+  it('a conflicted registry in the OLD folder stops the move before anything is written (D13)', async () => {
+    const th = host({ ...SAMPLE_VAULT, [`${GLOBAL}/Reagent.json`]: CONFLICTED });
+    th.answer.confirm(true);
+    await apply(th, BASE, { ...BASE, globalSampleFolder: SHARED });
+    expect(th.vault.files()[`${GLOBAL}/Reagent.json`]).toBe(CONFLICTED);
+    expect(th.vault.recycleBin).toHaveLength(0);
+    expect(Object.keys(th.vault.files()).some((f) => f.startsWith(`${SHARED}/`))).toBe(false);
+    expect(th.notes.at(-1)).toEqual({ kind: 'warn', message: t('samples.registryUnreadable', `${GLOBAL}/Reagent.json`) });
+  });
+
+  it('a Global folder change together with a type removal still moves the removed type, then offers it back', async () => {
+    const two = JSON.stringify({ '배지-1': { type: '배지', alias: 'LB', descriptions: [], sources: [] } });
+    const th = host({ ...SAMPLE_VAULT, [`${GLOBAL}/배지.json`]: two }, { customSampleTypes: ['배지'] });
+    th.answer.confirm(true, true);
+    const before = { ...BASE, customSampleTypes: ['배지'] };
+    await apply(th, before, { ...before, customSampleTypes: [], globalSampleFolder: SHARED });
+    expect(th.vault.files()[`${SHARED}/배지.json`]).toBeDefined();
+    expect(th.vault.files()[`${GLOBAL}/배지.json`]).toBeUndefined();
+    expect(th.asked.confirm).toHaveLength(2);
+    expect(th.asked.confirm[1].message).toContain(coreT('{0}: {1} sample(s)', '배지', '1'));
+    expect(th.ctx.settings.customSampleTypes).toEqual(['배지']);
   });
 
   it('an experiment registry set as Global by mistake is not moved (#408)', async () => {
