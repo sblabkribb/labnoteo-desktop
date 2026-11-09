@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 pub mod index;
+pub mod net;
 pub mod vault;
 
 pub mod app {

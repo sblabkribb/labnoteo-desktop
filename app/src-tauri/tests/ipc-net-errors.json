@@ -1,0 +1,19 @@
+{
+  "notConfigured": "notConfigured",
+  "keyMissing": "keyMissing",
+  "invalidUrl": "invalidUrl",
+  "forbiddenPath": "forbiddenPath",
+  "offline": "offline",
+  "timeout": "timeout",
+  "tls": "tls",
+  "redirect": "redirect",
+  "status": "status",
+  "notJson": "notJson",
+  "tooLarge": "tooLarge",
+  "cancelled": "cancelled",
+  "keychain": "keychain",
+  "badInput": "badInput",
+  "remote": "remote",
+  "noResult": "noResult",
+  "insecure": "insecure"
+}

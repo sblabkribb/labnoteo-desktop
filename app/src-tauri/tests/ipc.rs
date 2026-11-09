@@ -25,6 +25,7 @@ use labnoteo_app_lib::vault::{LinkJournalDir, SettingsFile, VaultState};
 const ARGS: &str = include_str!("ipc-args.json");
 const ERRORS: &str = include_str!("ipc-errors.json");
 const EVENTS: &str = include_str!("ipc-events.json");
+const NET_ERRORS: &str = include_str!("ipc-net-errors.json");
 
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
@@ -350,6 +351,46 @@ fn error_kinds_match_the_typescript_side() {
     assert_eq!(kind(FsError::Vault(VaultError::Io(Error::from_raw_os_error(206)))), fixture["pathTooLong"]);
     assert_eq!(kind(FsError::from(Error::from_raw_os_error(206))), fixture["pathTooLong"]);
     assert!(message(FsError::NoVault), "every error carries a display message");
+}
+
+/// What `NetError` puts in `kind`, one entry per `NetErrorKind`.
+#[test]
+fn net_error_kinds_match_the_fixture() {
+    use labnoteo_app_lib::net::NetErrorKind as K;
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(NET_ERRORS).unwrap();
+    assert_eq!(fixture.len(), 17, "ipc-net-errors.json lists every kind");
+    let all = [
+        K::NotConfigured, K::KeyMissing, K::InvalidUrl, K::ForbiddenPath, K::Offline, K::Timeout,
+        K::Tls, K::Redirect, K::Status, K::NotJson, K::TooLarge, K::Cancelled, K::Keychain,
+        K::BadInput, K::Remote, K::NoResult, K::Insecure,
+    ];
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a name (and an entry in the fixture).
+    let name = |k: &K| match k {
+        K::NotConfigured => "notConfigured",
+        K::KeyMissing => "keyMissing",
+        K::InvalidUrl => "invalidUrl",
+        K::ForbiddenPath => "forbiddenPath",
+        K::Offline => "offline",
+        K::Timeout => "timeout",
+        K::Tls => "tls",
+        K::Redirect => "redirect",
+        K::Status => "status",
+        K::NotJson => "notJson",
+        K::TooLarge => "tooLarge",
+        K::Cancelled => "cancelled",
+        K::Keychain => "keychain",
+        K::BadInput => "badInput",
+        K::Remote => "remote",
+        K::NoResult => "noResult",
+        K::Insecure => "insecure",
+    };
+    for k in &all {
+        let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-net-errors.json", name(k)));
+        assert_eq!(serde_json::to_value(k).unwrap(), Value::String(expected.clone()), "kind {}", name(k));
+    }
+    let named: std::collections::BTreeSet<&str> = all.iter().map(name).collect();
+    assert_eq!(named.len(), 17);
 }
 
 #[test]
