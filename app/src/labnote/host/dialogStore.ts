@@ -30,7 +30,8 @@ export type DialogSpec =
   | { kind: 'sampleSettings'; value: SampleSettingsValue }
   | { kind: 'progress'; id: number }
   | { kind: 'integrationSettings'; deps: IntegrationDeps }
-  | { kind: 'partbankSearch'; opts: PartbankSearchOpts };
+  | { kind: 'partbankSearch'; opts: PartbankSearchOpts }
+  | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {

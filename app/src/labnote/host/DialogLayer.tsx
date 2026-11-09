@@ -11,6 +11,7 @@ import { SampleSettingsDialog } from '../../samples/SampleSettingsDialog';
 import { ProgressDialog } from '../../integrations/ProgressDialog';
 import { IntegrationSettingsDialog } from '../../integrations/IntegrationSettingsDialog';
 import { PartbankSearchDialog } from '../../partbank/PartbankSearchDialog';
+import { AiAnswerDialog } from '../port/aiAnswerDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -39,6 +40,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <IntegrationSettingsDialog deps={spec.deps} onDone={onDone} onCancel={onCancel} />;
     case 'partbankSearch':
       return <PartbankSearchDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'aiAnswer':
+      return <AiAnswerDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

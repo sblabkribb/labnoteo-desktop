@@ -1,0 +1,513 @@
+// @vitest-environment jsdom
+/**
+ * "AI: 도우미에게 묻기(도구 사용)"(Task 35). vendor tests/plugin/askAgent.test.ts 의 모든 사례(#77, #161, #186, #286,
+ * #529, #544)를 옮겼다. 제공자 흉내는 `fakeInvoke({ llm_chat })` 이고, 도구는 진짜 core 도구가 가짜 보관함과 열린 편집기
+ * 위에서 돈다. 끝 알림의 문구만 보는 사례(#281, #529)는 vendor 처럼 runAgent 의 결과를 정해 준다(그 밖에는 진짜 runAgent).
+ */
+import { fakeInvoke } from '../../integrations/__tests__/fakeNet';
+import { cancelAllRequests } from '../../integrations/netIpc';
+import { cancelProgress } from '../../integrations/progressStore';
+import { setLang } from '../../i18n/lang';
+import { t } from '../../i18n/t';
+import { closeAllDialogs, currentDialog } from '../../labnote/host/dialogStore';
+import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
+import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
+import { openNote } from '../../labnote/openNotes';
+import { askAgentCommand } from '../../labnote/port/aiAskAgent';
+import { runAgent, type AgentRun } from '../../labnote/port/llmAgent';
+import { createAiEnv } from '../aiEnv';
+
+vi.mock('../../labnote/port/llmAgent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../labnote/port/llmAgent')>();
+  return { ...actual, runAgent: vi.fn(actual.runAgent) };
+});
+
+const DIR = 'labnote/001_Test';
+const NOTE = `${DIR}/001_WD010_A.labnote.md`;
+const OTHER = `${DIR}/002_WB030_B.labnote.md`;
+const BODY = ['## [WD010 A]', '', '메모 줄', '', '## 결과', '', '결과 문단', ''].join('\n');
+const LLM = { llmProvider: 'openai', llmEndpointOpenai: 'https://llm.example.test', llmModel: 'm' } as const;
+const VAULT = () => ({ root: 'C:/Vault', name: 'Vault' });
+
+/** OpenAI 모양의 2xx 답. */
+const reply = (content: string) => ({ status: 200, text: JSON.stringify({ choices: [{ message: { content } }] }) });
+let callNo = 0;
+/** 도구 하나를 부르는 모델 차례. */
+const toolReply = (name: string, args: Record<string, unknown>) => ({
+  status: 200,
+  text: JSON.stringify({
+    choices: [
+      {
+        message: {
+          content: '',
+          tool_calls: [{ id: `call_${++callNo}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }],
+        },
+      },
+    ],
+  }),
+});
+
+type Message = { role: string; content: string };
+type Route = (args: Record<string, unknown>) => unknown;
+
+let hosts: TestHost[] = [];
+
+/** 노트를 진짜 편집기로 열고(커서는 `caret`), 모델 차례를 `turns` 순서로 답한다. 차례가 떨어지면 마지막 것을 되풀이한다. */
+async function setup(turns: Route[], opts: { settings?: Record<string, unknown>; caret?: number; mount?: boolean } = {}) {
+  const th = createTestHost({ [NOTE]: BODY, [OTHER]: '## [WB030 B]\n' }, opts.settings ?? LLM);
+  hosts.push(th);
+  if (opts.mount !== false) {
+    await th.mount(NOTE);
+    if (opts.caret !== undefined) openNote(NOTE)!.view()!.dispatch({ selection: { anchor: opts.caret } });
+  }
+  let turn = 0;
+  const f = fakeInvoke({
+    llm_chat: (a) => turns[Math.min(turn++, turns.length - 1)](a),
+    net_cancel: () => null,
+    vault_current: VAULT,
+  });
+  return { th, f, env: createAiEnv(th.ctx, f.invoke) };
+}
+
+const sent = (f: ReturnType<typeof fakeInvoke>): Message[][] =>
+  f.calls.filter(([c]) => c === 'llm_chat').map(([, a]) => (a.body as { messages: Message[] }).messages);
+const chats = (f: ReturnType<typeof fakeInvoke>) => f.calls.filter(([c]) => c === 'llm_chat').length;
+const docOf = (path: string) => openNote(path)!.view()!.state.doc.toString();
+const answerSpec = () => currentDialog()?.spec as { kind: string; content: string; onInsert: () => Promise<boolean> } | undefined;
+const messages = (th: TestHost) => th.notes.map((n) => n.message);
+
+/** runAgent 가 이번 한 번 이 결과를 내게 한다(끝 알림 문구만 보는 vendor 사례). */
+const nextRun = (run: AgentRun) => vi.mocked(runAgent).mockResolvedValueOnce(run);
+const call = { id: 'call_0', name: 'create_sample', arguments: {} };
+
+beforeEach(() => {
+  setLang('en');
+  callNo = 0;
+});
+afterEach(() => {
+  for (const th of hosts) th.cleanup();
+  hosts = [];
+  closeAllDialogs();
+  cleanupDialogs();
+  vi.mocked(runAgent).mockClear();
+});
+
+describe('askAgentCommand (#77)', () => {
+  it('asks nothing when no provider is configured', async () => {
+    const { th, f, env } = await setup([() => reply('x')], { settings: { llmProvider: 'none' } });
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    expect(th.asked.prompt).toHaveLength(0);
+    expect(chats(f)).toBe(0);
+    expect(th.notes).toContainEqual({ kind: 'info', message: t('ai.configureFirst') });
+  });
+
+  it('needs an open lab note', async () => {
+    const { th, f, env } = await setup([() => reply('x')], { mount: false });
+    await askAgentCommand(env);
+    expect(th.asked.prompt).toHaveLength(0);
+    expect(chats(f)).toBe(0);
+    expect(th.notes).toContainEqual({ kind: 'info', message: 'Open a lab note first.' });
+  });
+
+  it('asks for the goal with the plugin wording, and stops on an empty one', async () => {
+    const { th, f, env } = await setup([() => reply('x')]);
+    th.answer.prompt('   ');
+    await askAgentCommand(env);
+    expect(th.asked.prompt[0]).toEqual({
+      title: 'Ask the AI assistant',
+      prompt: 'What should the assistant do?',
+      placeholder: 'e.g. Add a Method section describing the PCR setup',
+    });
+    expect(chats(f)).toBe(0);
+  });
+
+  it('shows the answer in a dialog instead of writing it to the note', async () => {
+    const { th, env } = await setup([() => reply('**답변**')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    expect(answerSpec()).toMatchObject({ kind: 'aiAnswer', content: '**답변**' });
+    expect(docOf(NOTE)).toBe(BODY);
+    expect(th.vault.files()[NOTE]).toBe(BODY);
+  });
+
+  it('sends the note body with the goal, capped at 6000 characters', async () => {
+    const { th, f, env } = await setup([() => reply('**답변**')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    const [msgs] = sent(f);
+    expect(msgs[1]).toEqual({ role: 'user', content: ['요약해 줘', '', 'Active note:', BODY].join('\n') });
+    expect(msgs[0].content).toContain('not written to the note');
+    expect(msgs[0].content).toContain(`The active note is "${NOTE}"; pass it as documentPath.`);
+
+    const long = `${BODY}${'가'.repeat(7000)}`;
+    openNote(NOTE)!.view()!.dispatch({ changes: { from: 0, to: docOf(NOTE).length, insert: long } });
+    th.answer.prompt('요약해 줘');
+    closeAllDialogs();
+    await askAgentCommand(env);
+    expect(sent(f)[1][1].content).toBe(['요약해 줘', '', 'Active note:', long.slice(0, 6000)].join('\n'));
+  });
+
+  it('sends temperature 0.2 and the tools', async () => {
+    const { th, f, env } = await setup([() => reply('끝')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    const body = f.calls.find(([c]) => c === 'llm_chat')![1].body as { temperature: number; tools: Array<{ function: { name: string } }> };
+    expect(body.temperature).toBe(0.2);
+    expect(body.tools.map((x) => x.function.name)).toContain('update_section');
+  });
+
+  it('lists its tools and asks the model to say what it cannot do', async () => {
+    const { th, f, env } = await setup([() => reply('끝')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    const system = sent(f)[0][0].content;
+    expect(system).toContain('update_section');
+    expect(system).toContain('experiment status');
+  });
+
+  it('reads caret and text before the prompt', async () => {
+    const caret = BODY.indexOf('메모 줄') + 2;
+    const { th, env } = await setup([() => reply('**답변**')], { caret });
+    // The goal prompt takes the focus; the editor then reports the start of the note (#544).
+    th.answer.prompt(() => {
+      openNote(NOTE)!.view()!.dispatch({ selection: { anchor: 0 } });
+      return '요약해 줘';
+    });
+    await askAgentCommand(env);
+    expect(await answerSpec()!.onInsert()).toBe(true);
+    const doc = docOf(NOTE);
+    expect(doc.indexOf('**답변**')).toBeGreaterThan(doc.indexOf('메모 줄'));
+    expect(doc.indexOf('**답변**')).toBeLessThan(doc.indexOf('## 결과'));
+  });
+
+  it('insert at saved caret, or at the end when the text changed', async () => {
+    const caret = BODY.indexOf('메모 줄') + 2;
+    const { th, env } = await setup(
+      [
+        () => reply('**첫째**'),
+        () => {
+          // The user writes on while the model works.
+          const view = openNote(NOTE)!.view()!;
+          view.dispatch({ changes: { from: view.state.doc.length, insert: '추가 줄\n' } });
+          return reply('**둘째**');
+        },
+      ],
+      { caret }
+    );
+    th.answer.prompt('요약해 줘', '또 해 줘');
+    await askAgentCommand(env);
+    expect(await answerSpec()!.onInsert()).toBe(true);
+    let doc = docOf(NOTE);
+    expect(doc.indexOf('**첫째**')).toBeGreaterThan(doc.indexOf('메모 줄'));
+    expect(doc.indexOf('**첫째**')).toBeLessThan(doc.indexOf('## 결과'));
+    closeAllDialogs();
+
+    await askAgentCommand(env);
+    expect(await answerSpec()!.onInsert()).toBe(true);
+    doc = docOf(NOTE);
+    expect(doc.indexOf('**둘째**')).toBeGreaterThan(doc.indexOf('추가 줄'));
+    expect(doc.trimEnd().endsWith('**둘째**')).toBe(true);
+  });
+
+  it('falls back to the end of the note when a tool the agent ran changed it', async () => {
+    const caret = BODY.indexOf('메모 줄') + 2;
+    const { th, env } = await setup(
+      [() => toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '추가 결과', mode: 'append' }), () => reply('**답변**')],
+      { caret }
+    );
+    th.answer.prompt('결과에 덧붙여 줘');
+    th.answer.confirm(true);
+    await askAgentCommand(env);
+    expect(docOf(NOTE)).toContain('추가 결과');
+    expect(await answerSpec()!.onInsert()).toBe(true);
+    expect(docOf(NOTE).trimEnd().endsWith('**답변**')).toBe(true);
+  });
+
+  it('does not insert once another note is open', async () => {
+    const { th, env } = await setup([() => reply('**답변**')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    th.setActive(OTHER);
+    expect(await answerSpec()!.onInsert()).toBe(false);
+    expect(th.vault.files()[OTHER]).toBe('## [WB030 B]\n');
+    expect(docOf(NOTE)).toBe(BODY);
+    expect(messages(th)).toContain('That note is no longer open. Copy the answer instead.');
+  });
+
+  it('opens no dialog for an empty answer', async () => {
+    const { th, env } = await setup([() => reply('')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    expect(currentDialog()).toBeNull();
+  });
+
+  // #161: only "ran 0 tool call(s)" was shown when the model neither answered nor acted.
+  it('says the request may be outside its tools when there is no answer and no tool call', async () => {
+    const { th, env } = await setup([() => reply('  ')]);
+    th.answer.prompt('상태를 바꿔 줘');
+    await askAgentCommand(env);
+    expect(messages(th)).toContain('The assistant gave no answer. What you asked may be outside the tools it can use.');
+    expect(messages(th)).toContain('The AI used no tools; nothing in the vault changed.');
+  });
+
+  // #195: a thinking model's empty answer says so instead of passing silently.
+  it('names a thinking-only empty answer', async () => {
+    const { th, env } = await setup([
+      () => ({ status: 200, text: JSON.stringify({ choices: [{ message: { content: '', reasoning_content: '음' } }] }) }),
+    ]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    expect(messages(th)).toContain('The model gave no answer (it only thought). Try again or choose another model.');
+  });
+
+  it('asks approval for each mutating tool with the multi-line message; destructive when lines are erased', async () => {
+    const { th, env } = await setup([
+      () => toolReply('read_section', { documentPath: NOTE, heading: '결과' }),
+      () => toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '새 결과' }),
+      () => toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '덧붙임', mode: 'append' }),
+      () => reply('바꿨습니다'),
+    ]);
+    th.answer.prompt('결과를 바꿔 줘');
+    th.answer.confirm(true, true);
+    await askAgentCommand(env);
+    // The read asked nothing; each write asked once.
+    expect(th.asked.confirm).toHaveLength(2);
+    const [first, second] = th.asked.confirm;
+    expect(first.message.startsWith('Allow AI tool "update_section" to modify the vault?')).toBe(true);
+    expect(first.message).toContain(`Target: ${NOTE}`);
+    expect(first.message).toMatch(/\n {2,}결과 문단/);
+    expect(first.message).toMatch(/\n {2,}새 결과/);
+    expect(first.opts).toEqual({ confirmLabel: 'Allow', destructive: true });
+    expect(second.opts).toEqual({ confirmLabel: 'Allow', destructive: false });
+    expect(docOf(NOTE)).toContain('새 결과');
+    expect(docOf(NOTE)).toContain('덧붙임');
+    expect(docOf(NOTE)).not.toContain('결과 문단');
+    expect(messages(th)).toContain('AI tool calls: 2 change(s) made, 1 lookup(s).');
+  });
+
+  it('closes the progress dialog while an approval is asked, and reopens it for the next turn', async () => {
+    const seen: Array<string | undefined> = [];
+    const { th, env } = await setup([
+      () => {
+        seen.push(currentDialog()?.spec.kind);
+        return toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '새 결과' });
+      },
+      () => {
+        seen.push(currentDialog()?.spec.kind);
+        return reply('끝');
+      },
+    ]);
+    th.answer.prompt('결과를 바꿔 줘');
+    th.answer.confirm(() => {
+      seen.push(currentDialog()?.spec.kind ?? 'none');
+      return true;
+    });
+    await askAgentCommand(env);
+    expect(seen).toEqual(['progress', 'none', 'progress']);
+  });
+
+  // #186: a write denied in the approval dialog counted as a tool call that ran.
+  it('a denial is reported in the tool-run notice', async () => {
+    const { th, f, env } = await setup([
+      () => toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '새 결과' }),
+      () => reply(''),
+    ]);
+    th.answer.prompt('결과를 바꿔 줘');
+    th.answer.confirm(false);
+    await askAgentCommand(env);
+    expect(docOf(NOTE)).toBe(BODY);
+    // The model hears the denial.
+    expect(sent(f)[1].at(-1)).toMatchObject({ role: 'tool', content: JSON.stringify({ error: 'User denied this write.' }) });
+    expect(messages(th)).toContain('The assistant gave no answer.');
+    expect(messages(th)).toContain('AI tool calls: 1 denied by you. Nothing in the vault changed.');
+  });
+
+  it('tells denied writes from changes in the end notice', async () => {
+    const { th, env } = await setup([() => reply('x')]);
+    th.answer.prompt('요약해 줘');
+    nextRun({
+      content: '끝',
+      executed: [
+        { call, outcome: 'done', mutates: true },
+        { call, outcome: 'done', mutates: false },
+        { call, outcome: 'failed', mutates: true, error: 'Sample not found' },
+      ],
+      stoppedAtLimit: false,
+    });
+    await askAgentCommand(env);
+    expect(messages(th)).toContain('AI tool calls: 1 change(s) made, 1 lookup(s), 1 failed. Failed: create_sample — Sample not found.');
+  });
+
+  // #281: the end notice counted failures without saying why.
+  it('names the first failures with their target and reason, and counts the rest', async () => {
+    const { th, env } = await setup([() => reply('x')]);
+    th.answer.prompt('요약해 줘');
+    const fail = (alias: string, error: string) => ({
+      call: { id: alias, name: 'create_sample', arguments: { alias, documentPath: 'labnote/001_A/001_WD010_A.labnote.md' } },
+      outcome: 'failed' as const,
+      mutates: true,
+      error,
+    });
+    nextRun({
+      content: '끝',
+      executed: [
+        fail('pET', 'Alias "pET" is already used by DNA-1 in this experiment'),
+        fail('IPTG', 'x'.repeat(120)),
+        { call: { id: 'r', name: 'update_section', arguments: { heading: 'Method' } }, outcome: 'rejected', mutates: true, error: 'No "Method" section' },
+        fail('YE-22', 'bad'),
+      ],
+      stoppedAtLimit: false,
+    });
+    await askAgentCommand(env);
+    const notice = messages(th).find((n) => n.startsWith('AI tool calls'))!;
+    expect(notice).toContain('Failed: create_sample (pET) — Alias "pET" is already used by DNA-1 in this experiment; ');
+    expect(notice).toContain(`create_sample (IPTG) — ${'x'.repeat(79)}…; `);
+    expect(notice).toContain('update_section (Method) — No "Method" section; +1 more.');
+    expect(notice).toContain('Nothing in the vault changed.');
+  });
+
+  // #529: a rule the plugin knows was read out in English, and cut mid-sentence.
+  it('words a named refusal in the language of the interface, then cuts it to length', async () => {
+    const { th, env } = await setup([() => reply('x')]);
+    setLang('ko');
+    th.answer.prompt('요약해 줘');
+    nextRun({
+      content: '끝',
+      executed: [
+        {
+          call: { id: 'a', name: 'create_sample', arguments: { alias: 'pET;28a' } },
+          outcome: 'rejected',
+          mutates: true,
+          error:
+            'Invalid alias "pET;28a": ";" and ":" separate the id, alias and description in a note. Replace them (e.g. with "-" or "/") and retry.',
+          code: 'sample_alias_separator',
+          params: ['pET;28a'],
+        },
+        {
+          call: { id: 'b', name: 'create_sample', arguments: { type: 'XNA' } },
+          outcome: 'failed',
+          mutates: true,
+          error: 'Unknown sample type "XNA". Known types: DNA, RNA.',
+          code: 'sample_type_unknown',
+          params: ['XNA', 'DNA, RNA'],
+        },
+        {
+          call: { id: 'c', name: 'create_sample', arguments: {} },
+          outcome: 'failed',
+          mutates: true,
+          error: 'type and documentPath are required',
+        },
+      ],
+      stoppedAtLimit: false,
+    });
+    await askAgentCommand(env);
+    const notice = messages(th).find((n) => n.startsWith('AI 도구 호출'))!;
+    expect(notice).toContain(
+      'create_sample (pET;28a) — 별칭에는 ";"나 ":"를 쓸 수 없습니다. 노트에서 ID·별칭·설명을 가르는 글자입니다. 대신 "-"나 "/"를 쓰세요(예: 1-10).'
+    );
+    expect(notice).toContain('create_sample — "XNA"은(는) 시료 타입이 아닙니다(DNA, RNA). Labnote 설정에서 먼저 추가하세요.');
+    expect(notice).toContain('create_sample — type and documentPath are required.');
+  });
+
+  // #286: after a change the end notice is the answer, without "try again".
+  it('does not ask to try again when the assistant changed something without answering', async () => {
+    const { th, env } = await setup([
+      () => toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '덧붙임', mode: 'append' }),
+      () => ({ status: 200, text: JSON.stringify({ choices: [{ message: { content: '', reasoning_content: '음' } }] }) }),
+    ]);
+    th.answer.prompt('결과에 덧붙여 줘');
+    th.answer.confirm(true);
+    await askAgentCommand(env);
+    expect(th.notes).toEqual([{ kind: 'info', message: 'AI tool calls: 1 change(s) made.' }]);
+  });
+
+  it('stopped at the limit gives the limit notice', async () => {
+    const { th, f, env } = await setup([() => toolReply('read_section', { documentPath: NOTE, heading: '결과' })]);
+    th.answer.prompt('계속 읽어 줘');
+    await askAgentCommand(env);
+    expect(chats(f)).toBe(6);
+    expect(currentDialog()).toBeNull();
+    expect(th.notes).toEqual([
+      { kind: 'warn', message: 'AI stopped after too many steps. AI tool calls: 6 lookup(s). Nothing in the vault changed.' },
+    ]);
+  });
+
+  it('maps a request error with describeLlmError', async () => {
+    const { th, env } = await setup([
+      () => {
+        throw { kind: 'offline', message: 'raw-rust-text' };
+      },
+    ]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    expect(th.notes).toHaveLength(1);
+    expect(th.notes[0].kind).toBe('warn');
+    expect(th.notes[0].message).not.toContain('raw-rust-text');
+    expect(currentDialog()).toBeNull();
+  });
+
+  it('cancel during a model turn stops the run and writes nothing', async () => {
+    const { th, f, env } = await setup([
+      () => toolReply('read_section', { documentPath: NOTE, heading: '결과' }),
+      () => {
+        // The user presses Cancel in the progress dialog while the model works.
+        setTimeout(() => cancelProgress((currentDialog()!.spec as { id: number }).id), 0);
+        return new Promise(() => {});
+      },
+    ]);
+    th.answer.prompt('결과를 바꿔 줘');
+    await askAgentCommand(env);
+    expect(chats(f)).toBe(2);
+    expect(f.calls.some(([c]) => c === 'net_cancel')).toBe(true);
+    expect(th.notes).toEqual([]);
+    expect(currentDialog()).toBeNull();
+    expect(docOf(NOTE)).toBe(BODY);
+    expect(th.vault.files()[NOTE]).toBe(BODY);
+  });
+
+  it('vault switch during an agent approval stops the run; no further llm_chat and no write', async () => {
+    const { th, f, env } = await setup([
+      () => toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '새 결과' }),
+      () => reply('끝'),
+    ]);
+    const write = vi.spyOn(th.host.fs, 'write');
+    const modify = vi.spyOn(th.host.fs, 'modify');
+    th.answer.prompt('결과를 바꿔 줘');
+    th.answer.confirm(() => {
+      // The vault is switched while the approval is open: the app cancels every request, then closes every dialog.
+      void cancelAllRequests(f.invoke);
+      closeAllDialogs();
+      return false; // the confirm settles as Cancel
+    });
+    await askAgentCommand(env);
+    expect(chats(f)).toBe(1);
+    expect(write).not.toHaveBeenCalled();
+    expect(modify).not.toHaveBeenCalled();
+    expect(docOf(NOTE)).toBe(BODY);
+    expect(th.vault.files()[NOTE]).toBe(BODY);
+    expect(th.notes).toEqual([]);
+    expect(currentDialog()).toBeNull();
+  });
+
+  it('an approved write after the vault root changed is not made', async () => {
+    let root = 'C:/A';
+    const { th, f } = await setup([
+      () => {
+        root = 'C:/B';
+        return toolReply('update_section', { documentPath: NOTE, heading: '결과', content: '새 결과' });
+      },
+      () => reply('끝'),
+    ]);
+    f.calls.length = 0;
+    const routes = f.invoke;
+    const env2 = createAiEnv(th.ctx, (async (cmd: string, args?: Record<string, unknown>) =>
+      cmd === 'vault_current' ? { root, name: 'v' } : routes(cmd, args)) as typeof f.invoke);
+    th.answer.prompt('결과를 바꿔 줘');
+    th.answer.confirm(true);
+    await askAgentCommand(env2);
+    expect(docOf(NOTE)).toBe(BODY);
+    expect(th.vault.files()[NOTE]).toBe(BODY);
+    expect(chats(f)).toBe(1);
+  });
+});
