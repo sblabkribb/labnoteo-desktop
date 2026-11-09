@@ -163,6 +163,31 @@ describe('insert-unit-operation', () => {
     expect(added).toBeLessThan(old);
   });
 
+  it('with the section heading deleted, it puts it back above the TOC, inserts after the cursor block, and one undo restores (#564)', async () => {
+    const original = workflowNote().replace('## Related Unit Operations\n\n', '');
+    expect(original).not.toContain('## Related Unit Operations');
+    const m = await openWorkflow(original);
+    cursorAt(m, '### [UHW010 Mixing]', 5);
+    h.answer.pick(pickOp('USW010'));
+    h.answer.alias('');
+    await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx)));
+
+    const doc = m.view().state.doc.toString();
+    const section = doc.indexOf('## Related Unit Operations');
+    expect(section).toBeGreaterThanOrEqual(0);
+    const toc = doc.split('\n').filter((l) => /^\s*- \[(UHW|USW)\d+ /.test(l));
+    expect(toc.map((l) => /\[([A-Z]+\d+) /.exec(l)?.[1])).toEqual(['UHW010', 'USW010', 'UHW180']);
+    expect(doc.indexOf('- [UHW010')).toBeGreaterThan(section);
+    // 되살린 제목만큼 밀린 커서로 넣을 곳을 찾는다: 새 블록은 커서가 있던 Mixing 뒤다
+    const added = doc.indexOf('### [USW010 ');
+    expect(doc.indexOf('### [UHW010 Mixing]')).toBeLessThan(added);
+    expect(added).toBeLessThan(doc.indexOf('### [UHW180 Incubation]'));
+    expect(m.view().state.selection.main.head).toBe(added);
+
+    act(() => void undo(m.view()));
+    expect(m.view().state.doc.toString()).toBe(original);
+  });
+
   it('on a non-workflow note, the reason from workflowPathProblem is shown and no alias is asked', async () => {
     h = createTestHost({ [README_PATH]: README, [WF_PATH]: workflowNote() });
     await h.mount(README_PATH);
