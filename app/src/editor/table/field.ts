@@ -1,6 +1,7 @@
 import { Facet, RangeSet, RangeSetBuilder, RangeValue, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import { sampleCellKey } from '../../samples/cellMarks';
 import { parseTable } from './model';
 import { TableWidget, toggleRawTable } from './widget';
 import { cellEditorExtension } from './cellEditor';
@@ -15,7 +16,7 @@ export { toggleRawTable };
  * - 블록 위젯이 줄바꿈을 덮으므로 ViewPlugin 이 아니라 StateField 여야 한다.
  * - 문서의 맨 위(Document 의 바로 아래) 표만 바꾼다. 인용(Blockquote)이나 목록(ListItem) 안의 표는 원문 그대로다.
  * - `rawTables` 에 든 표는 원문으로 남는다("마크다운으로 편집"). 선택이 그 표를 떠나면 격자로 돌아온다.
- * - 문서·구문 트리·원문 표시·잠금이 바뀔 때만 다시 만든다. 표는 적으니 맨 위 노드를 훑는 것으로 충분하다.
+ * - 문서·구문 트리·원문 표시·잠금·설정 칸이 바뀔 때만 다시 만든다. 표는 적으니 맨 위 노드를 훑는 것으로 충분하다.
  */
 
 export interface TableOptions {
@@ -132,13 +133,16 @@ function build(state: EditorState): DecorationSet {
   const raw = state.field(rawTables, false) ?? RangeSet.empty;
   const editable = !isLocked(state);
   const out = new RangeSetBuilder<Decoration>();
-  for (const span of findTables(state)) {
+  const tables = findTables(state);
+  // 셀의 샘플 표시(Task 10): 열쇠가 바뀐 표만 위젯이 다시 그린다. 표가 없으면 구하지 않는다.
+  const samplesKey = tables.length ? sampleCellKey(state) : '';
+  for (const span of tables) {
     if (overlaps(raw, span.from, span.to)) continue;
     // 문서의 줄 구분자와 상관없이 `\n` 으로 읽는다: CodeMirror 의 위치는 줄바꿈을 한 글자로 센다
     const source = state.doc.sliceString(span.from, span.to);
     const model = parseTable(source, 0, source.length);
     if (!model) continue;
-    out.add(span.from, span.to, Decoration.replace({ widget: new TableWidget(source, model, editable), block: true }));
+    out.add(span.from, span.to, Decoration.replace({ widget: new TableWidget(source, model, editable, samplesKey), block: true }));
   }
   return out.finish();
 }
@@ -146,8 +150,10 @@ function build(state: EditorState): DecorationSet {
 export const tableField = StateField.define<DecorationSet>({
   create: build,
   update(deco, tr) {
+    // 설정 칸을 갈아 끼우면(샘플 설정·판, Task 10) 셀의 샘플 표시가 바뀔 수 있다
     const changed =
       tr.docChanged ||
+      tr.reconfigured ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       tr.state.field(rawTables, false) !== tr.startState.field(rawTables, false) ||
       isLocked(tr.state) !== isLocked(tr.startState);

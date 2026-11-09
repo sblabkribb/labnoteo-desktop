@@ -2,7 +2,8 @@ import { Facet, StateEffect } from '@codemirror/state';
 import { EditorView, WidgetType } from '@codemirror/view';
 import { t } from '../../i18n/t';
 import { rows, type Align, type Cell, type TableModel } from './model';
-import { renderInline } from './renderInline';
+import { sampleCellDecorator } from '../../samples/cellMarks';
+import { renderInline, type InlineDecorator } from './renderInline';
 
 /**
  * 표 하나를 격자로 그리는 블록 위젯. 문서가 유일한 원본이고, 위젯은 원문(`source`)에서 다시 그릴 수 있는 그림일 뿐이다.
@@ -105,8 +106,15 @@ const WRAP_PX = 16;
 
 const ALIGN_CLASSES = ['lno-al-left', 'lno-al-center', 'lno-al-right'];
 
-/** 셀 요소가 지금 그리고 있는 원문. 바뀌지 않은 셀은 다시 그리지 않는다. */
+/** 셀 요소가 지금 그리고 있는 원문(과 샘플 표시 열쇠). 바뀌지 않은 셀은 다시 그리지 않는다. */
 const drawn = new WeakMap<HTMLElement, string>();
+
+/** 셀을 그릴 때의 꾸밈(샘플 ID 표시, Task 10)과 그 열쇠. 열쇠가 바뀌면 글자가 같아도 다시 그린다. */
+interface Paint {
+  decorate: InlineDecorator | undefined;
+  key: string;
+}
+const PLAIN: Paint = { decorate: undefined, key: '' };
 
 function classify(el: HTMLElement, cell: Cell, align: Align): void {
   for (const c of ALIGN_CLASSES) el.classList.remove(c);
@@ -117,23 +125,24 @@ function classify(el: HTMLElement, cell: Cell, align: Align): void {
   else el.removeAttribute('title');
 }
 
-function fillCell(el: HTMLElement, cell: Cell): void {
+function fillCell(el: HTMLElement, cell: Cell, paint: Paint): void {
   // 셀 편집기가 든 칸은 건드리지 않는다: 그 칸의 DOM 과 편집기가 자기 입력에도 살아 있어야 한글 조합이 깨지지 않는다
-  if (activeCells.has(el) || drawn.get(el) === cell.text) return;
+  const mark = `${paint.key}\u0000${cell.text}`;
+  if (activeCells.has(el) || drawn.get(el) === mark) return;
   el.replaceChildren();
-  renderInline(cell.text, el);
-  drawn.set(el, cell.text);
+  renderInline(cell.text, el, paint.decorate);
+  drawn.set(el, mark);
 }
 
-function makeCell(doc: Document, header: boolean, cell: Cell, align: Align): HTMLElement {
+function makeCell(doc: Document, header: boolean, cell: Cell, align: Align, paint: Paint): HTMLElement {
   const el = doc.createElement(header ? 'th' : 'td');
   el.setAttribute('role', header ? 'columnheader' : 'gridcell');
   classify(el, cell, align);
-  fillCell(el, cell);
+  fillCell(el, cell, paint);
   return el;
 }
 
-function makeTable(doc: Document, m: TableModel): HTMLTableElement {
+function makeTable(doc: Document, m: TableModel, paint: Paint): HTMLTableElement {
   const table = doc.createElement('table');
   table.className = 'lno-table';
   table.setAttribute('role', 'grid');
@@ -141,7 +150,7 @@ function makeTable(doc: Document, m: TableModel): HTMLTableElement {
   const tbody = doc.createElement('tbody');
   rows(m).forEach((row, r) => {
     const tr = doc.createElement('tr');
-    row.cells.forEach((cell, c) => tr.appendChild(makeCell(doc, r === 0, cell, m.align[c] ?? null)));
+    row.cells.forEach((cell, c) => tr.appendChild(makeCell(doc, r === 0, cell, m.align[c] ?? null, paint)));
     (r === 0 ? thead : tbody).appendChild(tr);
   });
   table.append(thead, tbody);
@@ -444,11 +453,14 @@ export function openTableMenu(view: EditorView, cell: HTMLElement, restore: () =
 
 // ---------------------------------------------------------------- 칸
 
-/** 셀 편집기를 걷은 칸을 셀 글자로 다시 그린다. 다음 갱신 때는 모델 글자로 한 번 더 맞춘다. */
-export function paintCell(el: HTMLElement, text: string): void {
+/**
+ * 셀 편집기를 걷은 칸을 셀 글자로 다시 그린다. 다음 갱신 때는 모델 글자로 한 번 더 맞춘다.
+ * `decorate` 는 바깥 편집기의 샘플 표시(`sampleCellDecorator(outer.state)`)다.
+ */
+export function paintCell(el: HTMLElement, text: string, decorate?: InlineDecorator): void {
   drawn.delete(el);
   el.replaceChildren();
-  renderInline(text, el);
+  renderInline(text, el, decorate);
 }
 
 const activeIn = (root: Element) => {
@@ -516,12 +528,17 @@ export class TableWidget extends WidgetType {
     readonly model: TableModel,
     /** 잠기지 않은 편집기인가. 잠겨 있으면 도구 막대가 없다. (WidgetType 에 이미 `editable` 게터가 있어 이름이 다르다.) */
     readonly canEdit: boolean,
+    /**
+     * 셀의 샘플 표시 열쇠(`sampleCellKey`: 설정과 판, 노트 경로, 노트가 정의한 ID). 설정이 없으면 ''.
+     * 바뀌면 같은 원문이라도 셀을 다시 그린다.
+     */
+    readonly samplesKey: string = '',
   ) {
     super();
   }
 
   eq(other: TableWidget): boolean {
-    return other.source === this.source && other.canEdit === this.canEdit;
+    return other.source === this.source && other.canEdit === this.canEdit && other.samplesKey === this.samplesKey;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -559,10 +576,11 @@ export class TableWidget extends WidgetType {
     }
 
     const m = this.model;
+    const paint: Paint = this.samplesKey ? { decorate: sampleCellDecorator(view.state), key: this.samplesKey } : PLAIN;
     const table = tableOf(wrap);
     const active = table ? activeIn(table) : undefined;
     if (!table || !sameShape(table, m)) {
-      const fresh = makeTable(doc, m);
+      const fresh = makeTable(doc, m, paint);
       if (table) table.replaceWith(fresh);
       else scrollBox(wrap).appendChild(fresh);
       active?.relocate(fresh);
@@ -574,7 +592,7 @@ export class TableWidget extends WidgetType {
       row.cells.forEach((cell, c) => {
         const el = table.rows[r].cells[c];
         classify(el, cell, m.align[c] ?? null);
-        fillCell(el, cell);
+        fillCell(el, cell, paint);
       }),
     );
   }

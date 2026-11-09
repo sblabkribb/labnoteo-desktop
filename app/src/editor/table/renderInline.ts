@@ -26,8 +26,17 @@ const SKIP = new Set(['EmphasisMark', 'StrikethroughMark', 'CodeMark']);
 const WRAP: Record<string, string> = { StrongEmphasis: 'strong', Emphasis: 'em', Strikethrough: 's' };
 const BR = /^<br\s*\/?>$/i;
 
-/** text 를 parent 에 인라인 DOM 으로 덧붙인다. */
-export function renderInline(text: string, parent: HTMLElement): void {
+/**
+ * 셀 원문 글자의 [from, to) 범위를 `<span class>` 로 감싸 달라는 꾸밈(샘플 ID 표시, Task 10). title 은 선택이다.
+ * 클래스 이름과 title 만 쓴다(CSP: 인라인 스타일 없음).
+ */
+export type InlineDecorator = (text: string) => ReadonlyArray<{ from: number; to: number; cls: string; title?: string }>;
+
+/**
+ * text 를 parent 에 인라인 DOM 으로 덧붙인다. `decorate` 가 준 범위는 한 덩어리 글자 안에 다 들어갈 때만 감싼다:
+ * 인라인 토큰(강조 표시, escape, 코드 표시 등)의 경계를 넘는 범위는 겹쳐 넣을 수 없어 버린다.
+ */
+export function renderInline(text: string, parent: HTMLElement, decorate?: InlineDecorator): void {
   const shown = displayText(text);
   const src = PREFIX + shown + SUFFIX;
   const tree = labnoteParser.parse(src);
@@ -35,17 +44,37 @@ export function renderInline(text: string, parent: HTMLElement): void {
   const add = (to: HTMLElement, s: string) => {
     if (s) to.appendChild(doc.createTextNode(s));
   };
+  // 꾸밈 범위를 src 위치로 옮긴다. 보일 글자 밖으로 나가는 범위는 버린다.
+  const decor = (decorate?.(text) ?? [])
+    .filter((r) => r.from >= 0 && r.from < r.to && r.to <= shown.length)
+    .map((r) => ({ ...r, from: r.from + PREFIX.length, to: r.to + PREFIX.length }))
+    .sort((a, b) => a.from - b.from);
+  /** src 의 [from, to) 글자를 덧붙인다. 그 안에 다 든 꾸밈 범위는 span 으로 감싼다. `map` 은 조각마다 글자를 고친다. */
+  const addSrc = (into: HTMLElement, from: number, to: number, map: (s: string) => string = (s) => s) => {
+    let pos = from;
+    for (const r of decor) {
+      if (r.from < pos || r.to > to) continue;
+      add(into, map(src.slice(pos, r.from)));
+      const span = doc.createElement('span');
+      span.className = r.cls;
+      if (r.title !== undefined) span.title = r.title;
+      add(span, map(src.slice(r.from, r.to)));
+      into.appendChild(span);
+      pos = r.to;
+    }
+    add(into, map(src.slice(pos, to)));
+  };
 
   /** node 의 [from, to) 를 그린다. 자식 사이의 빈틈은 글자다. */
   const children = (node: SyntaxNode, into: HTMLElement, from = node.from, to = node.to) => {
     let pos = from;
     for (let c = node.firstChild; c; c = c.nextSibling) {
       if (c.to <= from || c.from >= to) continue;
-      if (c.from > pos) add(into, src.slice(pos, c.from));
+      if (c.from > pos) addSrc(into, pos, c.from);
       one(c, into);
       pos = c.to;
     }
-    if (pos < to) add(into, src.slice(pos, to));
+    if (pos < to) addSrc(into, pos, to);
   };
 
   /** 링크·이미지의 이름표: 첫 LinkMark(`[` 또는 `![`) 뒤부터 둘째 LinkMark(`]`) 앞까지. */
@@ -70,7 +99,7 @@ export function renderInline(text: string, parent: HTMLElement): void {
       const to = marks.length > 1 ? marks[marks.length - 1].from : node.to;
       const el = doc.createElement('code');
       // GFM: 표 안에서는 코드 스팬 안의 백슬래시+파이프도 파이프다
-      add(el, src.slice(from, to).replace(/\\\|/g, '|'));
+      addSrc(el, from, to, (s) => s.replace(/\\\|/g, '|'));
       into.appendChild(el);
     } else if (name === 'WikiLink' || name === 'Embed') {
       // 위키링크·임베드: 별칭이 있으면 별칭을, 없으면 대상을 링크 모양 글자로 보인다 (해석은 하지 않는다)
@@ -80,7 +109,7 @@ export function renderInline(text: string, parent: HTMLElement): void {
       el.className = 'lno-table-link';
       if (target) el.title = src.slice(target.from, target.to);
       const shown = alias ?? target;
-      if (shown) add(el, src.slice(shown.from, shown.to));
+      if (shown) addSrc(el, shown.from, shown.to);
       into.appendChild(el);
     } else if (name === 'Link' || name === 'Image') {
       const el = doc.createElement('span');
@@ -95,14 +124,15 @@ export function renderInline(text: string, parent: HTMLElement): void {
       el.className = 'lno-table-link';
       const s = url ? src.slice(url.from, url.to) : src.slice(node.from, node.to);
       el.title = s;
-      add(el, s);
+      if (url) addSrc(el, url.from, url.to);
+      else addSrc(el, node.from, node.to);
       into.appendChild(el);
     } else if (name === 'HTMLTag' && BR.test(src.slice(node.from, node.to))) {
       into.appendChild(doc.createElement('br'));
     } else if (node.firstChild) {
       children(node, into);
     } else {
-      add(into, src.slice(node.from, node.to));
+      addSrc(into, node.from, node.to);
     }
   };
 
@@ -116,5 +146,5 @@ export function renderInline(text: string, parent: HTMLElement): void {
     children(cell, parent, cell.from, Math.min(cell.to, end));
   });
   // 파서가 표로 읽지 못하면(일어나지 않아야 한다) 원문을 글자로 둔다
-  if (!row) add(parent, shown);
+  if (!row) addSrc(parent, PREFIX.length, PREFIX.length + shown.length);
 }

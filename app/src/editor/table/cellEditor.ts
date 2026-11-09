@@ -20,6 +20,7 @@ import { t } from '../../i18n/t';
 import { markdownHighlighting } from '../theme';
 import { labnoteMarkdown } from '../markdownSyntax';
 import { cellAt, escapeCellText, insertRow, parseTable, rows, setCell, type Change, type TableModel } from './model';
+import { sampleCellDecorator } from '../../samples/cellMarks';
 import { displayText } from './renderInline';
 import { activeCells, cellActivator, openTableMenu, paintCell, tableOf, type CellHandle } from './widget';
 // field.ts 도 이 파일을 가져온다(tableExtension). 순환이므로 이 파일의 맨 위 코드는 field 의 값을 쓰지 않는다: 함수 안에서만 쓴다.
@@ -465,7 +466,7 @@ class Session implements CellHandle {
     activeCells.delete(this.td);
     this.td.classList.remove('lno-cell-active');
     this.nested.destroy();
-    if (repaint && this.td.isConnected) paintCell(this.td, text);
+    if (repaint && this.td.isConnected) paintCell(this.td, text, sampleCellDecorator(this.outer.state));
     const outer = this.outer;
     if (clear || (refocus && focused)) {
       queueMicrotask(() => {
