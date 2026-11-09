@@ -7,6 +7,8 @@
 //! a `set` flag and an `epoch` counter.
 
 pub mod clipboard;
+pub mod rpc;
+pub mod server;
 pub mod token;
 
 use std::sync::{Arc, RwLock};
