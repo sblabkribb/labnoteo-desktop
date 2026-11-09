@@ -50,6 +50,8 @@ function recorder() {
     if (cmd === 'vault_read_image') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
     if (cmd === 'vault_created_times') return [null];
+    if (cmd === 'slack_call') return { status: 200, json: { ok: true } };
+    if (cmd === 'slack_download') return new ArrayBuffer(0);
     if (cmd === 'index_bodies') return { items: [], next: null };
     if (cmd === 'vault_open' || cmd === 'vault_create' || cmd === 'vault_current') return { root: 'D:\\lab', name: 'lab', hasObsidianConfig: false };
     return null;
@@ -114,6 +116,9 @@ describe('IPC 인자 이름 계약', () => {
     await net.partbankCatalogWrite('a.json', '{}', r.invoke);
     await net.integrationStateRead('partbankUsage', r.invoke);
     await net.integrationStateWrite('partbankUsage', '{}', r.invoke);
+    // SP7 Part B Slack 커맨드
+    await net.slackCall({ method: 'authTest' }, r.invoke);
+    expect(await net.slackDownload({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' }, r.invoke)).toBeInstanceOf(ArrayBuffer);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

@@ -70,6 +70,9 @@ macro_rules! register_commands {
             // SP7 Part A
             $crate::vault::fs::vault_created_times,
             $crate::print::print_open_in_browser,
+            // SP7 Part B
+            $crate::net::slack::slack_call,
+            $crate::net::slack::slack_download,
         ])
     };
 }

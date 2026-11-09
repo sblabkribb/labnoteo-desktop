@@ -368,6 +368,46 @@ export async function bfwGenerateNotes(
   }
 }
 
+// ── Slack(SP7 B6) ──────────────────────────────────────────────
+
+/** Rust `SlackMethod`: 부를 수 있는 Slack Web API 메서드 전부. 주소는 Rust 가 만든다. */
+export type SlackMethod = 'authTest' | 'conversationsHistory' | 'conversationsList' | 'chatPostMessage' | 'reactionsAdd';
+
+/** Rust `SlackReply`. 2xx 와 429 가 답이다. 429 면 `retryAfter`(초)가 있다. 토큰은 Rust 가 이미 가렸다. */
+export interface SlackReply {
+  status: number;
+  json: unknown;
+  scopes?: string;
+  retryAfter?: number;
+}
+
+/** Slack Web API 를 부른다. 토큰은 Rust 가 자격 증명 관리자에서 읽는다. 읽기 메서드의 `params` 는 문자열과 숫자만. */
+export function slackCall(
+  a: { method: SlackMethod; params?: Record<string, unknown>; signal?: AbortSignal },
+  invoke: InvokeFn = tauriInvoke,
+): Promise<SlackReply> {
+  return trackRequest(
+    a.signal,
+    (requestId) => call<SlackReply>(invoke, 'slack_call', { requestId, method: a.method, params: a.params ?? {} }),
+    invoke,
+  );
+}
+
+/**
+ * Slack 비공개 파일(`https://files.slack.com/files-pri/…`)을 받는다. 다른 주소는 Rust 가 아무것도 보내지 않고
+ * `forbiddenPath` 로 거절한다. 리디렉트는 `redirect`, HTML 페이지는 `notJson`, 그 밖의 실패 응답은 `status` 다.
+ */
+export function slackDownload(
+  a: { url: string; signal?: AbortSignal },
+  invoke: InvokeFn = tauriInvoke,
+): Promise<ArrayBuffer> {
+  return trackRequest(
+    a.signal,
+    (requestId) => call<ArrayBuffer>(invoke, 'slack_download', { requestId, url: a.url }),
+    invoke,
+  );
+}
+
 // ── 앱 데이터 저장소 ──────────────────────────────────────────────
 
 export function partbankCatalogList(invoke: InvokeFn = tauriInvoke): Promise<string[]> {

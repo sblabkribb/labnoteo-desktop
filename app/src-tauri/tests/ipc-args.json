@@ -49,5 +49,7 @@
   "partbank_catalog_read": ["name"],
   "partbank_catalog_write": ["name", "content"],
   "integration_state_read": ["name"],
-  "integration_state_write": ["name", "content"]
+  "integration_state_write": ["name", "content"],
+  "slack_call": ["requestId", "method", "params"],
+  "slack_download": ["requestId", "url"]
 }

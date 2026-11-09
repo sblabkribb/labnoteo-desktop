@@ -8,6 +8,7 @@ pub mod bfw;
 pub mod llm;
 pub mod partbank;
 pub mod secrets;
+pub mod slack;
 pub mod sse;
 pub mod store;
 pub use store::IntegrationDirs;

@@ -6,6 +6,8 @@ import {
   cancelAllRequests,
   llmChat,
   setSecret,
+  slackCall,
+  slackDownload,
   toNetError,
   vaultGuard,
   vaultSignal,
@@ -176,5 +178,40 @@ describe('netIpc', () => {
     });
     await expect(setSecret('slackBot', 'xoxp-1', invoke)).rejects.toMatchObject({ kind: 'badInput' });
     expect(calls).toEqual([['secret_set', { slot: 'slackBot', value: 'xoxp-1' }]]);
+  });
+
+  it('slackCall sends a request id, the method and the params, and answers the reply', async () => {
+    const reply = { status: 429, json: { ok: false, error: 'ratelimited' }, retryAfter: 30 };
+    const f = fakeInvoke({ slack_call: () => reply });
+    expect(await slackCall({ method: 'conversationsHistory', params: { channel: 'D1', limit: 200 } }, f.invoke)).toEqual(reply);
+    const [cmd, args] = f.calls[0];
+    expect(cmd).toBe('slack_call');
+    expect(typeof args.requestId).toBe('string');
+    expect([args.method, args.params]).toEqual(['conversationsHistory', { channel: 'D1', limit: 200 }]);
+    await slackCall({ method: 'authTest' }, f.invoke);
+    expect(f.calls[1][1].params).toEqual({});
+  });
+
+  it('slackDownload answers the bytes and maps a refusal to a NetError', async () => {
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const f = fakeInvoke({ slack_download: () => bytes });
+    expect(await slackDownload({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' }, f.invoke)).toBe(bytes);
+    expect(f.calls[0][1]).toMatchObject({ url: 'https://files.slack.com/files-pri/T1-F1/a.png' });
+    const g = fakeInvoke({
+      slack_download: () => {
+        throw { kind: 'forbiddenPath', message: 'raw-rust-text' };
+      },
+    });
+    await expect(slackDownload({ url: 'https://evil.example/x' }, g.invoke)).rejects.toMatchObject({ kind: 'forbiddenPath' });
+  });
+
+  it('an aborted Slack call sends net_cancel with its request id', async () => {
+    const f = fakeInvoke({ slack_call: () => new Promise(() => {}), net_cancel: () => true });
+    const ac = new AbortController();
+    const p = slackCall({ method: 'authTest', signal: ac.signal }, f.invoke);
+    ac.abort();
+    await expect(p).rejects.toMatchObject({ kind: 'cancelled' });
+    const id = f.calls.find(([c]) => c === 'slack_call')![1].requestId;
+    expect(f.calls).toContainEqual(['net_cancel', { requestId: id }]);
   });
 });

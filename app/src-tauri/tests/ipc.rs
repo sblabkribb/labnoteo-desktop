@@ -125,6 +125,20 @@ fn ipc_argument_names_match_the_typescript_side() {
         "keyMissing"
     );
 
+    // Slack: a file URL off files.slack.com is refused before anything else
+    // (no token is looked up, nothing is sent), and a call without a stored
+    // bot token is keyMissing.
+    assert_eq!(
+        call("slack_download", args("slack_download", vec![json!("s1"), json!("https://evil.example/x")])).unwrap_err()["kind"],
+        "forbiddenPath"
+    );
+    assert_eq!(
+        call("slack_call", args("slack_call", vec![json!("s2"), json!("authTest"), json!({})])).unwrap_err()["kind"],
+        "keyMissing"
+    );
+    // A method off the allow-list is refused as a malformed argument.
+    assert!(call("slack_call", json!({"requestId": "s3", "method": "filesDelete", "params": {}})).is_err());
+
     // App-data stores (offline catalogs, integration state) are per vault.
     assert_eq!(call("partbank_catalog_list", args("partbank_catalog_list", vec![])).unwrap_err()["kind"], "notConfigured");
 
