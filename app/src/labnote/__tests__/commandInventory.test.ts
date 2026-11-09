@@ -26,6 +26,7 @@ const PORTED = [
   'update-catalogs',
   'sync-workflow-checklist',
   'open-workflow-view',
+  'insert-experiment-samples-table',
 ] as const;
 
 /** 아직 옮기지 않은 플러그인 명령과 그것을 옮길 하위 프로젝트(계획의 "Deferred to later sub-projects"). */
@@ -37,7 +38,6 @@ const DEFERRED: Record<string, string> = {
   'renumber-workflows': 'rename and links',
   'open-sample-definition': 'samples',
   'open-sample-view': 'samples',
-  'insert-experiment-samples-table': 'samples',
   'download-partbank-catalog': 'platform and integrations',
   'refresh-partbank-locations': 'platform and integrations',
   'ai-draft-method': 'platform and integrations',

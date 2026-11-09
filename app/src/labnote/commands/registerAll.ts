@@ -1,3 +1,4 @@
+import { sampleCommands } from '../../samples/commands';
 import { catalogCommands } from './catalogs';
 import { editorInsertCommands } from './editorInserts';
 import { experimentCommands } from './experiment';
@@ -18,6 +19,7 @@ function allCommands(): Command[] {
     ...catalogCommands,
     ...unitOpCommands,
     ...editorInsertCommands,
+    ...sampleCommands,
     ...panelCommands,
   ];
 }
