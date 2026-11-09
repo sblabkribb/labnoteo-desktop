@@ -3,6 +3,7 @@ use tauri::Manager;
 pub mod index;
 pub mod net;
 pub mod print;
+pub mod scan;
 pub mod vault;
 
 pub mod app {
@@ -73,6 +74,15 @@ macro_rules! register_commands {
             // SP7 Part B
             $crate::net::slack::slack_call,
             $crate::net::slack::slack_download,
+            $crate::scan::scan_folder_choose,
+            $crate::scan::scan_folder_clear,
+            $crate::scan::scan_folder_set_mode,
+            $crate::scan::scan_folder_status,
+            $crate::scan::scan_folder_list,
+            $crate::scan::scan_folder_prune_baseline,
+            $crate::scan::scan_folder_read,
+            $crate::scan::scan_folder_move,
+            $crate::scan::scan_folder_watch,
         ])
     };
 }
@@ -98,6 +108,8 @@ pub fn run() {
         .manage(vault::VaultState::default())
         // Requests in flight (cancellable by id) and the PartBank web pacing gate.
         .manage(net::NetState::default())
+        // The scan folder's watcher (SP7 B4); started by `scan_folder_watch` / `scan_folder_choose`.
+        .manage(scan::ScanFolderState::default())
         .setup(|app| {
             // Never abort startup over where the last vault is remembered: fall
             // back to the temp dir (the choice is then just not kept long-term).

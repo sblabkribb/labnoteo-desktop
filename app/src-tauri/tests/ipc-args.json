@@ -51,5 +51,14 @@
   "integration_state_read": ["name"],
   "integration_state_write": ["name", "content"],
   "slack_call": ["requestId", "method", "params"],
-  "slack_download": ["requestId", "url"]
+  "slack_download": ["requestId", "url"],
+  "scan_folder_choose": [],
+  "scan_folder_clear": [],
+  "scan_folder_set_mode": ["mode"],
+  "scan_folder_status": [],
+  "scan_folder_list": [],
+  "scan_folder_prune_baseline": ["present"],
+  "scan_folder_read": ["name"],
+  "scan_folder_move": ["name", "outcome"],
+  "scan_folder_watch": []
 }

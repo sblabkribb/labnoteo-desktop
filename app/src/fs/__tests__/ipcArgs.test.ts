@@ -19,8 +19,19 @@ const fixture: Record<string, string[]> = JSON.parse(
 /**
  * 픽스처에는 있지만 아직 TypeScript 래퍼가 없는 커맨드. SP6 Task 11 이 netIpc.ts 래퍼로 비웠다.
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
+ * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 래퍼를 만들며 비운다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [];
+const PENDING_TS_WRAPPERS: readonly string[] = [
+  'scan_folder_choose',
+  'scan_folder_clear',
+  'scan_folder_set_mode',
+  'scan_folder_status',
+  'scan_folder_list',
+  'scan_folder_prune_baseline',
+  'scan_folder_read',
+  'scan_folder_move',
+  'scan_folder_watch',
+];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.

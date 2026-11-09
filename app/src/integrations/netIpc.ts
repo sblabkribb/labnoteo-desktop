@@ -32,7 +32,8 @@ export type NetErrorKind =
   | 'badInput'
   | 'remote'
   | 'noResult'
-  | 'insecure';
+  | 'insecure'
+  | 'io';
 
 /** Rust `NetErrorKind` 의 직렬화 값 전부(`src-tauri/tests/ipc-net-errors.json`). 빠짐없는 대응 테스트에 쓴다. */
 export const NET_ERROR_KINDS: readonly NetErrorKind[] = [
@@ -53,6 +54,7 @@ export const NET_ERROR_KINDS: readonly NetErrorKind[] = [
   'remote',
   'noResult',
   'insecure',
+  'io',
 ];
 
 /** Rust `NetError` `{kind, message, status?, body?, location?}`. `body` 와 `message` 는 Rust 가 이미 키를 가렸다. */

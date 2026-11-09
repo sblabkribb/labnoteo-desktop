@@ -309,6 +309,8 @@ describe('failures', () => {
     badInput: 'badRequest',
     remote: 'badRequest',
     noResult: 'badRequest',
+    // A scan-folder file failure (SP7 Part B); partbank never sees one, so it is an app bug like badInput.
+    io: 'badRequest',
   };
 
   it.each(NET_ERROR_KINDS.filter((k) => k !== 'cancelled'))('NetError %s maps to a named PartbankErrorKind', (kind) => {
