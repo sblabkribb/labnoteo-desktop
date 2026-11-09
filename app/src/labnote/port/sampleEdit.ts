@@ -1,8 +1,8 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:899-1009 sha256:574feb04650a0f7a
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:918-1029 sha256:c98e7aae5bf0dabd
 // Ported from app/vendor/labnoteo/src/sampleActions.ts:1049-1095 sha256:0f5f71b2947392f8
 // Ported from app/vendor/labnoteo/src/sampleActions.ts:1368-1457 sha256:5a5e731b8052d094
-// labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info', m) without the duration ('warn' for 'Sample not found'); promptModal/confirmModal(app, …, label, opts) → env.host.prompt/confirm(…, { confirmLabel: label, ...opts }); plugin.host.pick → env.host.pick; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.refreshSampleViews() → env.changed([written registry]); plugin.host.editTarget() → env.editTarget(); processNoteThroughVault → env.processNote. editSampleInteractive refuses an unreadable (conflicted) registry with RegistryUnreadableError before the first prompt, as the create flow does. The reading-view branch of the definition sync is dropped: the app has no reading view, so the active note's definition is replaced through its edit target (one undo step). rewriteStaleAliases has no open-editor branch: ScopedNote has no editor (sampleScope.ts), and env.processNote re-plans on an open note's live buffer and applies the change as one transaction (one undo step per note). otherExperimentsWithSample (1011-1027) was ported ahead in sampleQuery.ts (Task 18) and is imported from there. rewriteStaleAliases skips a note whose env.processNote rejects with NoteBusyError (an open note that is saving or composing), rewrites the rest, and names the skipped notes in its sentence (app key samples.busySkipped).
+// labnoteO 0.140.2, Apache-2.0.
+// Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info', m) without the duration ('warn' for 'Sample not found'); promptModal/confirmModal(app, …, label, opts) → env.host.prompt/confirm(…, { confirmLabel: label, ...opts }); plugin.host.pick → env.host.pick; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.refreshSampleViews() → env.changed([written registry]); plugin.host.editTarget() → env.editTarget(); processNoteThroughVault → env.processNote. editSampleInteractive refuses an unreadable (conflicted) registry with RegistryUnreadableError before the first prompt, as the create flow does. The reading-view branch of the definition sync is dropped: the app has no reading view, so the active note's definition is replaced through its edit target (one undo step). rewriteStaleAliases has no open-editor branch: ScopedNote has no editor (sampleScope.ts), and env.processNote re-plans on an open note's live buffer and applies the change as one transaction (one undo step per note). otherExperimentsWithSample (1011-1027) was ported ahead in sampleQuery.ts (Task 18) and is imported from there. rewriteStaleAliases skips a note whose env.processNote rejects with NoteBusyError (an open note that is saving or composing), rewrites the rest, and names the skipped notes in its sentence (app key samples.busySkipped). The 0.140.2 alias naming of the storage slot question (#553) is taken as is: the edited sample is named `alias (ID)` there.
 import { buildSampleDefinitionText, sampleAliasProblem } from '@labnoteo/core/lib/sampleUtils';
 import {
   applyAliasRewrite,
@@ -70,7 +70,7 @@ export async function editSampleInteractive(
   const alias = clean(aliasRaw);
   const description = clean(descRaw);
   const location = clean(locationRaw);
-  if (!(await confirmLocationClash(env, { folder, id, location, before: record.location }))) return false;
+  if (!(await confirmLocationClash(env, { folder, id, alias, location, before: record.location }))) return false;
   // An emptied field is easy to submit by accident and nothing brings it back (#471).
   const oldDescription = record.descriptions?.[0]?.trim();
   const clearing = [

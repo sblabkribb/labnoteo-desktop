@@ -214,6 +214,26 @@ describe('editSampleInteractive alias rewrite (vendor)', () => {
   });
 
   // #173
+  // #553: the slot question names both samples by alias first, as the create flow does.
+  it('names the aliases when an edit moves a sample into a taken slot, and saves nothing when declined', async () => {
+    const registry = JSON.stringify({
+      'RNA-1': { ...RECORD, alias: 'moving', location: '4도' },
+      'RNA-9': { type: 'RNA', alias: 'kept', descriptions: [], sources: [], location: '-80 / P1 / A1' },
+    });
+    const th = host({ [REGISTRY]: registry });
+    th.answer.prompt('moving', 'kd', '-80 / P1 / A1');
+    th.answer.confirm(false);
+
+    const record = { ...RECORD, alias: 'moving', location: '4도' };
+    expect(await editSampleInteractive(createSampleEnv(th.ctx), { folder: FOLDER, type: 'RNA', id: 'RNA-1', record })).toBe(false);
+
+    expect(th.asked.confirm[0].message).toBe(
+      'kept (RNA-9, Local RNA sample) is already stored at -80 / P1 / A1. Save moving (RNA-1) anyway?',
+    );
+    expect(th.asked.confirm[0].opts).toEqual({ confirmLabel: 'Save anyway' });
+    expect(json(th, REGISTRY)['RNA-1'].location).toBe('4도');
+  });
+
   it('names the other experiments that keep a copy of the sample', async () => {
     const th = host({
       [REGISTRY]: JSON.stringify({ 'RNA-1': RECORD }),
