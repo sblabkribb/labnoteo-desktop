@@ -57,6 +57,34 @@ function runBodies(): string[] {
 }
 
 describe('sync-core.yml', () => {
+  it('starts on an upstream release (repository_dispatch), by hand, and once a day as a fallback', () => {
+    const on = /\non:\n((?: {2}.*\n|\s*\n)*)/.exec(TEXT);
+    expect(on).not.toBeNull();
+    const block = on![1];
+    expect(block).toMatch(/^ {2}repository_dispatch:\n {4}types: \[labnoteo-release\]\n/m);
+    expect(block).toMatch(/^ {2}workflow_dispatch:/m);
+    const crons = [...block.matchAll(/cron: '([^']+)'/g)].map((m) => m[1]);
+    expect(crons).toHaveLength(1);
+    const [minute, hour, dom, month, dow] = crons[0].split(' ');
+    // Once a day at a fixed time, not on the hour (GitHub's busiest minute).
+    expect(minute).toMatch(/^\d+$/);
+    expect(Number(minute)).toBeGreaterThan(0);
+    expect(Number(minute)).toBeLessThan(60);
+    expect(hour).toMatch(/^\d+$/);
+    expect([dom, month, dow]).toEqual(['*', '*', '*']);
+    expect(TEXT).not.toMatch(/every 6 hours/i);
+  });
+
+  it('hands the dispatched release tag to the find script through env only, which still checks it is the newest', () => {
+    const find = step(/id: find\b/);
+    expect(find).toContain('REQUESTED_TAG: ${{ github.event.client_payload.tag || inputs.tag }}');
+    expect(find).toMatch(/run: bash \.github\/scripts\/find-core-release\.sh \| tee -a "\$GITHUB_OUTPUT"/);
+    expect(TEXT).toMatch(/\n {2}workflow_dispatch:\n {4}inputs:\n {6}tag:\n(?: {8}.*\n)*? {8}required: false\n/);
+    // The payload is never interpolated anywhere else (and never into a run: body; see the token test).
+    const uses = LINES.filter((l) => !l.trimStart().startsWith('#') && l.includes('client_payload'));
+    expect(uses).toHaveLength(1);
+  });
+
   it('exposes the tag and commit to release from the sync job', () => {
     expect(SYNC).toContain('      tag: ${{ steps.tagit.outputs.tag || steps.decide.outputs.tag }}');
     expect(SYNC).toContain('      sha: ${{ steps.tagit.outputs.sha || steps.decide.outputs.sha }}');

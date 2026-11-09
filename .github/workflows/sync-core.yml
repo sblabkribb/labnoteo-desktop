@@ -1,6 +1,14 @@
 # Keeps the app on the newest labnoteO release, and ships each passing core update to installed apps.
 #
-# Every 6 hours (or on demand) this checks sblabkribb/labnoteo for a newer release tag (x.y.z).
+# Triggers (all three run the same chain below):
+#   - repository_dispatch `labnoteo-release`: sent by labnoteO's own release workflow the moment a
+#     release is published, so the app follows within minutes. client_payload.tag (optional) names that
+#     release; it is only a hint: find-core-release.sh uses it when it is a valid x.y.z tag that is also
+#     the newest release upstream, and otherwise goes on with the newest release (the core never moves
+#     backwards). Setup on the labnoteO side: docs/upstream-dispatch.md on the maintainer's machine.
+#   - once a day (schedule): the fallback when a dispatch was missed or failed.
+#   - workflow_dispatch (by hand, optional `tag` input that works like the payload's tag).
+# Each run checks sblabkribb/labnoteo for a newer release tag (x.y.z).
 # If the vendored core is older, it moves app/vendor/labnoteo to that tag and runs install, a clean
 # `npm ci`, the tests and the build:
 #   - all green: the update is committed to main;
@@ -25,6 +33,8 @@
 #      (step 2) and the issue closes once that tag has a release.
 #
 # Notes for maintainers:
+#   - Runs never overlap (concurrency group sync-core). GitHub keeps at most one run waiting: a newer
+#     trigger replaces a waiting one, which loses nothing because every run takes the newest release.
 #   - GitHub disables scheduled workflows in a public repo after 60 days without activity. Each run
 #     re-enables this workflow through the API, which resets that timer. If it was disabled anyway,
 #     enable it again under Actions.
@@ -38,9 +48,16 @@
 name: sync-core
 
 on:
+  repository_dispatch:
+    types: [labnoteo-release]
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '23 3 * * *'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: labnoteO release tag (x.y.z) to follow; empty = the newest release
+        type: string
+        required: false
 
 permissions:
   contents: write
@@ -78,6 +95,9 @@ jobs:
 
       - name: Find the newest labnoteO release
         id: find
+        env:
+          # Untrusted text: it reaches the script only as env, which checks it (see the header).
+          REQUESTED_TAG: ${{ github.event.client_payload.tag || inputs.tag }}
         run: bash .github/scripts/find-core-release.sh | tee -a "$GITHUB_OUTPUT"
 
       - name: Move the core to that release
@@ -297,7 +317,7 @@ jobs:
 
           Log: $RUN_URL
 
-          sync-core retries every 6 hours (a network error during install can also land here; check the log). It commits the update and closes this issue once a labnoteO release passes."
+          sync-core retries on the next labnoteO release and once a day (a network error during install can also land here; check the log). It commits the update and closes this issue once a labnoteO release passes."
           fi
           exit 1
 
@@ -363,6 +383,6 @@ jobs:
 
           Log: $RUN_URL
 
-          sync-core retries this tag automatically every 6 hours, without a new version, as long as $TAG has no GitHub Release (a missing or wrong signing key fails before the build; fix the secret and wait, or re-run). This issue closes once $TAG is released."
+          sync-core retries this tag automatically on its next run (daily, or on the next labnoteO release), without a new version, as long as $TAG has no GitHub Release (a missing or wrong signing key fails before the build; fix the secret and wait, or re-run). This issue closes once $TAG is released."
           fi
           exit 1
