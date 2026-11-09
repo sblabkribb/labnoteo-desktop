@@ -35,7 +35,9 @@ export type OverrideKey =
   | 'insertDate.noNote'
   | 'issueMarker.noNote'
   // 자동화가 없을 때 논의 표시: 플러그인 문장의 "Setup research automation" 안내를 뺀 것(그 명령은 뒤의 하위 프로젝트)
-  | 'discussFlag.flagged';
+  | 'discussFlag.flagged'
+  // 인쇄가 안 되어 브라우저로 열었을 때: 플러그인 문장의 "Printing from Obsidian did not work…" 대신
+  | 'print.openedInBrowser';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {
