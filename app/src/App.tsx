@@ -27,7 +27,8 @@ import { LanguageToggle } from './i18n/LanguageToggle';
 import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
-import { useSampleStoreWiring } from './samples/useSampleStore';
+import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSampleStore';
+import { createSampleEnv } from './samples/env';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
@@ -259,6 +260,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   );
   // 샘플 저장소(알려진 ID, README 의 sample_tracking)를 이 보관함의 fs 와 설정에 묶고, 대장 JSON 변경과 창 초점을 잇는다.
   useSampleStoreWiring(host.fs, settings);
+  // 편집기의 샘플 설정(D8): 저장소 판이나 샘플 설정이 바뀔 때만 새 객체다.
+  const sampleConfig = useSampleEditorConfig(settings);
   const ctx = useCommandContext({
     host,
     vaultRoot: vault.root,
@@ -483,6 +486,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
               onOpenLink={onOpenLink}
               onChangeStatus={ctx ? () => void runCommand(ctx, commandById('change-experiment-status')!) : undefined}
               headerActions={ctx ? (busy) => <EditorActions ctx={ctx} path={selected} disabled={busy} /> : undefined}
+              samples={sampleConfig}
+              sampleEnv={() => ctx && createSampleEnv(ctx)}
             />
           ) : (
             <p className="empty-state">{t('editor.empty')}</p>

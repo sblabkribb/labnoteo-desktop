@@ -23,7 +23,16 @@ import { pasteImages } from './live/pasteImage';
 import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
 import { linkIndex } from '../links/linkIndex';
 import { wikiCompletionGuards, wikiCompletionSource, type WikiCompletionDeps } from '../links/complete';
-import { linkResolution, resolutionFlusher, scheduleResolution, type LinkResolution } from './live/linkResolution';
+import {
+  linkResolution,
+  reconfigureFlusher,
+  scheduleReconfigure,
+  scheduleResolution,
+  type LinkResolution,
+} from './live/linkResolution';
+import { sampleEditorConfig, sampleNotePath, type SampleEditorConfig } from '../samples/editorConfig';
+import { sampleHighlight } from '../samples/highlight';
+import type { SampleEnv } from '../samples/env';
 import { LIST_KEYS } from './live/listKeys';
 import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
 import { notify } from '../labnote/host/toastStore';
@@ -96,6 +105,13 @@ interface Props {
   images?: VaultImages;
   /** 속성 격자의 상태 칩을 눌렀을 때. 격자는 status 를 직접 쓰지 않는다: 앱이 "실험 상태 바꾸기" 명령을 돌린다. */
   onChangeStatus?: () => void;
+  /**
+   * 샘플 강조·완성이 읽는 앱의 샘플 설정(계획 D8). null 이면 샘플을 그리지 않는다. 정체성은 저장소 판이나 샘플 설정이
+   * 바뀔 때만 바뀐다. 바뀌면 조합이 끝난 뒤 `samplesSlot` 을 갈아 끼운다.
+   */
+  samples?: SampleEditorConfig | null;
+  /** 샘플 동작(완성의 동작 줄, 샘플 넣기)이 쓰는 SampleEnv. 명령 맥락이 아직 없으면 undefined. */
+  sampleEnv?: () => SampleEnv | undefined;
 }
 
 export interface WindowApi {
@@ -128,6 +144,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     onOpenLink,
     images = vaultImages,
     onChangeStatus,
+    samples = null,
+    sampleEnv,
   },
   ref,
 ) {
@@ -168,6 +186,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
    */
   const resolutionSlot = useRef(new Compartment());
   const resolutionRef = useRef<LinkResolution | null>(null);
+  /** 샘플 설정 칸(D8). adopt 가 상태를 새로 만들 때 samplesRef 에서 다시 읽는다. */
+  const samplesSlot = useRef(new Compartment());
+  const samplesRef = useRef<SampleEditorConfig | null>(samples);
   /** 조합 중이라 내지 못한 덧씌움이 남았다: 조합이 끝난 첫 갱신에서 낸다. */
   const linksPending = useRef(false);
   /** 링크 색인(linkIndex)에 이 버퍼를 덧씌움으로 낸다. 조합 중에는 색인을 건드리지 않는다(IME 를 깨지 않게). */
@@ -203,8 +224,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -534,10 +555,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 표 칸 편집기에도 같은 완성을 싣는다. 칸 안에서는 별칭 구분자 앞에 백슬래시를 붙이고(inTable), 목록이 열린 동안의
       // Enter·Tab·위아래·Escape 는 칸 이동 대신 완성 목록이 받는다(cellEditor.ts 의 keys()).
       cellExtras.of([autocompletion({ override: [wikiCompletionSource(completionDeps)], icons: false }), wikiCompletionGuards()]),
+      // 샘플 ID 강조(D7): 셀 편집기에도 싣는다(바깥 편집기의 설정과 노트 경로를 읽는다).
+      cellExtras.of(sampleHighlight),
       mode.current.of(modeRef.current === 'live' ? liveExtensions.current() : []),
       // 링크 풀이: 모드 칸 밖에 두어 모드를 바꿔도 남는다. 조합 중에 미룬 값은 resolutionFlusher 가 조합이 끝난 뒤 넣는다.
       resolutionSlot.current.of(linkResolution.of(resolutionRef.current)),
-      resolutionFlusher,
+      // 샘플 설정 칸과 강조(D7, D8): 모드 칸 밖이라 두 모드 모두에서 그린다. 조합 중에 미룬 칸은 reconfigureFlusher 가
+      // 조합이 끝난 뒤 한 거래로 모두 넣는다(링크 풀이 칸과 같은 flusher).
+      samplesSlot.current.of(sampleEditorConfig.of(samplesRef.current)),
+      sampleNotePath.of(path),
+      sampleHighlight,
+      reconfigureFlusher,
       // 이미지 위젯이 읽는 노트 경로와 이미지 묶음(경로는 이 노트 기준으로 푼다). 소스 보기에서는 쓰는 것이 없다.
       imageLoader.of({ notePath: path, images }),
       // 속성 격자가 앱에 넘기는 일(상태 칩 → 앱의 상태 명령, 머리말 링크 → 앱의 링크 열기). 늘 최신 prop 을 부른다.
@@ -668,6 +696,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     // 노트마다 새로 마운트한다(key): path 가 바뀌는 경우는 없다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 샘플 설정이 바뀌면 샘플 칸만 갈아 끼운다(조합 중이면 끝난 뒤에).
+  useEffect(() => {
+    const next = samples ?? null;
+    if (samplesRef.current === next) return;
+    samplesRef.current = next;
+    const view = viewRef.current;
+    if (view) scheduleReconfigure(view, samplesSlot.current, sampleEditorConfig.of(next));
+  }, [samples]);
 
   // 언어가 바뀌면 편집 영역의 이름표만 다시 건다. 본문을 바꾸지 않으므로 저장 안 됨 표시도, 자동 저장도 움직이지 않는다.
   useEffect(() => {

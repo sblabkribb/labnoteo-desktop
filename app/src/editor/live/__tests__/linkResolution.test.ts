@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Compartment, EditorState } from '@codemirror/state';
+import { Compartment, EditorState, Facet } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { labnoteMarkdown } from '../../markdownSyntax';
 import { livePlugin } from '../inline';
 import { imageLoader } from '../imageWidget';
 import { vaultImages } from '../vaultImages';
-import { linkResolution, linkStateOf, resolutionFlusher, scheduleResolution, type LinkResolution } from '../linkResolution';
+import {
+  linkResolution,
+  linkStateOf,
+  reconfigureFlusher,
+  resolutionFlusher,
+  scheduleReconfigure,
+  scheduleResolution,
+  type LinkResolution,
+} from '../linkResolution';
 import { createResolver } from '../../../links/resolve';
 import { setComposing } from '../../__tests__/composing';
 import { t } from '../../../i18n/t';
@@ -173,5 +181,40 @@ describe('live preview: link resolution', () => {
   it('a link reference definition URL is not a bare link', () => {
     const v = liveView('[a]: https://a.b\n\nq', { notePath: 'n.md', resolution: res(['n.md']) }, 18);
     expect(v.contentDOM.querySelector('.lno-link')).toBeNull();
+  });
+});
+
+describe('scheduleReconfigure: per-compartment deferral', () => {
+  const last = (values: readonly number[]) => (values.length > 0 ? values[values.length - 1] : 0);
+  const facetA = Facet.define<number, number>({ combine: last });
+  const facetB = Facet.define<number, number>({ combine: last });
+
+  it('two slots deferred in one composition both apply', () => {
+    const a = new Compartment();
+    const b = new Compartment();
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const v = new EditorView({
+      parent,
+      state: EditorState.create({ doc: 'x', extensions: [a.of(facetA.of(0)), b.of(facetB.of(0)), reconfigureFlusher] }),
+    });
+    views.push(v);
+    setComposing(v, true);
+    scheduleReconfigure(v, a, facetA.of(1));
+    scheduleReconfigure(v, b, facetB.of(2));
+    expect(v.state.facet(facetA)).toBe(0);
+    expect(v.state.facet(facetB)).toBe(0);
+    setComposing(v, false);
+    const spy = vi.spyOn(v, 'dispatch');
+    v.dispatch({});
+    expect(v.state.facet(facetA)).toBe(1);
+    expect(v.state.facet(facetB)).toBe(2);
+    // the empty dispatch plus exactly one flush carrying both slots
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+
+  it('resolutionFlusher is the shared flusher', () => {
+    expect(resolutionFlusher).toBe(reconfigureFlusher);
   });
 });

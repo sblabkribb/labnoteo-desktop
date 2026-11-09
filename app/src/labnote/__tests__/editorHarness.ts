@@ -5,6 +5,9 @@ import { Editor, type EditorHandle } from '../../editor/Editor';
 import type { FakeVault } from '../../__tests__/fakeVault';
 import type { ListenFn } from '../../vault/useVaultEvents';
 import type { OpenTarget } from '../../editor/live/links';
+import { toggleMode } from '../../editor/live/mode';
+import type { SampleEditorConfig } from '../../samples/editorConfig';
+import type { SampleEnv } from '../../samples/env';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -23,10 +26,12 @@ export function mountEditor(
     onContextMenu?: (e: MouseEvent, view: EditorView) => void;
     headerActions?: (busy: boolean) => ReactNode;
     onOpenLink?: (t: OpenTarget) => void;
+    samples?: SampleEditorConfig | null;
+    sampleEnv?: () => SampleEnv | undefined;
   } = {},
 ) {
   const ref = createRef<EditorHandle>();
-  const utils = render(
+  const props = (samples: SampleEditorConfig | null | undefined) =>
     createElement(Editor, {
       ref,
       path,
@@ -39,8 +44,12 @@ export function mountEditor(
       onContextMenu: extra.onContextMenu,
       headerActions: extra.headerActions,
       onOpenLink: extra.onOpenLink,
-    }),
-  );
+      samples,
+      sampleEnv: extra.sampleEnv,
+    });
+  const utils = render(props(extra.samples));
+  /** 같은 props 에 새 샘플 설정으로 다시 그린다(앱이 저장소 판이 오른 뒤 하는 것과 같다). */
+  const setSamples = (cfg: SampleEditorConfig | null) => utils.rerender(props(cfg));
   const view = () => {
     const root = (utils.container.querySelector('.editor-frame') as HTMLElement).shadowRoot!;
     return EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
@@ -53,5 +62,10 @@ export function mountEditor(
     });
   const loaded = () => waitFor(() => expect(ref.current?.busy()).toBe(false));
   const writes = () => vault.log.filter((c) => c.cmd === 'vault_modify').length;
-  return { ...utils, ref, view, type, loaded, writes };
+  /** 라이브 미리보기 ↔ 소스 보기(편집기의 Mod-e 와 같은 명령). 바꾼 뒤의 모드를 돌려준다. */
+  const toggle = () => {
+    void view();
+    return toggleMode();
+  };
+  return { ...utils, ref, view, type, loaded, writes, toggleMode: toggle, setSamples };
 }

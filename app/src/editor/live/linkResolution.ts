@@ -62,25 +62,42 @@ export function linkStateOf(res: LinkResolution | null, kind: 'wiki' | 'md', tar
   return res.isUnknownTarget(mdPath(target)) ? 'unknown' : 'unresolved';
 }
 
-/** A value waiting for the composition to end, per view. */
-const deferred = new WeakMap<EditorView, { slot: Compartment; value: LinkResolution | null }>();
+/**
+ * Values waiting for the composition to end, per view and per compartment (samples plan D8). Each slot keeps
+ * only its latest value; the flusher applies every pending slot in one transaction.
+ */
+const deferred = new WeakMap<EditorView, Map<Compartment, Extension>>();
 
 const composing = (view: EditorView) => view.composing || view.compositionStarted;
 
-/** Puts `value` in `slot` now, or after the running composition (a reconfigure mid-composition breaks the IME). */
-export function scheduleResolution(view: EditorView, slot: Compartment, value: LinkResolution | null): void {
+/** Puts `ext` in `slot` now, or after the running composition (a reconfigure mid-composition breaks the IME). */
+export function scheduleReconfigure(view: EditorView, slot: Compartment, ext: Extension): void {
   if (composing(view)) {
-    deferred.set(view, { slot, value });
+    let pending = deferred.get(view);
+    if (!pending) deferred.set(view, (pending = new Map()));
+    pending.set(slot, ext);
     return;
   }
-  deferred.delete(view);
-  view.dispatch({ effects: slot.reconfigure(linkResolution.of(value)) });
+  const pending = deferred.get(view);
+  if (pending) {
+    pending.delete(slot);
+    if (pending.size === 0) deferred.delete(view);
+  }
+  view.dispatch({ effects: slot.reconfigure(ext) });
 }
 
-/** Dispatches a deferred value on the first update after the composition ends. */
-export const resolutionFlusher: Extension = EditorView.updateListener.of((u) => {
+/** Dispatches every deferred slot, in one transaction, on the first update after the composition ends. */
+export const reconfigureFlusher: Extension = EditorView.updateListener.of((u) => {
   const pending = deferred.get(u.view);
   if (!pending || composing(u.view)) return;
   deferred.delete(u.view);
-  u.view.dispatch({ effects: pending.slot.reconfigure(linkResolution.of(pending.value)) });
+  u.view.dispatch({ effects: [...pending].map(([slot, ext]) => slot.reconfigure(ext)) });
 });
+
+/** Puts `value` in `slot` now, or after the running composition (a thin wrapper over scheduleReconfigure). */
+export function scheduleResolution(view: EditorView, slot: Compartment, value: LinkResolution | null): void {
+  scheduleReconfigure(view, slot, linkResolution.of(value));
+}
+
+/** The shared flusher: one instance, so an editor that lists both gets it once. */
+export const resolutionFlusher: Extension = reconfigureFlusher;

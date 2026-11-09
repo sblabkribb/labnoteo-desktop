@@ -6,6 +6,8 @@
  * - `mount(path)` 는 진짜 Editor 를 그 경로에 열고 열린 노트로 삼는다(열린 노트 목록이 진짜다).
  * - `ctx.links` 는 단일 객체 `linkIndex`(비우고 `files` 로 채운 뒤 준비됨)와 가짜 보관함 위의 고침 기록이다.
  *   `cleanup()` 이 색인을 비운다.
+ * - `mount` 은 앱처럼 샘플 저장소를 이 보관함과 설정에 묶고 편집기에 샘플 설정과 SampleEnv 를 준다. 저장소 판이 오르면
+ *   새 설정으로 다시 그린다. `cleanup()` 이 구독을 풀고 저장소를 푼다.
  * - `opts.invoke` 는 가짜 보관함의 invoke 를 감싼다(앱의 fs 와 링크 의존성이 그것을 거친다).
  */
 import type { NotifyKind, PickItem, PromptOpts } from '@labnoteo/core';
@@ -21,6 +23,9 @@ import { coreT } from '../i18n';
 import type { AliasOpts, AppHost } from '../host/createAppHost';
 import { activeEditTarget, openNote } from '../openNotes';
 import { fromPluginData, type AppSettings } from '../settings';
+import { editorConfigFrom } from '../../samples/editorConfig';
+import { createSampleEnv } from '../../samples/env';
+import { samples } from '../../samples/sampleStore';
 import { mountEditor } from './editorHarness';
 
 type Answer<A extends unknown[], R> = R | ((...args: A) => R);
@@ -81,6 +86,7 @@ export function createTestHost(
   let active: string | undefined;
   let refreshes = 0;
   const mounted: Array<ReturnType<typeof mountEditor>> = [];
+  const offs: Array<() => void> = [];
   let current: AppSettings = { ...fromPluginData(undefined), ...settings };
 
   const openFile = async (path: string) => {
@@ -155,14 +161,18 @@ export function createTestHost(
     },
     setActive: (path) => void (active = path),
     async mount(path) {
-      const m = mountEditor(vault, path);
+      samples.configure(host.fs, current);
+      const m = mountEditor(vault, path, { samples: editorConfigFrom(samples, current), sampleEnv: () => createSampleEnv(ctx) });
       mounted.push(m);
+      offs.push(samples.subscribe(() => m.setSamples(editorConfigFrom(samples, current))));
       await m.loaded();
       active = path;
       return m;
     },
     cleanup() {
+      for (const off of offs.splice(0)) off();
       for (const m of mounted.splice(0)) act(() => m.unmount());
+      samples.unbind(host.fs);
       linkIndex.clear();
     },
   };
