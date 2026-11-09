@@ -268,6 +268,22 @@ describe('SamplesPanel', () => {
     await waitFor(() => expect(th.notes.map((n) => n.message)).toContain(coreT('Copied: {0}', 'DNA-1')));
   });
 
+  it('Copy sample ID: a clipboard refusal is a warning that names the ID, not a generic command failure', async () => {
+    const writeText = vi.fn(async () => {
+      throw new DOMException('Write permission denied.', 'NotAllowedError');
+    });
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const th = host();
+    mount(th);
+    fireEvent.contextMenu(await findRow(/DNA-1/));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: coreT('Copy sample ID') }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('DNA-1'));
+    await waitFor(() => expect(th.notes.at(-1)).toMatchObject({ kind: 'warn', message: t('samples.copyRefused', 'DNA-1') }));
+    expect(th.notes.map((n) => n.message).some((m) => m.startsWith(coreT('Command failed: {0}', '')))).toBe(false);
+    expect(th.notes.map((n) => n.message)).not.toContain(coreT('Copied: {0}', 'DNA-1'));
+  });
+
   it('refreshes on sampleEvents and on registry watcher events', async () => {
     expect(SAMPLE_PANEL_REFRESH_MS).toBe(300);
     const th = host();

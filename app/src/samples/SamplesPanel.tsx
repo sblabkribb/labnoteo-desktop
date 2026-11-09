@@ -42,6 +42,7 @@ import {
   type SampleTypePayload,
 } from '../labnote/port/sampleView';
 import { openMenu, type MenuAnchor, type MenuItem } from '../labnote/ui/menuStore';
+import { copyText } from '../links/clipboard';
 import { createSampleEnv, sampleEvents, type SampleEnv } from './env';
 import { samples } from './sampleStore';
 import { sampleTypeClass } from './typeClass';
@@ -282,8 +283,12 @@ function menuFor(env: SampleEnv, node: TreeNode, renderedLocal: string, activePa
         return {
           label: coreT('Copy sample ID'),
           run: async () => {
-            await navigator.clipboard.writeText(id);
-            env.host.notify('info', env.t('Copied: {0}', id));
+            try {
+              await copyText(id, (kind) => env.host.notify(kind, env.t('Copied: {0}', id)));
+            } catch {
+              // 클립보드가 거부했다: 일반 실패 알림 대신 ID 를 그대로 보여 손으로 옮길 수 있게 한다
+              env.host.notify('warn', t('samples.copyRefused', id));
+            }
           },
         };
       case 'insertReference':
