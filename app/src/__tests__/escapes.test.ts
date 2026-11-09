@@ -23,6 +23,9 @@ const QUOTED = new RegExp(
   'g',
 );
 
+/** A line that is only a comment: `// …`, `/* …` or a JSDoc ` * …` continuation. */
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
+
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     if (name === 'node_modules') return [];
@@ -36,6 +39,8 @@ function sources(dir: string): string[] {
 export function badEscapes(text: string): string[] {
   const out: string[] = [];
   text.split('\n').forEach((line, i) => {
+    // A whole-line comment holds no string: a ported JSDoc may quote TeX such as `\,` verbatim.
+    if (COMMENT_LINE.test(line)) return;
     for (const found of line.matchAll(QUOTED)) {
       const m = found[0];
       // String.raw keeps every backslash as written: it is the sanctioned way to type a path.
@@ -79,6 +84,13 @@ describe('backslash escapes in string literals', () => {
     expect(badEscapes(`const a = '${BT}'; const b = 'D:${BS}lab';`)).toHaveLength(1);
     // String.raw is the sanctioned way to write a path with single backslashes.
     expect(badEscapes('const p = String.raw' + BT + 'D:' + BS + 'lab' + BT + ';')).toEqual([]);
+  });
+
+  it('a whole-line comment is not read as a string, but code before a trailing comment still is', () => {
+    expect(badEscapes('  // `' + BS + ',` is a thin space')).toEqual([]);
+    expect(badEscapes(' * so `$3' + BS + ',mL$` printed')).toEqual([]);
+    expect(badEscapes('/* `' + BS + 'mu L` */')).toEqual([]);
+    expect(badEscapes("const p = 'D:" + BS + "lab'; // note")).toHaveLength(1);
   });
 
   it('no source file under src has one', () => {
