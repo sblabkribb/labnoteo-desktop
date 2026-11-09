@@ -74,7 +74,7 @@ const SLACK_CODES = [
   'HTTP error',
   'net::ERR_INTERNET_DISCONNECTED',
 ];
-const UNMATCHED: UnmatchedReason[] = ['no-qr', 'note-not-found', 'duplicate-id', 'note-only', 'no-unit-op', 'ambiguous', 'renamed', 'note-busy'];
+const UNMATCHED: UnmatchedReason[] = ['no-qr', 'note-not-found', 'duplicate-id', 'note-only', 'no-unit-op', 'ambiguous', 'renamed', 'note-busy', 'pdf-image'];
 const UNSUPPORTED: UnsupportedReason[] = ['heic', 'tiff', 'unknown', 'zip-limit', 'pdf-limit'];
 
 afterEach(() => setLang('ko'));
@@ -102,7 +102,7 @@ describe('SP7 Part B guards', () => {
       const texts: string[] = [];
 
       // The folder watcher asked to process with no folder set.
-      const f = fakeInvoke({ scan_folder_status: () => noFolder });
+      const f = fakeInvoke({ vault_current: () => ({ root: 'C:/vault', name: 'vault' }), scan_folder_status: () => noFolder });
       const watcher = new ScanFolderWatcher({
         run: async () => [],
         report: () => undefined,

@@ -6,6 +6,7 @@ import { readNoteId } from '@labnoteo/core/lib/noteId';
 import { decodeScanPayload, unitOpFingerprint, type PagePayload, type ScanPayload } from '@labnoteo/core/lib/scanPayload';
 import type { AppFs } from '../../../fs/tauriLabnoteFs';
 import { frontMatterText } from '../../frontMatterText';
+import { NetError } from '../../../integrations/netIpc';
 import { NoteBusyError } from '../../noteErrors';
 import { NoteIdService, type NoteIdSource } from '../../port/noteIdService';
 import {
@@ -509,6 +510,85 @@ describe('ScanPipeline.run (vendor scanPipeline.test.ts)', () => {
     expect(safeSourceName('dir\\sub/a\n## X [[b]] -->.jpg')).not.toMatch(/[\n[\]|<>#^`\\/]/);
     expect(safeSourceName('dir\\sub/a\n## X [[b]] -->.jpg')).toBe('a__ X __b__ --_.jpg');
     expect(safeSourceName('x'.repeat(200) + '.jpg')).toHaveLength(120);
+  });
+});
+
+/** A vault guard whose vault is switched once `switched()` says so: check() then rejects as cancelled (D11). */
+function switchGuard(switched: () => boolean) {
+  const check = vi.fn(async () => {
+    if (switched()) throw new NetError('cancelled', 'cancelled');
+  });
+  return { check };
+}
+
+describe('ScanPipeline.run across a vault switch (D11)', () => {
+  const p1 = () => qr(`LN1:${ID}:1:UHW010:1/1:261015`);
+
+  it('a switch before the first write ends the run: no image, no queue entry, no note write', async () => {
+    const s = setup(
+      { [NOTE]: NOTE_TEXT },
+      { 'a.jpg': [page(p1(), 'aaaaaaaaaaaa')], 'b.jpg': [page(undefined, 'bbbbbbbbbbbb')] },
+    );
+    const guard = switchGuard(() => true);
+    await expect(s.pipeline.run([input('a.jpg'), input('b.jpg')], { guard })).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(guard.check).toHaveBeenCalled();
+    expect(s.imageDeps.writeScanImage).not.toHaveBeenCalled();
+    expect(s.processNote).not.toHaveBeenCalled();
+    expect(s.fs.trash).not.toHaveBeenCalled();
+    expect(s.text.get(NOTE)).toBe(NOTE_TEXT);
+  });
+
+  it('a switch while the note is busy stops the retries: nothing is written, queued or trashed', async () => {
+    vi.useFakeTimers();
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'a.jpg': [page(p1(), 'aaaaaaaaaaaa')] });
+    s.setBusy(Infinity);
+    let switched = false;
+    const guard = switchGuard(() => switched);
+    const running = s.pipeline.run([input('a.jpg')], { guard }).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const calls = s.processNote.mock.calls.length;
+    switched = true;
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(await running).toMatchObject({ kind: 'cancelled' });
+    expect(s.processNote.mock.calls.length).toBe(calls);
+    expect(s.imagesUnder('_labnote-scans/unmatched/')).toEqual([]);
+    expect(s.fs.trash).not.toHaveBeenCalled();
+    expect(s.text.get(NOTE)).toBe(NOTE_TEXT);
+  });
+
+  it('checks the guard before each image write and before the note write', async () => {
+    const s = setup({ [NOTE]: NOTE_TEXT }, { 'a.jpg': [page(p1(), 'aaaaaaaaaaaa')], 'b.jpg': [page(undefined, 'bbbbbbbbbbbb')] });
+    const order: string[] = [];
+    const guard = { check: vi.fn(async () => void order.push('check')) };
+    s.imageDeps.writeScanImage.mockImplementation(async (dir: string, name: string, bytes: Uint8Array) => {
+      order.push('image');
+      s.images.set(`${dir}/${name}`, bytes.slice());
+      return `${dir}/${name}`;
+    });
+    s.processNote.mockImplementation(async (path: string, fn: (t: string) => string) => {
+      order.push('note');
+      s.text.set(path, fn(s.text.get(path)!));
+      return true;
+    });
+    const results = await s.pipeline.run([input('a.jpg'), input('b.jpg')], { guard });
+    expect(results.map((r) => r.status)).toEqual(['filed', 'unmatched']);
+    expect(order).toEqual(['check', 'image', 'check', 'image', 'check', 'note']);
+  });
+});
+
+describe('ScanPipeline.run: a PDF page with an image pdf.js cannot decode (User Decision 2026-11-09)', () => {
+  it('is queued as unmatched with the reason pdf-image, even in a shared folder, and named so in the queue', async () => {
+    for (const skipNoQr of [false, true]) {
+      const s = setup(
+        { [NOTE]: NOTE_TEXT },
+        { 'scan.pdf': [page(undefined, 'cccccccccccc', { sourcePage: 2, unsupportedImage: true })] },
+      );
+      const [r] = await s.pipeline.run([input('scan.pdf')], { skipNoQr });
+      expect(r).toMatchObject({ status: 'unmatched', reason: 'pdf-image', sourcePage: 2 });
+      expect(r.unmatchedPath).toMatch(/^_labnote-scans\/unmatched\/.*_unknown_pdf-image_hcccccccccccc-pdf_scan_p2\.jpg$/);
+      expect(s.images.has(r.unmatchedPath!)).toBe(true);
+      expect(s.processNote).not.toHaveBeenCalled();
+    }
   });
 });
 

@@ -13,7 +13,12 @@
 // notice (which pointed at docs/SCAN.md) becomes overrideOr('scan.slackCheckFailed'), so no text names the plugin's
 // docs (B11); a NetError is named by its kind, never by Rust's text, a NetError while claiming ends the check like
 // any other failed call, and a cancelled request (vault switch) is silent; SlackDeps drop store and t (coreT is the Translator) and gain invoke; the Translator parameter of
-// describeSlackError is named translate, so the app's own t-key check does not read plugin keys as app keys.
+// describeSlackError is named translate, so the app's own t-key check does not read plugin keys as app keys. A vault
+// switch is checked for (SP6 D11, B6): each poll takes a vaultGuard() first (deps.guard, default over invoke) and
+// hands it to run and report; every write of the link (save, saveState) re-reads the stored link and calls
+// guard.check() before writing, so the old vault's link is never written into another vault (no fallback to the
+// link the poll started with unless the guard says the vault is the same); after run, a stop() or a switch ends
+// the poll before anything is saved, replied or reported.
 /**
  * Slack as a way in for scans: send photos of worksheets to your own Slack bot by DM (or post them in a private
  * channel the bot was invited to), and this PC files them and replies in the thread.
@@ -33,8 +38,10 @@ import {
   slackCall,
   slackDownload,
   toNetError,
+  vaultGuard,
   type InvokeFn,
   type SlackMethod,
+  type VaultGuard,
 } from '../../integrations/netIpc';
 import { coreT, overrideOr } from '../i18n';
 import { readSlackLink, writeSlackLink, type SlackLink } from '../scan/scanIpc';
@@ -146,11 +153,14 @@ export interface SlackVerification {
 }
 
 export interface SlackDeps {
-  /** Files one message's pages: a background run (no dialog, B8). */
-  run(inputs: ScanInput[]): Promise<ScanResult[]>;
+  /** Files one message's pages: a background run (no dialog, B8), checking `guard` before each write. */
+  run(inputs: ScanInput[], guard: VaultGuard): Promise<ScanResult[]>;
   summarize(results: ScanResult[]): string;
   notify(message: string): void;
-  report(results: ScanResult[]): void;
+  /** `guard` is the poll's vault guard: the results it offers belong to that vault. */
+  report(results: ScanResult[], guard: VaultGuard): void;
+  /** The vault guard a poll takes first (default: vaultGuard over invoke). */
+  guard?: () => Promise<VaultGuard>;
   /** IPC (default: Tauri's). */
   invoke?: InvokeFn;
 }
@@ -201,9 +211,15 @@ export class SlackInbox {
     await writeSlackLink(link, this.invoke);
   }
 
-  /** The link as stored now (another write may have landed since `cfg` was read). */
-  private async latest(cfg: SlackLink): Promise<SlackLink> {
-    return (await readSlackLink(this.invoke)) ?? cfg;
+  /**
+   * The link as stored now (another write may have landed since `cfg` was read), read in the guard's vault: the
+   * check after the read rejects (cancelled) when the vault was switched, so a link of another vault, or `cfg` in
+   * place of another vault's missing link, is never handed back for writing.
+   */
+  private async latest(cfg: SlackLink, guard: VaultGuard): Promise<SlackLink> {
+    const stored = await readSlackLink(this.invoke);
+    await guard.check();
+    return stored ?? cfg;
   }
 
   async status(): Promise<'off' | 'linking' | 'linked'> {
@@ -323,11 +339,17 @@ export class SlackInbox {
     if (this.polling || this.stopped || Date.now() < this.pauseUntil) return;
     this.polling = true;
     try {
+      let guard: VaultGuard;
+      try {
+        guard = await (this.deps.guard ? this.deps.guard() : vaultGuard(this.invoke));
+      } catch {
+        return; // no vault Rust can name: nothing to file into
+      }
       const cfg = await this.config();
       if (!cfg) return;
       if (!(await secretStatus(this.invoke)).set.slackBot) return;
-      if (!cfg.userId) await this.pollLink(cfg);
-      else await this.pollFiles(cfg);
+      if (!cfg.userId) await this.pollLink(cfg, guard);
+      else await this.pollFiles(cfg, guard);
       this.lastError = undefined;
     } catch (err) {
       if (err instanceof RateLimited) {
@@ -353,7 +375,7 @@ export class SlackInbox {
     return coreT('Send new photos as a new message here, not as a reply in this thread.');
   }
 
-  private async pollLink(cfg: SlackLink): Promise<void> {
+  private async pollLink(cfg: SlackLink, guard: VaultGuard): Promise<void> {
     if (!cfg.linkCode) return;
     const channels =
       cfg.mode === 'channel' && cfg.channelId
@@ -365,7 +387,9 @@ export class SlackInbox {
       const { messages } = await this.collectHistory(channel);
       const hit = findLinkMessage(messages, cfg.linkCode);
       if (!hit?.user) continue;
-      await this.save({ ...cfg, channelId: channel, userId: hit.user, lastTs: hit.ts, linkCode: '' });
+      if (this.stopped) return;
+      const latest = await this.latest(cfg, guard);
+      await this.save({ ...latest, channelId: channel, userId: hit.user, lastTs: hit.ts, linkCode: '' });
       await this.api('chatPostMessage', {
         channel,
         thread_ts: hit.ts,
@@ -381,7 +405,7 @@ export class SlackInbox {
    * one this PC made earlier (crashed mid-work), or no way to claim (the scope
    * is missing — a lone PC works fine without it).
    */
-  private async claim(cfg: SlackLink, ts: string): Promise<boolean> {
+  private async claim(cfg: SlackLink, ts: string, guard: VaultGuard): Promise<boolean> {
     try {
       await this.api('reactionsAdd', { channel: cfg.channelId, timestamp: ts, name: 'eyes' });
     } catch (err) {
@@ -394,7 +418,8 @@ export class SlackInbox {
       }
       return true;
     }
-    const latest = await this.latest(cfg);
+    if (this.stopped) return false;
+    const latest = await this.latest(cfg, guard);
     await this.saveState({ ...latest, claimedTs: [...latest.claimedTs, ts].slice(-MAX_CLAIMS) });
     return true;
   }
@@ -437,23 +462,27 @@ export class SlackInbox {
     return { inputs, failures };
   }
 
-  private async pollFiles(cfg: SlackLink): Promise<void> {
+  private async pollFiles(cfg: SlackLink, guard: VaultGuard): Promise<void> {
     if (!cfg.channelId) return;
     const { messages, truncated } = await this.collectHistory(cfg.channelId, cfg.lastTs || undefined);
     if (truncated) this.deps.notify(coreT('Slack had more messages than one check reads; the oldest may have been skipped.'));
     for (const message of messagesToProcess(messages, cfg)) {
       if (this.stopped) return;
-      if (!(await this.claim(await this.latest(cfg), message.ts))) {
+      if (!(await this.claim(await this.latest(cfg, guard), message.ts, guard))) {
+        if (this.stopped) return;
         // Another PC's work: step past it and leave it alone.
-        const latest = await this.latest(cfg);
+        const latest = await this.latest(cfg, guard);
         await this.saveState({ ...latest, lastTs: message.ts });
         continue;
       }
       const { inputs, failures } = await this.download(message.files ?? []);
-      const results = [...(inputs.length ? await this.deps.run(inputs) : []), ...failures];
+      const results = [...(inputs.length ? await this.deps.run(inputs, guard) : []), ...failures];
+      // Stopped (the vault is closing) or switched while the pages were filed: nothing more is saved, replied or
+      // reported here; the message is still after lastTs in its own vault.
+      if (this.stopped) return;
       // Done with this message — remember that before replying, so a failed
       // reply (chat:write missing, …) cannot make the next check redo it.
-      const latest = await this.latest(cfg);
+      const latest = await this.latest(cfg, guard);
       await this.saveState({ ...latest, lastTs: message.ts });
       const lines = results
         .filter((r) => r.status !== 'skipped')
@@ -471,7 +500,7 @@ export class SlackInbox {
           this.deps.notify(coreT('Slack scans were filed, but replying in Slack failed ({0}). Check the chat:write permission.', msg));
         }
       }
-      if (results.length) this.deps.report(results);
+      if (results.length) this.deps.report(results, guard);
     }
   }
 }

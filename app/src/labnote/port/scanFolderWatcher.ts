@@ -13,10 +13,14 @@
 // (B8: a manual run shows the progress modal); 'Set a scan folder first: Settings → Labnote Assistant → Barcode &
 // scans.' becomes overrideOr('scan.setFolderFirst'); an unreadable folder is named by its NetError kind, never by
 // Rust's text; tick takes the running flag before the (now asynchronous) folder read, so two ticks never overlap;
-// console.warn logs the file name and the error kind only; window timers become globalThis timers.
+// console.warn logs the file name and the error kind only; window timers become globalThis timers. A vault switch is
+// checked for (SP6 D11): each tick takes a vaultGuard() (deps.guard, default over invoke) before it reads anything,
+// hands it to run in RunOptions.guard (the pipeline checks it before each write) and to report, and calls
+// guard.check() before scanFolderPruneBaseline, before each scanFolderMove and before writeScanHistory; a cancelled
+// check or run ends the tick quietly (undefined, no notice), so nothing of this vault lands in another.
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
-import { toNetError, type InvokeFn, type ListenFn } from '../../integrations/netIpc';
+import { toNetError, vaultGuard, type InvokeFn, type ListenFn, type VaultGuard } from '../../integrations/netIpc';
 import { coreT, overrideOr } from '../i18n';
 import {
   SCAN_FOLDER_CHANGED,
@@ -29,7 +33,7 @@ import {
   writeScanHistory,
   type ScanFolderStatus,
 } from '../scan/scanIpc';
-import type { RunOptions, ScanInput, ScanResult } from './scanPipeline';
+import { isCancelled, type ScanInput, type ScanResult } from './scanPipeline';
 
 export type { ScanMode as ScanFolderMode } from '../scan/scanIpc';
 
@@ -120,9 +124,12 @@ export function isInsideFolder(folder: string, parent: string): boolean {
 
 export interface WatcherDeps {
   /** Batch runner; `manual` is true when the user asked for this run (Process now, Process existing files too). */
-  run(inputs: ScanInput[], opts: RunOptions, manual: boolean): Promise<ScanResult[]>;
-  report(results: ScanResult[], manual: boolean): void;
+  run(inputs: ScanInput[], opts: { skipNoQr: boolean; guard: VaultGuard }, manual: boolean): Promise<ScanResult[]>;
+  /** `guard` is the tick's vault guard: the results it offers belong to that vault. */
+  report(results: ScanResult[], manual: boolean, guard: VaultGuard): void;
   notify(message: string): void;
+  /** The vault guard a tick takes first (default: vaultGuard over invoke). */
+  guard?: () => Promise<VaultGuard>;
   invoke?: InvokeFn;
   listen?: ListenFn;
   now?: () => number;
@@ -208,67 +215,88 @@ export class ScanFolderWatcher {
     }
     this.running = true;
     try {
-      const cfg = await this.config();
-      if (!cfg) {
-        // Plugin text: 'Set a scan folder first: Settings → Labnote Assistant → Barcode & scans.'
-        if (opts.manual) this.deps.notify(overrideOr('scan.setFolderFirst'));
-        return undefined;
-      }
-      const invoke = this.invoke;
-      let listed: FolderEntry[];
-      try {
-        listed = (await scanFolderList(invoke)).map((e) => ({
-          name: e.name,
-          size: e.size,
-          mtimeMs: e.mtimeMs,
-          birthtimeMs: e.birthtimeMs ?? undefined,
-        }));
-      } catch (err) {
-        if (opts.manual) this.deps.notify(coreT('The scan folder {0} could not be read: {1}', cfg.path ?? '', kindOf(err)));
-        return undefined;
-      }
-      const entries = listed.filter((e) => SCAN_FILE_RE.test(e.name));
-      const now = this.now();
-      let history = pruneHistory(await readScanHistory(invoke), now);
-      // A file taken out of the folder leaves the baseline, so putting it back in (the same photo once more) reads it.
-      const stillThere = (await scanFolderPruneBaseline(entries.map(historyKey), invoke)) ?? undefined;
-      const { ready, waiting } = selectReadyFiles(entries, {
-        since: cfg.since ?? 0,
-        now,
-        includeExisting: opts.includeExisting,
-        baseline: stillThere && new Set(stillThere),
-        handled: (e) => historyKey(e) in history,
-        lastSizes: this.lastSizes,
-        manual: opts.manual,
-      });
-      if (waiting > 0) this.scheduleTick(SETTLE_MS + 1_000);
-      if (ready.length === 0) {
-        if (opts.manual) this.deps.notify(this.nothingNewMessage(stillThere, !!opts.includeExisting));
-        return [];
-      }
-      const inputs: ScanInput[] = [];
-      const read: FolderEntry[] = [];
-      for (const e of ready) {
-        try {
-          inputs.push({ name: e.name, bytes: await scanFolderRead(e.name, invoke) });
-          read.push(e);
-        } catch (err) {
-          console.warn('[labnoteo] could not read scan', e.name, kindOf(err));
-        }
-      }
-      const results = await this.deps.run(inputs, { skipNoQr: cfg.mode === 'shared' }, !!opts.manual);
-      for (const e of read) {
-        const own = results.filter((r) => (r.input ?? r.source) === e.name);
-        history[historyKey(e)] = now;
-        if (cfg.mode === 'dedicated') await this.moveOriginal(e.name, outcomeOf(own));
-      }
-      history = pruneHistory(history, now);
-      await writeScanHistory(history, invoke);
-      this.deps.report(results, !!opts.manual);
-      return results;
+      return await this.tickNow(opts);
+    } catch (err) {
+      // The vault was switched mid-tick: nothing more is written, and nobody is told.
+      if (isCancelled(err)) return undefined;
+      throw err;
     } finally {
       this.running = false;
     }
+  }
+
+  private async tickNow(opts: { manual?: boolean; includeExisting?: boolean }): Promise<ScanResult[] | undefined> {
+    let guard: VaultGuard;
+    try {
+      guard = await (this.deps.guard ? this.deps.guard() : vaultGuard(this.invoke));
+    } catch (err) {
+      // No vault Rust can name: nothing to read into.
+      console.warn('[labnoteo] could not read the open vault', kindOf(err));
+      return undefined;
+    }
+    const cfg = await this.config();
+    if (!cfg) {
+      // Plugin text: 'Set a scan folder first: Settings → Labnote Assistant → Barcode & scans.'
+      if (opts.manual) this.deps.notify(overrideOr('scan.setFolderFirst'));
+      return undefined;
+    }
+    const invoke = this.invoke;
+    let listed: FolderEntry[];
+    try {
+      listed = (await scanFolderList(invoke)).map((e) => ({
+        name: e.name,
+        size: e.size,
+        mtimeMs: e.mtimeMs,
+        birthtimeMs: e.birthtimeMs ?? undefined,
+      }));
+    } catch (err) {
+      if (opts.manual) this.deps.notify(coreT('The scan folder {0} could not be read: {1}', cfg.path ?? '', kindOf(err)));
+      return undefined;
+    }
+    const entries = listed.filter((e) => SCAN_FILE_RE.test(e.name));
+    const now = this.now();
+    let history = pruneHistory(await readScanHistory(invoke), now);
+    // A file taken out of the folder leaves the baseline, so putting it back in (the same photo once more) reads it.
+    await guard.check();
+    const stillThere = (await scanFolderPruneBaseline(entries.map(historyKey), invoke)) ?? undefined;
+    const { ready, waiting } = selectReadyFiles(entries, {
+      since: cfg.since ?? 0,
+      now,
+      includeExisting: opts.includeExisting,
+      baseline: stillThere && new Set(stillThere),
+      handled: (e) => historyKey(e) in history,
+      lastSizes: this.lastSizes,
+      manual: opts.manual,
+    });
+    if (waiting > 0) this.scheduleTick(SETTLE_MS + 1_000);
+    if (ready.length === 0) {
+      if (opts.manual) this.deps.notify(this.nothingNewMessage(stillThere, !!opts.includeExisting));
+      return [];
+    }
+    const inputs: ScanInput[] = [];
+    const read: FolderEntry[] = [];
+    for (const e of ready) {
+      try {
+        inputs.push({ name: e.name, bytes: await scanFolderRead(e.name, invoke) });
+        read.push(e);
+      } catch (err) {
+        console.warn('[labnoteo] could not read scan', e.name, kindOf(err));
+      }
+    }
+    const results = await this.deps.run(inputs, { skipNoQr: cfg.mode === 'shared', guard }, !!opts.manual);
+    for (const e of read) {
+      const own = results.filter((r) => (r.input ?? r.source) === e.name);
+      history[historyKey(e)] = now;
+      if (cfg.mode === 'dedicated') {
+        await guard.check();
+        await this.moveOriginal(e.name, outcomeOf(own));
+      }
+    }
+    history = pruneHistory(history, now);
+    await guard.check();
+    await writeScanHistory(history, invoke);
+    this.deps.report(results, !!opts.manual, guard);
+    return results;
   }
 
   /** Why a manual run found nothing, and what to do about files it passes over. */

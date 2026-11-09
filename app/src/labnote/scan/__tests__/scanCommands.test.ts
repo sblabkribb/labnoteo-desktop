@@ -14,6 +14,7 @@ const LINK = JSON.stringify({ enabled: true, mode: 'dm', channelId: 'D1', linkCo
 /** Rust as the scan feature sees it: a folder (or none), an enabled Slack link with a stored bot token, and an empty folder and inbox. */
 function rust(status: () => ScanFolderStatus) {
   return fakeInvoke({
+    vault_current: () => ({ root: 'C:/Vault', name: 'Vault' }),
     scan_folder_status: () => status(),
     scan_folder_watch: () => null,
     scan_folder_list: () => [],

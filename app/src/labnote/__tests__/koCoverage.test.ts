@@ -6,6 +6,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import obsidianKo from '../../../vendor/labnoteo/src/l10n.ko';
 import { firstArgsOf } from '../../i18n/__tests__/callArgs';
+import { setLang } from '../../i18n/lang';
+import { coreT } from '../i18n';
 
 // `function paletteName(` 은 부르는 곳이 아니라 정의다. `this.host.t(` 도 `host.t(` 로 잡힌다.
 const CALLEE = /(?<![\w$]|function\s+)(?:coreT|paletteName|host\.t)\(/g;
@@ -111,5 +113,18 @@ describe('KO_ROOTS 가 코어 번역에 넘기는 키', () => {
       keys: ['A', 'B'],
       dynamic: ['src/labnote/x.ts: key'],
     });
+  });
+});
+
+// The SP7 review read 'Page' (unmatchedScans.ts, manual assign) and 'continued' (worksheetPrint.ts, printed worksheets)
+// as missing from l10n.ko.ts: they are there as unquoted keys (`Page: '페이지'`, `continued: '이어서'`).
+describe('plugin keys written without quotes in l10n.ko.ts', () => {
+  it("'Page' and 'continued' are Korean in ko and English in en", () => {
+    setLang('ko');
+    expect(coreT('Page')).toBe('페이지');
+    expect(coreT('continued')).toBe('이어서');
+    setLang('en');
+    expect(coreT('Page')).toBe('Page');
+    expect(coreT('continued')).toBe('continued');
   });
 });

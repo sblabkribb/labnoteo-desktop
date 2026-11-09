@@ -21,7 +21,12 @@
 // fileManager.trashFile becomes fs.trash (Recycle Bin), only for a path still there (images.exists, the plugin's
 // instanceof TFile); undo and removePrevious write through processNote (waiting out a busy note like flush) and
 // markUserEdit becomes the in-transform stampNote, applied only when an entry was removed (B9);
-// metadataCache.getFirstLinkpathDest becomes the editor's image resolution (resolveImagePath, pickByName).
+// metadataCache.getFirstLinkpathDest becomes the editor's image resolution (resolveImagePath, pickByName). A vault
+// switch is checked for (SP6 D11): RunOptions takes a guard, whose check() runs before every image write (store,
+// unmatched), before every processNote attempt (so the busy retries stop too) and before the stored image is
+// trashed; a cancelled check ends the run with that error and nothing more is written. A DecodedPage may carry
+// `unsupportedImage` (a PDF page with an image pdf.js cannot decode, User Decision 2026-11-09): it is queued as
+// unmatched with the new reason 'pdf-image', shared folder or not, and never filed or dropped.
 /**
  * The one path every scan takes, whatever brought it in (scan folder, drag and
  * drop, Slack): split PDFs and zips into pages, read each page's QR code, find
@@ -38,6 +43,7 @@ import { isPagePayload, unitOpFingerprint, type PagePayload, type ScanPayload } 
 import * as posix from '@labnoteo/core/posix';
 import { pickByName, resolveImagePath } from '../../editor/live/imagePath';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
+import { NetError } from '../../integrations/netIpc';
 import type { NoteRef } from '../barcode/noteIdIndex';
 import { NoteBusyError } from '../noteErrors';
 import type { NoteIdService } from './noteIdService';
@@ -71,7 +77,8 @@ export type UnmatchedReason =
   | 'no-unit-op'
   | 'ambiguous'
   | 'renamed'
-  | 'note-busy';
+  | 'note-busy'
+  | 'pdf-image';
 export type UnsupportedReason = 'heic' | 'tiff' | 'unknown' | 'zip-limit' | 'pdf-limit';
 
 export interface ScanResult {
@@ -114,8 +121,13 @@ export interface DecodedPage {
   hash: string;
   blank: boolean;
   payload?: ScanPayload;
-  /** The page could not be read (a PDF page pdf.js cannot render, an image over 20 MiB): an `error` result. */
+  /** The page could not be read (an image over 20 MiB, a PDF page with nothing to show at all): an `error` result. */
   error?: string;
+  /**
+   * A PDF page with an image pdf.js cannot decode (JPEG 2000): `render` gives what could be drawn (or a placeholder
+   * naming the PDF and page), and the page goes to the unmatched queue as `pdf-image`.
+   */
+  unsupportedImage?: boolean;
   /** The page upright, scaled and compressed for storing. */
   render(): Promise<ArrayBuffer>;
 }
@@ -162,9 +174,18 @@ export interface ManualTarget {
   printedOn?: string;
 }
 
+/** Checks, before a write, that the vault the run started in is still open; rejects (NetError cancelled) otherwise. */
+export interface WriteGuard {
+  check(): Promise<void>;
+}
+
+const noGuard: WriteGuard = { check: async () => undefined };
+
 export interface RunOptions {
   /** Shared folders hold other photos too: pass over pages without our QR quietly. */
   skipNoQr?: boolean;
+  /** The vault guard taken when the batch started (D11); none for a run that cannot outlive its vault. */
+  guard?: WriteGuard;
   onProgress?: (done: number, label: string) => void;
 }
 
@@ -241,6 +262,9 @@ export function safeSourceName(source: string): string {
     .slice(0, MAX_SOURCE_NAME);
 }
 
+/** The vault was switched (a guard check, or a request the switch cancelled): the run ends here. */
+export const isCancelled = (e: unknown): boolean => e instanceof NetError && e.kind === 'cancelled';
+
 const isBusy = (e: unknown): boolean => e instanceof NoteBusyError || (e instanceof Error && e.name === 'NoteBusyError');
 
 const wait = (ms: number) => new Promise<void>((resolve) => globalThis.setTimeout(resolve, ms));
@@ -267,12 +291,13 @@ export class ScanPipeline {
         });
         results.push(...rest);
       } catch (err) {
+        if (isCancelled(err)) throw err;
         console.error('[labnoteo] scan failed:', input.name, err);
         results.push({ source: input.name, status: 'error', message: err instanceof Error ? err.message : String(err) });
       }
       for (let i = first; i < results.length; i++) results[i].input = input.name;
     }
-    await this.flush(pending);
+    await this.flush(pending, opts.guard ?? noGuard);
     return results;
   }
 
@@ -294,18 +319,21 @@ export class ScanPipeline {
     saved: Set<string>,
   ): Promise<ScanResult> {
     const base: ScanResult = { source: page.source, sourcePage: page.sourcePage, status: 'error', hash: page.hash };
+    const guard = opts.guard ?? noGuard;
     if (page.error !== undefined) return { ...base, status: 'error', message: page.error };
+    // Never dropped, never filed from a page missing its image (User Decision 2026-11-09).
+    if (page.unsupportedImage) return this.unmatched(page, base, 'pdf-image', guard);
     if (page.blank) return { ...base, status: 'blank' };
     const payload = page.payload;
     if (!payload) {
       if (opts.skipNoQr) return { ...base, status: 'skipped', reason: 'no-qr' };
-      return this.unmatched(page, base, 'no-qr');
+      return this.unmatched(page, base, 'no-qr', guard);
     }
     base.payload = payload;
     const files = this.deps.noteIds.filesWithId(payload.noteId);
-    if (files.length === 0) return this.unmatched(page, base, 'note-not-found');
-    if (files.length > 1) return this.unmatched(page, base, 'duplicate-id');
-    if (!isPagePayload(payload)) return this.unmatched(page, base, 'note-only');
+    if (files.length === 0) return this.unmatched(page, base, 'note-not-found', guard);
+    if (files.length > 1) return this.unmatched(page, base, 'duplicate-id', guard);
+    if (!isPagePayload(payload)) return this.unmatched(page, base, 'note-only', guard);
     const notePath = files[0].path;
     base.notePath = notePath;
 
@@ -315,9 +343,9 @@ export class ScanPipeline {
     const same = filed.filter((s) => s.hash === page.hash);
     for (const s of same) if (await this.imageExists(s.embed, notePath)) return { ...base, status: 'duplicate' };
     const target = resolveScanTarget(listUnitOpBlocks(text), payload.unitOpIndex, payload.opId, payload.fingerprint);
-    if (target.kind === 'missing') return this.unmatched(page, base, 'no-unit-op');
-    if (target.kind === 'ambiguous') return this.unmatched(page, base, 'ambiguous');
-    if (target.kind === 'renamed') return this.unmatched(page, base, 'renamed');
+    if (target.kind === 'missing') return this.unmatched(page, base, 'no-unit-op', guard);
+    if (target.kind === 'ambiguous') return this.unmatched(page, base, 'ambiguous', guard);
+    if (target.kind === 'renamed') return this.unmatched(page, base, 'renamed', guard);
     if (batchHashes.has(page.hash)) return { ...base, status: 'duplicate' };
     // Its image was deleted: file it again in place of the entry left behind (#432).
     const replacesMissing = same.length > 0;
@@ -334,7 +362,7 @@ export class ScanPipeline {
         .map((s) => posix.basename(embedLinkPath(s.embed) ?? '').toLowerCase())
         .filter(Boolean),
     );
-    const stored = await this.store(notePath, payload, unitOpIndex, await page.render(), saved, linked);
+    const stored = await this.store(notePath, payload, unitOpIndex, await page.render(), saved, guard, linked);
     const result: ScanResult = {
       ...base,
       status: 'filed',
@@ -406,10 +434,12 @@ export class ScanPipeline {
     unitOpIndex: number,
     jpeg: ArrayBuffer,
     saved: Set<string>,
+    guard: WriteGuard,
     avoid?: ReadonlySet<string>,
   ) {
     const dir = getExperimentDir(notePath) ?? posix.dirname(notePath);
     const name = scanFileName(payload.noteId, unitOpIndex, payload.page, getSeoulDateString());
+    await guard.check();
     const file = await saveBinary(this.deps.images, posix.join(dir, SCANS_SUBFOLDER), name, jpeg, avoid, { skip: saved });
     saved.add(file.path);
     const width = this.deps.embedWidth();
@@ -435,20 +465,23 @@ export class ScanPipeline {
     );
   }
 
-  private async unmatched(page: DecodedPage, base: ScanResult, reason: UnmatchedReason): Promise<ScanResult> {
+  private async unmatched(page: DecodedPage, base: ScanResult, reason: UnmatchedReason, guard: WriteGuard): Promise<ScanResult> {
     const payload = base.payload && isPagePayload(base.payload) ? base.payload : undefined;
     const name = unmatchedFileName(timestamp(), page.source, base.payload?.noteId, page.sourcePage, {
       payload,
       reason,
       hash: page.hash,
     });
-    const file = await saveBinary(this.deps.images, UNMATCHED_FOLDER, name, await page.render());
+    const bytes = await page.render();
+    await guard.check();
+    const file = await saveBinary(this.deps.images, UNMATCHED_FOLDER, name, bytes);
     return { ...base, status: 'unmatched', reason, unmatchedPath: file.path };
   }
 
-  /** processNote, waiting out a busy (composing) note: every second, for up to 30 s. */
-  private async processWhenFree(notePath: string, fn: (text: string) => string): Promise<void> {
+  /** processNote, waiting out a busy (composing) note: every second, for up to 30 s. The guard is checked before each try. */
+  private async processWhenFree(notePath: string, fn: (text: string) => string, guard: WriteGuard = noGuard): Promise<void> {
     for (let attempt = 0; ; attempt++) {
+      await guard.check();
       try {
         await this.deps.processNote(notePath, fn);
         return;
@@ -460,7 +493,7 @@ export class ScanPipeline {
   }
 
   /** Write every note of the batch once, dating it in the same write. */
-  private async flush(pending: readonly Pending[]): Promise<void> {
+  private async flush(pending: readonly Pending[], guard: WriteGuard = noGuard): Promise<void> {
     const byNote = new Map<string, Pending[]>();
     for (const p of pending) byNote.set(p.notePath, [...(byNote.get(p.notePath) ?? []), p]);
     for (const [notePath, items] of byNote) {
@@ -483,8 +516,9 @@ export class ScanPipeline {
         return out === content ? out : stamp(out);
       };
       try {
-        await this.processWhenFree(notePath, apply);
+        await this.processWhenFree(notePath, apply, guard);
       } catch (err) {
+        if (isCancelled(err)) throw err;
         if (isBusy(err)) {
           // Still busy after 30 s: nothing was written; queue every page rather than lose one.
           console.warn('[labnoteo] note stayed busy; scans queued:', notePath);
@@ -512,11 +546,14 @@ export class ScanPipeline {
             },
             item.result,
             reason,
+            guard,
           );
           Object.assign(item.result, queued);
+          await guard.check();
           await this.deps.fs.trash(imagePath);
           delete item.result.imagePath;
         } catch (err) {
+          if (isCancelled(err)) throw err;
           Object.assign(item.result, { status: 'error', message: String(err) });
         }
       }

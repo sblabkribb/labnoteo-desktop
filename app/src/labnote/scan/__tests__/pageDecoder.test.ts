@@ -8,6 +8,9 @@ import { ScanImageTooLarge } from '../../port/scanDecode';
 import { ScanPipeline, unzipScans, type DecodedPage, type PipelineDeps, type ScanInput } from '../../port/scanPipeline';
 import type { DecodeClient, DecodedWorkerPage } from '../decodeClient';
 import { loadPdfLib } from '../pdfjs';
+import { setLang } from '../../../i18n/lang';
+import { coreT } from '../../i18n';
+import { describeResult } from '../../port/scanResults';
 
 vi.mock('pdfjs-dist', () => ({
   GlobalWorkerOptions: { workerSrc: '' },
@@ -23,10 +26,18 @@ const input = (name: string, bytes: ArrayBuffer): ScanInput => ({ name, bytes })
 /** A bitmap stand-in: `createImageBitmap` and the PDF canvas give these. */
 const fakeBitmap = () => ({ width: 10, height: 10, close: vi.fn() }) as unknown as ImageBitmap;
 
+/** What the stand-in canvases were asked to write: the placeholder page's lines. */
+let drawnText: string[] = [];
+
 beforeEach(() => {
+  drawnText = [];
   vi.stubGlobal('createImageBitmap', vi.fn(async () => fakeBitmap()));
   vi.stubGlobal('document', {
-    createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillStyle: '', fillRect() {} }) }),
+    createElement: () => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({ fillStyle: '', font: '', fillRect() {}, fillText: (text: string) => void drawnText.push(text) }),
+    }),
   });
 });
 afterEach(() => {
@@ -105,16 +116,17 @@ describe('forEachPdfPage', () => {
     expect(lib.getDocument.mock.calls[0][0].data).toBeInstanceOf(Uint8Array);
   });
 
-  it('a page whose image pdf.js could not decode (render resolves) reaches onPage with bitmap null', async () => {
+  it('a page whose image pdf.js could not decode (render resolves) reaches onPage with what was drawn and the missing ids', async () => {
     for (const global of [false, true]) {
       const lib = fakePdf(3, [], [2], global);
       const sharedResolve = lib.commonObjs.resolve;
-      const seen: { page: number; bitmap: unknown; error?: unknown }[] = [];
+      const seen: { page: number; bitmap: unknown; missing?: unknown }[] = [];
       await forEachPdfPage(lib, pdfBytes(), async (p) => {
-        seen.push({ page: p.page, bitmap: p.bitmap, error: p.bitmap ? undefined : p.error });
+        seen.push({ page: p.page, bitmap: p.bitmap, missing: p.bitmap ? p.missingImage : undefined });
       });
-      expect(seen.map((p) => p.bitmap === null)).toEqual([false, true, false]);
-      expect(String(seen[1].error)).toContain(global ? 'g_d0_img_p1_2' : 'img_p1_2');
+      expect(seen.map((p) => p.bitmap === null)).toEqual([false, false, false]);
+      expect(seen.map((p) => p.missing === undefined)).toEqual([true, false, true]);
+      expect(String(seen[1].missing)).toContain(global ? 'g_d0_img_p1_2' : 'img_p1_2');
       // the watch is removed after each render: the shared commonObjs keeps its own resolve
       expect(lib.commonObjs.resolve).toBe(sharedResolve);
     }
@@ -132,29 +144,65 @@ describe('createPageDecoder', () => {
     expect(results).toEqual([{ source: 'scan.pdf', status: 'unsupported', reason: 'pdf-limit' }]);
   });
 
-  it('a page that fails to render is an error result and the next page still decodes', async () => {
-    const decode = fakeDecode();
+  // User Decision (2026-11-09): reported as "unsupported image format in this PDF" and queued as unmatched, never dropped.
+  it('a page that fails to render becomes a placeholder page naming the PDF and page, marked unsupportedImage', async () => {
+    const jpeg = new ArrayBuffer(9);
+    const decode = fakeDecode((n) => (n === 2 ? { jpeg, blank: true } : {}));
     const decoder = createPageDecoder(output, { pdf: async () => fakePdf(3, [2]), decode, unzip: unzipScans });
-    const deps = { decoder } as unknown as PipelineDeps;
-    const results = await new ScanPipeline(deps).run([input('scan.pdf', pdfBytes())], { skipNoQr: true });
-    expect(results).toHaveLength(3);
-    expect(results[0]).toMatchObject({ status: 'skipped', sourcePage: 1 });
-    expect(results[1]).toMatchObject({ status: 'error', sourcePage: 2, message: t('scan.pdfPageFailed', 2) });
-    expect(results[1].message).not.toBe('scan.pdfPageFailed');
-    expect(results[2]).toMatchObject({ status: 'skipped', sourcePage: 3 });
-    expect(decode.calls).toBe(2);
+    const { pages, results } = await expandAll(decoder, input('scan.pdf', pdfBytes()));
+    expect(results).toEqual([]);
+    expect(pages.map((p) => [p.sourcePage, !!p.unsupportedImage])).toEqual([
+      [1, false],
+      [2, true],
+      [3, false],
+    ]);
+    expect(pages[1].blank).toBe(false);
+    expect(pages[1].payload).toBeUndefined();
+    expect(pages[1].error).toBeUndefined();
+    expect(await pages[1].render()).toBe(jpeg);
+    expect(drawnText.join(' ')).toContain('scan.pdf');
+    expect(drawnText.join(' ')).toContain(t('scan.pdfImagePlaceholder', 'scan.pdf', 2));
+    expect(decode.calls).toBe(3);
   });
 
-  it('a page whose image pdf.js could not decode is an error result, not blank, and the next page still decodes', async () => {
+  it('a page whose image pdf.js could not decode keeps what was drawn, is marked unsupportedImage and not blank', async () => {
     const decode = fakeDecode(() => ({ blank: true }));
     const decoder = createPageDecoder(output, { pdf: async () => fakePdf(3, [], [2]), decode, unzip: unzipScans });
-    const results = await new ScanPipeline({ decoder } as unknown as PipelineDeps).run([input('scan.pdf', pdfBytes())], {
-      skipNoQr: true,
-    });
-    expect(results).toHaveLength(3);
-    expect(results[1]).toMatchObject({ status: 'error', sourcePage: 2, message: t('scan.pdfPageFailed', 2) });
-    expect(results.map((r) => r.status)).toEqual(['blank', 'error', 'blank']);
-    expect(decode.calls).toBe(2);
+    const { pages } = await expandAll(decoder, input('scan.pdf', pdfBytes()));
+    expect(pages.map((p) => [p.blank, !!p.unsupportedImage])).toEqual([
+      [true, false],
+      [false, true],
+      [true, false],
+    ]);
+    expect(drawnText).toEqual([]);
+    expect(decode.calls).toBe(3);
+  });
+
+  it('through the pipeline both are unmatched pdf-image results, worded as the decision says, also in a shared folder', async () => {
+    const saved: string[] = [];
+    const deps = {
+      decoder: createPageDecoder(output, { pdf: async () => fakePdf(3, [1], [3]), decode: fakeDecode(), unzip: unzipScans }),
+      images: {
+        exists: async () => false,
+        writeScanImage: async (dir: string, name: string) => {
+          saved.push(`${dir}/${name}`);
+          return `${dir}/${name}`;
+        },
+      },
+    } as unknown as PipelineDeps;
+    const results = await new ScanPipeline(deps).run([input('scan.pdf', pdfBytes())], { skipNoQr: true });
+    expect(results.map((r) => [r.sourcePage, r.status, r.reason])).toEqual([
+      [1, 'unmatched', 'pdf-image'],
+      [2, 'skipped', 'no-qr'],
+      [3, 'unmatched', 'pdf-image'],
+    ]);
+    expect(saved).toHaveLength(2);
+    for (const lang of ['en', 'ko'] as const) {
+      setLang(lang);
+      expect(describeResult(coreT, results[0])).toContain(t('scan.pdfImageUnsupported'));
+    }
+    setLang('en');
+    expect(t('scan.pdfImageUnsupported')).toMatch(/^Unsupported image format in this PDF/);
   });
 
   it('a page image over 20 MiB is an error result and the next page still decodes', async () => {

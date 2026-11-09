@@ -7,7 +7,9 @@
 // pages continue; page.cleanup and the canvas release run in a finally. pdf.js does not reject render when its worker
 // cannot decode an image (pdfjs-dist 4.10.38 resolves the image object with null data and the canvas skips it), so
 // renderPage watches the page's objs and commonObjs resolve calls during the render and fails the page when an image
-// arrives as null (otherwise a JPEG 2000 page would render white and be filed as blank).
+// arrives as null (otherwise a JPEG 2000 page would render white and be filed as blank); such a page still reaches
+// onPage with what pdf.js could draw (`bitmap`) and `missingImage` (PdfImageMissing naming the image ids), so the
+// decoder can queue it as unmatched (User Decision 2026-11-09).
 /**
  * Pages of a scanned PDF (a multifunction printer's usual output) as images,
  * rendered one at a time with pdf.js on a detached canvas.
@@ -41,13 +43,17 @@ export interface PdfPage {
   cleanup(): void;
 }
 
-/** A rendered page (`bitmap`), or one pdf.js could not render (`bitmap: null` and the `error`). */
+/**
+ * A rendered page (`bitmap`; with `missingImage` when some of its images could not be decoded, so the bitmap shows
+ * the page without them), or one pdf.js could not render at all (`bitmap: null` and the `error`).
+ */
 export type PdfPageImage =
   | {
       /** 1-based. */
       page: number;
       pageCount: number;
       bitmap: ImageBitmap;
+      missingImage?: PdfImageMissing;
     }
   | { page: number; pageCount: number; bitmap: null; error: unknown };
 
@@ -78,7 +84,7 @@ function watchMissingImages(objs: PdfObjects, missing: string[]): () => void {
   };
 }
 
-async function renderPage(doc: PdfDocument, n: number): Promise<ImageBitmap> {
+async function renderPage(doc: PdfDocument, n: number): Promise<{ bitmap: ImageBitmap; missingImage?: PdfImageMissing }> {
   const page = await doc.getPage(n);
   const canvas = document.createElement('canvas');
   try {
@@ -95,8 +101,11 @@ async function renderPage(doc: PdfDocument, n: number): Promise<ImageBitmap> {
     } finally {
       for (const restore of unwatch) restore();
     }
-    if (missing.length > 0) throw new PdfImageMissing(missing);
-    return await createImageBitmap(canvas);
+    const bitmap = await createImageBitmap(canvas);
+    if (missing.length === 0) return { bitmap };
+    const missingImage = new PdfImageMissing(missing);
+    console.warn('[labnoteo] PDF page rendered without an image:', n, missingImage.message);
+    return { bitmap, missingImage };
   } finally {
     page.cleanup();
     canvas.width = canvas.height = 0;
@@ -122,7 +131,7 @@ export async function forEachPdfPage(
     for (let n = 1; n <= last; n++) {
       let image: PdfPageImage;
       try {
-        image = { page: n, pageCount, bitmap: await renderPage(doc, n) };
+        image = { page: n, pageCount, ...(await renderPage(doc, n)) };
       } catch (error) {
         console.warn('[labnoteo] PDF page could not be rendered:', n, error);
         image = { page: n, pageCount, bitmap: null, error };

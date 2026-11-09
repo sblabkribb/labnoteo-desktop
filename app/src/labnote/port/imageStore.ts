@@ -8,7 +8,8 @@
 // vault.createBinary becomes deps.writeScanImage (scan_write_image, which creates exactly the name), retried with
 // the next freeName on an `exists` refusal (a name taken between the check and the write); ensureFolder is
 // dropped (scan_write_image creates missing folders); normalizePath becomes posix.normalize; unlinkedTwin's
-// metadataCache.resolvedLinks becomes "no .md in deps.backlinks (LinkIndex.backlinks) names it".
+// metadataCache.resolvedLinks becomes "no .md in deps.backlinks (LinkIndex.backlinks) names it". UNMATCHED_REASONS
+// gains the app's 'pdf-image' (a PDF page with an image pdf.js cannot decode), so the queue can say why.
 /**
  * Where scanned pages are stored in the vault: next to the experiment's other
  * images under `images/scans/`, named after the note ID so moving a note can
@@ -152,7 +153,7 @@ function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
 }
 
 /** Why a page went to the unmatched queue; kept in its file name (#349). */
-const UNMATCHED_REASONS = ['no-qr', 'note-not-found', 'duplicate-id', 'note-only', 'no-unit-op', 'ambiguous', 'renamed'];
+const UNMATCHED_REASONS = ['no-qr', 'note-not-found', 'duplicate-id', 'note-only', 'no-unit-op', 'ambiguous', 'renamed', 'pdf-image'];
 
 /** What the QR code of a queued page said, and why it was not filed (#349). */
 export interface UnmatchedInfo {

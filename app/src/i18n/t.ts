@@ -395,6 +395,8 @@ const ko: Record<string, string> = {
     '워크플로 노트는 아직 이름을 바꿀 수 없습니다. README 체크리스트의 링크가 끊어집니다. 링크까지 고치는 이름 바꾸기는 나중에 추가됩니다.',
   'fileOps.renameGuarded.readme': 'README.labnote.md 는 실험을 알아보는 파일이라 이름을 바꿀 수 없습니다.',
   'scan.pdfPageFailed': 'PDF {0}쪽을 읽지 못했습니다(JPEG 2000 이미지일 수 있습니다). PDF나 JPEG로 다시 스캔하세요.',
+  'scan.pdfImageUnsupported': '이 PDF의 이미지 형식은 지원하지 않습니다(JPEG 2000일 수 있습니다). PDF나 JPEG로 다시 스캔하세요.',
+  'scan.pdfImagePlaceholder': '{0}의 {1}쪽: 이미지 형식을 지원하지 않아 보여 줄 수 없습니다.',
   'scan.imageTooLarge': '스캔 이미지가 20MB를 넘어 저장하지 못했습니다. 설정에서 이미지 크기를 줄이세요.',
   // 스캔 결과(SP7 Task 25): 플러그인의 HEIC·TIFF 안내는 Obsidian 을 말하므로 앱 문장으로(B11), 30 초 동안 편집 중이던 노트(B9)
   'scan.heicAdvice': 'HEIC 사진이라 열 수 없습니다. iPhone 설정 → 카메라 → 포맷 → "높은 호환성"으로 바꾸거나 JPEG로 공유하세요.',
@@ -830,6 +832,8 @@ const en: Record<string, string> = {
     "Workflow notes can't be renamed yet: their README checklist links would break. Renaming that also fixes links comes later.",
   'fileOps.renameGuarded.readme': "README.labnote.md identifies the experiment and can't be renamed.",
   'scan.pdfPageFailed': 'Could not read page {0} of the PDF (it may be a JPEG 2000 image). Scan it again as PDF or JPEG.',
+  'scan.pdfImageUnsupported': 'Unsupported image format in this PDF (it may be JPEG 2000). Scan it again as PDF or JPEG.',
+  'scan.pdfImagePlaceholder': 'Page {1} of {0}: its image format is not supported, so it cannot be shown.',
   'scan.imageTooLarge': 'The scan image is over 20 MB and was not stored. Lower the image size in settings.',
   'scan.heicAdvice': 'HEIC photo, which the app cannot open. On iPhone set Settings → Camera → Formats → Most Compatible, or share the photo as JPEG.',
   'scan.tiffAdvice': 'TIFF scan, which the app cannot open. Set the scanner to save PDF or JPEG.',

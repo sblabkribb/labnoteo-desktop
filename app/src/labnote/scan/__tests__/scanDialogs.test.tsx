@@ -6,6 +6,7 @@ import type { PagePayload } from '@labnoteo/core/lib/scanPayload';
 import { setLang } from '../../../i18n/lang';
 import { t as appT } from '../../../i18n/t';
 import { fakeInvoke } from '../../../integrations/__tests__/fakeNet';
+import { NetError, type VaultGuard } from '../../../integrations/netIpc';
 import type { ProgressHandle } from '../../../integrations/progressStore';
 import { createTestHost } from '../../__tests__/testHost';
 import type { CommandContext } from '../../commands/context';
@@ -92,11 +93,25 @@ function fakePipeline(results: ScanResult[] = [filed()]) {
   } as unknown as typeof pipeline;
 }
 
+/** A vault guard over a vault that stays open until `close()` (the switch aborts its signal, D11). */
+function openVault(): VaultGuard & { close(): void; check: ReturnType<typeof vi.fn> } {
+  const controller = new AbortController();
+  return {
+    signal: controller.signal,
+    root: 'C:/Vault',
+    check: vi.fn(async () => {
+      if (controller.signal.aborted) throw new NetError('cancelled', 'cancelled');
+    }),
+    close: () => controller.abort(),
+  };
+}
+
 function makeFeature(deps: Partial<ScanFeatureDeps> = {}): ScanFeature {
   return new ScanFeature(ctx, {
     pipeline,
     decoder: { expand: vi.fn() } as unknown as PageDecoder,
     withProgress: withProgressSpy as unknown as ScanFeatureDeps['withProgress'],
+    guard: async () => openVault(),
     ...deps,
   });
 }
@@ -320,6 +335,93 @@ describe('runs and reports', () => {
     expect(toast.action?.label).toBe(coreT('Details'));
     act(() => toast.action!.run());
     expect(currentDialog()?.spec.kind).toBe('scanResults');
+  });
+
+  // D11: the results of a vault that was switched away are not opened in the new one.
+  it('after a vault switch the Details and Show results toasts open nothing', async () => {
+    renderLayer();
+    const openFile = vi.spyOn(ctx, 'openFile');
+    const feature = makeFeature();
+    const vault = openVault();
+    act(() => feature.report([filed()], false, vault));
+    const details = currentToasts().at(-1)!;
+    act(() => details.action!.run());
+    expect(currentDialog()?.spec.kind).toBe('scanResults');
+    vault.close();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: coreT('Open note') }));
+    });
+    await waitFor(() => expect(openFile).toHaveBeenCalled());
+    // the vault is gone: no Show results toast, and the old Details opens nothing
+    expect(currentToasts().find((x) => x.action?.label === coreT('Show results'))).toBeUndefined();
+    act(() => details.action!.run());
+    expect(currentDialog()).toBeNull();
+    expect(pipeline.undo).not.toHaveBeenCalled();
+    expect(pipeline.removePrevious).not.toHaveBeenCalled();
+  });
+
+  it('a folder run whose vault is switched mid-run hands the tick guard to the pipeline and leaves the new vault alone', async () => {
+    let open = 'C:/A';
+    const f = fakeInvoke({
+      vault_current: () => ({ root: open, name: open }),
+      scan_folder_status: () => ({ path: 'D:/scans', mode: 'dedicated', exists: true, insideVault: false, since: 1, baseline: [] }),
+      scan_folder_list: () => [{ name: 'a.jpg', size: 2, mtimeMs: 10, birthtimeMs: null }],
+      scan_folder_prune_baseline: () => [],
+      scan_folder_read: () => new ArrayBuffer(2),
+      scan_folder_move: () => 'labnote-processed/a.jpg',
+      integration_state_read: () => null,
+      integration_state_write: () => null,
+    });
+    const notify = vi.fn();
+    pipeline.run.mockImplementation(async (_inputs: readonly ScanInput[], opts?: { guard?: VaultGuard }) => {
+      expect(opts?.guard?.root).toBe('C:/A');
+      open = 'C:/B';
+      await opts!.guard!.check();
+      return [filed()];
+    });
+    const feature = new ScanFeature(ctx, {
+      pipeline,
+      decoder: { expand: vi.fn() } as unknown as PageDecoder,
+      withProgress: withProgressSpy as unknown as ScanFeatureDeps['withProgress'],
+      notify,
+      invoke: f.invoke,
+    });
+    await feature.processFolderNow();
+    expect(pipeline.run).toHaveBeenCalledTimes(1);
+    expect(f.calls.filter(([c]) => c === 'scan_folder_move' || c === 'integration_state_write')).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+    expect(currentToasts()).toEqual([]);
+    expect(currentDialog()).toBeNull();
+  });
+
+  it('each batch runs with a vault guard: the one handed in, or one taken when the batch starts', async () => {
+    const taken = openVault();
+    const guard = vi.fn(async () => taken);
+    const feature = makeFeature({ guard, notifyStatus: vi.fn(() => ({ update: vi.fn(), close: vi.fn() })) });
+    await feature.runWithProgress([{ name: 'a.jpg', bytes: new ArrayBuffer(1) }], false, true);
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(pipeline.run.mock.calls[0][1]).toMatchObject({ guard: taken });
+    const mine = openVault();
+    await feature.runWithProgress([{ name: 'b.jpg', bytes: new ArrayBuffer(1) }], false, false, mine);
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(pipeline.run.mock.calls[1][1]).toMatchObject({ guard: mine });
+  });
+
+  it('an import cancelled by a vault switch says nothing and opens no results', async () => {
+    renderLayer();
+    const notify = vi.fn();
+    pipeline.run.mockRejectedValueOnce(new NetError('cancelled', 'cancelled'));
+    const feature = makeFeature({ notify });
+    const done = inAct(() => feature.openImport());
+    const zone = document.querySelector('.scan-drop')!;
+    const file = new File(['ab'], 'a.jpg');
+    await act(async () => {
+      fireEvent.drop(zone, { dataTransfer: { files: [file] } });
+      await done;
+    });
+    expect(pipeline.run).toHaveBeenCalledTimes(1);
+    expect(notify).not.toHaveBeenCalled();
+    expect(currentDialog()).toBeNull();
   });
 
   it('a manual run with only skipped pages says no worksheet pages were found', () => {

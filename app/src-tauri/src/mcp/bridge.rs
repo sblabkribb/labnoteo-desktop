@@ -47,6 +47,10 @@ pub const TIMEOUT_MESSAGE: &str = "Approval timed out: the user did not answer i
 /// JSON-RPC error for a call failed by a stop, a vault switch or a page load.
 pub const DRAINED_CODE: i64 = -32002;
 pub const DRAINED_MESSAGE: &str = "labnoteO closed the vault; nothing was written";
+/// The same end for a call the webview had already claimed: it may have been
+/// writing when the vault closed, so whether anything was written is unknown.
+pub const DRAINED_CLAIMED_MESSAGE: &str =
+    "labnoteO closed the vault while this call was running; whether it wrote anything is unknown, so check the note before trying again";
 
 /// One call waiting for the webview.
 pub(crate) struct Pending {
@@ -225,13 +229,17 @@ pub(crate) fn reply(pending: &PendingMap, call_id: &str, r: ReplyIn) -> bool {
     }
 }
 
-/// Fails every pending call with `-32002` and empties the map. Emits nothing:
-/// the webview is going away or switching vault and cancels its own work.
+/// Fails every pending call with `-32002` and empties the map: an unclaimed
+/// call with [`DRAINED_MESSAGE`] (nothing ran), a claimed one with
+/// [`DRAINED_CLAIMED_MESSAGE`] (the tool may have written already). Emits
+/// nothing: the webview is going away or switching vault and cancels its own
+/// work.
 pub fn drain_pending(state: &McpState) -> u32 {
     let drained: Vec<Pending> = lock(&state.pending).drain().map(|(_, p)| p).collect();
     let n = drained.len() as u32;
     for p in drained {
-        let _ = p.tx.send(CallOutcome::RpcError(DRAINED_CODE, DRAINED_MESSAGE.to_string()));
+        let message = if p.claimed { DRAINED_CLAIMED_MESSAGE } else { DRAINED_MESSAGE };
+        let _ = p.tx.send(CallOutcome::RpcError(DRAINED_CODE, message.to_string()));
     }
     n
 }
@@ -613,6 +621,29 @@ mod tests {
         }
         assert!(drain_events(&events).is_empty(), "a drain emits nothing");
         assert_eq!(drain_pending(&state), 0);
+    }
+
+    #[tokio::test]
+    async fn drain_tells_a_claimed_call_its_result_is_unknown() {
+        let state = McpState::default();
+        let (bridge, events, _) = test_bridge(&state);
+        let claimed = spawn_call(bridge.clone(), "append_note", 1);
+        let waiting = spawn_call(bridge.clone(), "append_note", 2);
+        settle().await;
+        let ids: Vec<String> = drain_events(&events).iter().map(call_id_of).collect();
+        assert_eq!(ids.len(), 2);
+        // The webview won the claim for the first call: it may already be writing.
+        assert!(claim(&state.pending, &ids[0]));
+        assert_eq!(drain_pending(&state), 2);
+        let v = rpc_json(claimed.await.unwrap());
+        assert_eq!(v["error"]["code"], DRAINED_CODE);
+        assert_eq!(v["error"]["message"], DRAINED_CLAIMED_MESSAGE);
+        assert!(!DRAINED_CLAIMED_MESSAGE.contains("nothing was written"));
+        let v = rpc_json(waiting.await.unwrap());
+        assert_eq!(v["error"]["code"], DRAINED_CODE);
+        assert_eq!(v["error"]["message"], DRAINED_MESSAGE);
+        // A late reply for the claimed call is not delivered twice.
+        assert!(!reply(&state.pending, &ids[0], ReplyIn::NoReply));
     }
 
     #[tokio::test]

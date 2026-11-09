@@ -9,10 +9,14 @@
 // ScanResultModal becomes deps.openResults (the ResultsDialog through dialogStore); this.app.vault.cachedRead
 // becomes deps.read (the editor-aware fs, so an open note's buffer) and host.openFile becomes deps.openFile;
 // "Open note" waits for the note to open (an error is notified) before offering the results again; the
-// Translator is coreT.
+// Translator is coreT. A vault switch is checked for (SP6 D11): each batch runs with a vault guard (the caller's, or
+// deps.guard() taken when the batch starts), which goes to pipeline.run as RunOptions.guard; report takes the guard
+// of the run it reports, and its Details and Show results toast actions do nothing once that guard's signal is aborted
+// (the vault was switched), so the old vault's results, Undo and Delete earlier scan never act on another vault.
 /** A batch of scans, one at a time, and what the user is told about it. */
 import { scanEntryLine } from '@labnoteo/core';
 import type { withProgress } from '../../integrations/progressStore';
+import type { VaultGuard } from '../../integrations/netIpc';
 import type { notify, notifyStatus } from '../host/toastStore';
 import { coreT } from '../i18n';
 import type { ScanInput, ScanPipeline, ScanResult } from './scanPipeline';
@@ -37,7 +41,12 @@ export interface ScanRunsDeps {
   /** Opens the results dialog over `results` (the same array, so Undo state carries over). */
   openResults(results: ScanResult[], actions: ResultActions): void;
   openUnmatched(): void;
+  /** The vault guard a batch takes when it starts, unless its caller hands one in. */
+  guard(): Promise<VaultGuard>;
 }
+
+/** Whether the vault `guard` was taken in has been switched away (its results then belong to no open vault). */
+const gone = (guard: VaultGuard | undefined): boolean => !!guard?.signal.aborted;
 
 export class ScanRuns {
   /** Settles when the batch in hand is over; the next batch waits for it. */
@@ -45,20 +54,21 @@ export class ScanRuns {
 
   constructor(private readonly deps: ScanRunsDeps) {}
 
-  /** Run one batch after any batch already running. */
-  runWithProgress(inputs: ScanInput[], skipNoQr: boolean, manual: boolean): Promise<ScanResult[]> {
-    const run = this.tail.then(() => this.runNow(inputs, skipNoQr, manual));
+  /** Run one batch after any batch already running; `guard` is the caller's vault guard (otherwise one is taken). */
+  runWithProgress(inputs: ScanInput[], skipNoQr: boolean, manual: boolean, guard?: VaultGuard): Promise<ScanResult[]> {
+    const run = this.tail.then(async () => this.runNow(inputs, skipNoQr, manual, guard ?? (await this.deps.guard())));
     this.tail = run.catch(() => undefined);
     return run;
   }
 
-  private async runNow(inputs: ScanInput[], skipNoQr: boolean, manual: boolean): Promise<ScanResult[]> {
+  private async runNow(inputs: ScanInput[], skipNoQr: boolean, manual: boolean, guard: VaultGuard): Promise<ScanResult[]> {
     const { pipeline } = this.deps;
     const progressText = (done: number, label: string) => coreT('Processing scans… {0} page(s) done ({1})', String(done), label);
     if (manual) {
       return this.deps.withProgress(coreT('Processing scans…'), (p) =>
         pipeline.run(inputs, {
           skipNoQr,
+          guard,
           onProgress: (done, label) => p.line(progressText(done, label)),
         }),
       );
@@ -68,6 +78,7 @@ export class ScanRuns {
     try {
       return await pipeline.run(inputs, {
         skipNoQr,
+        guard,
         onProgress: (done, label) => status?.update(progressText(done, label)),
       });
     } finally {
@@ -75,23 +86,28 @@ export class ScanRuns {
     }
   }
 
-  report(results: ScanResult[], manual: boolean): void {
+  /** `guard`: the vault guard of the run that gave `results`; once it is aborted, the results open nothing. */
+  report(results: ScanResult[], manual: boolean, guard?: VaultGuard): void {
     const shown = results.filter((r) => r.status !== 'skipped');
     if (shown.length === 0) {
       if (manual && results.length > 0) this.deps.notify('info', coreT('No worksheet pages were found.'));
       return;
     }
-    const open = (): void =>
+    const open = (): void => {
+      if (gone(guard)) return;
       this.deps.openResults(results, {
         openNote: (path, hash) => {
           void this.openScanInNote(path, hash)
             .catch((err: unknown) =>
               this.deps.notify('error', coreT('Command failed: {0}', err instanceof Error ? err.message : String(err))),
             )
-            .then(() => this.offerResultsAgain(open));
+            .then(() => {
+              if (!gone(guard)) this.offerResultsAgain(open);
+            });
         },
         openUnmatched: () => this.deps.openUnmatched(),
       });
+    };
     if (manual) {
       open();
       return;

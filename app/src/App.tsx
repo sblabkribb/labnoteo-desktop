@@ -41,6 +41,7 @@ import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
+import { clearToasts } from './labnote/host/toastStore';
 import { startMcpForVault } from './labnote/mcp/commands';
 import { cancelAllRequests } from './integrations/netIpc';
 import { startBfworkflow } from './bfworkflow/bfwApp';
@@ -342,11 +343,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     registerAllAppCommands();
     // 연동 설정의 AI "연결 시험"(Task 28).
     const offLlmProbe = registerLlmProbe();
-    // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자와 메뉴는 의미가 없다.
+    // 보관함을 바꾸면 이 보관함의 명령이 띄운 대화상자, 알림(스캔 결과의 Details 같은 동작 단추), 메뉴는 의미가 없다.
     // 이 보관함을 위해 기다리던 네트워크 요청도 모두 취소한다(D11: 보관함 신호가 끊겨 쓰기 전 확인이 멈춘다).
     return () => {
       offLlmProbe();
       closeAllDialogs();
+      clearToasts();
       void cancelAllRequests();
       closeMenu();
     };

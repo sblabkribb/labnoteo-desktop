@@ -2,7 +2,8 @@
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: the HEIC and TIFF advice names Obsidian, so it becomes overrideOr('scan.heicAdvice') and
 // overrideOr('scan.tiffAdvice') (SP7 B11; the plugin keys stay as comments); the app's own unmatched reason
-// 'note-busy' (B9) gets t('scan.noteBusy'); the Translator parameter t is named translate, so the app's own t-key
+// 'note-busy' (B9) gets t('scan.noteBusy') and 'pdf-image' (a PDF page with an image pdf.js cannot decode, User
+// Decision 2026-11-09) t('scan.pdfImageUnsupported'); the Translator parameter t is named translate, so the app's own t-key
 // check does not read plugin keys as app keys. The dialog half of resultModal.ts is scan/ResultsDialog.tsx.
 /** What a batch of scans came to: the summary line and one text per page. */
 import type { Translator } from '@labnoteo/core';
@@ -84,6 +85,8 @@ export function unmatchedReasonText(translate: Translator, reason: string, noteI
     ),
     // The app's own reason (B9): the note stayed busy (composing) for 30 s.
     'note-busy': appT('scan.noteBusy'),
+    // The app's own reason (User Decision 2026-11-09): a PDF page with an image pdf.js cannot decode (JPEG 2000).
+    'pdf-image': appT('scan.pdfImageUnsupported'),
   };
   return why[reason] ?? '';
 }

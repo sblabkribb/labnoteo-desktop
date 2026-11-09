@@ -101,10 +101,11 @@ describe('watcher helpers', () => {
   });
 
   it('a PDF with an unreadable page and a filed page counts as processed; all pages unreadable counts as failed', () => {
-    // SMOKE-TEST SP7 step 8 (open, awaiting the user's sign-off on not queueing it): an undecodable PDF page is for now
-    // an `error` result; the original is kept either way.
+    // SMOKE-TEST SP7 step 8: an undecodable PDF page is queued as unmatched (reason pdf-image, User Decision
+    // 2026-11-09); the original is kept either way.
     const r = (status: ScanResult['status']): ScanResult => ({ source: 'scan.pdf', status });
-    expect(outcomeOf([r('filed'), r('error'), r('filed')])).toBe('processed');
+    expect(outcomeOf([r('filed'), r('unmatched'), r('filed')])).toBe('processed');
+    expect(outcomeOf([r('unmatched'), r('unmatched')])).toBe('failed');
     expect(outcomeOf([r('error'), r('error')])).toBe('failed');
   });
 
@@ -146,7 +147,9 @@ function fakeRust(init: { status?: Partial<ScanFolderStatus>; files?: Record<str
   const moves: Array<[string, string]> = [];
   const unreadable = new Set<string>();
   let listFails = false;
+  const vault = { root: 'C:/VaultA' };
   const f = fakeInvoke({
+    vault_current: () => ({ root: vault.root, name: 'v' }),
     scan_folder_status: () => ({ ...status, baseline: status.baseline && [...status.baseline] }),
     scan_folder_list: () => {
       if (listFails) throw { kind: 'io', message: 'raw-rust-text' };
@@ -183,6 +186,7 @@ function fakeRust(init: { status?: Partial<ScanFolderStatus>; files?: Record<str
     files,
     moves,
     unreadable,
+    vault,
     failList: () => void (listFails = true),
     history: (): Record<string, number> => (historyText === null ? {} : (JSON.parse(historyText) as Record<string, number>)),
   };
@@ -256,7 +260,7 @@ describe('ScanFolderWatcher.tick', () => {
     const { watcher, run, report, names } = makeWatcher(rust, (n) => (n === 'b.jpg' ? 'error' : n === 'c.jpg' ? 'unmatched' : 'filed'));
     await watcher.tick({ manual: true });
     expect(names(0)).toEqual(['a.jpg', 'b.jpg', 'c.jpg']);
-    expect(run.mock.calls[0][1]).toEqual({ skipNoQr: false });
+    expect(run.mock.calls[0][1]).toMatchObject({ skipNoQr: false });
     expect(run.mock.calls[0][2]).toBe(true);
     expect(report.mock.calls.map((c) => c[1])).toEqual([true]);
     expect(rust.moves).toEqual([
@@ -278,7 +282,7 @@ describe('ScanFolderWatcher.tick', () => {
     await watcher.tick({ manual: true });
     await watcher.tick({ manual: true });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0][1]).toEqual({ skipNoQr: true });
+    expect(run.mock.calls[0][1]).toMatchObject({ skipNoQr: true });
     expect(callsOf(rust, 'scan_folder_move')).toEqual([]);
     expect(rust.history()).toEqual({ [keyOf('photo.jpg', photo)]: NOW, 'kept.jpg|3|1': NOW - 89 * DAY });
   });
@@ -524,5 +528,55 @@ describe('ScanFolderWatcher.start', () => {
     await vi.advanceTimersByTimeAsync(POLL_MS * 2);
     expect(listen).not.toHaveBeenCalled();
     expect(callsOf(rust, 'scan_folder_list')).toEqual([]);
+  });
+
+  // D11: the vault was switched while the batch ran.
+  it('a vault switch during the run writes no history, moves no original and reports nothing', async () => {
+    const rust = fakeRust({ status: { mode: 'dedicated' }, files: { 'a.jpg': file('a.jpg', 10_000) } });
+    const { watcher, run, report } = makeWatcher(rust);
+    let guardSeen: RunOptions['guard'];
+    run.mockImplementation(async (inputs: ScanInput[], opts: RunOptions) => {
+      guardSeen = opts.guard;
+      rust.vault.root = 'C:/VaultB';
+      return inputs.map((i): ScanResult => ({ source: i.name, input: i.name, status: 'filed' }));
+    });
+    expect(await watcher.tick({ manual: true })).toBeUndefined();
+    expect(guardSeen).toBeDefined();
+    await expect(guardSeen!.check()).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(rust.moves).toEqual([]);
+    expect(callsOf(rust, 'scan_folder_move')).toEqual([]);
+    expect(rust.calls.filter(([c, a]) => c === 'integration_state_write' && a.name === 'scanFolderHistory')).toEqual([]);
+    expect(report).not.toHaveBeenCalled();
+    // Back in the first vault, the file is still there and still new.
+    rust.vault.root = 'C:/VaultA';
+    run.mockImplementation(async (inputs: ScanInput[]) => inputs.map((i): ScanResult => ({ source: i.name, input: i.name, status: 'filed' })));
+    await watcher.tick({ manual: true });
+    expect(rust.moves).toEqual([['a.jpg', 'processed']]);
+  });
+
+  it('a run cancelled by a vault switch ends the tick quietly, without history, moves or a notice', async () => {
+    const rust = fakeRust({ status: { mode: 'shared' }, files: { 'a.jpg': file('a.jpg', 10_000) } });
+    const { watcher, run, report, notices } = makeWatcher(rust);
+    run.mockImplementation(async () => {
+      throw netError('cancelled');
+    });
+    expect(await watcher.tick({ manual: true })).toBeUndefined();
+    expect(rust.calls.filter(([c, a]) => c === 'integration_state_write' && a.name === 'scanFolderHistory')).toEqual([]);
+    expect(report).not.toHaveBeenCalled();
+    expect(notices).toEqual([]);
+  });
+
+  it("a vault switch before the baseline is pruned leaves the other vault's baseline alone", async () => {
+    const rust = fakeRust({ files: { 'a.jpg': file('a.jpg', 10_000) } });
+    const list = rust.invoke;
+    rust.invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      const out = await list(cmd, args);
+      if (cmd === 'scan_folder_list') rust.vault.root = 'C:/VaultB';
+      return out;
+    }) as typeof rust.invoke;
+    const { watcher, run } = makeWatcher(rust);
+    expect(await watcher.tick({ manual: true })).toBeUndefined();
+    expect(callsOf(rust, 'scan_folder_prune_baseline')).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
   });
 });

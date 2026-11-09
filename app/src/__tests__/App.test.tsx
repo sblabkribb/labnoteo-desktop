@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App';
 import { linkIndex } from '../links/linkIndex';
+import { currentToasts, notify } from '../labnote/host/toastStore';
 import { installFakeVault } from './fakeVault';
 import { baseInvoke } from './fixtures';
 
@@ -53,6 +54,19 @@ describe('앱', () => {
     await user.click(screen.getByRole('button', { name: '기존 폴더 열기' }));
     await waitFor(() => expect(screen.getByText('보관함: right')).toBeTruthy());
     expect(tauri.invoke).toHaveBeenCalledWith('vault_open', { path: 'D:/right' });
+  });
+  it('보관함을 바꾸면 이전 보관함의 알림(스캔 결과의 Details 등)이 사라진다', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByText('보관함: wrong')).toBeTruthy();
+    const run = vi.fn();
+    act(() => notify('info', 'Scans: 1 page(s): 1 filed', { ms: 15000, action: { label: 'Details', run } }));
+    const mine = () => currentToasts().filter((x) => x.action?.run === run);
+    expect(mine()).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '보관함 바꾸기' }));
+    expect(await screen.findByText('노트를 둘 곳을 정하세요')).toBeTruthy();
+    expect(mine()).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
   });
   it('새 노트를 만들면 편집기가 그 노트를 연다', async () => {
     const user = userEvent.setup();

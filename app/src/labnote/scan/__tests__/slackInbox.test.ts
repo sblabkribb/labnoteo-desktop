@@ -119,6 +119,7 @@ describe('SlackInbox', () => {
     const runs: string[][] = [];
     const notices: string[] = [];
     const f = fakeInvoke({
+      vault_current: () => ({ root: 'C:/VaultA', name: 'A' }),
       secret_status: () => secretStatusOf({ slackBot: opts.token ?? true }),
       integration_state_read: (a) => state.get(String(a.name)) ?? null,
       integration_state_write: (a) => {
@@ -443,6 +444,7 @@ describe('SlackInbox', () => {
 
   it('a network failure is named by its kind, never by Rust text', async () => {
     const failing = fakeInvoke({
+      vault_current: () => ({ root: 'C:/VaultA', name: 'A' }),
       secret_status: () => secretStatusOf({ slackBot: true }),
       integration_state_read: () => JSON.stringify({ enabled: true, mode: 'dm', channelId: 'D1', userId: 'U1', lastTs: '1.0' }),
       integration_state_write: () => null,
@@ -460,6 +462,7 @@ describe('SlackInbox', () => {
 
   it('a cancelled request (vault switch) is silent', async () => {
     const failing = fakeInvoke({
+      vault_current: () => ({ root: 'C:/VaultA', name: 'A' }),
       secret_status: () => secretStatusOf({ slackBot: true }),
       integration_state_read: () => JSON.stringify({ enabled: true, mode: 'dm', channelId: 'D1', userId: 'U1', lastTs: '1.0' }),
       integration_state_write: () => null,
@@ -527,6 +530,103 @@ describe('SlackInbox', () => {
   });
 });
 
+describe('SlackInbox across a vault switch (D11, B6)', () => {
+  /** Two vaults' app-data state; vault A has the enabled link, vault B none. `switchTo` changes what Rust has open. */
+  function twoVaults(opts: { messages?: unknown[] } = {}) {
+    const vaults: Record<string, Map<string, string>> = {
+      'C:/A': new Map([
+        ['slackLink', JSON.stringify({ enabled: true, mode: 'dm', channelId: 'D1', linkCode: '', userId: 'U1', lastTs: '1.0', claimedTs: [] })],
+      ]),
+      'C:/B': new Map(),
+    };
+    let open = 'C:/A';
+    const posted: unknown[] = [];
+    const f = fakeInvoke({
+      vault_current: () => ({ root: open, name: open }),
+      secret_status: () => secretStatusOf({ slackBot: true }),
+      integration_state_read: (a) => vaults[open].get(String(a.name)) ?? null,
+      integration_state_write: (a) => {
+        vaults[open].set(String(a.name), String(a.content));
+        return null;
+      },
+      slack_call: (a) => {
+        if (a.method === 'chatPostMessage') posted.push(a.params);
+        return a.method === 'conversationsHistory'
+          ? { status: 200, json: { ok: true, messages: opts.messages ?? [{ ts: '2.0', user: 'U1', files: [file('a.jpg')] }] } }
+          : { status: 200, json: { ok: true } };
+      },
+      slack_download: () => new ArrayBuffer(4),
+    });
+    return { f, vaults, posted, switchTo: (root: string) => void (open = root) };
+  }
+
+  it('a switch while a message is filed writes no slackLink into the new vault and reports nothing', async () => {
+    const v = twoVaults();
+    const report = vi.fn();
+    const guards: unknown[] = [];
+    const box = new SlackInbox({
+      run: async (inputs, guard) => {
+        guards.push(guard);
+        v.switchTo('C:/B');
+        return inputs.map((i): ScanResult => ({ source: i.name, status: 'filed', notePath: 'n.md' }));
+      },
+      summarize: () => '',
+      notify: vi.fn(),
+      report,
+      invoke: v.f.invoke,
+    });
+    await box.poll();
+    expect(guards).toHaveLength(1);
+    expect(guards[0]).toMatchObject({ root: 'C:/A' });
+    expect(v.vaults['C:/B'].size).toBe(0);
+    expect(report).not.toHaveBeenCalled();
+    expect(v.posted).toEqual([]);
+    expect(box.lastError).toBeUndefined();
+    // Vault A still has the message to do: it is not marked handled anywhere.
+    expect(JSON.parse(v.vaults['C:/A'].get('slackLink')!)).toMatchObject({ lastTs: '1.0' });
+  });
+
+  it('a switch before the claim is saved writes nothing into the new vault and files nothing', async () => {
+    const v = twoVaults();
+    const run = vi.fn(async () => [] as ScanResult[]);
+    const read = v.f.invoke;
+    const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      const out = await read(cmd, args);
+      if (cmd === 'slack_call' && args?.method === 'reactionsAdd') v.switchTo('C:/B');
+      return out;
+    }) as typeof read;
+    const box = new SlackInbox({ run, summarize: () => '', notify: vi.fn(), report: vi.fn(), invoke });
+    await box.poll();
+    expect(v.vaults['C:/B'].size).toBe(0);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('a stop() while a message is filed saves nothing afterwards', async () => {
+    const v = twoVaults();
+    let box: SlackInbox;
+    const writesAfterStop: unknown[] = [];
+    let stopped = false;
+    const write = v.f.invoke;
+    const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      if (stopped && cmd === 'integration_state_write') writesAfterStop.push(args);
+      return write(cmd, args);
+    }) as typeof write;
+    box = new SlackInbox({
+      run: async (inputs) => {
+        box.stop();
+        stopped = true;
+        return inputs.map((i): ScanResult => ({ source: i.name, status: 'filed', notePath: 'n.md' }));
+      },
+      summarize: () => '',
+      notify: vi.fn(),
+      report: vi.fn(),
+      invoke,
+    });
+    await box.poll();
+    expect(writesAfterStop).toEqual([]);
+  });
+});
+
 describe('ScanFeature.slack', () => {
   afterEach(() => {
     cleanupDialogs();
@@ -546,6 +646,7 @@ describe('ScanFeature.slack', () => {
       ['slackLink', JSON.stringify({ enabled: true, mode: 'dm', channelId: 'D1', linkCode: '', userId: 'U1', lastTs: '1.0', claimedTs: [] })],
     ]);
     const f = fakeInvoke({
+      vault_current: () => ({ root: 'C:/VaultA', name: 'A' }),
       secret_status: () => secretStatusOf({ slackBot: true }),
       integration_state_read: (a) => state.get(String(a.name)) ?? null,
       integration_state_write: (a) => {

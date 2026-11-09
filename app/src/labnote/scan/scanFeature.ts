@@ -10,9 +10,12 @@
  *   지금 처리(processFolderNow)는 사용자가 부른 실행이라 진행 창과 결과 창을 연다. 30초 폴링과 폴더 변경 이벤트는 배경 실행이다.
  * - Slack 받은 편지함(port/slackInbox.ts): `slack`. 보관함을 열면 start()(90초마다, 연결을 켠 보관함만), 닫으면 dispose 가 stop().
  *   Slack 으로 온 사진은 배경 실행이다(대화상자 없음, QR 없는 사진도 결과로 알린다).
+ * - 보관함 바꾸기(SP6 D11): 묶음마다(가져오기는 시작할 때, 폴더 감시는 틱마다, Slack 은 확인마다) vaultGuard 를 잡아 파이프라인에
+ *   넘긴다. 파이프라인은 쓰기 전마다 guard.check() 를 부르고, 보관함이 바뀌었으면 아무것도 더 쓰지 않고 끝난다(알림 없음).
+ *   결과 알림의 Details 와 Show results 는 그 보관함이 닫히면 아무것도 열지 않는다. 알림 자체는 App 이 보관함을 바꿀 때 비운다.
  */
 import { listVaultImages, readVaultImage } from '../../fs/vaultImage';
-import type { InvokeFn, ListenFn } from '../../integrations/netIpc';
+import { vaultGuard, type InvokeFn, type ListenFn, type VaultGuard } from '../../integrations/netIpc';
 import { withProgress } from '../../integrations/progressStore';
 import { appNoteIdSource } from '../barcode/noteIdSource';
 import { noteIds } from '../barcode/noteIdIndex';
@@ -23,7 +26,15 @@ import { NoteIdService } from '../port/noteIdService';
 import { createPageDecoder } from '../port/pageDecoder';
 import { ScanRuns } from '../port/scanFeatureRuns';
 import { ScanFolderWatcher } from '../port/scanFolderWatcher';
-import { ScanPipeline, unzipScans, type PageDecoder, type PipelineDeps, type ScanInput, type ScanResult } from '../port/scanPipeline';
+import {
+  ScanPipeline,
+  isCancelled,
+  unzipScans,
+  type PageDecoder,
+  type PipelineDeps,
+  type ScanInput,
+  type ScanResult,
+} from '../port/scanPipeline';
 import { summarizeResults } from '../port/scanResults';
 import { SlackInbox } from '../port/slackInbox';
 import { assignUnmatched, listUnmatched, type AssignDeps } from '../port/unmatchedScans';
@@ -46,6 +57,8 @@ export interface ScanFeatureDeps {
   listen: ListenFn;
   /** The decode client to use instead of a new one over the real worker; the feature terminates it on dispose. */
   decodeClient: DecodeClient;
+  /** The vault guard each batch, folder tick and Slack check takes (default: vaultGuard over invoke). */
+  guard: () => Promise<VaultGuard>;
 }
 
 export class ScanFeature {
@@ -76,7 +89,9 @@ export class ScanFeature {
     const pd: PipelineDeps | undefined = deps.pipeline ? undefined : pipelineDeps(ctx, this.decoder);
     this.pipeline = deps.pipeline ?? new ScanPipeline(pd!);
     this.notify = deps.notify ?? notify;
+    const guard = deps.guard ?? (() => vaultGuard(deps.invoke));
     this.runs = new ScanRuns({
+      guard,
       pipeline: this.pipeline,
       withProgress: deps.withProgress ?? withProgress,
       notifyStatus: deps.notifyStatus ?? notifyStatus,
@@ -87,17 +102,19 @@ export class ScanFeature {
       openUnmatched: () => void this.openUnmatched(),
     });
     this.watcher = new ScanFolderWatcher({
-      run: (inputs, opts, manual) => this.runWithProgress(inputs, opts.skipNoQr ?? false, manual),
-      report: (results, manual) => this.report(results, manual),
+      run: (inputs, opts, manual) => this.runWithProgress(inputs, opts.skipNoQr, manual, opts.guard),
+      report: (results, manual, g) => this.report(results, manual, g),
+      guard,
       notify: (message) => this.notify('info', message),
       invoke: deps.invoke,
       listen: deps.listen,
     });
     this.slack = new SlackInbox({
-      run: (inputs) => this.runWithProgress(inputs, false, false),
+      run: (inputs, g) => this.runWithProgress(inputs, false, false, g),
       summarize: (results) => summarizeResults(coreT, results),
       notify: (message) => this.notify('info', message),
-      report: (results) => this.report(results, false),
+      report: (results, g) => this.report(results, false, g),
+      guard,
       invoke: deps.invoke,
     });
     const images = deps.images ?? { list: () => listVaultImages(), read: (path: string) => readVaultImage(path) };
@@ -131,6 +148,7 @@ export class ScanFeature {
       const results = await this.runWithProgress(inputs, false, true);
       this.report(results, true);
     } catch (err) {
+      if (isCancelled(err)) return; // the vault was switched mid-run: nothing more was written
       this.notify('error', coreT('Command failed: {0}', err instanceof Error ? err.message : String(err)));
     }
   }
@@ -140,6 +158,7 @@ export class ScanFeature {
     try {
       await this.watcher.tick({ manual: true, includeExisting });
     } catch (err) {
+      if (isCancelled(err)) return;
       this.notify('error', coreT('Command failed: {0}', err instanceof Error ? err.message : String(err)));
     }
   }
@@ -165,14 +184,14 @@ export class ScanFeature {
     return (await this.unmatchedIo.list()).length;
   }
 
-  /** One batch at a time: a batch started while another runs waits for it. */
-  runWithProgress(inputs: ScanInput[], skipNoQr: boolean, manual: boolean): Promise<ScanResult[]> {
-    return this.runs.runWithProgress(inputs, skipNoQr, manual);
+  /** One batch at a time: a batch started while another runs waits for it. `guard`: the caller's vault guard. */
+  runWithProgress(inputs: ScanInput[], skipNoQr: boolean, manual: boolean, guard?: VaultGuard): Promise<ScanResult[]> {
+    return this.runs.runWithProgress(inputs, skipNoQr, manual, guard);
   }
 
-  /** A manual run opens the results; a background run posts a toast whose Details opens them. */
-  report(results: ScanResult[], manual: boolean): void {
-    this.runs.report(results, manual);
+  /** A manual run opens the results; a background run posts a toast whose Details opens them (not after a vault switch). */
+  report(results: ScanResult[], manual: boolean, guard?: VaultGuard): void {
+    this.runs.report(results, manual, guard);
   }
 
   /** Stops the folder watcher, the Slack inbox and the decode worker. */
