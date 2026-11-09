@@ -10,6 +10,7 @@ import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/prop
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
 import { runSampleSettings } from '../../samples/SampleSettingsDialog';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
+import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDialog';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -140,8 +141,15 @@ const convertLegacyNotes: AppCommand = {
   run: (ctx) => convertLegacyNotesCommand(ctx),
 };
 
+/** 연동 설정(SP6 D17): partbank, AI 제공자, bfworkflow 의 주소와 키. 키는 Windows 자격 증명 관리자에만 저장한다. */
+const integrationSettings: AppCommand = {
+  id: 'app.integration-settings',
+  nameKey: 'cmd.integrationSettings',
+  run: (ctx) => runIntegrationSettings(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

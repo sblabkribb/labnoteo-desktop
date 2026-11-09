@@ -4,6 +4,7 @@ import type { AliasOpts } from './AliasDialog';
 import type { SampleDefinitionModel, SampleDefinitionResult, UsageGroup } from '../port/sampleDefinitionModel';
 import { deepActiveElement } from '../../ui/returnFocus';
 import type { SampleSettingsValue } from '../../samples/SampleSettingsDialog';
+import type { IntegrationDeps } from '../../integrations/IntegrationSettingsDialog';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -26,7 +27,8 @@ export type DialogSpec =
   | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[] }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'sampleSettings'; value: SampleSettingsValue }
-  | { kind: 'progress'; id: number };
+  | { kind: 'progress'; id: number }
+  | { kind: 'integrationSettings'; deps: IntegrationDeps };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {

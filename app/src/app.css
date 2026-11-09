@@ -512,6 +512,22 @@ button.danger:hover:not(:disabled) { background: var(--danger); filter: brightne
 .progress-lines { margin: 0; padding: 0; list-style: none; min-height: 0; max-height: 40vh; overflow-y: auto; color: var(--text-muted); font-size: 0.93em; }
 .progress-line { padding: 1px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
+/* 연동 설정(SP6 Task 13, D17): 본문만 스크롤하고 닫기 줄은 남는다. 주소·키 칸은 너비를 다 쓴다(플러그인의 width: 100%) */
+.dialog.integration-settings { width: min(42rem, 100%); }
+.integration-body { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; overflow-y: auto; }
+.integration-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.integration-section h3 { margin: 0; font-size: 1em; }
+.integration-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.integration-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.integration-field input[type="text"], .integration-field input[type="password"] { width: 100%; box-sizing: border-box; }
+.integration-key-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.integration-key-state { color: var(--text-muted); font-size: 0.93em; }
+.integration-key-state.set { color: var(--text); font-weight: 600; }
+.integration-key-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.integration-key-row input[type="password"] { flex: 1 1 12rem; width: auto; min-width: 0; }
+.integration-allow { color: var(--text); font-size: 0.93em; }
+.integration-test { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+
 /* 샘플 정의 창(SP5 Task 23): 짧은 이름 칸과 넓은 값 칸(JSON 경로가 길다). 본문만 스크롤하고 단추 줄은 감싼다(#283) */
 .dialog.sample-def { width: min(44rem, 100%); }
 .sample-def-body { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; overflow-y: auto; }

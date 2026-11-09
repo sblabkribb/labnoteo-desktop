@@ -219,7 +219,7 @@ export function useVaultSettings(vaultRoot: string): {
   settings: AppSettings | undefined;
   imported: boolean;
   foundLlmKey: boolean;
-  update(patch: Partial<AppSettings>): void;
+  update(patch: Partial<AppSettings>): Promise<void>;
 } {
   const [settings, setSettings] = useState<AppSettings>();
   const [imported, setImported] = useState(false);
@@ -242,12 +242,13 @@ export function useVaultSettings(vaultRoot: string): {
       live = false;
     };
   }, [vaultRoot]);
-  const update = (patch: Partial<AppSettings>) => {
-    if (!current.current) return;
+  /** 바꾼 값을 곧바로 보이고 저장한다. 저장이 끝나면(실패해도) 풀린다: 연동 설정은 Rust 가 저장본을 읽은 뒤에 고리를 부른다. */
+  const update = (patch: Partial<AppSettings>): Promise<void> => {
+    if (!current.current) return Promise.resolve();
     const next = { ...current.current, ...patch };
     current.current = next;
     setSettings(next);
-    saveVaultSettings(next).catch(() => undefined);
+    return saveVaultSettings(next).catch(() => undefined);
   };
   return { settings, imported, foundLlmKey, update };
 }

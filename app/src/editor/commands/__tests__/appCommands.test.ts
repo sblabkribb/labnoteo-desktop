@@ -56,6 +56,13 @@ describe('app-command registry', () => {
     expect(catalogs.en['cmd.convertLegacyNotes']).toBe('Convert older notes to .labnote.md');
   });
 
+  it('registers the "Integration settings" palette command', () => {
+    const c = appCommands().find((x) => x.id === 'app.integration-settings');
+    expect(c?.nameKey).toBe('cmd.integrationSettings');
+    expect(catalogs.ko['cmd.integrationSettings']).toBe('연동 설정');
+    expect(catalogs.en['cmd.integrationSettings']).toBe('Integration settings');
+  });
+
   it('displayKey turns CodeMirror keys into labels', () => {
     expect(displayKey('Mod-e')).toBe('Ctrl+E');
     expect(displayKey('Mod-Shift-.')).toBe('Ctrl+Shift+.');

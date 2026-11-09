@@ -35,7 +35,11 @@ export type OverrideKey =
   | 'insertDate.noNote'
   | 'issueMarker.noNote'
   // 자동화가 없을 때 논의 표시: 플러그인 문장의 "Setup research automation" 안내를 뺀 것(그 명령은 뒤의 하위 프로젝트)
-  | 'discussFlag.flagged';
+  | 'discussFlag.flagged'
+  // 연동 설정(SP6 Task 13): 키는 보관함이 아니라 Windows 자격 증명 관리자에 있다. 스킴 없는 LLM 주소는 https:// 를 붙인다.
+  | 'integrations.partbankIntro'
+  | 'integrations.keyKeptHere'
+  | 'ai.schemeHint';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {
