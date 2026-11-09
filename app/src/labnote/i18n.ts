@@ -39,7 +39,9 @@ export type OverrideKey =
   // 연동 설정(SP6 Task 13): 키는 보관함이 아니라 Windows 자격 증명 관리자에 있다. 스킴 없는 LLM 주소는 https:// 를 붙인다.
   | 'integrations.partbankIntro'
   | 'integrations.keyKeptHere'
-  | 'ai.schemeHint';
+  | 'ai.schemeHint'
+  // AI 명령(SP6 Task 31): 플러그인의 'Configure an AI provider in settings first.' 는 앱의 연동 설정을 가리킨다.
+  | 'ai.configureFirst';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

@@ -46,11 +46,12 @@ function checkRange(text: string, start: number, end: number): void {
 /**
  * 열린 CodeMirror 뷰 위의 `EditTarget`. 오프셋은 `state.doc.toString()`(줄을 LF 로 이은 글) 기준이고,
  * 그것은 CRLF·섞인 파일에서도 CodeMirror 위치와 1:1 이다. 편집 한 번은 트랜잭션 한 번, 되돌리기 한 번이다.
- * 모든 메서드는 부를 때 `isBusy()` 면 `NoteBusyError` 로 거부한다.
+ * 모든 메서드는 부를 때 `isBusy()` 거나 뷰가 한글 IME 로 조합 중(`view.composing`)이면 `NoteBusyError` 로 거부한다:
+ * 조합 중에 글을 바꾸면 조합이 깨진다(네트워크를 기다린 AI 답 같은 비동기 결과도 여기서 막힌다, SP6 Task 31).
  */
 export function editTargetFor(view: EditorView, path: string, isBusy: () => boolean): AppEditTarget {
   const check = () => {
-    if (isBusy()) throw new NoteBusyError(path);
+    if (isBusy() || view.composing) throw new NoteBusyError(path);
   };
   const dispatch = (spec: TransactionSpec) => view.dispatch({ ...spec, annotations: COMMAND_EDIT() });
 

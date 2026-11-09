@@ -186,4 +186,21 @@ describe('editTargetFor().batch', () => {
     ).rejects.toBeInstanceOf(NoteBusyError);
     expect(view.state.doc.toString()).toBe('abc');
   });
+
+  it('refuses while the view is composing', async () => {
+    const { view } = viewOf('abc', { anchor: 3 });
+    let composing = true;
+    Object.defineProperty(view, 'composing', { configurable: true, get: () => composing });
+    const t = target(view);
+    // 한글 조합 중에 글을 넣으면 조합이 깨진다: 아무 메서드도 뷰를 건드리지 않는다
+    await expect(t.replaceRange(0, 0, 'X')).rejects.toBeInstanceOf(NoteBusyError);
+    await expect(t.getText()).rejects.toBeInstanceOf(NoteBusyError);
+    await expect(t.insertAtCursor('X')).rejects.toBeInstanceOf(NoteBusyError);
+    await expect(t.revealOffset!(0)).rejects.toBeInstanceOf(NoteBusyError);
+    await expect(t.batch(async (b) => b.replaceRange(0, 0, 'X'))).rejects.toBeInstanceOf(NoteBusyError);
+    expect(view.state.doc.toString()).toBe('abc');
+    composing = false;
+    await t.replaceRange(0, 0, 'X');
+    expect(view.state.doc.toString()).toBe('Xabc');
+  });
 });
