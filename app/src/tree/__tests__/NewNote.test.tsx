@@ -1,36 +1,35 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { NewNote } from '../NewNote';
+import { NewNoteForm } from '../NewNote';
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function setup(over: { flush?: () => Promise<boolean>; invoke?: Invoke } = {}) {
   const onCreated = vi.fn();
+  const onCancel = vi.fn();
   const invoke = vi.fn(over.invoke ?? (async (cmd: string) => (cmd === 'vault_exists' ? false : { kind: 'ok' })));
   const flush = over.flush ?? (async () => true);
-  render(<NewNote flush={flush} onCreated={onCreated} invoke={invoke as never} />);
-  return { onCreated, invoke };
+  render(<NewNoteForm flush={flush} onCreated={onCreated} onCancel={onCancel} invoke={invoke as never} />);
+  return { onCreated, onCancel, invoke };
 }
 
-const openForm = () => userEvent.click(screen.getByRole('button', { name: '새 노트' }));
+const openForm = async () => undefined;
 const nameBox = () => screen.getByRole('textbox', { name: '노트 이름' });
 
-describe('새 노트 단추', () => {
-  it('눌러야 이름 입력이 나타나고, 입력창에 바로 커서가 간다', async () => {
+describe('새 노트 입력(새 노트 대화상자 안)', () => {
+  it('열리면 입력창에 바로 커서가 가고, 안내문이 입력에 이어진다', async () => {
     setup();
-    expect(screen.queryByRole('textbox')).toBeNull();
-    await openForm();
     expect(document.activeElement).toBe(nameBox());
+    expect(document.getElementById(nameBox().getAttribute('aria-describedby')!)!.textContent).toContain('.labnote.md');
   });
 
-  it('이름을 쓰고 Enter 를 치면 만들고, 만든 경로로 알린 뒤 입력을 닫는다', async () => {
+  it('이름을 쓰고 Enter 를 치면 만들고, 만든 경로로 알린다(대화상자는 그 값으로 닫힌다)', async () => {
     const { onCreated, invoke } = setup();
     await openForm();
     await userEvent.type(nameBox(), 'Day 1{Enter}');
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('Day 1.labnote.md'));
     expect(invoke).toHaveBeenCalledWith('vault_modify', { path: 'Day 1.labnote.md', content: '', expectedBefore: '' });
-    expect(screen.queryByRole('textbox')).toBeNull();
   });
 
   it('빈 이름은 이유를 알려 주고 입력을 연 채로 둔다', async () => {
@@ -85,12 +84,12 @@ describe('새 노트 단추', () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
-  it('취소하면 입력이 닫히고 아무것도 만들지 않는다', async () => {
-    const { invoke } = setup();
+  it('취소하면 취소를 알리고 아무것도 만들지 않는다', async () => {
+    const { invoke, onCancel } = setup();
     await openForm();
     await userEvent.type(nameBox(), 'a');
     await userEvent.click(screen.getByRole('button', { name: '취소' }));
-    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onCancel).toHaveBeenCalledTimes(1);
     expect(invoke).not.toHaveBeenCalled();
   });
 });

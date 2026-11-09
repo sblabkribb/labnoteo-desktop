@@ -28,6 +28,9 @@ export interface FakeWindow {
   /** 테스트가 창 닫기를 요청한다. 처리기가 preventDefault 하지 않았으면 destroyed 가 된다. */
   requestClose(): Promise<void>;
   destroyed: boolean;
+  /** 앱이 건 창 제목(setTitle). 건 적이 없으면 undefined. */
+  title: string | undefined;
+  setTitle(title: string): Promise<void>;
 }
 
 export interface FakeVault {
@@ -121,6 +124,10 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
     },
     window: {
       destroyed: false,
+      title: undefined,
+      async setTitle(title) {
+        fake.window.title = title;
+      },
       async onCloseRequested(handler) {
         closeHandlers.add(handler);
         return () => void closeHandlers.delete(handler);

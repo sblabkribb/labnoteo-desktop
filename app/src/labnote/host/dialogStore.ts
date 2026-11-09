@@ -61,7 +61,9 @@ export type DialogSpec =
   | { kind: 'scanImport'; processFolder?: () => void }
   | { kind: 'scanResults'; results: ScanResult[]; pipeline: ScanPipeline; actions: ResultActions }
   // 미분류 스캔 대기열(Task 26): 끝나면 손으로 넣을 페이지, 닫으면 undefined
-  | { kind: 'scanUnmatched'; io: UnmatchedIo };
+  | { kind: 'scanUnmatched'; io: UnmatchedIo }
+  // 새 노트(UI 재설계 Task 5): 리본·Ctrl+N·팔레트. 끝나면 만든 노트의 경로, 닫으면 undefined
+  | { kind: 'newNote'; flush: () => Promise<boolean>; invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {

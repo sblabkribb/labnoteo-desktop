@@ -40,30 +40,37 @@ beforeEach(() => {
   });
 });
 
+/** 보관함 줄의 ⇅ 메뉴에서 보관함 바꾸기를 고른다(명령 맥락이 생긴 뒤: 그 전에는 단추가 바로 바꾼다). */
+async function switchVault(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() => expect((screen.getByRole('button', { name: '설정' }) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(screen.getByRole('button', { name: '보관함 메뉴' }));
+  await user.click(await screen.findByRole('menuitem', { name: '보관함 바꾸기' }));
+}
+
 describe('앱', () => {
   it('보관함을 고른 뒤에도 바꿀 수 있다: 잘못 고른 폴더에 갇히지 않는다', async () => {
     const user = userEvent.setup();
     render(<App />);
-    expect(await screen.findByText('보관함: wrong')).toBeTruthy();
+    expect(await screen.findByText('wrong', { selector: '.vault-bar-name' })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: '보관함 바꾸기' }));
+    await switchVault(user);
     expect(await screen.findByText('노트를 둘 곳을 정하세요')).toBeTruthy();
-    expect(screen.queryByText('보관함: wrong')).toBeNull();
+    expect(screen.queryByText('wrong', { selector: '.vault-bar-name' })).toBeNull();
 
     tauri.dialog.open.mockResolvedValue('D:/right');
     await user.click(screen.getByRole('button', { name: '기존 폴더 열기' }));
-    await waitFor(() => expect(screen.getByText('보관함: right')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('right', { selector: '.vault-bar-name' })).toBeTruthy());
     expect(tauri.invoke).toHaveBeenCalledWith('vault_open', { path: 'D:/right' });
   });
   it('보관함을 바꾸면 이전 보관함의 알림(스캔 결과의 Details 등)이 사라진다', async () => {
     const user = userEvent.setup();
     render(<App />);
-    expect(await screen.findByText('보관함: wrong')).toBeTruthy();
+    expect(await screen.findByText('wrong', { selector: '.vault-bar-name' })).toBeTruthy();
     const run = vi.fn();
     act(() => notify('info', 'Scans: 1 page(s): 1 filed', { ms: 15000, action: { label: 'Details', run } }));
     const mine = () => currentToasts().filter((x) => x.action?.run === run);
     expect(mine()).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: '보관함 바꾸기' }));
+    await switchVault(user);
     expect(await screen.findByText('노트를 둘 곳을 정하세요')).toBeTruthy();
     expect(mine()).toEqual([]);
     expect(run).not.toHaveBeenCalled();
@@ -82,32 +89,33 @@ describe('앱', () => {
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
-    await screen.findByText('보관함: wrong');
-    expect(screen.getByText("왼쪽에서 노트를 고르거나, 워크플로 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
+    expect(screen.getByText("왼쪽에서 노트를 고르거나, 실험 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: '새 노트' }));
-    await user.type(screen.getByRole('textbox', { name: '노트 이름' }), 'Day 1{Enter}');
+    await user.click(within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '새 노트' }));
+    await user.type(within(await screen.findByRole('dialog', { name: '새 노트' })).getByRole('textbox', { name: '노트 이름' }), 'Day 1{Enter}');
 
     await waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('vault_read', { path: 'Day 1.labnote.md' }));
-    expect(screen.queryByText("왼쪽에서 노트를 고르거나, 워크플로 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeNull();
+    expect(screen.queryByText("왼쪽에서 노트를 고르거나, 실험 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeNull();
     expect(screen.queryByRole('textbox', { name: '노트 이름' })).toBeNull();
   });
-  it('레이아웃 영역이 역할로 드러난다: 상단 바, 사이드바, 본문, 상태줄', async () => {
+  it('레이아웃 영역이 역할로 드러난다: 리본, 사이드바(보관함 줄), 본문, 상태줄. 상단 바는 없다', async () => {
     render(<App />);
-    await screen.findByText('보관함: wrong');
-    const banner = screen.getByRole('banner');
-    expect(within(banner).getByRole('heading', { level: 1, name: 'labnoteO' })).toBeTruthy();
-    expect(within(banner).getByRole('button', { name: '보관함 바꾸기' })).toBeTruthy();
-    expect(within(banner).getByRole('button', { name: '새 노트' })).toBeTruthy();
-    expect(within(banner).getByRole('combobox', { name: '테마' })).toBeTruthy();
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
+    expect(screen.queryByRole('banner')).toBeNull();
+    const ribbon = screen.getByRole('toolbar', { name: '리본' });
+    expect(within(ribbon).getByRole('button', { name: '새 노트' })).toBeTruthy();
+    // 새 노트 단추는 일반 노트를 만든다(단축키는 툴팁에). 실험은 리본의 '새 실험'
+    expect(within(ribbon).getByRole('button', { name: '새 노트' }).getAttribute('title')).toBe('새 노트 (Ctrl+N)');
+    expect(within(ribbon).getByRole('button', { name: '새 실험' })).toBeTruthy();
     const side = screen.getByRole('complementary', { name: '사이드바' });
     expect(within(side).getByRole('searchbox', { name: '노트 검색' })).toBeTruthy();
     expect(within(side).getByText('노트가 없습니다')).toBeTruthy();
+    expect(within(within(side).getByRole('group', { name: '보관함' })).getByRole('button', { name: '보관함 메뉴' })).toBeTruthy();
     expect(screen.getAllByRole('main')).toHaveLength(1); // main 안에 main 을 중첩하지 않는다
-    expect(within(screen.getByRole('main')).getByText("왼쪽에서 노트를 고르거나, 워크플로 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
-    // the empty state mentions Ctrl+P; 새 노트 단추는 일반 노트를 만든다고 알리고 실험은 '새 실험'으로 안내한다
+    expect(within(screen.getByRole('main')).getByText("왼쪽에서 노트를 고르거나, 실험 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
+    // the empty state mentions Ctrl+P
     expect(within(screen.getByRole('main')).getByText(/Ctrl\+P/)).toBeTruthy();
-    expect(within(banner).getByRole('button', { name: '새 노트' }).getAttribute('title')).toMatch(/일반 노트.*새 실험/);
     expect(within(screen.getByRole('contentinfo')).getByText(/0\.0\.0/)).toBeTruthy();
   });
   it('보관함을 고르는 화면에도 main 이 하나 있다', async () => {
@@ -134,7 +142,7 @@ describe('앱', () => {
       throw new Error(`unexpected ${cmd}`);
     });
     render(<App />);
-    await screen.findByText('보관함: wrong');
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
     const bar = screen.getByRole('contentinfo');
     expect(within(bar).getByText('색인을 만드는 중입니다')).toBeTruthy();
     expect(within(bar).queryByRole('status')).toBeNull();
@@ -145,7 +153,7 @@ describe('앱', () => {
   });
   it('색인에서 건너뛴 노트가 없으면 상태줄에 status 가 없다', async () => {
     render(<App />); // 기본 모의: skipped 0
-    await screen.findByText('보관함: wrong');
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
     await waitFor(() => expect(screen.queryByText('색인을 만드는 중입니다')).toBeNull());
     expect(within(screen.getByRole('contentinfo')).queryByRole('status')).toBeNull();
   });
@@ -166,7 +174,7 @@ describe('앱', () => {
       throw new Error(`unexpected ${cmd}`);
     });
     const first = render(<App />);
-    await screen.findByText('보관함: wrong');
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
     const notice = await screen.findByText('labnoteO(Obsidian) 설정을 이 보관함으로 가져왔습니다.');
     expect(notice.closest('.notices')).toBeTruthy();
     expect(notice.getAttribute('role')).toBe('status');
@@ -175,7 +183,7 @@ describe('앱', () => {
     first.unmount();
 
     render(<App />);
-    await screen.findByText('보관함: wrong');
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
     await waitFor(() => expect(tauri.invoke.mock.calls.filter(([c]) => c === 'settings_vault_read')).toHaveLength(2));
     expect(screen.queryByText('labnoteO(Obsidian) 설정을 이 보관함으로 가져왔습니다.')).toBeNull();
     expect(tauri.invoke.mock.calls.filter(([c]) => c === 'settings_import_plugin')).toHaveLength(1);
@@ -183,8 +191,8 @@ describe('앱', () => {
   it('Ctrl+P 는 명령 팔레트를 연다: 인쇄를 막고, 팔레트가 열린 동안 .shell 은 inert 다', async () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
-    await screen.findByText('보관함: wrong');
-    const button = within(screen.getByRole('banner')).getByRole('button', { name: '명령 팔레트 (Ctrl+P)' }) as HTMLButtonElement;
+    await screen.findByText('wrong', { selector: '.vault-bar-name' });
+    const button = within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '명령 팔레트' }) as HTMLButtonElement;
     await waitFor(() => expect(button.disabled).toBe(false)); // 설정을 읽은 뒤 켜진다
     const e = new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', ctrlKey: true, bubbles: true, composed: true, cancelable: true });
     act(() => {
@@ -213,7 +221,7 @@ describe('앱', () => {
     tauri.invoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => vault.invoke(cmd, args));
     tauri.listen.mockImplementation(((event: string, handler: Parameters<typeof vault.listen>[1]) => vault.listen(event, handler)) as never);
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await waitFor(() => expect(linkIndex.ready()).toBe(true));
     await vault.mem.write('New.md', '');
     await vault.emitChange('New.md', 'created');

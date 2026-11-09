@@ -42,7 +42,7 @@ describe('보관함을 열 때의 카탈로그 알림', () => {
     const vault = await outdatedVault();
     vault.settings = JSON.stringify({ catalogNoticeHash: bundledCatalogHash() });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await waitFor(() => expect(vault.log.some((c) => c.cmd === 'settings_vault_read')).toBe(true));
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByText(NOTICE)).toBeNull();

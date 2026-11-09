@@ -31,7 +31,7 @@ describe('앱 셸 CSS 계약', () => {
 
   it('print hides chrome', () => {
     const p = parseRules(css).filter((r) => r.atRule === '@media print').flatMap((r) => r.selectors).join(',');
-    for (const s of ['.topbar', '.sidebar', '.statusbar', '.notices', '.toaster', '.dialog-layer', '.context-menu', '.editor-path button']) expect(p).toContain(s);
+    for (const s of ['.ribbon', '.sidebar', '.dock-scrim', '.statusbar', '.notices', '.toaster', '.dialog-layer', '.context-menu', '.editor-path button']) expect(p).toContain(s);
   });
 
   it('print drops the full-window grid and the content scroller', () => {
@@ -48,14 +48,23 @@ describe('앱 셸 CSS 계약', () => {
     expect(print['.lno-table-toolbar']?.display).toBe('none');
   });
 
-  it('사이드바 탭 이름(파일·워크플로·샘플·개요·링크)은 말줄임으로 잘리지 않고, 자리가 모자라면 다음 줄로 넘어간다', () => {
-    const tab = ruleFor('.sidebar-tab')!;
-    expect(tab.body).not.toMatch(/text-overflow/);
-    expect(tab.decls['overflow']).toBeUndefined();
-    expect(tab.decls['white-space']).toBe('nowrap');
-    // 0 바탕(flex-basis 0)이면 좁은 사이드바에서 이름보다 작아진다: 이름 길이를 바탕으로 늘어나기만 한다
-    expect(tab.decls['flex']).toBe('1 0 auto');
-    expect(ruleFor('.sidebar-tabs')!.decls['flex-wrap']).toBe('wrap');
+  it('독의 탭은 아이콘 탭이다: 줄을 넘기지 않고, 고른 탭은 --bg-selected 채움만 받는다(알약·밑줄 없음)', () => {
+    expect(ruleFor('.dock-tabs')!.decls['flex-wrap']).toBe('nowrap');
+    const selected = ruleFor('.dock-tab[aria-selected="true"]')!;
+    expect(selected.decls['background']).toBe('var(--bg-selected)');
+    expect(selected.body).not.toMatch(/box-shadow|border-bottom|text-decoration/);
+  });
+
+  it('독의 너비와 숨김은 <html> 의 변수와 속성을 따르고, 끄는 동안은 전환을 끈다', () => {
+    expect(ruleFor('.shell')!.decls['grid-template-columns']).toBe('var(--ribbon-w) var(--side-w) minmax(0, 1fr) auto');
+    expect(ruleFor('.shell')!.decls['transition']).toBe('grid-template-columns var(--motion)');
+    expect(ruleFor(':root[data-left-hidden="true"] .shell')!.decls['grid-template-columns']).toBe('var(--ribbon-w) 0 minmax(0, 1fr) auto');
+    expect(ruleFor(':root[data-left-hidden="true"] .dock')!.decls['display']).toBe('none');
+    expect(ruleFor(':root[data-resizing] .shell')!.decls['transition']).toBe('none');
+    // 좁은 창에서는 독이 떠서 열리고 깔개가 깔린다
+    const narrow = parseRules(css).filter((r) => r.atRule === '@media (max-width: 819.98px)');
+    expect(narrow.find((r) => r.selectors.includes('.dock'))!.body).toMatch(/position:\s*fixed/);
+    expect(narrow.find((r) => r.selectors.includes('.dock-scrim'))!.body).toMatch(/background:\s*var\(--scrim\)/);
   });
 
   it('긴 노트 이름은 사이드바를 밀지 않고 말줄임된다', () => {
@@ -82,8 +91,9 @@ describe('앱 셸 CSS 계약', () => {
     expect(parseRules(css).flatMap((r) => r.selectors).filter((sel) => sel.includes('.note-tree') && /button|li\b/.test(sel))).toEqual([]);
   });
 
-  it('사이드바와 본문이 각자 스크롤한다', () => {
-    expect(ruleFor('.sidebar')!.body).toMatch(/overflow-y:\s*auto/);
+  it('사이드바의 탭 패널과 본문이 각자 스크롤한다(탭 줄과 보관함 줄은 남는다)', () => {
+    expect(ruleFor('.sidebar')!.body).toMatch(/overflow-y:\s*hidden/);
+    expect(ruleFor('.sidebar-panel')!.body).toMatch(/overflow-y:\s*auto/);
     expect(ruleFor('.content')!.body).toMatch(/overflow:\s*auto/);
   });
 

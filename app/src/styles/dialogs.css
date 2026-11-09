@@ -58,6 +58,10 @@
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-4); }
 
 .prompt-question { color: var(--text); }
+/* 새 노트 대화상자(Task 5): 이름표, 입력, 안내, 오류, 단추가 한 줄씩 */
+.new-note { display: flex; flex-direction: column; gap: var(--space-4); }
+.new-note input { width: 100%; }
+.new-note .dialog-actions { margin-top: var(--space-2); }
 .prompt-hint { margin: 0; color: var(--text-muted); font-size: 0.93em; }
 .prompt-hint.warn { color: var(--warning); font-weight: 600; }
 .prompt-error { margin: 0; }

@@ -17,6 +17,10 @@ import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
 import { runNotesFromDesign } from '../../bfworkflow/notesFromDesign';
 import { runDesignUsage, runOpenDesign } from '../../bfworkflow/openDesign';
 import { runCheckForUpdates } from '../../update/checkCommand';
+import { layoutStore } from '../../ui/layoutStore';
+import { runQuickSwitcher } from '../../ui/quickSwitcher';
+import { chooseTheme, type Theme } from '../../theme/useTheme';
+import { setLang, type Lang } from '../../i18n/lang';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -212,8 +216,49 @@ const checkForUpdates: AppCommand = {
   run: (ctx) => runCheckForUpdates(ctx),
 };
 
+/** 왼쪽 독 숨기기·보이기(UI 재설계 Task 5). 키는 보여 주기만 한다: App 의 window keydown 이 code === 'Backslash' 로 듣는다(₩ 키도). */
+const toggleLeft: AppCommand = {
+  id: 'app.toggle-left-sidebar',
+  nameKey: 'cmd.toggleLeft',
+  key: 'Mod-\\',
+  run: () => layoutStore.toggleLeft(),
+};
+
+/** 오른쪽 사이드바(개요·링크) 열기·닫기. */
+const toggleRight: AppCommand = {
+  id: 'app.toggle-right-sidebar',
+  nameKey: 'cmd.toggleRight',
+  run: () => layoutStore.toggleRight(),
+};
+
+/** 새 노트 대화상자(리본의 새 노트와 같다). 키는 App 의 window keydown 이 듣는다. */
+const newNote: AppCommand = {
+  id: 'app.new-note',
+  nameKey: 'cmd.newNote',
+  key: 'Mod-n',
+  run: (ctx) => ctx.newNote?.(),
+};
+
+/** 빠른 이동: 노트 이름으로 골라 연다. 키는 App 의 window keydown 이 듣는다. */
+const quickSwitcher: AppCommand = {
+  id: 'app.quick-switcher',
+  nameKey: 'cmd.quickSwitcher',
+  key: 'Mod-o',
+  run: (ctx) => runQuickSwitcher(ctx),
+};
+
+/** 테마와 언어: 창 틀의 고르기 상자가 빠진 뒤(Task 5) 팔레트에서 바꾼다. 모양 팝오버(Task 7)와 설정(Task 8)도 같은 값을 쓴다. */
+const themeCommand = (id: string, nameKey: string, theme: Theme): AppCommand => ({ id, nameKey, run: () => chooseTheme(theme) });
+const themeCommands: AppCommand[] = [
+  themeCommand('theme-system', 'cmd.theme.system', 'system'),
+  themeCommand('theme-light', 'cmd.theme.light', 'light'),
+  themeCommand('theme-dark', 'cmd.theme.dark', 'dark'),
+];
+const langCommand = (id: string, nameKey: string, lang: Lang): AppCommand => ({ id, nameKey, run: () => setLang(lang) });
+const langCommands: AppCommand[] = [langCommand('lang-ko', 'cmd.lang.ko', 'ko'), langCommand('lang-en', 'cmd.lang.en', 'en')];
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, toggleLeft, toggleRight, newNote, quickSwitcher, ...themeCommands, ...langCommands];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

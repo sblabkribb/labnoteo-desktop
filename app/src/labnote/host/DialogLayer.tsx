@@ -17,6 +17,7 @@ import { BarcodeDialog } from '../port/barcodeDialog';
 import { ImportDialog } from '../scan/ImportDialog';
 import { ResultsDialog } from '../scan/ResultsDialog';
 import { UnmatchedDialog } from '../scan/UnmatchedDialog';
+import { NewNoteDialog } from '../../tree/NewNoteDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -57,6 +58,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <ResultsDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'scanUnmatched':
       return <UnmatchedDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'newNote':
+      return <NewNoteDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

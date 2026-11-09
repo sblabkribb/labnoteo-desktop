@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { PickItem } from '@labnoteo/core';
 import { t } from '../../i18n/t';
-import { useLang } from '../../i18n/useLang';
 import { appCommands, displayKey, type AppCommand } from '../../editor/commands/appCommands';
 import type { CommandContext } from '../commands/context';
 import { commands, type Command } from '../commands/registry';
@@ -69,22 +68,4 @@ export function usePaletteHotkey(ctx: CommandContext | undefined): void {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
-}
-
-/** 상단 바의 팔레트 단추. 맥락이 생기기 전(설정을 읽는 중)에는 꺼져 있다. */
-export function PaletteButton({ ctx }: { ctx: CommandContext | undefined }) {
-  useLang();
-  const label = t('palette.open');
-  return (
-    <button
-      type="button"
-      className="palette-open"
-      title={label}
-      aria-label={label}
-      disabled={!ctx}
-      onClick={() => {
-        if (ctx) void runCommand(ctx, () => openPalette(ctx));
-      }}
-    />
-  );
 }

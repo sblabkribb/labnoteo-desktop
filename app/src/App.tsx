@@ -2,11 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { t } from './i18n/t';
 import { FirstRun } from './onboarding/FirstRun';
 import { useVault, type VaultInfo } from './vault/useVault';
-import { ChangeVault } from './vault/ChangeVault';
 import { useVaultEvents } from './vault/useVaultEvents';
 import { vaultImages } from './editor/live/vaultImages';
 import { NoteTree } from './tree/NoteTree';
-import { NewNote } from './tree/NewNote';
+import { newNoteDialog } from './tree/NewNoteDialog';
 import { useTree } from './tree/useTree';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
@@ -23,9 +22,9 @@ import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { startUpdateChecks } from './update/updateStore';
 import { ThemeToggle } from './theme/ThemeToggle';
-import { useTheme, type Theme } from './theme/useTheme';
+import { useTheme } from './theme/useTheme';
 import { LanguageToggle } from './i18n/LanguageToggle';
-import { applyHtmlLang, setLang, type Lang } from './i18n/lang';
+import { applyHtmlLang, setLang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
 import { offerPluginLlmKey } from './integrations/importLlmKey';
@@ -55,7 +54,7 @@ import { registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { legacyNotesOfferOnOpen } from './labnote/commands/legacyConvert';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
-import { PaletteButton, usePaletteHotkey } from './labnote/ui/CommandPalette';
+import { openPalette, usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
 import { closeMenu, openMenu } from './labnote/ui/menuStore';
 import { EditorActions } from './labnote/ui/EditorActions';
@@ -79,10 +78,21 @@ import { cancelNoteIdTouches, notifyingRun, startIdWatch } from './labnote/barco
 import { startScan } from './labnote/scan/commands';
 import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
+import { Ribbon, type RibbonActions } from './ui/Ribbon';
+import { Dock } from './ui/Dock';
+import { VaultBar } from './ui/VaultBar';
+import { Icon } from './ui/Icon';
+import { layoutStore, useLayout, type LeftTab, type RightTab } from './ui/layoutStore';
+import { setWindowTitle } from './ui/windowTitle';
+import { runQuickSwitcher } from './ui/quickSwitcher';
 
-type SidebarTab = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
+/** 명령(showPanel)이 부르는 이름. 'workflows' 는 플러그인의 워크플로 뷰라 왼쪽 독의 실험 탭으로 간다. */
+type PanelName = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
 
-const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'samples', 'outline', 'links'];
+const RIGHT_TABS: readonly { id: RightTab; icon: 'list-tree' | 'link'; labelKey: string }[] = [
+  { id: 'outline', icon: 'list-tree', labelKey: 'sidebar.outline' },
+  { id: 'links', icon: 'link', labelKey: 'sidebar.tab.links' },
+];
 
 /** 마우스의 뒤로(3)·앞으로(4) 단추. */
 const MOUSE_BACK = 3;
@@ -94,36 +104,40 @@ function navKey(e: globalThis.KeyboardEvent): 'back' | 'forward' | undefined {
   return e.key === 'ArrowLeft' ? 'back' : e.key === 'ArrowRight' ? 'forward' : undefined;
 }
 
-/** 보관함마다 기억하는 사이드바 탭(이 PC 의 브라우저 저장소). 읽거나 쓰지 못하면 기억하지 않는다. */
+/**
+ * 왼쪽 독의 탭은 앱 전체에서 하나(layoutStore, ui.json)다. 이 표시는 보관함마다 "탭을 고른 적이 있다"만 적는다(이 PC 의 브라우저
+ * 저장소): 고른 적 없는 보관함에 labnote/ 폴더가 있으면 처음 열 때 실험 탭을 보인다. 읽거나 쓰지 못하면 아무것도 바꾸지 않는다.
+ */
 const tabKey = (root: string) => `labnoteo-sidebar-tab:${root}`;
 
-function storedTab(root: string): SidebarTab | undefined {
+function tabChosen(root: string): boolean {
   try {
-    const v = localStorage.getItem(tabKey(root));
-    return TAB_ORDER.find((tab) => tab === v);
+    return localStorage.getItem(tabKey(root)) !== null;
   } catch {
-    return undefined;
+    return true;
   }
 }
 
-function storeTab(root: string, tab: SidebarTab): void {
+function markTabChosen(root: string, tab: string): void {
   try {
     localStorage.setItem(tabKey(root), tab);
   } catch {
-    // 저장소가 막혀 있다: 이번 실행 동안만 기억한다
+    // 저장소가 막혀 있다: 표시 없이 지나간다
   }
+}
+
+/** Ctrl 만(Shift·Alt·Meta 없이), 한글 조합 중이 아닐 때. */
+function plainCtrl(e: globalThis.KeyboardEvent): boolean {
+  return e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && !e.isComposing && e.keyCode !== 229;
 }
 
 interface ViewProps {
   vault: VaultInfo;
   version: string;
   onChangeVault: () => void;
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-  lang: Lang;
 }
 
-function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: ViewProps) {
+function VaultView({ vault, version, onChangeVault }: ViewProps) {
   const { entries, failed, reload } = useTree(vault.root);
   // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
   useVaultEvents(reload);
@@ -233,29 +247,38 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
       offWatch();
     };
   }, [navFns]);
-  // 사이드바 탭: 고른 적이 없으면 labnote/ 폴더가 있는 보관함은 Workflows, 아니면 Files.
-  const [chosenTab, setChosenTab] = useState<SidebarTab | undefined>(() => storedTab(vault.root));
+  // 화면 배치(왼쪽 독의 탭·너비·숨김, 오른쪽 사이드바): 앱 전체에서 하나, Rust 의 ui.json 이 기준이다.
+  const layout = useLayout();
+  const tab = layout.leftTab;
   const hasLabnote = entries.some((e) => e.isDir && e.depth === 0 && e.path.toLowerCase() === 'labnote');
-  const tab: SidebarTab = chosenTab ?? (hasLabnote ? 'workflows' : 'files');
-  const showPanel = (next: SidebarTab) => {
-    setChosenTab(next);
-    storeTab(vault.root, next);
+  // 탭을 고른 적 없는 보관함에 labnote/ 가 있으면 처음 한 번 실험 탭을 보인다(실험 → 워크플로 → UO 가 이 보관함의 길이다).
+  useEffect(() => {
+    if (!hasLabnote || tabChosen(vault.root)) return;
+    markTabChosen(vault.root, 'experiments');
+    layoutStore.update({ leftTab: 'experiments' });
+  }, [hasLabnote, vault.root]);
+  const showLeft = (next: LeftTab) => {
+    markTabChosen(vault.root, next);
+    layoutStore.update({ leftTab: next, leftHidden: false });
   };
-  // WAI-ARIA 탭 패턴: 고른 탭만 Tab 순서에 있으니 화살표·Home·End 로 탭을 옮기고 초점도 함께 옮긴다.
-  const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    // Alt/Ctrl/Meta+arrow is the app's (Alt+←/→ is back and forward), not tab movement.
+  const showRight = (next: RightTab) => layoutStore.update({ rightTab: next, rightOpen: true });
+  const showPanel = (next: PanelName) => {
+    if (next === 'outline' || next === 'links') showRight(next);
+    else showLeft(next === 'workflows' ? 'experiments' : next);
+  };
+  // 오른쪽 사이드바의 탭(개요 / 링크): 왼쪽 독과 같은 탭 패턴. 오른쪽 사이드바는 Task 6 에서 제 자리(RightDock)를 얻는다.
+  const onRightTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const order = TAB_ORDER;
-    const at = order.indexOf(tab);
+    const order = RIGHT_TABS.map((x) => x.id);
+    const at = order.indexOf(layout.rightTab);
     const next =
-      e.key === 'ArrowRight' ? order[(at + 1) % order.length]
-      : e.key === 'ArrowLeft' ? order[(at - 1 + order.length) % order.length]
+      e.key === 'ArrowRight' || e.key === 'ArrowLeft' ? order[(at + 1) % order.length]
       : e.key === 'Home' ? order[0]
       : e.key === 'End' ? order[order.length - 1]
       : undefined;
     if (!next) return;
     e.preventDefault();
-    showPanel(next);
+    showRight(next);
     document.getElementById(`sidebar-tab-${next}`)?.focus();
   };
   const openNote = (path: string) => openFile(path);
@@ -305,8 +328,14 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     closeActive,
     showPanel,
     navigate: (dir) => void navFns.go(dir),
+    newNote: () => void newNote(),
   });
   usePaletteHotkey(ctx);
+  // 창 제목: `labnoteO — <보관함>`. 독을 숨겨도 어느 보관함인지 보인다. 보관함을 떠나면 앱 이름만.
+  useEffect(() => {
+    setWindowTitle(vault.name);
+    return () => setWindowTitle(undefined);
+  }, [vault.name]);
   // 새 버전 확인(B-R8): 지금, 6시간마다, 오래 떠나 있다 돌아왔을 때. 알림은 UpdateBanner 가 이 상태를 읽어 보인다.
   useEffect(() => startUpdateChecks(), []);
   // 저장 때의 샘플 동기화(D12)가 쓸 SampleEnv. 맥락이 바뀌거나 보관함 화면이 내려가면, 기다리던 동기화를 그 맥락으로 먼저 돌린다.
@@ -438,6 +467,56 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     };
   }, [hasCtx, host]);
   const flush = async () => !editor.current || (await editor.current.flush());
+  // 새 노트(리본, Ctrl+N, 팔레트): 대화상자에서 이름을 받아 보관함 맨 위에 만들고 연다.
+  async function newNote(): Promise<void> {
+    if (currentDialog() !== null) return;
+    const path = await newNoteDialog(flush);
+    if (path === undefined) return;
+    reload();
+    await openFile(path);
+  }
+  const switchVault = async () => {
+    if (await flush()) onChangeVault();
+  };
+  const ribbonActions: RibbonActions = {
+    toggleLeft: () => layoutStore.toggleLeft(),
+    toggleRight: () => layoutStore.toggleRight(),
+    newNote: () => void newNote(),
+    palette: () => {
+      if (ctx) void runCommand(ctx, () => openPalette(ctx));
+    },
+    quickSwitcher: () => {
+      if (ctx) void runCommand(ctx, () => runQuickSwitcher(ctx));
+    },
+    newExperiment: () => {
+      const c = commandById('create-experiment');
+      if (ctx && c) void runCommand(ctx, c);
+    },
+    scan: () => {
+      const c = commandById('import-scanned-pages');
+      if (ctx && c) void runCommand(ctx, c);
+    },
+  };
+  // 셸 단축키: Ctrl+\ 왼쪽 독(code 로 맞춘다: 한국어 자판의 ₩ 키도 Backslash 다), Ctrl+N 새 노트, Ctrl+O 빠른 이동.
+  // 편집기 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 는 셋 다 묶지 않는다. 대화상자가 열려 있으면 듣지 않는다.
+  const shortcuts = useRef(ribbonActions);
+  shortcuts.current = ribbonActions;
+  useEffect(() => {
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.defaultPrevented || !plainCtrl(e)) return;
+      const run =
+        e.code === 'Backslash' ? shortcuts.current.toggleLeft
+        : e.code === 'KeyN' ? shortcuts.current.newNote
+        : e.code === 'KeyO' ? shortcuts.current.quickSwitcher
+        : undefined;
+      if (!run) return;
+      e.preventDefault();
+      if (e.repeat || currentDialog() !== null) return;
+      run();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
   // 맥락 메뉴: 항목은 여는 순간 만든다. 명령 맥락이 아직 없으면(설정을 읽는 중) 기본 동작 그대로다.
   const onTreeMenu = ctx
     ? (entry: (typeof entries)[number], anchor: { x: number; y: number } | { element: Element }) =>
@@ -485,95 +564,21 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
   return (
     <>
       <div className="shell" ref={shell}>
-        <header className="topbar">
-          <h1>{t('app.title')}</h1>
-          <p className="vault-name" title={vault.name}>
-            {t('vault.open', vault.name)}
-          </p>
-          <div className="topbar-actions">
-            <PaletteButton ctx={ctx} />
-            <NewNote flush={flush} onCreated={openNote} />
-            <ChangeVault flush={flush} onChange={onChangeVault} />
-            <ThemeToggle theme={theme} onChange={setTheme} />
-            <LanguageToggle lang={lang} onChange={setLang} />
-          </div>
-        </header>
+        <Ribbon actions={ribbonActions} leftHidden={layout.leftHidden} rightOpen={layout.rightOpen} ready={ctx !== undefined} />
         <div className="notices">
           <UpdateBanner beforeInstall={flush} />
           {failed && <p role="alert">{t('tree.error')}</p>}
           {settingsImported && <p role="status">{t('settings.imported')}</p>}
         </div>
-        <aside className="sidebar" aria-label={t('app.sidebar')}>
-          <div className="sidebar-tabs" role="tablist" aria-label={t('sidebar.tabs')} onKeyDown={onTabKeyDown}>
-            <button
-              type="button"
-              role="tab"
-              id="sidebar-tab-files"
-              aria-controls="sidebar-panel-files"
-              aria-selected={tab === 'files'}
-              tabIndex={tab === 'files' ? 0 : -1}
-              className="sidebar-tab"
-              onClick={() => showPanel('files')}
-            >
-              {t('sidebar.tab.files')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="sidebar-tab-workflows"
-              aria-controls="sidebar-panel-workflows"
-              aria-selected={tab === 'workflows'}
-              tabIndex={tab === 'workflows' ? 0 : -1}
-              className="sidebar-tab"
-              onClick={() => showPanel('workflows')}
-            >
-              {t('sidebar.tab.workflows')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="sidebar-tab-samples"
-              aria-controls="sidebar-panel-samples"
-              aria-selected={tab === 'samples'}
-              tabIndex={tab === 'samples' ? 0 : -1}
-              className="sidebar-tab"
-              onClick={() => showPanel('samples')}
-            >
-              {t('sidebar.tab.samples')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="sidebar-tab-outline"
-              aria-controls="sidebar-panel-outline"
-              aria-selected={tab === 'outline'}
-              tabIndex={tab === 'outline' ? 0 : -1}
-              className="sidebar-tab"
-              onClick={() => showPanel('outline')}
-            >
-              {t('sidebar.outline')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="sidebar-tab-links"
-              aria-controls="sidebar-panel-links"
-              aria-selected={tab === 'links'}
-              tabIndex={tab === 'links' ? 0 : -1}
-              className="sidebar-tab"
-              onClick={() => showPanel('links')}
-            >
-              {t('sidebar.tab.links')}
-            </button>
-          </div>
+        <Dock tab={tab} onTab={showLeft} footer={<VaultBar name={vault.name} root={vault.root} ctx={ctx} onSwitchVault={switchVault} />}>
           {/* 파일 탭은 숨겨도 내리지 않는다: 접어 둔 폴더와 찾던 말이 남는다 */}
           <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
             <SearchPanel onOpen={openNote} />
             {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
             {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} onContextMenu={onTreeMenu} />}
           </div>
-          {tab === 'workflows' && (
-            <div role="tabpanel" id="sidebar-panel-workflows" className="sidebar-panel" aria-labelledby="sidebar-tab-workflows">
+          {tab === 'experiments' && (
+            <div role="tabpanel" id="sidebar-panel-experiments" className="sidebar-panel" aria-labelledby="sidebar-tab-experiments">
               {ctx ? <WorkflowsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
             </div>
           )}
@@ -582,17 +587,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
               {ctx ? <SamplesPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
             </div>
           )}
-          {tab === 'outline' && (
-            <div role="tabpanel" id="sidebar-panel-outline" className="sidebar-panel" aria-labelledby="sidebar-tab-outline">
-              <OutlinePanel onReveal={onOutlineReveal} />
-            </div>
-          )}
-          {tab === 'links' && (
-            <div role="tabpanel" id="sidebar-panel-links" className="sidebar-panel" aria-labelledby="sidebar-tab-links">
-              <LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />
-            </div>
-          )}
-        </aside>
+        </Dock>
         <main className="content">
           {selected ? (
             <Editor
@@ -611,6 +606,38 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
             <p className="empty-state">{t('editor.empty')}</p>
           )}
         </main>
+        {layout.rightOpen && (
+          <aside className="sidebar right-slot" aria-label={t('right.label')}>
+            <div className="dock-tabs" role="tablist" aria-label={t('right.tabs')} onKeyDown={onRightTabKeyDown}>
+              {RIGHT_TABS.map((x) => (
+                <button
+                  key={x.id}
+                  type="button"
+                  role="tab"
+                  id={`sidebar-tab-${x.id}`}
+                  aria-controls={`sidebar-panel-${x.id}`}
+                  aria-selected={layout.rightTab === x.id}
+                  aria-label={t(x.labelKey)}
+                  title={t(x.labelKey)}
+                  tabIndex={layout.rightTab === x.id ? 0 : -1}
+                  className="ibtn dock-tab"
+                  onClick={() => showRight(x.id)}
+                >
+                  <Icon name={x.icon} size={18} />
+                </button>
+              ))}
+            </div>
+            {layout.rightTab === 'outline' ? (
+              <div role="tabpanel" id="sidebar-panel-outline" className="sidebar-panel" aria-labelledby="sidebar-tab-outline">
+                <OutlinePanel onReveal={onOutlineReveal} />
+              </div>
+            ) : (
+              <div role="tabpanel" id="sidebar-panel-links" className="sidebar-panel" aria-labelledby="sidebar-tab-links">
+                <LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />
+              </div>
+            )}
+          </aside>
+        )}
         <footer className="statusbar">
           <div className="status-notes">
             {indexing && <span>{t('search.indexing')}</span>}
@@ -643,7 +670,7 @@ export function App() {
   useLayoutEffect(() => applyHtmlLang(lang), [lang]);
   // 보관함이 열린 화면은 VaultView 가 자기 main 을 가진다. 그 밖의 화면(불러오는 중, 선택)은 여기서 감싼다.
   if (state.status === 'ready') {
-    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} theme={theme} setTheme={setTheme} lang={lang} />;
+    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} />;
   }
   return (
     <main className="standalone">

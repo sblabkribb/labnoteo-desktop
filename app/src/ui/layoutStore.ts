@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 /**
@@ -88,9 +89,15 @@ export interface LayoutStore {
   get(): UiPrefs;
   subscribe(fn: (prefs: UiPrefs) => void): () => void;
   update(patch: Partial<UiPrefs>): void;
+  /** 왼쪽 독을 숨기거나 보인다(리본 단추, Ctrl+\, 팔레트). */
+  toggleLeft(): void;
+  /** 오른쪽 사이드바를 열거나 닫는다. */
+  toggleRight(): void;
   load(invoke?: Invoke): Promise<UiPrefs>;
   /** 진행 중인 load 가 끝나면(성공이든 실패든) 풀린다. load 가 없었으면 바로 풀린다. */
   ready(): Promise<void>;
+  /** 테스트용: 기다리던 쓰기를 버리고 기본값으로 돌리고, <html> 에 건 변수와 속성을 걷는다(Rust 에도 거울에도 쓰지 않는다). */
+  resetForTest(): void;
 }
 
 export interface LayoutStoreOptions {
@@ -132,7 +139,7 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
     for (const fn of [...subs]) fn(state);
   };
 
-  return {
+  const store: LayoutStore = {
     get: () => state,
     subscribe(fn) {
       subs.add(fn);
@@ -146,6 +153,12 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
         timer = undefined;
         writeUiPrefs(state, invoke).catch(() => undefined);
       }, WRITE_DEBOUNCE_MS);
+    },
+    toggleLeft() {
+      store.update({ leftHidden: !state.leftHidden });
+    },
+    toggleRight() {
+      store.update({ rightOpen: !state.rightOpen });
     },
     load(withInvoke) {
       if (withInvoke) invoke = withInvoke;
@@ -162,8 +175,29 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
       return p;
     },
     ready: () => pending.then(() => undefined),
+    resetForTest() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      changedSinceLoad = false;
+      state = { ...DEFAULT_PREFS };
+      // DOM 에 건 것도 걷어 낸다: 처음 뜬 문서처럼(style 속성도 data- 속성도 없다)
+      if (typeof document !== 'undefined') {
+        const root = document.documentElement;
+        root.style.removeProperty('--side-w');
+        root.style.removeProperty('--right-w');
+        if (root.getAttribute('style') === '') root.removeAttribute('style');
+        for (const a of ['data-left-hidden', 'data-right-open', 'data-density', 'data-resizing']) root.removeAttribute(a);
+      }
+      for (const fn of [...subs]) fn(state);
+    },
   };
+  return store;
 }
 
 /** 앱의 하나뿐인 배치 저장소. main.tsx 가 그리기 전에 load() 를 시작한다. */
 export const layoutStore: LayoutStore = createLayoutStore();
+
+/** React 에서 배치를 읽는다: 바뀌면 다시 그린다. */
+export function useLayout(store: LayoutStore = layoutStore): UiPrefs {
+  return useSyncExternalStore(store.subscribe, store.get);
+}

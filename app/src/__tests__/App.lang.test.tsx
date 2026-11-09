@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@codemirror/view';
 import { App } from '../App';
@@ -74,6 +74,17 @@ function hangulIn(root: Element | ShadowRoot): string[] {
 
 const languageSelect = (scope: HTMLElement, name: string) => within(scope).getByRole<HTMLSelectElement>('combobox', { name });
 
+/** 보관함 화면에서 언어 바꾸기: 창 틀의 고르기 상자는 빠졌고(Task 5), 팔레트의 언어 명령으로 바꾼다. */
+async function langFromPalette(user: ReturnType<typeof userEvent.setup>, paletteName: string, command: string) {
+  const button = within(screen.getByRole('toolbar')).getByRole('button', { name: paletteName }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  await user.click(button);
+  await user.type(within(await screen.findByRole('dialog')).getByRole('combobox'), command);
+  await act(async () => {
+    await user.keyboard('{Enter}');
+  });
+}
+
 function memoryStorage(): Storage {
   const m = new Map<string, string>();
   return {
@@ -110,24 +121,24 @@ describe('영어 화면', () => {
     expect(document.documentElement.lang).toBe('en');
   });
 
-  it('상단 바, 사이드바, 빈 편집기 안내가 영어로 뜬다', async () => {
+  it('리본, 사이드바, 보관함 줄, 빈 편집기 안내가 영어로 뜬다', async () => {
     setLang('en');
     vaultReady();
     render(<App />);
-    expect(await screen.findByText('Vault: lab')).toBeTruthy();
-    const banner = screen.getByRole('banner');
-    expect(within(banner).getByRole('button', { name: 'New note' })).toBeTruthy();
-    expect(within(banner).getByRole('button', { name: 'Switch vault' })).toBeTruthy();
-    expect(within(banner).getByRole('combobox', { name: 'Theme' })).toBeTruthy();
-    expect(languageSelect(banner, 'Language').value).toBe('en');
+    expect(await screen.findByText('lab', { selector: '.vault-bar-name' })).toBeTruthy();
+    const ribbon = screen.getByRole('toolbar', { name: 'Ribbon' });
+    expect(within(ribbon).getByRole('button', { name: 'New note' }).title).toBe('New note (Ctrl+N)');
+    expect(within(ribbon).getByRole('button', { name: 'Show or hide left sidebar' })).toBeTruthy();
+    expect(screen.getByRole('tablist', { name: 'Sidebar view' })).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Vault' })).getByRole('button', { name: 'Vault menu' })).toBeTruthy();
     const side = screen.getByRole('complementary', { name: 'Sidebar' });
     expect(within(side).getByRole('searchbox', { name: 'Search notes' })).toBeTruthy();
     expect(await within(side).findByRole('navigation', { name: 'Notes' })).toBeTruthy();
-    expect(within(screen.getByRole('main')).getByText("Pick a note on the left, or start with 'New experiment' in the Workflows tab or Ctrl+P.")).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText("Pick a note on the left, or start with 'New experiment' in the Experiments tab or Ctrl+P.")).toBeTruthy();
     expect(within(screen.getByRole('contentinfo')).getByText('Version 0.0.0')).toBeTruthy();
     // 한국어가 한 글자도 남지 않았다: 글자와 이름(placeholder, aria-label, title, alt) 모두.
     // 언어 이름 선택지(한국어)만은 일부러 자기 언어로 적는다.
-    expect(document.body.textContent).toContain('Vault: lab'); // 실제 화면을 읽었다
+    expect(document.body.textContent).toContain('Pick a note on the left'); // 실제 화면을 읽었다
     expect(hangulIn(document.body)).toEqual([]);
     // 검사식 자체: 한글 이름표와 글자를 실제로 잡고, 언어 이름 선택지는 건너뛴다
     const probe = document.createElement('div');
@@ -153,11 +164,11 @@ describe('영어 화면', () => {
 });
 
 describe('언어 선택', () => {
-  it('선택지는 자기 언어로 적힌 이름이고, 각 선택지에 그 언어의 lang 이 붙는다', async () => {
-    vaultReady();
+  it('선택지는 자기 언어로 적힌 이름이고, 각 선택지에 그 언어의 lang 이 붙는다 (보관함을 고르는 첫 화면)', async () => {
+    picker();
     render(<App />);
-    await screen.findByText('보관함: lab');
-    const select = languageSelect(screen.getByRole('banner'), '언어');
+    await screen.findByText('노트를 둘 곳을 정하세요');
+    const select = languageSelect(screen.getByRole('main'), '언어');
     const options = within(select).getAllByRole<HTMLOptionElement>('option');
     expect(options.map((o) => [o.value, o.textContent, o.lang])).toEqual([
       ['ko', '한국어', 'ko'],
@@ -169,20 +180,20 @@ describe('언어 선택', () => {
     const user = userEvent.setup();
     vaultReady();
     render(<App />);
-    await screen.findByText('보관함: lab');
+    await screen.findByText('lab', { selector: '.vault-bar-name' });
     expect(document.documentElement.lang).toBe('ko');
 
-    await user.selectOptions(languageSelect(screen.getByRole('banner'), '언어'), 'en');
-    expect(screen.getByText('Vault: lab')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Switch vault' })).toBeTruthy();
-    expect(screen.queryByText('보관함: lab')).toBeNull();
-    expect(document.documentElement.lang).toBe('en');
+    await langFromPalette(user, '명령 팔레트', '언어: English');
+    await waitFor(() => expect(document.documentElement.lang).toBe('en'));
+    expect(screen.getByText('lab', { selector: '.vault-bar-name' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Vault menu' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '보관함 메뉴' })).toBeNull();
     expect(getLang()).toBe('en');
     expect(localStorage.getItem(LANG_KEY)).toBe('en');
 
-    await user.selectOptions(languageSelect(screen.getByRole('banner'), 'Language'), 'ko');
-    expect(screen.getByText('보관함: lab')).toBeTruthy();
-    expect(document.documentElement.lang).toBe('ko');
+    await langFromPalette(user, 'Command palette', 'Language: Korean');
+    await waitFor(() => expect(document.documentElement.lang).toBe('ko'));
+    expect(screen.getByRole('button', { name: '보관함 메뉴' })).toBeTruthy();
   });
 
   it('첫 화면에서도 바꿀 수 있고, 이미 보이던 오류 문구도 새 언어로 바뀐다', async () => {
@@ -220,7 +231,8 @@ describe('언어 선택', () => {
     // (그 전에 켜면 위의 waitFor 가 돌지 않는다.)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     // userEvent 는 입력 사이에 타이머를 기다린다: 손으로 돌리는 시계 아래에서는 change 이벤트를 직접 보낸다(select 의 change 와 같다)
-    const choose = (name: string, value: string) => act(() => void fireEvent.change(languageSelect(screen.getByRole('banner'), name), { target: { value } }));
+    // 팔레트의 언어 명령이 하는 일(setLang)을 바로 부른다: 팔레트를 타이핑하면 userEvent 가 멈춘 시계를 기다린다
+    const choose = (_name: string, value: 'ko' | 'en') => act(() => setLang(value));
     await act(async () => before.dispatch({ changes: { from: before.state.doc.length, insert: 'Tm 58 °C' }, userEvent: 'input.type' }));
     expect(within(main()).getByText('저장 안 됨')).toBeTruthy();
 

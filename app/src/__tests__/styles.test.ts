@@ -62,7 +62,27 @@ describe('styles/*.css', () => {
     const now = selectorKeys(allCss());
     // 새 팔레트(Task 2)가 일부러 없앤 것: 예전 시스템 다크 선택자(이제 :root:not([data-theme])),
     // 컨테이너마다 단추 바탕을 되돌리던 --button-bg 규칙, 상단 바 select 의 바탕 덮기(입력은 이제 모두 --bg)
-    const RETIRED = ['@media (prefers-color-scheme: dark) :root:not([data-theme="light"])', '.topbar select', '.search-results'];
+    // 셸 재설계(Task 5)가 일부러 없앤 것: 상단 바와 그 안의 새 노트 입력, ⌘ 단추, 글자 사이드바 탭, 640px 쌓기(이제 820px 아래 떠 있는 독)
+    const RETIRED = [
+      '@media (prefers-color-scheme: dark) :root:not([data-theme="light"])',
+      '.topbar select',
+      '.search-results',
+      '.topbar',
+      '.topbar h1',
+      '.topbar p',
+      '.vault-name',
+      '.topbar-actions',
+      '.topbar form',
+      '.topbar form p',
+      ':where(.topbar form) p',
+      '@media (max-width: 640px) .shell',
+      '@media (max-width: 640px) .sidebar',
+      '.palette-open::before',
+      '.sidebar-tabs',
+      '.sidebar-tab',
+      '.sidebar-tab[aria-selected="true"]',
+      '@media print .topbar',
+    ];
     expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);
   });

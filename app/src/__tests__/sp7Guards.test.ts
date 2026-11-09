@@ -35,12 +35,16 @@ afterEach(() => {
 /** sha256 (hex) of `app.security.csp` as SP6 left it (unchanged since `147eeba`; SP6 Task 42 kept it). */
 const PINNED_CSP_SHA256 = '1f98f75cbb06294027e5139aee487f2306fd1b523fe9c2c1ce88b152a2a378cc';
 
-/** `capabilities/default.json` permissions as SP6 left them (the list `csp.test.ts` also pins). */
+/**
+ * `capabilities/default.json` permissions as SP6 left them (the list `csp.test.ts` also pins), plus the one later addition:
+ * `core:window:allow-set-title` (UI redesign Task 5: the window title names the vault). SP7 itself added none.
+ */
 const SP6_PERMISSIONS = [
   'core:default',
   'core:window:allow-destroy',
   'core:window:allow-set-theme',
   'core:window:allow-show',
+  'core:window:allow-set-title',
   'dialog:allow-open',
   'dialog:allow-save',
   'updater:default',

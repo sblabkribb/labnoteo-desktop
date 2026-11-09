@@ -77,6 +77,23 @@ function applyToWindow(theme: Theme, win: ThemeWindowApi | undefined, first: boo
     .finally(show);
 }
 
+/** 열린 useTheme 들의 setTheme. 팔레트의 테마 명령(theme.system/light/dark)이 chooseTheme 으로 부른다. */
+const choosers = new Set<(theme: Theme) => void>();
+
+/** 팔레트 명령처럼 React 밖에서 테마를 고른다. 화면의 useTheme 이 하나도 없으면 저장만 하고 바로 건다. */
+export function chooseTheme(theme: Theme): void {
+  if (choosers.size === 0) {
+    apply(theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // 저장하지 못해도 이번 실행에는 적용된다.
+    }
+    return;
+  }
+  for (const fn of [...choosers]) fn(theme);
+}
+
 export function useTheme(windowApi?: ThemeWindowApi): { theme: Theme; setTheme: (theme: Theme) => void } {
   const [theme, set] = useState<Theme>(load);
   const win = useRef(windowApi);
@@ -101,5 +118,12 @@ export function useTheme(windowApi?: ThemeWindowApi): { theme: Theme; setTheme: 
       // 저장하지 못해도 이번 실행에는 적용된다.
     }
   };
+  const latest = useRef(setTheme);
+  latest.current = setTheme;
+  useEffect(() => {
+    const fn = (next: Theme) => latest.current(next);
+    choosers.add(fn);
+    return () => void choosers.delete(fn);
+  }, []);
   return { theme, setTheme };
 }

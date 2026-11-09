@@ -76,6 +76,7 @@ import {
   TriangleAlert,
   Upload,
   User,
+  Vault,
   Workflow,
   X,
   ZoomIn,
@@ -159,6 +160,7 @@ const ICONS = {
   printer: Printer,
   download: Download,
   upload: Upload,
+  vault: Vault,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

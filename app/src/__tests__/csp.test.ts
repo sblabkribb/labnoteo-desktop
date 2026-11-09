@@ -128,6 +128,8 @@ describe('창 권한', () => {
       'core:window:allow-destroy',
       'core:window:allow-set-theme',
       'core:window:allow-show',
+      // 창 제목(UI 재설계 Task 5): `labnoteO — <보관함>`. 왼쪽 독을 숨겨도 어느 보관함인지 보인다
+      'core:window:allow-set-title',
       'dialog:allow-open',
       'dialog:allow-save',
       'updater:default',

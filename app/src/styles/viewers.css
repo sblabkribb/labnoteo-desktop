@@ -12,12 +12,13 @@
   .editor-frame:focus-within { outline: 2px solid Highlight; }
 }
 
-/* 인쇄: 노트 본문만 종이에 남긴다. 창 틀(상단 바·사이드바·상태줄·알림·대화상자·메뉴)을 숨기고, 창 높이 격자와 본문의 스크롤을 풀어
+/* 인쇄: 노트 본문만 종이에 남긴다. 창 틀(리본·사이드바·상태줄·알림·대화상자·메뉴)을 숨기고, 창 높이 격자와 본문의 스크롤을 풀어
    긴 노트가 여러 쪽으로 이어지게 한다. 화면이 다크여도 종이에는 라이트 값으로 찍는다(그 토큰 블록은 tokens.css 끝).
    편집기 그림자 루트 안의 표 도구 막대는 editorThemeSpec 의 '@media print' 키가 숨긴다. */
 @media print {
-  .topbar,
+  .ribbon,
   .sidebar,
+  .dock-scrim,
   .statusbar,
   .notices,
   .toaster,

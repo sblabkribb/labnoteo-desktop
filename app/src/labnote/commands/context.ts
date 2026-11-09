@@ -36,6 +36,8 @@ export interface CommandContext {
   links?: LinkDeps;
   /** 뒤로·앞으로 가기(SP4 Task 28). 앱은 늘 준다. */
   navigate?(dir: 'back' | 'forward'): void;
+  /** 새 노트 대화상자(리본, Ctrl+N). 앱은 늘 준다. */
+  newNote?(): void;
 }
 
 const listeners = new Set<() => void>();

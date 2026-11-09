@@ -169,8 +169,8 @@ describe('하루의 흐름(앱 전체)', () => {
       vault = installFakeVault({});
       const toasts = recordToasts();
       render(<App />);
-      await screen.findByText('보관함: fake-vault');
-      const paletteButton = within(screen.getByRole('banner')).getByRole('button', { name: '명령 팔레트 (Ctrl+P)' }) as HTMLButtonElement;
+      await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
+      const paletteButton = within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '명령 팔레트' }) as HTMLButtonElement;
       await waitFor(() => expect(paletteButton.disabled).toBe(false));
 
       // 1. Ctrl+P → "실험 생성" → 제목
@@ -190,7 +190,7 @@ describe('하루의 흐름(앱 전체)', () => {
       expect(vault.files()[README_PATH]).not.toContain(TYPED);
 
       // 4. Workflows 패널 → 카탈로그 워크플로 → 워크플로 생성, 별칭 "pET"
-      await user.click(screen.getByRole('tab', { name: '워크플로' }));
+      await user.click(screen.getByRole('tab', { name: '실험' }));
       const catalog = await screen.findByRole('tree', { name: '카탈로그' });
       const root = await within(catalog).findByRole('treeitem', { name: /^Workflows \[\d+\]$/ });
       await user.click(root);
@@ -294,9 +294,9 @@ describe('하루의 흐름(앱 전체)', () => {
       expect(messages).toContain(coreT('Experiment created: {0}', '002_형질전환_2차'));
       expect(toasts.all.filter((x) => x.kind === 'error')).toEqual([]);
 
-      // 영구 삭제는 없었다. style 속성도 없다
+      // 영구 삭제는 없었다. style 속성도 없다(<html> 의 --side-w 같은 배치 변수는 layoutStore 가 CSSOM 으로 건 것이라 body 만 본다)
       expect(vault.log.filter((c) => c.cmd === 'vault_remove')).toEqual([]);
-      expect([...document.querySelectorAll('[style]')].map((el) => el.outerHTML.slice(0, 80))).toEqual([]);
+      expect([...document.body.querySelectorAll('[style]')].map((el) => el.outerHTML.slice(0, 80))).toEqual([]);
     },
     60_000,
   );
@@ -307,7 +307,7 @@ describe('하루의 흐름(앱 전체)', () => {
     const TABLE = '| 시료 | 부피 |\n| --- | --- |\n| A | 1234 |\n';
     vault = installFakeVault({ [NOTE]: `# 표\n\n${TABLE}` });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await user.click(await screen.findByRole('treeitem', { name: /^표/ }));
     await editorReady(NOTE, '| A | 1234 |');
 

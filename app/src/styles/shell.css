@@ -1,4 +1,4 @@
-/* 앱 셸: 기본 요소, 단추와 입력, 포커스 링, 격자 배치, 상단 바, 알림 줄, 사이드바와 탭, 본문, 편집기 틀, 상태줄. */
+/* 앱 셸: 기본 요소, 단추와 입력, 포커스 링, 격자 배치, 리본, 알림 줄, 왼쪽 독(탭·너비 손잡이·보관함 줄), 오른쪽 자리, 본문, 편집기 틀, 상태줄. */
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -164,51 +164,42 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
 }
 
 /* ───────── 앱 셸 ─────────
-   상단 바 / (알림) / 사이드바 + 본문 / 상태줄. 창 전체를 쓰고 페이지는 스크롤하지 않는다:
-   사이드바와 본문이 각자 스크롤한다. */
+   리본 | 왼쪽 독 | (알림 + 본문) | 오른쪽 자리 / 상태줄. 창 전체를 쓰고 페이지는 스크롤하지 않는다: 독의 패널과 본문이 각자 스크롤한다.
+   독의 너비(--side-w)와 숨김(data-left-hidden), 오른쪽 자리의 너비(--right-w)는 layoutStore 가 <html> 에 건다(CSSOM, CSP). */
 .shell {
-  --sidebar-w: clamp(14rem, 26vw, 20rem);
   height: 100vh;
   display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: var(--ribbon-w) var(--side-w) minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
-    "top top"
-    "notices notices"
-    "side main"
-    "status status";
+    "ribbon side notices right"
+    "ribbon side main right"
+    "status status status status";
+  transition: grid-template-columns var(--motion);
 }
+/* 숨긴 독은 0 너비 칸만 남는다. 끄는 동안(data-resizing)은 너비를 바로 따른다 */
+:root[data-left-hidden="true"] .shell { grid-template-columns: var(--ribbon-w) 0 minmax(0, 1fr) auto; }
+:root[data-left-hidden="true"] .dock { display: none; }
+:root[data-resizing] .shell { transition: none; }
+:root[data-resizing], :root[data-resizing] * { cursor: col-resize; user-select: none; }
 
-.topbar {
-  grid-area: top;
+/* 리본(44px, 늘 보인다): 30×30 아이콘 단추. 단추의 이름과 단축키는 aria-label 과 title 에 있다 */
+.ribbon {
+  grid-area: ribbon;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-4) var(--space-6);
-  padding: var(--space-4) var(--space-6);
-  background: var(--bg-side);
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  background: var(--bg-ribbon);
+  border-right: 1px solid var(--border);
 }
-.topbar h1 { margin: 0; font-size: 1rem; }
-.topbar p { margin: 0; }
-.vault-name {
-  flex: 1 1 8rem;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-}
-.topbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-4);
-}
-/* "새 노트" 이름 입력은 상단 바 안에서 열린다: 입력 줄 뒤에 안내문이 한 줄을 다 쓴다 */
-.topbar form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
-.topbar form p { flex-basis: 100%; }
-:where(.topbar form) p { color: var(--text-muted); }
+.ribbon .ribbon-btn { width: 30px; min-width: 30px; height: 30px; min-height: 30px; }
+/* 사이드바 접기 단추는 열림을 aria-expanded 로 알리지만 켜진 칸처럼 칠하지 않는다(Obsidian 처럼) */
+.ribbon .ribbon-btn[aria-expanded="true"] { background: transparent; color: var(--text-muted); }
+.ribbon .ribbon-btn[aria-expanded]:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.ribbon-sep { flex: none; width: 18px; height: 1px; margin: var(--space-2) 0; background: var(--border); }
+.ribbon-spacer { flex: 1 1 auto; }
 
 /* 업데이트 배너와 노트 목록 오류: 상단 바 아래 전체 폭. 둘 다 떠도 줄이 쌓일 뿐 서로 가리지 않는다. */
 .notices { grid-area: notices; max-height: 30vh; overflow-y: auto; }
@@ -228,21 +219,93 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* 왼쪽 독(.sidebar.dock)과 오른쪽 자리(.sidebar.right-slot): 위에 탭 줄, 가운데 패널(여기만 스크롤), 아래 보관함 줄 */
 .sidebar {
-  grid-area: side;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow-x: hidden;
-  overflow-y: auto;
-  padding: var(--space-5) 0;
+  overflow-y: hidden;
   background: var(--bg-side);
-  border-right: 1px solid var(--border);
 }
-/* 탭 패널(.sidebar-panel) 안: 파일 탭의 찾기 칸과 트리, Workflows 패널 */
+.dock { grid-area: side; border-right: 1px solid var(--border); }
+.dock-panels { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.sidebar-panel { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: var(--space-4) 0 var(--space-5); }
+.sidebar-panel[hidden] { display: none; }
+/* 탭 패널(.sidebar-panel) 안: 파일 탭의 찾기 칸과 트리, 실험 패널 */
 .sidebar-panel > section { padding: 0 var(--space-5) var(--space-5); }
 .sidebar-panel > section input { width: 100%; }
 .sidebar-panel > section > p { margin: var(--space-4) 0 0; }
 :where(.sidebar-panel > section) p { color: var(--text-muted); }
 .sidebar-panel > p { margin: 0; padding: 0 var(--space-5); color: var(--text-muted); }
+
+/* 독의 아이콘 탭(파일 / 실험 / 샘플): 고른 탭은 --bg-selected 채움만(알약·밑줄 없음). 이름은 aria-label 과 title, 줄은 넘기지 않는다 */
+.dock-tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.dock-tab { width: 32px; min-width: 32px; height: 28px; }
+.dock-tab[aria-selected="true"] { background: var(--bg-selected); color: var(--text); }
+
+/* 보관함 줄(40px): 아이콘, 이름(말줄임), ⇅ 메뉴, 설정 */
+.vault-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: 0 var(--space-3) 0 var(--space-5);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.vault-bar-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 너비 손잡이(6px, role=separator): 사이드바 안쪽 가장자리에 붙고(사이드바가 넘침을 자른다), hover·끌기·초점에 2px 강조색 선을 보인다 */
+.resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizer-left { right: 0; }
+.resizer-right { left: 0; }
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--motion);
+}
+.resizer:hover::after, .resizer:focus-visible::after, :root[data-resizing] .resizer::after { background: var(--accent); }
+.resizer:focus-visible { outline: none; }
+
+/* 오른쪽 자리(개요 / 링크). Task 6 에서 RightDock 이 이 자리를 맡는다 */
+.right-slot { grid-area: right; width: var(--right-w); border-left: 1px solid var(--border); }
+
+/* 독 뒤의 깔개: 좁은 창(아래 미디어 쿼리)에서 독이 본문 위에 뜰 때만 보인다 */
+.dock-scrim { display: none; }
 
 .content {
   grid-area: main;
@@ -295,41 +358,28 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
 .standalone-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 .standalone { max-width: 48rem; margin: 0 auto; padding: var(--space-8) var(--space-7); }
 
-/* 좁은 창: 사이드바를 본문 위로 쌓는다 */
-@media (max-width: 640px) {
-  .shell {
-    height: auto;
-    min-height: 100vh;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto auto;
-    grid-template-areas: "top" "notices" "side" "main" "status";
+/* 좁은 창(820px 아래): 독은 본문을 밀지 않고 리본 옆에 떠서 열리고, 뒤에 깔개를 깐다(누르면 닫힌다). 리본은 남는다 */
+@media (max-width: 819.98px) {
+  .shell,
+  :root[data-left-hidden="true"] .shell {
+    grid-template-columns: var(--ribbon-w) 0 minmax(0, 1fr) auto;
   }
-  .sidebar { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--border); }
-}
-
-/* 명령 팔레트 단추(상단 바): 이름은 aria-label 과 title 에 있다 */
-.palette-open::before { content: "⌘"; content: "⌘" / ""; }
-
-/* 사이드바 탭: 파일 / 워크플로 / 샘플 / 개요 / 링크.
-   이름은 말줄임(…)으로 자르지 않는다: 사이드바가 좁으면 탭이 다음 줄로 넘어가고, 탭 하나는 제 이름 길이 아래로 줄지 않는다 */
-.sidebar-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: 0 var(--space-5) var(--space-4);
-}
-.sidebar-tab {
-  flex: 1 0 auto;
-  padding: var(--space-2) var(--space-4);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.sidebar-tab[aria-selected="true"] {
-  background: var(--bg-selected);
-  box-shadow: inset 0 -3px 0 var(--accent);
-  color: var(--text);
-  font-weight: 600;
+  .dock {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: var(--ribbon-w);
+    z-index: calc(var(--z-dialog) - 1); /* 대화상자·메뉴(밝은 DOM 의 앱 층) 아래 */
+    width: min(var(--side-w), calc(100vw - var(--ribbon-w) - 16px));
+    box-shadow: var(--shadow-menu);
+  }
+  .dock-scrim {
+    display: block;
+    position: fixed;
+    inset: 0 0 0 var(--ribbon-w);
+    z-index: calc(var(--z-dialog) - 2);
+    background: var(--scrim);
+  }
+  :root[data-left-hidden="true"] .dock-scrim { display: none; }
+  .right-slot { width: min(var(--right-w), 40vw); }
 }

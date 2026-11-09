@@ -10,7 +10,7 @@ import { createAppHost } from '../../host/createAppHost';
 import { DialogLayer } from '../../host/DialogLayer';
 import { closeAllDialogs, currentDialog } from '../../host/dialogStore';
 import { clearToasts } from '../../host/toastStore';
-import { PaletteButton, usePaletteHotkey } from '../CommandPalette';
+import { usePaletteHotkey } from '../CommandPalette';
 import { clearAppCommandsForTest, registerAllAppCommands } from '../../../editor/commands/appCommands';
 import { getMode, setMode } from '../../../editor/live/mode';
 
@@ -37,7 +37,6 @@ function Harness({ ctx }: { ctx: CommandContext | undefined }) {
     <>
       <div className="shell" ref={shell}>
         <div data-testid="host" />
-        <PaletteButton ctx={ctx} />
       </div>
       <DialogLayer blockRef={shell} />
     </>
@@ -144,23 +143,6 @@ describe('명령 팔레트', () => {
     ctrlPInShadow();
     await screen.findByRole('dialog');
     expect(optionLabels()).toEqual(['Create experiment', 'Create workflow']);
-  });
-
-  it('the top-bar button opens the palette, is labelled in both languages and is disabled until the context exists', async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<Harness ctx={undefined} />);
-    const button = screen.getByRole('button', { name: '명령 팔레트 (Ctrl+P)' }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.title).toBe('명령 팔레트 (Ctrl+P)');
-    ctrlPInShadow();
-    expect(currentDialog()).toBeNull();
-
-    rerender(<Harness ctx={makeCtx()} />);
-    await user.click(button);
-    expect(await screen.findByRole('dialog')).toBeTruthy();
-    act(() => closeAllDialogs());
-    act(() => setLang('en'));
-    expect(screen.getByRole('button', { name: 'Command palette (Ctrl+P)' })).toBeTruthy();
   });
 
   it('palette lists editor-toggle-source with its shortcut and runs it', async () => {

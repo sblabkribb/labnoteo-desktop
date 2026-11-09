@@ -2,7 +2,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FirstRun } from '../onboarding/FirstRun';
-import { NewNote } from '../tree/NewNote';
+import { NewNoteForm } from '../tree/NewNote';
 import { NoteTree } from '../tree/NoteTree';
 
 import { allCss, compareSpecificity, declarations, parseRules, specificity, type Rule } from './css';
@@ -105,7 +105,7 @@ describe('계단식 자기 점검', () => {
 
   it('styles/*.css 의 @media 안 규칙을 @-규칙 안의 것으로 읽는다 (예전 정규식은 머리를 못 잡아 무조건 규칙으로 셌다)', () => {
     const heads = APP_RULES.filter((r) => r.atRule).map((r) => r.atRule);
-    expect(heads).toContain('@media (max-width: 640px)');
+    expect(heads).toContain('@media (max-width: 819.98px)');
     expect(heads).toContain('@media (prefers-color-scheme: dark)');
     expect(APP_RULES.find((r) => r.selectors.includes('.shell') && r.atRule)).toBeDefined();
     expect(APP_RULES.filter((r) => !r.atRule).length).toBeGreaterThan(50);
@@ -122,13 +122,12 @@ describe('경고 글자색은 둘러싼 규칙에 지지 않는다', () => {
     expect(winning(screen.getByRole('alert'), 'color')).toBe('var(--danger)');
   });
 
-  it('상단 바의 새 노트 오류는 위험색이다', async () => {
+  it('새 노트 대화상자의 오류는 위험색이다', async () => {
     render(
-      <header className="topbar">
-        <NewNote flush={async () => true} onCreated={() => {}} invoke={(async () => false) as never} />
-      </header>,
+      <div className="dialog">
+        <NewNoteForm flush={async () => true} onCreated={() => {}} onCancel={() => {}} invoke={(async () => false) as never} />
+      </div>,
     );
-    await userEvent.click(screen.getByRole('button', { name: '새 노트' }));
     await userEvent.click(screen.getByRole('button', { name: '만들기' }));
     expect(winning(await screen.findByRole('alert'), 'color')).toBe('var(--danger)');
     // 같은 줄의 안내문은 여전히 흐리다 (경고만 빠진다)
@@ -165,12 +164,12 @@ describe('열린 노트의 강조 막대', () => {
 describe('단추는 평평하다: 보조는 회색 채움, 주된 것은 강조 채움, 테두리 없음', () => {
   /** 컨테이너 선택자를 실제 마크업으로 세운다. 그 안에 보통 단추와 주된 단추를 하나씩 둔다. */
   const MARKUP: Record<string, string> = {
-    '.topbar': '<header class="topbar"><button>a</button><button class="primary">b</button></header>',
+    '.dialog': '<div class="dialog"><button>a</button><button class="primary">b</button></div>',
     '.first-run': '<div class="first-run"><button>a</button><button class="primary">b</button></div>',
     '.notices > aside': '<div class="notices"><aside><button>a</button><button class="primary">b</button></aside></div>',
   };
 
-  it.each(['.topbar', '.first-run', '.notices > aside'])('%s: plain button is --bg-hover, primary is --accent-fill', (c) => {
+  it.each(['.dialog', '.first-run', '.notices > aside'])('%s: plain button is --bg-hover, primary is --accent-fill', (c) => {
     document.body.innerHTML = MARKUP[c];
     const plain = document.querySelector(`${c} button:not(.primary)`)!;
     const primary = document.querySelector(`${c} button.primary`)!;
@@ -220,11 +219,10 @@ describe('단추는 평평하다: 보조는 회색 채움, 주된 것은 강조 
 
   it('컨테이너 글자 기본값은 :where() 로 특이도 0 이라 경고 규칙을 :not([role]) 없이도 이기지 못한다', () => {
     const sels = APP_RULES.flatMap((r) => r.selectors);
-    for (const s of ['.first-run > p:not([role])', '.topbar form p:not([role])', '.sidebar-panel > section > p[role="alert"]']) {
+    for (const s of ['.first-run > p:not([role])', '.topbar form p:not([role])', ':where(.topbar form) p', '.sidebar-panel > section > p[role="alert"]']) {
       expect(sels, s).not.toContain(s);
     }
     expect(sels).toContain(':where(.first-run) p');
-    expect(sels).toContain(':where(.topbar form) p');
     expect(sels).toContain(':where(.sidebar-panel > section) p');
     // 컨테이너마다 따로 두던 주된 단추 배경 되돌리기는 없다
     expect(sels.filter((s) => /\S+ button\.primary$/.test(s))).toEqual([]);

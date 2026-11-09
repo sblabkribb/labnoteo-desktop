@@ -10,4 +10,11 @@ describe('capabilities', () => {
     expect(entry.allow).toEqual([{ url: 'http://*' }, { url: 'https://*' }, { url: 'mailto:*' }, { url: 'partbank:*' }]);
     expect(cap.permissions).not.toContain('opener:default');
   });
+
+  it('lets the window set its own title (labnoteO — vault name), and nothing wider for the title', () => {
+    const cap = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf-8'));
+    expect(cap.permissions).toContain('core:window:allow-set-title');
+    expect(cap.permissions).not.toContain('core:window:default');
+    expect(cap.description).toMatch(/set-title/);
+  });
 });

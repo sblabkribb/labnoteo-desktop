@@ -64,7 +64,7 @@ describe('보관함을 열 때의 예전 형식 노트 제안', () => {
     first.unmount();
 
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await new Promise((r) => setTimeout(r, 100));
     expect(screen.queryByRole('alertdialog', { name: t('legacy.offer.title') })).toBeNull();
     expect(Object.keys(vault.files())).toContain('labnote/002_PCR/README.md');

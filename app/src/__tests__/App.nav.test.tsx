@@ -58,7 +58,7 @@ describe('navigation history', () => {
   it('a link followed by back reopens the source note at its caret line', async () => {
     installFakeVault({ 'n.md': 'a\nb\n[[Home]]', 'Home.md': '# H' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('n.md'));
     await docIs('a\nb\n[[Home]]');
     const v = await editorView();
@@ -81,7 +81,7 @@ describe('navigation history', () => {
   it('a note created from an unresolved link is history too: back returns to the source note', async () => {
     const vault = installFakeVault({ 'exp/A.labnote.md': 'a\nb\n[[New note]]' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('A.labnote.md'));
     await docIs('a\nb\n[[New note]]');
     const v = await editorView();
@@ -116,7 +116,7 @@ describe('navigation history', () => {
   it('clicking [[a]] opens a.labnote.md (the .labnote fallback) and creates no a.md', async () => {
     const vault = installFakeVault({ 'exp/n.labnote.md': 'x\n[[a]]', 'exp/a.labnote.md': 'AAA' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('n.labnote.md'));
     await docIs('x\n[[a]]');
     const v = await editorView();
@@ -137,7 +137,7 @@ describe('navigation history', () => {
   it('Alt+ArrowLeft and Alt+ArrowRight typed in the editor with the caret mid-document navigate', async () => {
     installFakeVault({ 'a.md': 'alpha beta gamma', 'b.md': 'delta epsilon zeta' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('a.md'));
     await docIs('alpha beta gamma');
     await userEvent.click(await screen.findByText('b.md'));
@@ -155,7 +155,7 @@ describe('navigation history', () => {
   it('a tree open is history too, and a note the watcher reports removed is skipped by back', async () => {
     const vault = installFakeVault({ 'a.md': 'A', 'b.md': 'B', 'c.md': 'C' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('a.md'));
     await docIs('A');
     await userEvent.click(await screen.findByText('b.md'));
@@ -181,7 +181,7 @@ describe('navigation history', () => {
   async function openPropsNote() {
     const vault = installFakeVault({ 'a.md': 'A', 'n.md': '---\ntitle: old\n---\nbody' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('a.md'));
     await docIs('A');
     await userEvent.click(await screen.findByText('n.md'));
@@ -222,7 +222,7 @@ describe('navigation history', () => {
   it('back that cannot save the current note leaves the note and the history unchanged', async () => {
     const vault = installFakeVault({ 'a.md': 'A', 'b.md': 'B' });
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await userEvent.click(await screen.findByText('a.md'));
     await docIs('A');
     await userEvent.click(await screen.findByText('b.md'));
@@ -245,7 +245,7 @@ describe('navigation history', () => {
   it('the mousedown of the back and forward buttons is prevented, other buttons are not', async () => {
     installFakeVault({});
     render(<App />);
-    await screen.findByText('보관함: fake-vault');
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     const nav = new MouseEvent('mousedown', { button: 3, cancelable: true, bubbles: true });
     window.dispatchEvent(nav);
     expect(nav.defaultPrevented).toBe(true);
