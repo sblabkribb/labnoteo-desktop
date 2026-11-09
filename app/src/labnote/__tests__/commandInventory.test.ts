@@ -29,6 +29,11 @@ const PORTED = [
   'insert-experiment-samples-table',
   'open-sample-definition',
   'open-sample-view',
+  'ai-draft-method',
+  'ai-summarize-results',
+  'ai-summarize-experiment',
+  'ai-extract-samples',
+  'ai-ask-agent',
 ] as const;
 
 /** 아직 옮기지 않은 플러그인 명령과 그것을 옮길 하위 프로젝트(계획의 "Deferred to later sub-projects"). */
@@ -41,12 +46,7 @@ const DEFERRED: Record<string, string> = {
     'rename and links: must call queueSampleSourceRenames after the README hold is released (vendor tests/plugin/renumberWorkflows.test.ts "sample sources after renumbering", #149)',
   'download-partbank-catalog': 'platform and integrations',
   'refresh-partbank-locations': 'platform and integrations',
-  'ai-draft-method': 'platform and integrations',
-  'ai-summarize-results': 'platform and integrations',
-  'ai-summarize-experiment': 'platform and integrations',
-  'ai-extract-samples': 'platform and integrations',
-  'ai-ask-agent': 'platform and integrations',
-  'toggle-mcp-server': 'platform and integrations',
+  'toggle-mcp-server': 'SP7: MCP server',
   'show-note-barcode': 'barcode',
   'assign-note-id': 'barcode',
   'print-experiment-worksheet': 'barcode',

@@ -1,3 +1,4 @@
+import { aiCommands } from '../../ai/commands';
 import { sampleCommands } from '../../samples/commands';
 import { catalogCommands } from './catalogs';
 import { editorInsertCommands } from './editorInserts';
@@ -21,6 +22,7 @@ function allCommands(): Command[] {
     ...editorInsertCommands,
     ...sampleCommands,
     ...panelCommands,
+    ...aiCommands,
   ];
 }
 
