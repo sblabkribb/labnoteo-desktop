@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/sampleActions.ts:415-897 sha256:851b8d2ce7b19901
 // labnoteO 0.138.0, Apache-2.0.
-// Changes: App/LabnotePlugin → SampleEnv (D5); Notice → host.notify; modals → host dialogs. In detail: plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info' | 'warn', m) without the duration (warn for the refused folder, the alias twins and the discarded notices); promptModal/pickModal/confirmModal(app, …, label) → env.host.prompt/pick/confirm(…, { confirmLabel: label }); pickModal's initialQuery is dropped because the app's pick dialog has no initial query (it still pre-fills the create fallback); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.refreshSampleViews() → env.changed([written registry]); validateAlias/validateDescription/loadCatalogSamples take env. confirmAliasClash, confirmLocationClash, aliasSiblingLabel, globalSamplesWithAlias and findRegisteredSample are exported for the edit and move ports.
+// Changes: App/LabnotePlugin → SampleEnv (D5); Notice → host.notify; modals → host dialogs. In detail: plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info' | 'warn', m) without the duration (warn for the refused folder, the alias twins and the discarded notices); promptModal/pickModal/confirmModal(app, …, label) → env.host.prompt/pick/confirm(…, { confirmLabel: label }); pickModal's initialQuery is dropped because the app's pick dialog has no initial query (it still pre-fills the create fallback); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.refreshSampleViews() → env.changed([written registry]); an unreadable (conflicted) target registry is refused with RegistryUnreadableError before the first prompt; validateAlias/validateDescription/loadCatalogSamples take env. confirmAliasClash, confirmLocationClash, aliasSiblingLabel, globalSamplesWithAlias and findRegisteredSample are exported for the edit and move ports.
 import type { PickItem } from '@labnoteo/core';
 import { invalidVaultFolderReason } from '@labnoteo/core/lib/regexUtils';
 import {
@@ -22,7 +22,7 @@ import {
   upsertSampleRecord,
   type SampleRecord,
 } from '@labnoteo/core/lib/sampleStorage';
-import type { SampleEnv } from '../../samples/env';
+import { assertRegistryReadable, type SampleEnv } from '../../samples/env';
 import { invalidFolderText } from './customSampleTypes';
 import { updateSampleListTables } from './sampleListTable';
 import { clean, loadCatalogSamples, validateAlias, validateDescription, type SampleScope } from './sampleScope';
@@ -157,6 +157,8 @@ export async function createSampleInteractive(
     env.host.notify('warn', [why, fix].filter(Boolean).join(' '));
     return undefined;
   }
+  // A conflicted registry would refuse the write only after every prompt; refuse it before them instead.
+  await assertRegistryReadable(env.fs, registryOf(folder, type)[0]);
   const initial = opts.initial?.trim() ?? '';
   const initialId = initial && normalizeSampleId(type, initial) ? initial : undefined;
   const initialAlias = initial && !initialId ? initial : '';

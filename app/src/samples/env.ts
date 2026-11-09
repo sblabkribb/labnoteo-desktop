@@ -132,6 +132,16 @@ export function safeRegistryFs(fs: AppFs, globalFolder: () => string): AppFs {
   };
 }
 
+/**
+ * Throws RegistryUnreadableError when the registry at `path` exists with non-empty text that is not a JSON object.
+ * 흐름이 묻기 전에 부른다(#328 처럼 친 글을 잃지 않게). 마지막 지킴은 그대로 safeRegistryFs 의 거절이다.
+ */
+export async function assertRegistryReadable(fs: Pick<AppFs, 'exists' | 'read'>, path: string): Promise<void> {
+  if (!(await fs.exists(path))) return;
+  const text = await fs.read(path);
+  if (text.trim() !== '' && !isJsonObject(text)) throw new RegistryUnreadableError(path);
+}
+
 type PathsListener = (paths?: readonly string[]) => void;
 const listeners = new Set<PathsListener>();
 

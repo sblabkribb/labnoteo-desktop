@@ -8,8 +8,10 @@ import { createSampleInteractive, pickCatalogReference } from '../../labnote/por
 import { validateAlias } from '../../labnote/port/sampleScope';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { rememberExperiment } from '../../labnote/port/sampleFolders';
+import { resetIdCounter } from '@labnoteo/core/lib/sampleUtils';
 import { coreT } from '../../labnote/i18n';
 import { getLang, setLang } from '../../i18n/lang';
+import { t } from '../../i18n/t';
 import { installSampleActionRunners } from '../actionRunners';
 import { createSampleEnv, RegistryUnreadableError, sampleEvents } from '../env';
 import { sampleActionRunners } from '../sources';
@@ -29,6 +31,8 @@ const host = (files: Record<string, string> = {}) => {
 };
 const lang = getLang();
 beforeEach(() => {
+  // 코어의 ID 생성기는 모든 종류가 한 시각/카운터를 나눠 쓴다: 앞 테스트가 같은 밀리초에 만든 ID 가 `-1` 을 붙이지 않게.
+  resetIdCounter();
   setLang('en');
   events = 0;
   offEvents = sampleEvents.subscribe(() => void events++);
@@ -116,11 +120,12 @@ describe('createSampleInteractive', () => {
 
   it('create refuses over a conflicted registry', async () => {
     const th = host({ ...SAMPLE_VAULT, [`${LOCAL}/DNA.json`]: CONFLICTED });
-    // 직접 입력은 ID 를 먼저 묻는다: ID, 별칭, 설명, 위치
     th.answer.prompt('DNA-5', 'pBR', 'backbone', 'Freezer A / C1');
     await expect(
       createSampleInteractive(createSampleEnv(th.ctx), { type: 'DNA', folder: LOCAL, mode: 'manual', scope: 'local', initial: 'DNA-5' }),
     ).rejects.toBeInstanceOf(RegistryUnreadableError);
+    // Refused before the first prompt, so nothing typed is lost (like #328).
+    expect(th.asked.prompt).toHaveLength(0);
     expect(th.vault.files()[`${LOCAL}/DNA.json`]).toBe(CONFLICTED);
   });
 
@@ -528,6 +533,19 @@ describe('installSampleActionRunners', () => {
     const ref = await sampleActionRunners.generate!(createSampleEnv(th.ctx), q, 'DNA');
     expect(ref).toMatch(/^DNA-\d+;pX$/);
     expect(th.asked.prompt[0].value).toBe('pX');
+  });
+
+  it('generate over a conflicted registry warns in the UI language and leaves the file byte-identical', async () => {
+    installSampleActionRunners();
+    setLang('ko');
+    const th = host({ ...SAMPLE_VAULT, [`${LOCAL}/DNA.json`]: CONFLICTED });
+    th.setActive(NOTE);
+    th.answer.prompt((o) => o.value, '', '');
+    const q = { notePath: NOTE, trigger: { type: 'DNA' } as never, typed: 'pX' };
+    expect(await sampleActionRunners.generate!(createSampleEnv(th.ctx), q, 'DNA')).toBeUndefined();
+    expect(th.notes).toEqual([{ kind: 'warn', message: t('samples.registryUnreadable', `${LOCAL}/DNA.json`) }]);
+    expect(th.notes[0].message).toContain('샘플 대장');
+    expect(th.vault.files()[`${LOCAL}/DNA.json`]).toBe(CONFLICTED);
   });
 
   it('catalog resolves the picked product', async () => {
