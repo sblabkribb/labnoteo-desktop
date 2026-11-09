@@ -255,6 +255,25 @@ describe('Add sample', () => {
     expect(JSON.parse(th.vault.files()[`${LOCAL}/DNA.json`])[`DNA-${GEN}`].alias).toBe('pBR');
   });
 
+  // #544: the type picker took the focus and the editor then reported the start of the note, so the
+  // reference landed below the last section instead of where the user was writing.
+  it('inserts at the cursor read before the type picker, not where the editor reports it after', async () => {
+    const th = host(SAMPLE_VAULT);
+    const m = await th.mount(NOTE);
+    const saved = '# clone\n'.length; // the empty line under the title
+    act(() => m.view().dispatch({ selection: { anchor: saved } }));
+    vi.spyOn(Date, 'now').mockReturnValue(GEN + 2);
+    th.answer.pick(() => {
+      m.view().dispatch({ selection: { anchor: 0 } }); // what the editor says once the dialog closed
+      return 'DNA';
+    });
+    th.answer.prompt('pBR', '', '');
+    await act(() => addSampleFromEditor(createSampleEnv(th.ctx)));
+    const doc = m.view().state.doc.toString();
+    expect(doc.indexOf(`DNA-${GEN + 2};pBR`)).toBeGreaterThan(0);
+    expect(doc.indexOf(`DNA-${GEN + 2};pBR`)).toBeLessThan(doc.indexOf('@dna;DNA-1'));
+  });
+
   it('a catalog type searches the catalog instead of generating', async () => {
     const th = host(SAMPLE_VAULT);
     const m = await th.mount(NOTE);

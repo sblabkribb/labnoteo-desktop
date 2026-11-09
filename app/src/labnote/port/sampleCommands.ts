@@ -1,10 +1,11 @@
 // Ported from app/vendor/labnoteo/src/main.ts:792-822 sha256:06b20607dbe60741
 // Ported from app/vendor/labnoteo/src/main.ts:855-895 sha256:5da76ea9350fbbf6
-// Ported from app/vendor/labnoteo/src/main.ts:890-940 sha256:3b3e70c313aca07c
+// Ported from app/vendor/labnoteo/src/main.ts:897-951 sha256:537e34938effb9d9
 // Ported from app/vendor/labnoteo/src/sampleDefinitionModal.ts:31-59 sha256:8f0e42fc6e91eed7
-// labnoteO 0.138.0, Apache-2.0.
-// Changes: main.ts:785-815 is an excerpt from inside the `editor-menu` closure (the one exception to the D4 range rule): it becomes sampleEditorMenuItems, which returns the two items as MenuActions with the app keys 'samples.menu.goToDefinition' / 'samples.menu.addSample' (labelKey, the plugin's 'Go to definition' / 'Add sample' text) instead of menu.addItem, reads the line and column from the open note's CodeMirror state instead of editor.getCursor/getLine, and leaves this.run to ContextMenu's runCommand. App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m) → env.host.notify('info', m); pickModal(app, items, opts) → env.host.pick(items, opts); this.host.editTarget() → env.editTarget(); this.fs → env.fs; this.settings.x → env.settings().x (globalSampleFolder → env.globalFolder()); this.sampleTrackingFor → env.trackingFor; this.hasLocalScope/localSampleFolder → env.hasLocalScope/localFolder. openSampleDefinitionCommand reads the reference under the cursor through the edit target (getText/getCursorOffset) instead of MarkdownView.editor; the tracking-off sentence names the app command t('cmd.sampleSettings') where the plugin names its settings path. openSampleDefinition (sampleDefinitionModal.ts:31-59) is ported here as the resolve-or-notice step; `new SampleDefinitionModal(…).open()` becomes runSampleDefinition (samples/definitionFlow.ts), which opens the dialog and runs the chosen flow.
+// labnoteO 0.140.2, Apache-2.0.
+// Changes: main.ts:785-815 is an excerpt from inside the `editor-menu` closure (the one exception to the D4 range rule): it becomes sampleEditorMenuItems, which returns the two items as MenuActions with the app keys 'samples.menu.goToDefinition' / 'samples.menu.addSample' (labelKey, the plugin's 'Go to definition' / 'Add sample' text) instead of menu.addItem, reads the line and column from the open note's CodeMirror state instead of editor.getCursor/getLine, and leaves this.run to ContextMenu's runCommand. App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m) → env.host.notify('info', m); pickModal(app, items, opts) → env.host.pick(items, opts); this.host.editTarget() → env.editTarget(); this.fs → env.fs; this.settings.x → env.settings().x (globalSampleFolder → env.globalFolder()); this.sampleTrackingFor → env.trackingFor; this.hasLocalScope/localSampleFolder → env.hasLocalScope/localFolder. openSampleDefinitionCommand reads the reference under the cursor through the edit target (getText/getCursorOffset) instead of MarkdownView.editor; the tracking-off sentence names the app command t('cmd.sampleSettings') where the plugin names its settings path. openSampleDefinition (sampleDefinitionModal.ts:31-59) is ported here as the resolve-or-notice step; `new SampleDefinitionModal(…).open()` becomes runSampleDefinition (samples/definitionFlow.ts), which opens the dialog and runs the chosen flow. addSampleFromEditor reads the caret before the type picker (caretBeforeModal, #544) and hands it to the port's insertSampleReference (port/sampleInsert.ts), which takes the same optional caret as the plugin's; a table cell being edited still takes the reference itself (D20), so the caret only steers the note-level insert.
 import { findSampleReferenceAt } from '@labnoteo/core';
+import { caretBeforeModal } from '@labnoteo/core/lib/caret';
 import { getSampleDisplayMeta, isCatalogSampleType } from '@labnoteo/core/lib/sampleUtils';
 import { hasReferenceCatalog, noteLabsamplesFolder } from '@labnoteo/core/lib/sampleStorage';
 import type { EditorState } from '@codemirror/state';
@@ -146,6 +147,10 @@ export async function addSampleFromEditor(env: SampleEnv): Promise<void> {
     return;
   }
 
+  // Read before the type picker opens: it takes the focus, and the
+  // Source-mode editor then reports the cursor at the start of the note (#544).
+  const caret = await caretBeforeModal(target);
+
   const types = getSampleDisplayMeta(env.settings().customSampleTypes).types;
   const type = await env.host.pick(
     types.map((t) => ({ label: t, value: t })),
@@ -177,5 +182,5 @@ export async function addSampleFromEditor(env: SampleEnv): Promise<void> {
     referenceText = created?.referenceText;
   }
   if (!referenceText) return;
-  await insertSampleReference(env, target, referenceText);
+  await insertSampleReference(env, target, referenceText, caret);
 }

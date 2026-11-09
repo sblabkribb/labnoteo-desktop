@@ -2,6 +2,7 @@
 // labnoteO 0.138.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m) → env.host.notify('info', m); pickModal(app, items, { title }) → env.host.pick(items, { title }); plugin.host.editTarget() → env.editTarget(); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.markUserEdit removed. insertSampleReference takes `target: EditTarget | undefined` and goes through env.insertAtCursor (cell-aware, D20) when there is no target or a table cell editor is active in the target's note. insertExperimentSamplesTable reads the caret as the end of the table being edited when a cell editor is active (the vendor's "below the table" rule for a table cursor), and makes every edit inside one env.editTarget().batch (one undo step); the batch re-reads the note's text and the list-table ranges after the picker in the Replace branch too, not only in the Insert-one-more branch.
 import { isOffsetBeforeBody, maskAiCallouts, planReferenceInsert, type EditTarget } from '@labnoteo/core';
+import { caretIn } from '@labnoteo/core/lib/caret';
 import {
   buildMarkdownTable,
   compareSamples,
@@ -44,7 +45,12 @@ function cellEditing(path: string): { tableEnd: number } | undefined {
  * with a neighbour). Reveals the spot.
  * In the app, a table cell being edited takes the reference itself, pipe-escaped (D20).
  */
-export async function insertSampleReference(env: SampleEnv, target: EditTarget | undefined, ref: string): Promise<void> {
+export async function insertSampleReference(
+  env: SampleEnv,
+  target: EditTarget | undefined,
+  ref: string,
+  caret?: number,
+): Promise<void> {
   if (!target || (target.path === env.activePath() && cellEditing(target.path))) {
     env.insertAtCursor(ref);
     return;
@@ -55,8 +61,10 @@ export async function insertSampleReference(env: SampleEnv, target: EditTarget |
     return;
   }
   const text = await target.getText();
-  const cursor = await target.getCursorOffset();
-  const selection = await target.getSelectionRange?.();
+  // `caret` is what a caller read before its own dialog opened, which the
+  // Source-mode editor no longer reports correctly (#544).
+  const cursor = caret === undefined ? await target.getCursorOffset() : caretIn(caret, text);
+  const selection = caret === undefined ? await target.getSelectionRange?.() : undefined;
   const types = getSampleDisplayMeta(env.settings().customSampleTypes).types;
   const plan = planReferenceInsert(text, cursor, ref, types, selection?.end);
   await target.replaceRange(plan.offset, plan.end ?? plan.offset, plan.text);
