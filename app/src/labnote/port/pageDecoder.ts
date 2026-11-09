@@ -5,8 +5,8 @@
 // renderJpeg run in the decode worker through the DecodeClient (one call that transfers the bitmap and answers the
 // blank flag, the QR hit and the upright JPEG, which render() hands back); a PDF page with an image pdf.js cannot
 // decode (SP7 E2: JPEG 2000) becomes a page marked `unsupportedImage` (User Decision 2026-11-09), never blank and
-// without a payload, whose render() is what pdf.js could draw, or, when it could draw nothing, a placeholder page
-// naming the PDF and the page (t('scan.pdfImagePlaceholder')), so the pipeline queues it as unmatched ('pdf-image');
+// without a payload, whose render() is what pdf.js could draw, or, when it could draw nothing or only a blank page,
+// a placeholder page (rendered even if the worker judges it blank: `keepBlank`) naming the PDF and the page (t('scan.pdfImagePlaceholder')), so the pipeline queues it as unmatched ('pdf-image');
 // only when not even the placeholder can be drawn is it an `error` page (t('scan.pdfPageFailed', page)). A page
 // whose JPEG stays over 20 MiB is a page with `error` t('scan.imageTooLarge') (B5), so the pipeline records an
 // `error` result in its place; either way the next page still decodes; the bitmap is closed in a finally (a no-op
@@ -42,12 +42,13 @@ export function createPageDecoder(output: () => ImageOutput, deps: PageDecoderDe
     bitmap: ImageBitmap,
     source: string,
     hash: string,
-    sourcePage: number | undefined
+    sourcePage: number | undefined,
+    keepBlank = false
   ): Promise<DecodedPage> {
     let decoded;
     try {
       const { maxEdge, quality } = output();
-      decoded = await deps.decode.page(bitmap, { maxEdge, quality });
+      decoded = await deps.decode.page(bitmap, keepBlank ? { maxEdge, quality, keepBlank } : { maxEdge, quality });
     } catch (err) {
       if (err instanceof ScanImageTooLarge) return failedPage(source, hash, sourcePage, t('scan.imageTooLarge'));
       throw err;
@@ -61,6 +62,21 @@ export function createPageDecoder(output: () => ImageOutput, deps: PageDecoderDe
       payload: hit?.payload,
       render: async () => jpeg,
     };
+  }
+
+  /** decodeBitmap, closing `bitmap` afterwards. */
+  async function decodeAndClose(
+    bitmap: ImageBitmap,
+    source: string,
+    hash: string,
+    sourcePage: number,
+    keepBlank = false
+  ): Promise<DecodedPage> {
+    try {
+      return await decodeBitmap(bitmap, source, hash, sourcePage, keepBlank);
+    } finally {
+      bitmap.close();
+    }
   }
 
   /** A white A4 page (at the PDF resolution) naming the PDF and the page, for a page pdf.js could not draw at all. */
@@ -108,17 +124,19 @@ export function createPageDecoder(output: () => ImageOutput, deps: PageDecoderDe
         // User Decision (2026-11-09): a page with an image pdf.js cannot decode is reported as "unsupported image
         // format in this PDF" and queued as unmatched (never dropped): what pdf.js drew, or a placeholder page.
         const unsupported = !page.bitmap || !!page.missingImage;
-        const bitmap = page.bitmap ?? (await placeholder(input.name, page.page));
-        if (!bitmap) {
-          await onPage(failedPage(input.name, hash, page.page, t('scan.pdfPageFailed', page.page)));
-          return;
+        let decoded = page.bitmap ? await decodeAndClose(page.bitmap, input.name, hash, page.page) : undefined;
+        // An unreadable page that drew nothing visible shows the placeholder instead, rendered even if judged blank:
+        // the usual JPEG 2000 scanner page is one full-page image, so pdf.js draws a white page that the worker calls
+        // blank and answers without a JPEG, and the queue must never hold an empty image.
+        if (unsupported && (!decoded || (decoded.error === undefined && (await decoded.render()).byteLength === 0))) {
+          const bitmap = await placeholder(input.name, page.page);
+          decoded = bitmap ? await decodeAndClose(bitmap, input.name, hash, page.page, true) : undefined;
+          if (!decoded || (decoded.error === undefined && (await decoded.render()).byteLength === 0)) {
+            await onPage(failedPage(input.name, hash, page.page, t('scan.pdfPageFailed', page.page)));
+            return;
+          }
         }
-        let decoded: DecodedPage;
-        try {
-          decoded = await decodeBitmap(bitmap, input.name, hash, page.page);
-        } finally {
-          bitmap.close();
-        }
+        if (!decoded) return;
         if (unsupported && decoded.error === undefined) {
           decoded = { ...decoded, blank: false, payload: undefined, unsupportedImage: true };
         }

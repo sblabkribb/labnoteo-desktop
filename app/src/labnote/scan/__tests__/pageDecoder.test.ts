@@ -79,14 +79,23 @@ function fakePdf(pages: number, failing: number[] = [], missingImage: number[] =
   return { getDocument, commonObjs } as PdfLib & { getDocument: typeof getDocument; commonObjs: typeof commonObjs };
 }
 
-/** A decode-client stand-in: every page decodes as a page without our QR, unless `answer` says otherwise. */
-function fakeDecode(answer: (n: number) => Partial<DecodedWorkerPage> | Error = () => ({})): DecodeClient & { calls: number } {
+/**
+ * A decode-client stand-in: every page decodes as a page without our QR, unless `answer` says otherwise. Like the
+ * worker, a blank page comes back with an empty JPEG unless the request says `keepBlank`.
+ */
+function fakeDecode(answer: (n: number) => Partial<DecodedWorkerPage> | Error = () => ({})): DecodeClient & {
+  calls: number;
+  keepBlank: boolean[];
+} {
   const client = {
     calls: 0,
-    async page() {
+    keepBlank: [] as boolean[],
+    async page(_bitmap: ImageBitmap, opts: { maxEdge: number; quality: number; keepBlank?: boolean }) {
       const out = answer(++client.calls);
+      client.keepBlank.push(!!opts.keepBlank);
       if (out instanceof Error) throw out;
-      return { hit: null, foreign: false, blank: false, jpeg: new ArrayBuffer(4), rotation: 0, ...out } as DecodedWorkerPage;
+      const page = { hit: null, foreign: false, blank: false, jpeg: new ArrayBuffer(4), rotation: 0, ...out } as DecodedWorkerPage;
+      return page.blank && !opts.keepBlank ? { ...page, jpeg: new ArrayBuffer(0) } : page;
     },
     terminate() {},
   };
@@ -166,7 +175,7 @@ describe('createPageDecoder', () => {
   });
 
   it('a page whose image pdf.js could not decode keeps what was drawn, is marked unsupportedImage and not blank', async () => {
-    const decode = fakeDecode(() => ({ blank: true }));
+    const decode = fakeDecode((n) => ({ blank: n !== 2 }));
     const decoder = createPageDecoder(output, { pdf: async () => fakePdf(3, [], [2]), decode, unzip: unzipScans });
     const { pages } = await expandAll(decoder, input('scan.pdf', pdfBytes()));
     expect(pages.map((p) => [p.blank, !!p.unsupportedImage])).toEqual([
@@ -174,8 +183,49 @@ describe('createPageDecoder', () => {
       [false, true],
       [true, false],
     ]);
+    expect((await pages[1].render()).byteLength).toBeGreaterThan(0);
     expect(drawnText).toEqual([]);
     expect(decode.calls).toBe(3);
+  });
+
+  // BUG-1: the usual JPEG 2000 scanner page is one full-page image; when it cannot be decoded pdf.js draws a white
+  // page, which the worker calls blank and answers with no JPEG. Queued as is, that is a 0-byte image in the vault.
+  it('an undecodable page that drew nothing visible gets the placeholder page, never an empty image', async () => {
+    const decode = fakeDecode((n) => ({ blank: n === 2 || n === 4 })); // calls: p1, p2, p2's placeholder, p3
+    const decoder = createPageDecoder(output, { pdf: async () => fakePdf(3, [], [2]), decode, unzip: unzipScans });
+    const { pages } = await expandAll(decoder, input('scan.pdf', pdfBytes()));
+    expect(pages.map((p) => [p.sourcePage, p.blank, !!p.unsupportedImage])).toEqual([
+      [1, false, false],
+      [2, false, true],
+      [3, true, false],
+    ]);
+    expect(pages[1].error).toBeUndefined();
+    expect((await pages[1].render()).byteLength).toBeGreaterThan(0);
+    expect(drawnText.join(' ')).toContain(t('scan.pdfImagePlaceholder', 'scan.pdf', 2));
+    // page 1, page 2 as drawn, page 2's placeholder (rendered even if judged blank), page 3
+    expect(decode.keepBlank).toEqual([false, false, true, false]);
+  });
+
+  it('an undecodable page through the pipeline never stores a 0-byte image', async () => {
+    const saved: { name: string; size: number }[] = [];
+    const deps = {
+      decoder: createPageDecoder(output, {
+        pdf: async () => fakePdf(1, [], [1]),
+        decode: fakeDecode(() => ({ blank: true })),
+        unzip: unzipScans,
+      }),
+      images: {
+        exists: async () => false,
+        writeScanImage: async (dir: string, name: string, bytes: ArrayBuffer) => {
+          saved.push({ name, size: bytes.byteLength });
+          return `${dir}/${name}`;
+        },
+      },
+    } as unknown as PipelineDeps;
+    const results = await new ScanPipeline(deps).run([input('scan.pdf', pdfBytes())], { skipNoQr: true });
+    expect(results.map((r) => [r.status, r.reason])).toEqual([['unmatched', 'pdf-image']]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].size).toBeGreaterThan(0);
   });
 
   it('through the pipeline both are unmatched pdf-image results, worded as the decision says, also in a shared folder', async () => {

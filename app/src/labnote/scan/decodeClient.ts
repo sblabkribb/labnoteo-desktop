@@ -12,9 +12,11 @@ export interface DecodeRequest {
   bitmap: ImageBitmap;
   maxEdge: number;
   quality: number;
+  /** Render the JPEG even for a page judged blank (a page that must be shown, e.g. an unreadable PDF page's placeholder). */
+  keepBlank?: boolean;
 }
 
-/** What the worker found on a page. `jpeg` is empty for a blank page (a blank page is never stored). */
+/** What the worker found on a page. `jpeg` is empty for a blank page (a blank page is never stored) unless `keepBlank`. */
 export interface DecodedWorkerPage {
   hit: QrHit | null;
   foreign: boolean;
@@ -28,7 +30,7 @@ export type DecodeResponse =
   | { id: number; ok: false; error: 'tooLarge' | 'failed' };
 
 export interface DecodeClient {
-  page(bitmap: ImageBitmap, opts: { maxEdge: number; quality: number }): Promise<DecodedWorkerPage>;
+  page(bitmap: ImageBitmap, opts: { maxEdge: number; quality: number; keepBlank?: boolean }): Promise<DecodedWorkerPage>;
   terminate(): void;
 }
 
@@ -37,6 +39,7 @@ interface Pending {
   bitmap: ImageBitmap;
   maxEdge: number;
   quality: number;
+  keepBlank?: boolean;
   resolve(page: DecodedWorkerPage): void;
   reject(err: Error): void;
 }
@@ -93,6 +96,7 @@ export function createDecodeClient(make: () => Worker = makeWorker): DecodeClien
     if (!next) return;
     current = next;
     const req: DecodeRequest = { id: next.id, op: 'page', bitmap: next.bitmap, maxEdge: next.maxEdge, quality: next.quality };
+    if (next.keepBlank) req.keepBlank = true;
     try {
       ensureWorker().postMessage(req, [next.bitmap]);
     } catch (err) {
@@ -103,9 +107,9 @@ export function createDecodeClient(make: () => Worker = makeWorker): DecodeClien
   }
 
   return {
-    page(bitmap, { maxEdge, quality }) {
+    page(bitmap, { maxEdge, quality, keepBlank }) {
       return new Promise<DecodedWorkerPage>((resolve, reject) => {
-        queue.push({ id: nextId++, bitmap, maxEdge, quality, resolve, reject });
+        queue.push({ id: nextId++, bitmap, maxEdge, quality, keepBlank, resolve, reject });
         pump();
       });
     },

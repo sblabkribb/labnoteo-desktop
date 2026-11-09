@@ -66,6 +66,14 @@ describe('createDecodeClient', () => {
     expect(posts[1].transfer).toEqual([b2]);
   });
 
+  it('keepBlank reaches the worker, so a page it must show is rendered even when judged blank', async () => {
+    const w = new FakeWorker(ok);
+    const client = createDecodeClient(() => w as unknown as Worker);
+    await client.page(bitmap(1), { maxEdge: 10, quality: 0.8, keepBlank: true });
+    await client.page(bitmap(2), { maxEdge: 10, quality: 0.8 });
+    expect(w.posts.map(p => p.msg.keepBlank)).toEqual([true, undefined]);
+  });
+
   it('terminate rejects the pending and queued requests and stops the worker', async () => {
     const w = new FakeWorker(() => undefined);
     const client = createDecodeClient(() => w as unknown as Worker);
