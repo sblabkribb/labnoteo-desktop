@@ -11,6 +11,7 @@ import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
 import { runSampleSettings } from '../../samples/SampleSettingsDialog';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
 import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDialog';
+import { runOpenLabnoteoLink } from '../../partbank/linkCommand';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -148,8 +149,15 @@ const integrationSettings: AppCommand = {
   run: (ctx) => runIntegrationSettings(ctx),
 };
 
+/** labnoteO 링크 열기(SP6 D14): partbank 가 만든 labnoteo-import·labnoteo-open 링크를 붙여 넣어 연다. OS 주소 체계는 등록하지 않는다. */
+const openLabnoteoLink: AppCommand = {
+  id: 'app.open-labnoteo-link',
+  nameKey: 'cmd.openLabnoteoLink',
+  run: (ctx) => runOpenLabnoteoLink(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, openLabnoteoLink];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
