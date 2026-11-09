@@ -70,8 +70,15 @@ describe('보관함별 설정', () => {
         'sampleTracking',
         'schemaVersion',
         'workflowViewGroupBy',
+        'worksheetPaperSize',
       ].sort(),
     );
+  });
+
+  it('worksheetPaperSize defaults to a4 and keeps letter', () => {
+    expect(fromPluginData({}).worksheetPaperSize).toBe('a4');
+    expect(fromPluginData({ worksheetPaperSize: 'letter' }).worksheetPaperSize).toBe('letter');
+    expect(fromPluginData({ worksheetPaperSize: 'a3' }).worksheetPaperSize).toBe('a4');
   });
 
   it('an unknown workflowViewGroupBy falls back to status (migrateSettings 를 거친다)', () => {
