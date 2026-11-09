@@ -1,9 +1,11 @@
 /** 샘플 저장소를 React 에 잇는 훅(계획 Task 7). */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { LabnoteFs } from '@labnoteo/core';
 import { useVaultChanges } from '../labnote/panel/useVaultChanges';
+import type { AppFs } from '../fs/tauriLabnoteFs';
 import type { AppSettings } from '../labnote/settings';
+import { liveCatalogStore, subscribeCurrentCatalogs, withPartbankCatalogs } from '../partbank/catalogOverlay';
 import type { ListenFn } from '../vault/useVaultEvents';
+import { normalizeSampleFolder, sampleEvents } from './env';
 import { editorConfigFrom, type SampleEditorConfig } from './editorConfig';
 import { SAMPLE_FOCUS_REREAD_MS, samples } from './sampleStore';
 
@@ -36,12 +38,25 @@ export function useSampleEditorConfig(settings: AppSettings | undefined): Sample
  * configure (unbind on fs change/unmount) + useVaultChanges({labsamples:true}) + window focus → vaultChanged('all')
  * (at most once per SAMPLE_FOCUS_REREAD_MS; a focus inside the window re-reads once when it ends).
  * 명령과 동기화의 `sampleEvents` → registryChanged 는 저장소가 configure 때 스스로 구독한다(훅 없이도 같게).
+ * 저장소에 묶는 fs 는 앱 데이터의 PartBank 카탈로그를 덧씌운다(D15). 카탈로그가 바뀌거나 앱의 카탈로그 저장소가 바뀌면
+ * `env.changed([globalFolder])` 와 같은 길(`sampleEvents`)로 알린다: 저장소가 다시 읽고 완성 캐시가 비워진다.
  */
-export function useSampleStoreWiring(fs: LabnoteFs, settings: AppSettings | undefined, listen?: ListenFn): void {
+export function useSampleStoreWiring(appFs: AppFs, settings: AppSettings | undefined, listen?: ListenFn): void {
   const loaded = settings !== undefined;
   const tracking = settings?.sampleTracking === true;
   const custom = settings?.customSampleTypes;
   const folder = settings?.globalSampleFolder;
+  // 폴더는 부를 때마다 지금 설정에서 읽는다: 폴더가 바뀌어도 fs 정체성은 그대로다(configure 가 폴더 변경을 따로 받는다).
+  const folderRef = useRef(folder);
+  folderRef.current = folder;
+  const fs = useMemo(
+    () => withPartbankCatalogs(appFs, () => normalizeSampleFolder(folderRef.current), liveCatalogStore),
+    [appFs],
+  );
+  useEffect(
+    () => subscribeCurrentCatalogs(() => sampleEvents.emit([normalizeSampleFolder(folderRef.current)])),
+    [],
+  );
   useEffect(() => {
     if (!loaded) return;
     samples.configure(fs, { sampleTracking: tracking, customSampleTypes: custom ?? [], globalSampleFolder: folder ?? '' });

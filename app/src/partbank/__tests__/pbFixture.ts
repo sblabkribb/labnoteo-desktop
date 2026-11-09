@@ -10,6 +10,7 @@ import type { AppSettings } from '../../labnote/settings';
 import type { InvokeFn, SecretStatus } from '../../integrations/netIpc';
 import { fakeInvoke, secretStatusOf } from '../../integrations/__tests__/fakeNet';
 import { createSampleEnv, type SampleEnv } from '../../samples/env';
+import type { PartbankCatalogStore } from '../catalogOverlay';
 
 export const PB_WEB = 'https://partbank.kbiofoundry.kr';
 export const PB_DESKTOP = 'http://127.0.0.1:47830';
@@ -33,6 +34,8 @@ export function pbEnv(
     settings?: Partial<AppSettings>;
     routes?: Record<string, (args: Record<string, unknown>) => unknown>;
     status?: SecretStatus;
+    /** 앱 데이터의 카탈로그 저장소(D15). 없으면 createSampleEnv 의 기본(지금 저장소). */
+    catalogs?: PartbankCatalogStore;
   } = {},
 ): PbEnv {
   const th = createTestHost(files, {
@@ -46,7 +49,7 @@ export function pbEnv(
   const f = fakeInvoke({ secret_status: () => status, vault_current: () => ({ root: PB_VAULT_ROOT }), ...opts.routes });
   const feature = new PartbankFeature({ settings: () => th.ctx.settings, host: th.host, invoke: f.invoke });
   feature.setStatus(status);
-  return { th, env: createSampleEnv(th.ctx), feature, client: feature.defaultClient(), invoke: f.invoke, calls: f.calls };
+  return { th, env: createSampleEnv(th.ctx, { catalogs: opts.catalogs }), feature, client: feature.defaultClient(), invoke: f.invoke, calls: f.calls };
 }
 
 /**

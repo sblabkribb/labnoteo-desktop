@@ -4,6 +4,7 @@ import { planReferenceInsert, type Translator } from '@labnoteo/core';
 import { isSampleTrackingOn } from '@labnoteo/core/lib/labnoteStructure';
 import { escapeSamplePipes } from '@labnoteo/core/lib/sampleUtils';
 import { activeCellView } from '../editor/table/cellEditor';
+import { currentCatalogStore, withPartbankCatalogs, type PartbankCatalogStore } from '../partbank/catalogOverlay';
 import type { AppFs } from '../fs/tauriLabnoteFs';
 import { linkIndex } from '../links/linkIndex';
 import type { CommandContext } from '../labnote/commands/context';
@@ -23,7 +24,7 @@ export const DEFAULT_GLOBAL_SAMPLE_FOLDER = 'resources/labsamples';
  */
 export interface SampleEnv {
   readonly host: AppHost;
-  /** safeRegistryFs(trashingFs(host.fs), globalFolder) (D13). */
+  /** safeRegistryFs(trashingFs(withPartbankCatalogs(host.fs, globalFolder, catalogs)), globalFolder) (D13, D15). */
   readonly fs: AppFs;
   readonly t: Translator;
   settings(): AppSettings;
@@ -164,10 +165,15 @@ export const sampleEvents = {
   },
 };
 
-/** 명령 맥락으로 SampleEnv 를 만든다. 설정과 열린 노트는 부를 때마다 지금 값을 읽는다. */
-export function createSampleEnv(ctx: CommandContext): SampleEnv {
+/**
+ * 명령 맥락으로 SampleEnv 를 만든다. 설정과 열린 노트는 부를 때마다 지금 값을 읽는다.
+ * fs 는 앱 데이터의 PartBank 카탈로그를 Global 폴더에 덧씌운다(D15): `opts.catalogs`, 없으면 만들 때의 `currentCatalogStore()`
+ * (Task 26 이 놓기 전에는 빈 저장소라 아무 커맨드도 부르지 않는다).
+ */
+export function createSampleEnv(ctx: CommandContext, opts: { catalogs?: PartbankCatalogStore } = {}): SampleEnv {
   const globalFolder = () => normalizeSampleFolder(ctx.settings.globalSampleFolder);
-  const fs = safeRegistryFs(trashingFs(ctx.host.fs), globalFolder);
+  const catalogs = opts.catalogs ?? currentCatalogStore();
+  const fs = safeRegistryFs(trashingFs(withPartbankCatalogs(ctx.host.fs, globalFolder, catalogs)), globalFolder);
   const types = () => sampleTypesFor(ctx.settings);
 
   return {
