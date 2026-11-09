@@ -5,6 +5,12 @@ import { registerAllCommands } from '../../../labnote/commands/registerAll';
 import type { CommandContext } from '../../../labnote/commands/context';
 import { getMode, setMode } from '../../live/mode';
 import { appCommands, clearAppCommandsForTest, displayKey, registerAllAppCommands, registerAppCommand } from '../appCommands';
+import { setLang } from '../../../i18n/lang';
+import { check as pluginCheck } from '@tauri-apps/plugin-updater';
+import { dismissUpdate, resetUpdateStoreForTest, startUpdateChecks, updateState } from '../../../update/updateStore';
+
+vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn(async () => null) }));
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn(async () => '0.1.4') }));
 
 // Node 의 자체 localStorage 가 jsdom 의 것을 가리므로 메모리 저장소를 꽂는다(theme-guard.test.tsx 와 같다).
 function memoryStorage(): Storage {
@@ -102,5 +108,78 @@ describe('app-command registry', () => {
     expect(getMode()).toBe('source');
     await c.run({} as CommandContext);
     expect(getMode()).toBe('live');
+  });
+});
+
+describe('Check for updates (palette)', () => {
+  const checkMock = pluginCheck as unknown as ReturnType<typeof vi.fn>;
+  function ctxWithNotify() {
+    const notify = vi.fn();
+    return { ctx: { host: { notify } } as unknown as CommandContext, notify };
+  }
+  function cmd() {
+    return appCommands().find((x) => x.id === 'app.check-for-updates')!;
+  }
+
+  beforeEach(() => {
+    resetUpdateStoreForTest();
+    checkMock.mockReset();
+  });
+
+  it('is registered with ko and en names', () => {
+    expect(cmd().nameKey).toBe('cmd.checkForUpdates');
+    expect(catalogs.ko['cmd.checkForUpdates']).toBe('업데이트 확인');
+    expect(catalogs.en['cmd.checkForUpdates']).toBe('Check for updates');
+  });
+
+  it('says the app is up to date, with the current version (ko)', async () => {
+    checkMock.mockResolvedValue(null);
+    const { ctx, notify } = ctxWithNotify();
+    await cmd().run(ctx);
+    expect(checkMock).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('info', '최신 버전입니다(0.1.4).');
+  });
+
+  it('says the app is up to date (en)', async () => {
+    setLang('en');
+    checkMock.mockResolvedValue(null);
+    const { ctx, notify } = ctxWithNotify();
+    await cmd().run(ctx);
+    expect(notify).toHaveBeenCalledWith('info', "You're up to date (0.1.4).");
+  });
+
+  it('warns when the check fails (ko and en)', async () => {
+    checkMock.mockRejectedValue(new Error('offline'));
+    const a = ctxWithNotify();
+    await cmd().run(a.ctx);
+    expect(a.notify).toHaveBeenCalledWith('warn', '업데이트를 확인하지 못했습니다. 인터넷 연결을 확인해 주세요.');
+    setLang('en');
+    const b = ctxWithNotify();
+    await cmd().run(b.ctx);
+    expect(b.notify).toHaveBeenCalledWith('warn', "Couldn't check for updates. Check your internet connection.");
+  });
+
+  it('shows no toast when a new version is found; the banner shows it, even after Later', async () => {
+    const update = { version: '0.2.0', download: vi.fn(), install: vi.fn() };
+    checkMock.mockResolvedValue(update);
+    const stop = startUpdateChecks();
+    await vi.waitFor(() => expect(updateState().kind).toBe('available'));
+    dismissUpdate();
+    const { ctx, notify } = ctxWithNotify();
+    await cmd().run(ctx);
+    expect(notify).not.toHaveBeenCalled();
+    expect(updateState()).toMatchObject({ kind: 'available', dismissed: false });
+    expect(update.download).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('a failing periodic check shows nothing', async () => {
+    checkMock.mockRejectedValue(new Error('offline'));
+    const notify = vi.spyOn(await import('../../../labnote/host/toastStore'), 'notify');
+    const stop = startUpdateChecks();
+    await vi.waitFor(() => expect(updateState()).toEqual({ kind: 'failed', manual: false }));
+    expect(notify).not.toHaveBeenCalled();
+    notify.mockRestore();
+    stop();
   });
 });

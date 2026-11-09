@@ -16,6 +16,7 @@ import { bfwReady } from '../../bfworkflow/bfwApp';
 import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
 import { runNotesFromDesign } from '../../bfworkflow/notesFromDesign';
 import { runDesignUsage, runOpenDesign } from '../../bfworkflow/openDesign';
+import { runCheckForUpdates } from '../../update/checkCommand';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -204,8 +205,15 @@ const bfwDesignUsage: AppCommand = {
   available: (ctx) => bfwReady(ctx),
 };
 
+/** 업데이트 확인(B-R8, B-R10): 지금 확인하고 "나중에"를 지운다. 새 버전이면 알림이 보이고, 설치는 거기서 누를 때만 한다. */
+const checkForUpdates: AppCommand = {
+  id: 'app.check-for-updates',
+  nameKey: 'cmd.checkForUpdates',
+  run: (ctx) => runCheckForUpdates(ctx),
+};
+
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

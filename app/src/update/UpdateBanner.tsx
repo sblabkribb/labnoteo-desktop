@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { check } from '@tauri-apps/plugin-updater';
+import { useState, useSyncExternalStore } from 'react';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { t } from '../i18n/t';
+import { dismissUpdate, subscribeUpdate, updateState } from './updateStore';
 
 /** plugin-updater 의 `Update` 중 쓰는 부분만. */
 export interface PendingUpdate {
@@ -13,29 +13,27 @@ export interface PendingUpdate {
 interface Props {
   /** 설치 전에 저장 안 된 편집을 저장한다. false 면 편집이 남아 있으니 설치하지 않는다. */
   beforeInstall: () => Promise<boolean>;
-  checkForUpdate?: () => Promise<PendingUpdate | null>;
   restart?: () => Promise<void>;
 }
 
 /**
- * 시작할 때 한 번 새 버전을 확인한다. 오프라인이거나 확인이 실패하면 아무것도 보이지 않는다 —
- * 업데이트는 노트 사용을 막지 않는다. 설치는 사용자가 누를 때만 한다.
+ * updateStore 가 찾은 새 버전을 알린다(확인은 App 이 startUpdateChecks 로 시작한다). 오프라인이거나 주기 확인이
+ * 실패하면 아무것도 보이지 않는다 — 업데이트는 노트 사용을 막지 않는다. 설치는 사용자가 누를 때만 한다(B-R9).
+ * "나중에"는 이 버전 알림을 앱을 다시 켜거나 직접 확인할 때까지 감춘다(B-R10).
  */
-export function UpdateBanner({ beforeInstall, checkForUpdate = check, restart = relaunch }: Props) {
-  const [update, setUpdate] = useState<PendingUpdate | null>(null);
+export function UpdateBanner({ beforeInstall, restart = relaunch }: Props) {
+  const state = useSyncExternalStore(subscribeUpdate, updateState);
   const [phase, setPhase] = useState<'idle' | 'installing' | 'unsaved' | 'failed'>('idle');
 
-  useEffect(() => {
-    let live = true;
-    checkForUpdate()
-      .then((u) => live && setUpdate(u))
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [checkForUpdate]);
-
-  if (!update) return null;
+  if (state.kind === 'checking' && state.manual) {
+    return (
+      <aside aria-label={t('update.install')}>
+        <p role="status">{t('update.checking')}</p>
+      </aside>
+    );
+  }
+  if (state.kind !== 'available' || state.dismissed) return null;
+  const update = state.update;
 
   async function install(u: PendingUpdate) {
     setPhase('installing');
@@ -59,6 +57,9 @@ export function UpdateBanner({ beforeInstall, checkForUpdate = check, restart = 
       <p>{t('update.available', update.version)}</p>
       <button type="button" className="primary" disabled={phase === 'installing'} onClick={() => install(update)}>
         {t('update.install')}
+      </button>
+      <button type="button" disabled={phase === 'installing'} onClick={() => dismissUpdate()}>
+        {t('update.later')}
       </button>
       {phase === 'installing' && <p role="status">{t('update.installing')}</p>}
       {phase === 'unsaved' && <p role="alert">{t('update.unsaved')}</p>}

@@ -21,6 +21,7 @@ import { followLink, linkAt, type OpenTarget } from './editor/live/links';
 import type { EditorView } from '@codemirror/view';
 import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
+import { startUpdateChecks } from './update/updateStore';
 import { ThemeToggle } from './theme/ThemeToggle';
 import { useTheme, type Theme } from './theme/useTheme';
 import { LanguageToggle } from './i18n/LanguageToggle';
@@ -306,6 +307,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
     navigate: (dir) => void navFns.go(dir),
   });
   usePaletteHotkey(ctx);
+  // 새 버전 확인(B-R8): 지금, 6시간마다, 오래 떠나 있다 돌아왔을 때. 알림은 UpdateBanner 가 이 상태를 읽어 보인다.
+  useEffect(() => startUpdateChecks(), []);
   // 저장 때의 샘플 동기화(D12)가 쓸 SampleEnv. 맥락이 바뀌거나 보관함 화면이 내려가면, 기다리던 동기화를 그 맥락으로 먼저 돌린다.
   useEffect(() => {
     // 노트 동기화가 쓴 대장은 partbank 사용처의 재대조를 부르지 않는다(노트는 제 변경으로 간다).
