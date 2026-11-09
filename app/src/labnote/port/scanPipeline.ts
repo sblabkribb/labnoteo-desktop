@@ -13,7 +13,8 @@
 // NoteBusyError every BUSY_RETRY_MS (1 s) up to BUSY_RETRIES (30 s), then re-queues every item of that note
 // through the vanished-block path with the new reason 'note-busy' (read the stored image, queue it, fs.trash it);
 // vault.getAbstractFileByPath/readBinary there become images.readBinary, fileManager.trashFile becomes fs.trash;
-// ZIP_LIMITS is exported; saveBinary returns { path, name }.
+// ZIP_LIMITS is exported; saveBinary returns { path, name }; a DecodedPage may carry `error` (a page the decoder
+// could not read), which filePage records as an `error` result in the page's place.
 /**
  * The one path every scan takes, whatever brought it in (scan folder, drag and
  * drop, Slack): split PDFs and zips into pages, read each page's QR code, find
@@ -101,6 +102,8 @@ export interface DecodedPage {
   hash: string;
   blank: boolean;
   payload?: ScanPayload;
+  /** The page could not be read (a PDF page pdf.js cannot render, an image over 20 MiB): an `error` result. */
+  error?: string;
   /** The page upright, scaled and compressed for storing. */
   render(): Promise<ArrayBuffer>;
 }
@@ -264,6 +267,7 @@ export class ScanPipeline {
     saved: Set<string>,
   ): Promise<ScanResult> {
     const base: ScanResult = { source: page.source, sourcePage: page.sourcePage, status: 'error', hash: page.hash };
+    if (page.error !== undefined) return { ...base, status: 'error', message: page.error };
     if (page.blank) return { ...base, status: 'blank' };
     const payload = page.payload;
     if (!payload) {

@@ -394,6 +394,8 @@ const ko: Record<string, string> = {
   'fileOps.renameGuarded.workflowNote':
     '워크플로 노트는 아직 이름을 바꿀 수 없습니다. README 체크리스트의 링크가 끊어집니다. 링크까지 고치는 이름 바꾸기는 나중에 추가됩니다.',
   'fileOps.renameGuarded.readme': 'README.labnote.md 는 실험을 알아보는 파일이라 이름을 바꿀 수 없습니다.',
+  'scan.pdfPageFailed': 'PDF {0}쪽을 읽지 못했습니다(JPEG 2000 이미지일 수 있습니다). PDF나 JPEG로 다시 스캔하세요.',
+  'scan.imageTooLarge': '스캔 이미지가 20MB를 넘어 저장하지 못했습니다. 설정에서 이미지 크기를 줄이세요.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -790,6 +792,8 @@ const en: Record<string, string> = {
   'fileOps.renameGuarded.workflowNote':
     "Workflow notes can't be renamed yet: their README checklist links would break. Renaming that also fixes links comes later.",
   'fileOps.renameGuarded.readme': "README.labnote.md identifies the experiment and can't be renamed.",
+  'scan.pdfPageFailed': 'Could not read page {0} of the PDF (it may be a JPEG 2000 image). Scan it again as PDF or JPEG.',
+  'scan.imageTooLarge': 'The scan image is over 20 MB and was not stored. Lower the image size in settings.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
