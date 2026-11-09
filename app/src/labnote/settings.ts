@@ -28,6 +28,9 @@ export type AppSettings = Pick<
   | 'llmEndpointOpenai'
   | 'llmModel'
   | 'worksheetPaperSize'
+  | 'scanMaxImageEdge'
+  | 'scanJpegQuality'
+  | 'scanEmbedWidth'
 > & {
   schemaVersion: number;
   importedFromPlugin?: boolean;
@@ -109,6 +112,11 @@ const KEYS = [
   'allowHttpOrigins',
   // SP7 Part A: 실험 워크시트 용지(a4 | letter). 플러그인 migrateSettings 가 기본값과 검사를 맡는다.
   'worksheetPaperSize',
+  // SP7 Part B: 스캔 이미지 긴 변(px), JPEG 품질, 노트에 보이는 폭(0 = 원래 크기).
+  // 플러그인 migrateSettings 가 기본값과 범위를 맡는다: 범위 밖 값은 버리고 기본값을 둔다(B7).
+  'scanMaxImageEdge',
+  'scanJpegQuality',
+  'scanEmbedWidth',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
