@@ -42,6 +42,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .manage(labnoteo_app_lib::net::NetState::default())
+        .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -123,6 +124,9 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("bfw_probe", args("bfw_probe", vec![json!("server"), json!("https://x.example"), Value::Null])).unwrap_err()["kind"],
         "keyMissing"
     );
+
+    // App-data stores (offline catalogs, integration state) are per vault.
+    assert_eq!(call("partbank_catalog_list", args("partbank_catalog_list", vec![])).unwrap_err()["kind"], "notConfigured");
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -209,6 +213,33 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("bfw_generate_notes", args("bfw_generate_notes", vec![json!("g3"), design.clone(), json!("en"), json!(false)])).unwrap_err()["kind"],
         "keyMissing"
     );
+
+    // Offline PartBank catalogs and integration state: in the app data dir,
+    // per vault, JSON objects only, and never in the vault itself.
+    assert_eq!(ok("partbank_catalog_list", args("partbank_catalog_list", vec![])), json!([]));
+    assert_eq!(ok("partbank_catalog_read", args("partbank_catalog_read", vec![json!("DNA_partbank-web.json")])), Value::Null);
+    ok("partbank_catalog_write", args("partbank_catalog_write", vec![json!("DNA_partbank-web.json"), json!(r#"{"items":[]}"#)]));
+    assert_eq!(
+        ok("partbank_catalog_read", args("partbank_catalog_read", vec![json!("DNA_partbank-web.json")])),
+        r#"{"items":[]}"#
+    );
+    assert_eq!(ok("partbank_catalog_list", args("partbank_catalog_list", vec![])), json!(["DNA_partbank-web.json"]));
+    assert_eq!(
+        call("partbank_catalog_write", args("partbank_catalog_write", vec![json!("../x_partbank-web.json"), json!("{}")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(
+        call("partbank_catalog_write", args("partbank_catalog_write", vec![json!("DNA_partbank-web.json"), json!("[]")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(ok("integration_state_read", args("integration_state_read", vec![json!("partbankUsage")])), Value::Null);
+    ok("integration_state_write", args("integration_state_write", vec![json!("bfwCatalogCache"), json!(r#"{"origin":"o"}"#)]));
+    assert_eq!(
+        ok("integration_state_read", args("integration_state_read", vec![json!("bfwCatalogCache")])),
+        r#"{"origin":"o"}"#
+    );
+    assert!(call("integration_state_read", json!({"name": "../x"})).is_err());
+    assert!(dir.join("data").join("integrations").join("partbank").is_dir());
 
     // The link journal: kept in the app data dir, never in the vault.
     assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);

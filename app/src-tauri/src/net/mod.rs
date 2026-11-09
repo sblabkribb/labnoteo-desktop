@@ -9,6 +9,8 @@ pub mod llm;
 pub mod partbank;
 pub mod secrets;
 pub mod sse;
+pub mod store;
+pub use store::IntegrationDirs;
 pub use error::*;
 
 #[cfg(test)]

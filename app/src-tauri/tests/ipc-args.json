@@ -40,5 +40,10 @@
   "bfw_request": ["path", "query"],
   "bfw_probe": ["connection", "url", "apiKey"],
   "bfw_base": [],
-  "bfw_generate_notes": ["requestId", "design", "language", "perWorkflow"]
+  "bfw_generate_notes": ["requestId", "design", "language", "perWorkflow"],
+  "partbank_catalog_list": [],
+  "partbank_catalog_read": ["name"],
+  "partbank_catalog_write": ["name", "content"],
+  "integration_state_read": ["name"],
+  "integration_state_write": ["name", "content"]
 }

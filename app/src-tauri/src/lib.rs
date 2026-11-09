@@ -59,6 +59,11 @@ macro_rules! register_commands {
             $crate::net::bfw::bfw_probe,
             $crate::net::bfw::bfw_base,
             $crate::net::bfw::bfw_generate_notes,
+            $crate::net::store::partbank_catalog_list,
+            $crate::net::store::partbank_catalog_read,
+            $crate::net::store::partbank_catalog_write,
+            $crate::net::store::integration_state_read,
+            $crate::net::store::integration_state_write,
         ])
     };
 }
@@ -101,6 +106,9 @@ pub fn run() {
             app.manage(index::IndexState::new(data.join("index")));
             // The link-update journal (rename recovery and undo), also outside every vault.
             app.manage(vault::LinkJournalDir(data.join("link-journal")));
+            // Offline PartBank catalogs and integration state, per vault and
+            // never in the vault (D13).
+            app.manage(net::IntegrationDirs(data.join("integrations")));
             // Integration keys: Windows Credential Manager only, never a file (D6).
             app.manage(net::secrets::Secrets::keyring());
             // Watches the open vault for changes made outside the app; started
