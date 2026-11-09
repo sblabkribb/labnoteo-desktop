@@ -76,8 +76,9 @@ impl std::fmt::Debug for Outgoing {
     }
 }
 
-/// A 2xx answer; `text` already has the key redacted.
-#[derive(Debug)]
+/// A 2xx answer; `text` already has the key redacted. Serializes as
+/// `{status, text}` (what `llm_chat` returns to the webview).
+#[derive(Debug, serde::Serialize)]
 pub struct Incoming {
     pub status: u16,
     pub text: String,

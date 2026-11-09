@@ -53,6 +53,8 @@ macro_rules! register_commands {
             $crate::net::net_cancel,
             $crate::net::partbank::partbank_request,
             $crate::net::partbank::partbank_probe,
+            $crate::net::llm::llm_chat,
+            $crate::net::llm::llm_probe,
         ])
     };
 }

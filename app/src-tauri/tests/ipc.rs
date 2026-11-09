@@ -100,6 +100,13 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("partbank_probe", args("partbank_probe", vec![json!("web"), json!("https://x.example"), Value::Null])).unwrap_err()["kind"],
         "keyMissing"
     );
+    // LLM: with no vault there is no saved provider or endpoint.
+    let llm = call("llm_chat", args("llm_chat", vec![json!("r"), json!("ollama"), json!({})])).unwrap_err();
+    assert!(llm["kind"] == "badInput" || llm["kind"] == "notConfigured", "{llm}");
+    assert_eq!(
+        call("llm_probe", args("llm_probe", vec![json!("ollama"), json!("ftp://x"), json!("m"), Value::Null])).unwrap_err()["kind"],
+        "invalidUrl"
+    );
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -156,6 +163,11 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("partbank_probe", args("partbank_probe", vec![json!("web"), json!("https://x.example/path"), json!("typed")])).unwrap_err()["kind"],
         "invalidUrl"
     );
+
+    // LLM with the vault open: the default provider is none, so a chat that
+    // names another provider is refused before anything is sent.
+    let llm = call("llm_chat", args("llm_chat", vec![json!("r"), json!("ollama"), json!({})])).unwrap_err();
+    assert!(llm["kind"] == "badInput" || llm["kind"] == "notConfigured", "{llm}");
 
     // The link journal: kept in the app data dir, never in the vault.
     assert_eq!(ok("link_journal_read", args("link_journal_read", vec![])), Value::Null);
