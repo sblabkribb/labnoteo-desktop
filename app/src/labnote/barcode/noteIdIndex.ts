@@ -44,6 +44,31 @@ function isMissing(e: unknown): boolean {
   return !!e && typeof e === 'object' && (e as { code?: unknown }).code === 'ENOENT';
 }
 
+/** `from`(파일 또는 폴더)의 항목을 `to` 로 옮긴다. 옮긴 것이 있으면 true. */
+function moveEntries(entries: Map<string, Entry>, from: string, to: string): boolean {
+  const entry = entries.get(from);
+  if (entry) {
+    entries.delete(from);
+    if (isMarkdown(to)) entries.set(to, { ref: { ...entry.ref, path: to, basename: basenameOf(to) }, id: entry.id });
+    return true;
+  }
+  const prefix = `${from}/`;
+  const moved = [...entries.entries()].filter(([p]) => p.startsWith(prefix));
+  for (const [p, e] of moved) {
+    entries.delete(p);
+    const next = `${to}/${p.slice(prefix.length)}`;
+    entries.set(next, { ref: { ...e.ref, path: next }, id: e.id });
+  }
+  return moved.length > 0;
+}
+
+/** 그 파일 또는 폴더(안의 모든 경로)의 항목을 뺀다. */
+function dropEntries(entries: Map<string, Entry>, path: string): void {
+  entries.delete(path);
+  const prefix = `${path}/`;
+  for (const p of [...entries.keys()]) if (p.startsWith(prefix)) entries.delete(p);
+}
+
 /** 원문의 앞부분(front matter)에 적힌 올바른 `labnote_id`. 본문의 `labnote_id:` 는 세지 않는다. */
 function idIn(raw: string): string | undefined {
   return readNoteId(frontMatterText(raw));
@@ -65,6 +90,8 @@ export class NoteIdIndex {
   private latest = new Map<string, number>();
   private seq = 0;
   private readonly listeners = new Set<(path: string) => void>();
+  /** 진행 중인 빌드마다 하나: 빌드가 읽는 동안 들어온 rename/drop. 빌드 결과에 다시 적용한다. */
+  private readonly journals = new Set<Array<(m: Map<string, Entry>) => void>>();
 
   constructor(deps: NoteIdIndexDeps) {
     this.deps = deps;
@@ -132,30 +159,23 @@ export class NoteIdIndex {
     if (id !== undefined && id !== prev?.id) this.emit(path);
   }
 
-  /** 파일 또는 폴더의 이름이 바뀌었다. 다시 읽지 않고 항목을 옮긴다(ID 와 만든 시각은 그대로). */
+  /**
+   * 파일 또는 폴더의 이름이 바뀌었다. 다시 읽지 않고 항목을 옮긴다(ID 와 만든 시각은 그대로).
+   * 옛 경로에서 아직 읽고 있는 refresh 는 버린다(늦게 끝나 옛 경로를 되살리지 않게).
+   * 진행 중인 다시 빌드에도 기록해 두었다가 그 결과에 다시 적용한다.
+   */
   rename(from: string, to: string): void {
-    const entry = this.entries.get(from);
-    if (entry) {
-      this.entries.delete(from);
-      if (isMarkdown(to)) this.entries.set(to, { ref: { ...entry.ref, path: to, basename: basenameOf(to) }, id: entry.id });
-      return;
-    }
-    const prefix = `${from}/`;
-    const moved = [...this.entries.entries()].filter(([p]) => p.startsWith(prefix));
-    for (const [p, e] of moved) {
-      this.entries.delete(p);
-      const next = `${to}/${p.slice(prefix.length)}`;
-      this.entries.set(next, { ref: { ...e.ref, path: next }, id: e.id });
-    }
-    if (moved.length === 0 && isMarkdown(to)) void this.refresh(to);
+    this.forget(from);
+    for (const journal of this.journals) journal.push((m) => moveEntries(m, from, to));
+    const moved = moveEntries(this.entries, from, to);
+    if (!moved && isMarkdown(to)) void this.refresh(to);
   }
 
   /** 파일 또는 폴더가 지워졌다. */
   drop(path: string): void {
-    this.entries.delete(path);
-    this.latest.delete(path);
-    const prefix = `${path}/`;
-    for (const p of [...this.entries.keys()]) if (p.startsWith(prefix)) this.entries.delete(p);
+    this.forget(path);
+    for (const journal of this.journals) journal.push((m) => dropEntries(m, path));
+    dropEntries(this.entries, path);
   }
 
   /** refresh 뒤 그 경로의 ID 가 바뀌었거나 새로 생겼을 때 불린다. 돌려준 함수로 끊는다. */
@@ -176,6 +196,12 @@ export class NoteIdIndex {
     }
   }
 
+  /** 그 경로(폴더면 그 안의 경로까지)에서 진행 중인 refresh 의 결과를 버리게 한다. */
+  private forget(path: string): void {
+    const prefix = `${path}/`;
+    for (const p of [...this.latest.keys()]) if (p === path || p.startsWith(prefix)) this.latest.delete(p);
+  }
+
   private async safeCtimes(paths: string[]): Promise<Array<number | null>> {
     try {
       return await this.deps.ctimes(paths);
@@ -187,14 +213,24 @@ export class NoteIdIndex {
   /** 전부 읽는다. 첫 빌드가 아니면(다시 빌드) ID 가 바뀌었거나 새로 생긴 경로마다 `onChange` 를 부른다. */
   private async build(): Promise<void> {
     const generation = this.generation;
-    const paths = (await this.deps.files()).filter(isMarkdown);
-    const [ctimes, ids] = await Promise.all([this.safeCtimes(paths), this.readAll(paths)]);
+    const journal: Array<(m: Map<string, Entry>) => void> = [];
+    this.journals.add(journal);
+    let paths: string[];
+    let ctimes: Array<number | null>;
+    let ids: Array<string | undefined>;
+    try {
+      paths = (await this.deps.files()).filter(isMarkdown);
+      [ctimes, ids] = await Promise.all([this.safeCtimes(paths), this.readAll(paths)]);
+    } finally {
+      this.journals.delete(journal);
+    }
     if (this.generation !== generation) return;
     const before = this.entries;
     const next = new Map<string, Entry>();
     paths.forEach((path, i) => {
       next.set(path, { ref: { path, basename: basenameOf(path), ctime: ctimes[i] ?? 0 }, id: ids[i] });
     });
+    for (const op of journal) op(next);
     this.entries = next;
     const notify = this.built;
     this.built = true;

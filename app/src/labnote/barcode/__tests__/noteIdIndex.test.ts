@@ -94,6 +94,76 @@ describe('NoteIdIndex', () => {
     expect(idx.refs()).toEqual([]);
   });
 
+  it('a refresh still reading the old path does not bring back a renamed file', async () => {
+    const text = '---\nlabnote_id: LN-7K3M9QX2\n---\n';
+    const files: Record<string, string> = { 'a.labnote.md': text };
+    let release: (s: string) => void = () => {};
+    let hold = false;
+    const d = deps(files, async (path) => {
+      if (hold) return new Promise<string>((r) => (release = r));
+      if (!(path in files)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return files[path];
+    });
+    const idx = new NoteIdIndex(d);
+    await idx.ready();
+    const seen: string[] = [];
+    idx.onChange((p) => seen.push(p));
+    hold = true;
+    const pending = idx.refresh('a.labnote.md');
+    await vi.waitFor(() => expect(d.read).toHaveBeenCalledTimes(2));
+    idx.rename('a.labnote.md', 'x/a.labnote.md');
+    release(text);
+    await pending;
+    expect(idx.exists('a.labnote.md')).toBe(false);
+    expect(idx.refs().filter((r) => idx.idOf(r.path) === 'LN-7K3M9QX2').map((r) => r.path)).toEqual(['x/a.labnote.md']);
+    expect(seen).toEqual([]);
+  });
+
+  it('a refresh still reading a file inside a renamed folder is thrown away', async () => {
+    const text = '---\nlabnote_id: LN-7K3M9QX2\n---\n';
+    const files: Record<string, string> = { 'f/a.labnote.md': text };
+    let release: (s: string) => void = () => {};
+    let hold = false;
+    const d = deps(files, async (path) => {
+      if (hold) return new Promise<string>((r) => (release = r));
+      return files[path];
+    });
+    const idx = new NoteIdIndex(d);
+    await idx.ready();
+    hold = true;
+    const pending = idx.refresh('f/a.labnote.md');
+    await vi.waitFor(() => expect(d.read).toHaveBeenCalledTimes(2));
+    idx.rename('f', 'g');
+    release(text);
+    await pending;
+    expect(idx.refs().map((r) => r.path)).toEqual(['g/a.labnote.md']);
+  });
+
+  it('a rename or drop made while a rebuild is reading is kept when the rebuild lands', async () => {
+    const files: Record<string, string> = {
+      'a.labnote.md': '---\nlabnote_id: LN-7K3M9QX2\n---\n',
+      'b.labnote.md': '---\nlabnote_id: LN-8M4N0RY3\n---\n',
+    };
+    const gates: Array<() => void> = [];
+    let hold = false;
+    const d = deps(files, async (path) => {
+      if (hold) await new Promise<void>((r) => gates.push(r));
+      return files[path];
+    });
+    const idx = new NoteIdIndex(d);
+    await idx.ready();
+    hold = true;
+    const pending = idx.refresh('');
+    await vi.waitFor(() => expect(gates).toHaveLength(2));
+    idx.rename('a.labnote.md', 'x/a.labnote.md');
+    idx.drop('b.labnote.md');
+    for (const g of gates) g();
+    await pending;
+    expect(idx.exists('a.labnote.md')).toBe(false);
+    expect(idx.exists('b.labnote.md')).toBe(false);
+    expect(idx.idOf('x/a.labnote.md')).toBe('LN-7K3M9QX2');
+  });
+
   it("refresh('') rebuilds", async () => {
     const files: Record<string, string> = { 'a.md': '' };
     const idx = new NoteIdIndex(deps(files));
