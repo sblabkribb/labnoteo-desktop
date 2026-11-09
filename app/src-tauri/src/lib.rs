@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 pub mod index;
+pub mod mcp;
 pub mod net;
 pub mod print;
 pub mod vault;
@@ -70,6 +71,10 @@ macro_rules! register_commands {
             // SP7 Part A
             $crate::vault::fs::vault_created_times,
             $crate::print::print_open_in_browser,
+            // SP7 Part C
+            $crate::mcp::token::mcp_token_status,
+            $crate::mcp::token::mcp_token_regenerate,
+            $crate::mcp::token::mcp_token_copy,
         ])
     };
 }
@@ -95,6 +100,10 @@ pub fn run() {
         .manage(vault::VaultState::default())
         // Requests in flight (cancellable by id) and the PartBank web pacing gate.
         .manage(net::NetState::default())
+        // SP7 Part C: the MCP server's state (the in-memory token copy) and
+        // the clipboard the token is copied to from Rust (C5).
+        .manage(mcp::McpState::default())
+        .manage(mcp::ClipState(std::sync::Arc::new(mcp::ArboardClipboard)))
         .setup(|app| {
             // Never abort startup over where the last vault is remembered: fall
             // back to the temp dir (the choice is then just not kept long-term).

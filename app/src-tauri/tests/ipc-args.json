@@ -49,5 +49,8 @@
   "partbank_catalog_read": ["name"],
   "partbank_catalog_write": ["name", "content"],
   "integration_state_read": ["name"],
-  "integration_state_write": ["name", "content"]
+  "integration_state_write": ["name", "content"],
+  "mcp_token_status": [],
+  "mcp_token_regenerate": [],
+  "mcp_token_copy": []
 }

@@ -26,6 +26,19 @@ const ARGS: &str = include_str!("ipc-args.json");
 const ERRORS: &str = include_str!("ipc-errors.json");
 const EVENTS: &str = include_str!("ipc-events.json");
 const NET_ERRORS: &str = include_str!("ipc-net-errors.json");
+const MCP_ERRORS: &str = include_str!("ipc-mcp-errors.json");
+
+/// True when `s` holds a run of 48 or more hex chars: the shape of an MCP token.
+fn has_48_hex(s: &str) -> bool {
+    let mut run = 0;
+    for c in s.chars() {
+        run = if c.is_ascii_hexdigit() { run + 1 } else { 0 };
+        if run >= 48 {
+            return true;
+        }
+    }
+    false
+}
 
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
@@ -34,6 +47,8 @@ fn ipc_argument_names_match_the_typescript_side() {
     std::fs::create_dir_all(dir.join("vault")).unwrap();
     let vault = dir.join("vault").to_string_lossy().into_owned();
 
+    // The fake clipboard (never the real one), kept so the copy can be checked.
+    let clip = std::sync::Arc::new(labnoteo_app_lib::mcp::FakeClipboard::default());
     let app = labnoteo_app_lib::register_commands!(mock_builder())
         .manage(VaultState::default())
         .manage(SettingsFile(dir.join("config").join("settings.json")))
@@ -43,6 +58,8 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .manage(labnoteo_app_lib::net::NetState::default())
         .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
+        .manage(labnoteo_app_lib::mcp::McpState::default())
+        .manage(labnoteo_app_lib::mcp::ClipState(clip.clone()))
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -442,6 +459,25 @@ title: 실험
     assert!(call("vault_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
     std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
 
+    // The MCP token (Credential Manager; here the memory store): the webview
+    // learns a flag and an epoch, and the copy goes to the clipboard from Rust.
+    let first = responses.borrow().len();
+    assert_eq!(ok("mcp_token_status", args("mcp_token_status", vec![])), json!({"set": false, "epoch": 0}));
+    assert_eq!(ok("mcp_token_regenerate", args("mcp_token_regenerate", vec![])), json!({"set": true, "epoch": 1}));
+    assert_eq!(ok("mcp_token_status", args("mcp_token_status", vec![])), json!({"set": true, "epoch": 1}));
+    assert_eq!(ok("mcp_token_copy", args("mcp_token_copy", vec![])), Value::Null);
+    {
+        use labnoteo_app_lib::mcp::Clipboard;
+        let copied = clip.get().expect("the token is on the (fake) clipboard");
+        assert!(has_48_hex(&copied), "the clipboard holds the token");
+        for r in responses.borrow()[first..].iter() {
+            assert!(!r.contains(&copied), "{r}");
+        }
+    }
+    for r in responses.borrow().iter() {
+        assert!(!has_48_hex(r), "a response holds a 48-hex string: {r}");
+    }
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
@@ -571,6 +607,30 @@ fn net_error_kinds_match_the_fixture() {
     }
     let named: std::collections::BTreeSet<&str> = all.iter().map(name).collect();
     assert_eq!(named.len(), 17);
+}
+
+/// What `McpError` puts in `kind`, one entry per `McpErrorKind`.
+#[test]
+fn mcp_error_kinds_match_the_fixture() {
+    use labnoteo_app_lib::mcp::{McpError, McpErrorKind as K};
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(MCP_ERRORS).unwrap();
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a name (and an entry in the fixture).
+    let name = |k: &K| match k {
+        K::PortInUse => "portInUse",
+        K::Keychain => "keychain",
+        K::BadInput => "badInput",
+        K::Clipboard => "clipboard",
+        K::Io => "io",
+        K::NotRunning => "notRunning",
+    };
+    let all = [K::PortInUse, K::Keychain, K::BadInput, K::Clipboard, K::Io, K::NotRunning];
+    assert_eq!(fixture.len(), all.len(), "ipc-mcp-errors.json lists every kind");
+    for k in &all {
+        let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-mcp-errors.json", name(k)));
+        let wire = serde_json::to_value(McpError::new(*k, "m")).unwrap();
+        assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
+    }
 }
 
 #[test]
