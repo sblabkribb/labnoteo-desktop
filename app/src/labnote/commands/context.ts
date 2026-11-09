@@ -30,7 +30,7 @@ export interface CommandContext {
   /** 트리를 다시 읽고 vaultRefresh 를 알린다(Workflows 패널이 구독한다, Task 12). */
   refresh(): void;
   /** 사이드바 탭을 바꾼다. */
-  showPanel(panel: 'files' | 'workflows' | 'outline' | 'links'): void;
+  showPanel(panel: 'files' | 'workflows' | 'samples' | 'outline' | 'links'): void;
   /** 링크 색인과 고침 기록. 앱은 늘 준다. */
   links?: LinkDeps;
   /** 뒤로·앞으로 가기(SP4 Task 28). 앱은 늘 준다. */

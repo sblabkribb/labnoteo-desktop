@@ -59,7 +59,19 @@ let answers = new Map<string, boolean>();
 /** 실험 폴더 → 지금 진행 중인 읽기의 표. 늦게 끝난 옛 읽기는 답을 바꾸지 않는다. */
 let reading = new Map<string, symbol>();
 const listeners = new Set<() => void>();
+/** Registry files may have changed on disk (watcher, focus re-read, a write): the Samples panel re-reads its tree. */
+const registryListeners = new Set<() => void>();
 let offEvents: (() => void) | undefined;
+
+function notifyRegistry(): void {
+  for (const fn of [...registryListeners]) {
+    try {
+      fn();
+    } catch (e) {
+      console.error('[samples] registry listener failed', e);
+    }
+  }
+}
 
 function bump(): void {
   version++;
@@ -204,6 +216,7 @@ export const samples = {
 
   /** Watcher paths or 'all': registry JSON → index.fileChanged; README.labnote.md → tracking.invalidate; 'all' → both reset. */
   vaultChanged(paths: readonly string[] | 'all'): void {
+    if (paths === 'all' || paths.some((p) => isRegistryPath(p, globalFolder()) || maybeFolder(p))) notifyRegistry();
     if (!index || !tracking) return;
     if (paths === 'all') {
       index.invalidate();
@@ -223,6 +236,7 @@ export const samples = {
 
   /** Paths written by sync or a command (files → fileChanged; folders → index.invalidate()). */
   registryChanged(paths?: readonly string[]): void {
+    notifyRegistry();
     if (!index) return;
     if (!paths) {
       index.invalidate();
@@ -234,6 +248,15 @@ export const samples = {
       else folder = true;
     }
     if (folder) index.invalidate();
+  },
+
+  /**
+   * Fires when registry files may have changed, whether or not anything visible in the editors did: watcher and focus
+   * re-read paths that name a registry JSON or a folder ('all' included), and every registryChanged. Not a version bump.
+   */
+  subscribeRegistry(fn: () => void): () => void {
+    registryListeners.add(fn);
+    return () => void registryListeners.delete(fn);
   },
 
   /** Fires after version bumps. */
@@ -258,5 +281,6 @@ export const samples = {
     unbindAll();
     version = 0;
     listeners.clear();
+    registryListeners.clear();
   },
 };

@@ -82,7 +82,7 @@ export interface CommandContextDeps {
   reloadTree(): void;
   openFile(path: string, at?: At): Promise<void>;
   closeActive(): Promise<boolean>;
-  showPanel?: (p: 'files' | 'workflows' | 'outline' | 'links') => void;
+  showPanel?: (p: 'files' | 'workflows' | 'samples' | 'outline' | 'links') => void;
   /** 뒤로·앞으로 가기(SP4 Task 28). */
   navigate?: (dir: 'back' | 'forward') => void;
 }

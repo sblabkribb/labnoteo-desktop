@@ -673,6 +673,28 @@ button.sample-def-link:hover { text-decoration: underline; }
 .wf-tree-row[aria-expanded="false"]::before { content: "▸"; content: "▸" / ""; }
 .wf-tree-row:not([aria-expanded])::before { content: ""; flex: none; width: 1em; }
 
+/* Samples 패널(SP5 Task 25): 찾기, 도움말, Local·Global 트리. 종류 줄의 견본은 편집기의 종류 색 토큰으로 칠한다 */
+.samples-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+.samples-search { margin: 0 var(--space-3); min-width: 0; }
+.samples-hint { margin: 0; padding: 0 var(--space-3); color: var(--text-muted); font-size: var(--font-size-sm); }
+.sample-swatch {
+  flex: none;
+  width: 0.75em;
+  height: 0.75em;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.sample-swatch.lno-sample-t-dna { background: var(--sample-dna-bg); }
+.sample-swatch.lno-sample-t-rna { background: var(--sample-rna-bg); }
+.sample-swatch.lno-sample-t-plasmid { background: var(--sample-plasmid-bg); }
+.sample-swatch.lno-sample-t-reagent { background: var(--sample-reagent-bg); }
+.sample-swatch.lno-sample-t-primer { background: var(--sample-primer-bg); }
+.sample-swatch.lno-sample-t-protein { background: var(--sample-protein-bg); }
+.sample-swatch.lno-sample-t-equip { background: var(--sample-equip-bg); }
+.sample-swatch.lno-sample-t-labware { background: var(--sample-labware-bg); }
+.sample-swatch.lno-sample-t-other { background: var(--sample-other-bg); }
+.sample-swatch.lno-sample-t-custom { background: var(--sample-custom-bg); }
+
 /* 링크 패널(SP4 Task 17): 백링크 묶음(출처 노트 머리, 흐린 폴더), 링크 부분을 mark 로 칠한 맥락 줄 */
 .links-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); }
 .links-section { display: flex; flex-direction: column; gap: var(--space-2); }

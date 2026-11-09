@@ -144,6 +144,8 @@ describe('사이드바 탭', () => {
     await waitFor(() => expect(workflows().getAttribute('aria-selected')).toBe('true'));
     workflows().focus();
     await user.keyboard('{ArrowRight}');
+    expect(tabs().getByRole('tab', { name: t('sidebar.tab.samples') }).getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{ArrowRight}');
     expect(outline().getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(outline());
     expect(screen.getByRole('tabpanel', { name: t('sidebar.outline') })).toBeTruthy();
@@ -153,6 +155,31 @@ describe('사이드바 탭', () => {
     render(<App />);
     await screen.findByText('보관함: fake-vault');
     await waitFor(() => expect(outline().getAttribute('aria-selected')).toBe('true'));
+  });
+
+  it('the tab list puts Samples between Workflows and Outline, and a stored samples tab is restored', async () => {
+    const user = userEvent.setup();
+    installFakeVault({ 'labnote/001_GFP/README.labnote.md': README });
+    const first = render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    expect(t('sidebar.tab.samples')).toBe('샘플');
+    expect(tabs().getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      '파일',
+      '워크플로',
+      '샘플',
+      t('sidebar.outline'),
+      t('sidebar.tab.links'),
+    ]);
+    const samplesTab = () => tabs().getByRole('tab', { name: '샘플' });
+    await user.click(samplesTab());
+    expect(samplesTab().getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel', { name: '샘플' })).toBeTruthy();
+    expect(await screen.findByText(t('samples.root.global'))).toBeTruthy();
+    first.unmount();
+
+    render(<App />);
+    await screen.findByText('보관함: fake-vault');
+    await waitFor(() => expect(samplesTab().getAttribute('aria-selected')).toBe('true'));
   });
 
   it('the Links tab is reachable with ArrowRight and remembered per vault', async () => {

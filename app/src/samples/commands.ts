@@ -46,4 +46,5 @@ export const sampleCommands: Command[] = [
       await openSampleDefinitionCommand(createSampleEnv(ctx));
     },
   },
+  { id: 'open-sample-view', nameKey: 'Open sample view', run: async (ctx) => ctx.showPanel('samples') },
 ];

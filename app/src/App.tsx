@@ -51,6 +51,7 @@ import { closeMenu, openMenu } from './labnote/ui/menuStore';
 import { EditorActions } from './labnote/ui/EditorActions';
 import { editorMenu, noteTreeMenu } from './labnote/menus';
 import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
+import { SamplesPanel } from './samples/SamplesPanel';
 import { OutlinePanel } from './editor/outline/OutlinePanel';
 import { LinksPanel } from './links/LinksPanel';
 import { createFromLink } from './links/createFromLink';
@@ -62,9 +63,9 @@ import { subscribeVaultChanges, type ListenFn } from './vault/useVaultEvents';
 import { useVaultChanges } from './labnote/panel/useVaultChanges';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 
-type SidebarTab = 'files' | 'workflows' | 'outline' | 'links';
+type SidebarTab = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
 
-const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'outline', 'links'];
+const TAB_ORDER: readonly SidebarTab[] = ['files', 'workflows', 'samples', 'outline', 'links'];
 
 /** 마우스의 뒤로(3)·앞으로(4) 단추. */
 const MOUSE_BACK = 3;
@@ -447,6 +448,18 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
             <button
               type="button"
               role="tab"
+              id="sidebar-tab-samples"
+              aria-controls="sidebar-panel-samples"
+              aria-selected={tab === 'samples'}
+              tabIndex={tab === 'samples' ? 0 : -1}
+              className="sidebar-tab"
+              onClick={() => showPanel('samples')}
+            >
+              {t('sidebar.tab.samples')}
+            </button>
+            <button
+              type="button"
+              role="tab"
               id="sidebar-tab-outline"
               aria-controls="sidebar-panel-outline"
               aria-selected={tab === 'outline'}
@@ -478,6 +491,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme, lang }: Vie
           {tab === 'workflows' && (
             <div role="tabpanel" id="sidebar-panel-workflows" className="sidebar-panel" aria-labelledby="sidebar-tab-workflows">
               {ctx ? <WorkflowsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
+            </div>
+          )}
+          {tab === 'samples' && (
+            <div role="tabpanel" id="sidebar-panel-samples" className="sidebar-panel" aria-labelledby="sidebar-tab-samples">
+              {ctx ? <SamplesPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
             </div>
           )}
           {tab === 'outline' && (

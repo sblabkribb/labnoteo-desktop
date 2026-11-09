@@ -44,6 +44,8 @@ export interface TestHost {
   notes: Array<{ kind: NotifyKind; message: string }>;
   asked: Asked;
   opened: string[];
+  /** ctx.showPanel 으로 고른 사이드바 탭, 차례대로. */
+  panels: Array<Parameters<CommandContext['showPanel']>[0]>;
   refreshes: () => number;
   answer: {
     /** 고를 값(문자열 등), 또는 받은 항목과 옵션으로 값을 고르는 함수. */
@@ -77,6 +79,7 @@ export function createTestHost(
   const notes: TestHost['notes'] = [];
   const asked: Asked = { pick: [], prompt: [], confirm: [], alias: [] };
   const opened: string[] = [];
+  const panels: TestHost['panels'] = [];
   const queues = { pick: [] as unknown[], prompt: [] as unknown[], confirm: [] as unknown[], alias: [] as unknown[] };
   const next = <R>(q: unknown[], fallback: R, ...args: unknown[]): R => {
     if (q.length === 0) return fallback;
@@ -136,7 +139,7 @@ export function createTestHost(
     openFile,
     closeActive: async () => true,
     refresh: () => void refreshes++,
-    showPanel: () => undefined,
+    showPanel: (panel) => void panels.push(panel),
     links: {
       index: linkIndex,
       journal: createJournalStore(invoke),
@@ -152,6 +155,7 @@ export function createTestHost(
     notes,
     asked,
     opened,
+    panels,
     refreshes: () => refreshes,
     answer: {
       pick: (...a) => void queues.pick.push(...a),
