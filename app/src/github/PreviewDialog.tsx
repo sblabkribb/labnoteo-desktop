@@ -137,6 +137,9 @@ export function PreviewDialog(props: {
   const tickable = (f: PlanFile) => !f.generated && f.change !== 'deleted';
   const sending = visible.filter((f) => f.change !== 'deleted' && !untick.has(f.path));
   const bytes = sending.reduce((n, f) => n + f.size, 0);
+  // 1.5 GiB 한도는 Rust 처럼 공용 시료 파일(고른 경우)까지 센다. Rust 가 더 세는 것이 있으면 올리기가 `blocked` 로 돌아온다.
+  const limitBytes =
+    bytes + plan.files.filter((f) => f.sample && samples && f.change !== 'deleted' && !untick.has(f.path)).reduce((n, f) => n + f.size, 0);
 
   const toggle = (path: string, on: boolean) =>
     setUntick((before) => {
@@ -157,7 +160,7 @@ export function PreviewDialog(props: {
       case 'unreadable':
         return untick.has(r.path);
       case 'uploadTooLarge':
-        return bytes <= r.limit;
+        return limitBytes <= r.limit;
       case 'nfdCollision':
         return r.paths.filter((p) => !untick.has(p)).length <= 1;
       case 'publicNotConfirmed':
@@ -184,7 +187,14 @@ export function PreviewDialog(props: {
             <p>{t('github.preview.secret', base(r.hit.path), r.hit.line, hitKind(r.hit), r.hit.masked)}</p>
             {r.fromSample ? null : (
               <div className="github-actions">
-                <button type="button" onClick={() => void Promise.resolve(deps.openFile(r.hit.path)).catch(() => undefined)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // 파일을 고치면 이 계획은 낡는다: 미리보기를 닫고(모달 뒤에 열리지 않게) 파일을 연다.
+                    props.onCancel();
+                    void Promise.resolve(deps.openFile(r.hit.path)).catch(() => undefined);
+                  }}
+                >
                   {t('github.preview.openFile')}
                 </button>
                 <button type="button" disabled={untick.has(r.hit.path)} onClick={() => toggle(r.hit.path, false)}>
@@ -266,7 +276,15 @@ export function PreviewDialog(props: {
     <DialogFrame title={t('github.preview.title')} className="github-dialog github-preview" onCancel={props.onCancel}>
       <div className="github-form">
         <p className="github-private">
-          <Icon name={head.private === false ? 'globe' : 'lock'} size={14} />
+          {head.private === true ? (
+            <span className="github-visibility">
+              <Icon name="lock" size={14} /> <span>{t('github.preview.private')}</span>
+            </span>
+          ) : head.private === false ? (
+            <span className="github-visibility public">
+              <Icon name="globe" size={14} /> <span>{t('github.preview.public')}</span>
+            </span>
+          ) : null}
           <span>
             {head.fullName ? <code>{head.fullName}</code> : null} {head.title ? `"${head.title}"` : null}
           </span>

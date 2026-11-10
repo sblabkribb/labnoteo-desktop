@@ -8,6 +8,7 @@ import {
   type InfoFinding,
   type PlanOutcome,
   type PlanTarget,
+  type Red,
   type UploadChoices,
   type UploadOutcome,
   type Yellow,
@@ -102,6 +103,8 @@ export interface CollectedInfo {
   sampleIds: string[];
   infoFindings: InfoFinding[];
   title: string;
+  /** 노트(보관함 경로)마다 그 노트가 넣었지만 폴더 밖에 있는 파일(보관함 경로). 다시 올리기에서 바뀐 노트의 것만 보인다. */
+  outsideByNote?: Record<string, string[]>;
 }
 
 export interface FlowDeps {
@@ -153,6 +156,59 @@ export function fitsQuick(plan: ReadyPlan): boolean {
     !yellowBlocksQuick(plan) &&
     (plan.totals.new > 0 || plan.totals.deleted > 0)
   );
+}
+
+/**
+ * 다시 올리기에서 보일 `outside` 발견: 지난 올리기 뒤 새로 생기거나 바뀐 노트가 폴더 밖 파일을 넣었을 때만.
+ * 다른 표시용 발견(작성자, 링크 …)은 다시 보이지 않는다: 처음 올릴 때 보였고, 넘기면 매번 전체 미리보기가 된다.
+ */
+export function changedOutside(plan: ReadyPlan, folder: string, info: CollectedInfo): InfoFinding | null {
+  const byNote = info.outsideByNote ?? {};
+  const paths = new Set<string>();
+  for (const f of plan.files) {
+    if (f.change !== 'new' && f.change !== 'changed') continue;
+    for (const p of byNote[`${folder}/${f.path}`] ?? []) paths.add(p);
+  }
+  return paths.size > 0 ? { kind: 'outside', count: paths.size, paths: [...paths].sort() } : null;
+}
+
+function hitText(h: Extract<Red, { kind: 'secret' }>['hit']): string {
+  switch (h.kind) {
+    case 'apiKey':
+      return t('github.preview.kind.apiKey');
+    case 'privateKey':
+      return t('github.preview.kind.privateKey');
+    case 'password':
+      return t('github.preview.kind.password');
+    case 'token':
+      return t('github.preview.kind.token');
+    case 'suspect':
+      return t('github.preview.kind.suspect');
+    case 'saved':
+      return t('github.preview.secretSaved', h.label);
+  }
+}
+
+/** 남은 빨간 항목을 알림의 자세히 보기 줄로. */
+export function redLines(red: readonly Red[]): string[] {
+  return red.map((r) => {
+    switch (r.kind) {
+      case 'secret':
+        return `${r.hit.path}:${r.hit.line} — ${hitText(r.hit)}`;
+      case 'tooLarge':
+        return `${r.path} — ${t('github.preview.tooBig')}`;
+      case 'unreadable':
+        return `${r.path} — ${t('github.preview.unreadable')}`;
+      case 'uploadTooLarge':
+        return t('github.preview.uploadTooBig');
+      case 'nfdCollision':
+        return `${t('github.preview.dropOne')}: ${r.paths.join(', ')}`;
+      case 'publicNotConfirmed':
+        return t('github.public.nowPublic');
+      case 'divergedNotAcknowledged':
+        return `${t('github.diverged.title')}: ${r.paths.join(', ')}`;
+    }
+  });
 }
 
 /** 계획을 세우지 못한 까닭의 글. */
@@ -208,8 +264,8 @@ export async function uploadExperiment(ctx: CommandContext, folder: string, deps
   try {
     await runFlow(folder, deps);
   } catch (e) {
-    const text = githubErrorText(e);
-    if (text) deps.ui.notify('error', text);
+    // 뜻밖의 오류(빈 글로 바뀌는 것 포함)도 말 없이 끝나지 않게 일반 오류 글을 보인다.
+    deps.ui.notify('error', githubErrorText(e) || t('github.err.local'));
   }
 }
 
@@ -269,14 +325,17 @@ async function runFlow(folder: string, deps: FlowDeps): Promise<void> {
 
   let signedInAgain = false;
   let replanned = false;
+  const makePlan = async (): Promise<PlanOutcome> => {
+    if (target.kind !== 'update') return ipc.githubPlan({ folder, target, sampleIds: info.sampleIds, infoFindings: info.infoFindings });
+    // 다시 올리기: 표시용 발견 없이 계획하고, 바뀐 노트가 폴더 밖 파일을 넣었으면 그것만 넘겨 한 번 더 계획한다(spec §17).
+    const plan = await ipc.githubPlan({ folder, target, sampleIds: info.sampleIds, infoFindings: [] });
+    if (plan.outcome !== 'ready') return plan;
+    const outside = changedOutside(plan, folder, info);
+    return outside ? ipc.githubPlan({ folder, target, sampleIds: info.sampleIds, infoFindings: [outside] }) : plan;
+  };
+
   for (;;) {
-    const plan = await ipc.githubPlan({
-      folder,
-      target,
-      sampleIds: info.sampleIds,
-      // 다시 올리기에서는 링크 같은 표시용 발견을 다시 보이지 않는다: 처음 올릴 때 보였고, 넘기면 매번 전체 미리보기가 된다.
-      infoFindings: target.kind === 'update' ? [] : info.infoFindings,
-    });
+    const plan = await makePlan();
     if (plan.outcome !== 'ready') {
       if (plan.outcome === 'notLinked' && !replanned) {
         replanned = true;
@@ -329,14 +388,25 @@ async function runFlow(folder: string, deps: FlowDeps): Promise<void> {
           return account ? 'plan' : 'stop';
         case 'planStale':
         case 'planExpired':
-        case 'blocked':
           if (replanned) {
             ui.notify('error', outcome.outcome === 'planExpired' ? t('github.err.planExpired') : t('github.err.planStale'));
             return 'stop';
           }
           replanned = true;
-          if (outcome.outcome !== 'blocked') ui.notify('info', outcome.outcome === 'planExpired' ? t('github.err.planExpired') : t('github.err.planStale'));
+          ui.notify('info', outcome.outcome === 'planExpired' ? t('github.err.planExpired') : t('github.err.planStale'));
           return 'plan';
+        case 'blocked': {
+          // Rust 가 막은 까닭(남은 빨간 항목)을 보이고, 한 번만 다시 계획한다: 새 미리보기가 그 항목을 보인다.
+          const lines = redLines(outcome.red);
+          const opts = lines.length > 0 ? { title: t('github.preview.mustFix'), detail: lines.join('\n') } : undefined;
+          if (replanned) {
+            ui.notify('error', t('github.err.blocked'), opts);
+            return 'stop';
+          }
+          replanned = true;
+          ui.notify('warn', t('github.err.blocked'), opts);
+          return 'plan';
+        }
         case 'needsPreview':
           // 저장소는 있다(끝나지 않은 올리기): 그 저장소로 다시 계획하고 미리보기를 보인다.
           if (replanned) {
@@ -505,7 +575,14 @@ export function realFlowDeps(ctx: CommandContext): FlowDeps {
           nameCheck: (owner, name) => githubNameCheck(owner, name),
           resolveRepo: (url) => githubResolveRepo(url),
         }),
-      preview: (plan, head) => githubPreviewDialog(plan, head, { openFile: (path) => ctx.openFile(`${head.folder}/${path}`) }),
+      // [파일 열기] 는 미리보기를 닫고(흐름이 끝난다) 파일을 연다: 고친 뒤에는 다시 올리기부터 해야 한다.
+      preview: (plan, head) =>
+        githubPreviewDialog(plan, head, {
+          openFile: async (path) => {
+            await ctx.openFile(`${head.folder}/${path}`);
+            ctx.host.notify('info', t('github.preview.fixThenUpload'));
+          },
+        }),
       quick: (plan) => githubQuickDialog(plan),
       diverged: (files) => githubDivergedDialog(files),
       progress: (title) => openProgress(title),

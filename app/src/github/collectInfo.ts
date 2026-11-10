@@ -38,6 +38,7 @@ export async function collectInfoWith(folder: string, d: CollectDeps): Promise<C
   const sampleIds = new Set<string>();
   const used = new Set<string>();
   const outside = new Set<string>();
+  const outsideByNote: Record<string, string[]> = {};
   let wikiLinks = 0;
   let crossLinks = 0;
   for (const note of notes) {
@@ -57,7 +58,11 @@ export async function collectInfoWith(folder: string, d: CollectDeps): Promise<C
         continue;
       }
       if (NOTE.test(target)) crossLinks += 1;
-      else outside.add(target);
+      else {
+        outside.add(target);
+        const mine = (outsideByNote[note] ??= []);
+        if (!mine.includes(target)) mine.push(target);
+      }
     }
   }
   const unused = own.filter((p) => IMAGE.test(p) && !used.has(p));
@@ -84,5 +89,6 @@ export async function collectInfoWith(folder: string, d: CollectDeps): Promise<C
   if (wikiLinks > 0) infoFindings.push({ kind: 'wikiLinks', count: wikiLinks });
   if (outside.size > 0) infoFindings.push({ kind: 'outside', count: outside.size, paths: [...outside].sort() });
   if (unused.length > 0) infoFindings.push({ kind: 'unused', count: unused.length, paths: unused.sort() });
-  return { sampleIds: [...sampleIds].sort(), infoFindings, title };
+  for (const paths of Object.values(outsideByNote)) paths.sort();
+  return { sampleIds: [...sampleIds].sort(), infoFindings, title, outsideByNote };
 }

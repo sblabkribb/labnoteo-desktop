@@ -139,7 +139,7 @@ describe('progress dialog', () => {
     expect(currentDialog()).toBeNull();
   });
 
-  it('setCancellable(false) hides Cancel, and Escape and the close button no longer abort', async () => {
+  it('setCancellable(false) hides Cancel, disables Close, and Escape no longer aborts', async () => {
     renderLayer();
     const p = open('Uploading', { cancellable: true });
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
@@ -150,11 +150,15 @@ describe('progress dialog', () => {
       dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(p.signal.aborted).toBe(false);
-    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    // the locked window's close button is disabled, so keyboard users never land on a dead control
+    const close = screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true);
+    await userEvent.click(close);
     expect(p.signal.aborted).toBe(false);
     expect(screen.getByRole('dialog')).toBeTruthy();
     act(() => p.setCancellable(true));
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(false);
     act(() => p.done());
     expect(p.signal.aborted).toBe(false);
   });

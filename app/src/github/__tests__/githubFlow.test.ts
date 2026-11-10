@@ -10,7 +10,8 @@ import type {
   UploadOutcome,
 } from '../../integrations/githubIpc';
 import type { CommandContext } from '../../labnote/commands/context';
-import { fitsQuick, uploadExperiment, type FlowDeps, type FlowUi, type ReadyPlan } from '../githubFlow';
+import { NetError } from '../../integrations/netIpc';
+import { fitsQuick, uploadExperiment, type CollectedInfo, type FlowDeps, type FlowUi, type ReadyPlan } from '../githubFlow';
 import type { Destination, DestinationInit } from '../UploadDialog';
 import { LinkIndex } from '../../links/linkIndex';
 import { collectInfoWith } from '../collectInfo';
@@ -73,7 +74,8 @@ function harness(o: {
   diverged?: Array<{ mode: 'mine' | 'separate'; ack: string[] } | 'cancel'>;
   choose?: unknown[];
   progress?: GithubProgress[];
-  info?: { sampleIds: string[]; infoFindings: never[] | Array<{ kind: 'outside'; paths: string[] }>; title: string };
+  info?: CollectedInfo;
+  planError?: unknown;
 }): Harness {
   const h: Harness = {
     deps: undefined as unknown as FlowDeps,
@@ -159,6 +161,7 @@ function harness(o: {
       githubPlan: async (a) => {
         h.calls.push('plan');
         h.plans.push({ target: a.target, infoFindings: a.infoFindings });
+        if (o.planError !== undefined) throw o.planError;
         return (plans.length > 1 ? plans.shift() : plans[0]) ?? ready();
       },
       githubUpload: async (a) => {
@@ -375,6 +378,46 @@ describe('uploadExperiment', () => {
     const again = harness({ info, status: LINKED, plans: [ready({ mode: 'update', quickOk: true })] });
     await uploadExperiment(ctx, FOLDER, again.deps);
     expect(again.plans[0].infoFindings).toEqual([]);
+    expect(again.plans).toHaveLength(1);
+  });
+
+  it('a re-upload whose changed note embeds a file from outside the folder re-plans with only that outside finding', async () => {
+    const info: CollectedInfo = {
+      sampleIds: [],
+      infoFindings: [{ kind: 'author', names: ['홍길동'] }, { kind: 'outside', count: 2, paths: ['resources/a.png', 'resources/old.png'] }],
+      title: 'x',
+      outsideByNote: { [`${FOLDER}/notes/day2.md`]: ['resources/a.png'], [`${FOLDER}/README.labnote.md`]: ['resources/old.png'] },
+    };
+    const files = [
+      { path: 'notes/day2.md', size: 5, change: 'changed' as const },
+      { path: 'README.labnote.md', size: 5, change: 'same' as const },
+    ];
+    // Rust shows the outside finding as an info yellow, which always asks for the full preview
+    const outsideYellow = { kind: 'info' as const, info: 'outside' as const, count: 1, paths: ['resources/a.png'], names: [] };
+    const h = harness({ info, status: LINKED, plans: [ready({ mode: 'update', quickOk: true, files }), ready({ mode: 'update', files, yellow: [outsideYellow] })], preview: [{}] });
+    await uploadExperiment(ctx, FOLDER, h.deps);
+    expect(h.calls).toEqual(['plan', 'plan', 'preview', 'upload']);
+    expect(h.plans[0].infoFindings).toEqual([]);
+    expect(h.plans[1].infoFindings).toEqual([{ kind: 'outside', count: 1, paths: ['resources/a.png'] }]);
+  });
+
+  it('blocked shows the remaining red items and re-plans once; a second blocked stops with err.blocked, not planStale', async () => {
+    const red = [{ kind: 'tooLarge' as const, path: 'raw/gel.czi', size: 200_000_000 }];
+    const h = harness({ outcomes: [{ outcome: 'blocked', red }, { outcome: 'blocked', red }], preview: [{}, {}] });
+    await uploadExperiment(ctx, FOLDER, h.deps);
+    expect(h.calls).toEqual(['destination', 'plan', 'preview', 'upload', 'plan', 'preview', 'upload']);
+    expect(h.notes.map((n) => [n.kind, n.message])).toEqual([
+      ['warn', t('github.err.blocked')],
+      ['error', t('github.err.blocked')],
+    ]);
+    expect(h.notes.some((n) => n.message === t('github.err.planStale'))).toBe(false);
+    expect(h.notes[0].opts).toEqual({ title: t('github.preview.mustFix'), detail: `raw/gel.czi — ${t('github.preview.tooBig')}` });
+  });
+
+  it('an unexpected error that maps to no text still tells the user something went wrong', async () => {
+    const h = harness({ planError: new NetError('cancelled', 'cancelled') });
+    await uploadExperiment(ctx, FOLDER, h.deps);
+    expect(h.notes.map((n) => [n.kind, n.message])).toEqual([['error', t('github.err.local')]]);
   });
 });
 

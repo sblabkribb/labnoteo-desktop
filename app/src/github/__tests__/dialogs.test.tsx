@@ -286,14 +286,51 @@ describe('preview dialog', () => {
     const hit = { kind: 'suspect' as const, path: 'notes.md', line: 14, masked: 'sk-…a9f1', lineHash: 'abc', overridable: true };
     const p = openIn(() => githubPreviewDialog(plan({ red: [{ kind: 'secret', hit }] }), HEAD, { openFile: (path) => void opened.push(path) }));
     expect(screen.getByText(t('github.preview.secret', 'notes.md', 14, t('github.preview.kind.suspect'), 'sk-…a9f1'))).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: t('github.preview.openFile') }));
-    expect(opened).toEqual(['notes.md']);
+    expect(screen.getByRole('button', { name: t('github.preview.notAKey') })).toBeTruthy();
     const upload = screen.getByRole('button', { name: t('github.preview.upload') }) as HTMLButtonElement;
     expect(upload.disabled).toBe(true);
     await userEvent.click(screen.getByRole('button', { name: t('github.preview.notAKey') }));
     expect(upload.disabled).toBe(false);
     await userEvent.click(upload);
     await expect(p).resolves.toEqual({ untick: [], allowHits: [{ path: 'notes.md', lineHash: 'abc' }], includeSamples: false });
+  });
+
+  it('"open file" closes the preview first, so the file is not opened behind it', async () => {
+    renderLayer();
+    const opened: Array<{ path: string; dialogOpen: boolean }> = [];
+    const hit = { kind: 'suspect' as const, path: 'notes.md', line: 14, masked: 'sk-…a9f1', lineHash: 'abc', overridable: true };
+    const p = openIn(() =>
+      githubPreviewDialog(plan({ red: [{ kind: 'secret', hit }] }), HEAD, {
+        openFile: (path) => void opened.push({ path, dialogOpen: currentDialog() !== null }),
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.openFile') }));
+    await expect(p).resolves.toBe('cancel');
+    expect(opened).toEqual([{ path: 'notes.md', dialogOpen: false }]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('the header says private or public in words, and nothing when visibility is unknown', () => {
+    renderLayer();
+    void openIn(() => githubPreviewDialog(plan(), HEAD, { openFile: () => undefined }));
+    let header = document.querySelector('.github-private')!;
+    expect(header.textContent).toContain(t('github.preview.private'));
+    expect(header.textContent).toContain(HEAD.fullName);
+    cleanupDialogs();
+
+    renderLayer();
+    void openIn(() => githubPreviewDialog(plan(), { ...HEAD, private: false }, { openFile: () => undefined }));
+    header = document.querySelector('.github-private')!;
+    expect(header.textContent).toContain(t('github.preview.public'));
+    expect(header.textContent).not.toContain(t('github.preview.private'));
+    cleanupDialogs();
+
+    renderLayer();
+    void openIn(() => githubPreviewDialog(plan(), { ...HEAD, private: undefined }, { openFile: () => undefined }));
+    header = document.querySelector('.github-private')!;
+    expect(header.textContent).not.toContain(t('github.preview.private'));
+    expect(header.textContent).not.toContain(t('github.preview.public'));
+    expect(header.querySelector('svg')).toBeNull();
   });
 
   it('a private-key hit has no "not a key" button', () => {
