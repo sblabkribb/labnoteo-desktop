@@ -233,3 +233,36 @@ describe('Assistant pane: skin row (plan Task 16)', () => {
     expect(screen.getByRole('group', { name: 'Skin' }).textContent).toContain('By Hong · Licence: CC-BY-4.0');
   });
 });
+
+describe('Assistant pane: skin import and export (Task 17)', () => {
+  const blue: SkinManifest = { ...BUILTIN_SKIN, id: 'flasko-blue', name: 'Flasko Blue', author: 'Hong', licence: 'CC-BY-4.0' };
+
+  it('export saves the chosen skin (the built-in one too); import leaves the settings window first', async () => {
+    const exportSkin = vi.fn(async () => true);
+    const importSkin = vi.fn(async () => undefined);
+    const leave = vi.fn(async (after: () => Promise<void>) => after());
+    const deps = { list: vi.fn(async () => [blue]), exportSkin, importSkin, leave, notify: vi.fn() };
+    const view = render(<SkinRow {...deps} active="flasko-blue" />);
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '내보내기' }));
+    expect(exportSkin).toHaveBeenCalledWith('flasko-blue');
+    view.rerender(<SkinRow {...deps} active="flasko" />);
+    await userEvent.click(screen.getByRole('button', { name: '내보내기' }));
+    expect(exportSkin).toHaveBeenLastCalledWith('flasko');
+    await userEvent.click(screen.getByRole('button', { name: '가져오기' }));
+    expect(leave).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(importSkin).toHaveBeenCalledTimes(1);
+  });
+
+  it('without a settings window, import runs in place and the list is read again', async () => {
+    const list = vi.fn(async () => [blue]);
+    const importSkin = vi.fn(async () => undefined);
+    render(<SkinRow list={list} importSkin={importSkin} active="flasko" />);
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '가져오기' }));
+    await settle();
+    expect(importSkin).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+});

@@ -110,5 +110,8 @@
   "skin_install": ["stagingId", "replace"],
   "skin_list": [],
   "skin_read": ["id"],
-  "skin_remove": ["id"]
+  "skin_remove": ["id"],
+  "skin_import_pick": [],
+  "skin_staging_discard": ["stagingId"],
+  "skin_export": ["id"]
 }

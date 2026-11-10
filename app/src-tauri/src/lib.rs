@@ -147,6 +147,10 @@ macro_rules! register_commands {
             $crate::skins::store::skin_list,
             $crate::skins::store::skin_read,
             $crate::skins::store::skin_remove,
+            // Import and export pack files through Rust's own dialogs (assistant Task 17).
+            $crate::skins::store::skin_import_pick,
+            $crate::skins::store::skin_staging_discard,
+            $crate::skins::store::skin_export,
         ])
     };
 }
@@ -226,6 +230,8 @@ pub fn run() {
             app.manage(net::secrets::Secrets::keyring());
             // Save as... for SKILL.md: Rust's own save dialog, modal to the main window.
             app.manage(skill::SkillPicker::dialog(app.handle().clone()));
+            // Open and save dialogs for .labnoteo-skin files (the path never comes from JS).
+            app.manage(skins::SkinFileDialogs::dialog(app.handle().clone()));
             // Watches the open vault for changes made outside the app; started
             // by `vault_open` / `vault_current`, moved when the vault changes.
             app.manage(vault::watcher::WatcherState::new(vault::watcher::app_starter(app.handle().clone())));

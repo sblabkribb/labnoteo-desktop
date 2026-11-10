@@ -14,6 +14,8 @@ import type { ResultActions } from '../port/scanFeatureRuns';
 import type { ScanPipeline, ScanResult } from '../port/scanPipeline';
 import type { UnmatchedIo } from '../scan/UnmatchedDialog';
 import type { BuiltContext } from '../context/contextBuilder';
+import type { StagedSkin } from '../../assistant/skins/store';
+import type { SkinUrls } from '../../assistant/skins/useSkin';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -68,7 +70,9 @@ export type DialogSpec =
   // 새 실험(UI 재설계 Task 19): 제목과 실험자. 끝나면 NewExperimentResult, 닫으면 undefined
   | { kind: 'newExperiment'; opts: NewExperimentOpts }
   // feat/ai-context: context sources before AI drafting. Send resolves { sources, window }, closing resolves null
-  | { kind: 'aiContextSources'; built: BuiltContext; window: number; providerLabel: string; model: string };
+  | { kind: 'aiContextSources'; built: BuiltContext; window: number; providerLabel: string; model: string }
+  // 어시스턴트 스킨 가져오기(assistant Task 17): Rust 가 검사해 임시 보관한 팩의 미리 보기. 'install' 이면 설치 확인으로, 닫으면 undefined
+  | { kind: 'skinImport'; staged: StagedSkin; urls?: SkinUrls };
 
 
 /**

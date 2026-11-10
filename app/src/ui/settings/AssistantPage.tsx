@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
 import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
+import { exportSkinFile, importSkinFile } from '../../assistant/skins/transfer';
 import type { SkinManifest } from '../../assistant/skins/types';
 import type { WebSearchResult } from '../../assistant/web/ipc';
 import { assistantSession } from '../../assistant/useAssistantSession';
@@ -17,9 +18,9 @@ import { SettingRow, Toggle } from './SettingRow';
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
  * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json),
- * 대화 기록(Task 10).
+ * 대화 기록(Task 10). 스킨 가져오기(Task 17)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
  */
-export function AssistantPage() {
+export function AssistantPage(props: { leave?: (after: () => Promise<void>) => void } = {}) {
   useLang();
   const { pet } = useLayout();
   return (
@@ -44,7 +45,7 @@ export function AssistantPage() {
           />
         }
       />
-      <SkinRow />
+      <SkinRow leave={props.leave} />
       <WebSearchRow />
       <HistoryRow />
     </>
@@ -60,12 +61,19 @@ export interface SkinRowDeps {
   remove?: (id: string) => Promise<void>;
   confirm?: (message: string) => Promise<boolean>;
   notify?: (kind: 'info' | 'warn', message: string) => void;
+  /** 스킨 파일 가져오기(미리 보기와 확인을 거쳐 설치). */
+  importSkin?: () => Promise<unknown>;
+  /** 스킨 파일 내보내기(Rust 저장 창). */
+  exportSkin?: (id: string) => Promise<boolean>;
+  /** 설정 창을 닫고 그 뒤에 `after` 를 한다(가져오기의 창들이 설정 창 뒤에 줄 서지 않게). 없으면 바로 한다. */
+  leave?: (after: () => Promise<void>) => void;
 }
 
 /**
  * 스킨 줄(assistant 명세 §8.3, §10.1, plan Task 16): 기본 스킨(맨 앞)과 이 PC 에 설치한 스킨에서 고르고(ui.json pet.skin),
  * 고른 스킨을 지운다(확인 후, 되돌릴 수 없다). 기본 스킨은 지울 수 없다. 모르는 id 는 기본 스킨으로 보인다.
  * 이름·만든 사람·라이선스는 스킨 파일에서 온 글이라 글자로만 보인다(React 가 이스케이프한다).
+ * "가져오기"는 설정 창을 닫고 파일을 골라 미리 보기·확인을 거쳐 설치한다(Task 17). "내보내기"는 고른 스킨(기본 스킨도)을 파일로 저장한다.
  */
 export function SkinRow(deps: SkinRowDeps = {}) {
   useLang();
@@ -76,6 +84,8 @@ export function SkinRow(deps: SkinRowDeps = {}) {
   const remove = deps.remove ?? ((id: string) => removeSkinAndFallBack(id));
   const confirm = deps.confirm ?? ((message: string) => confirmDialog(message, { confirmLabel: t('settings.assistant.skin.remove'), destructive: true }));
   const notify = deps.notify ?? toast;
+  const importSkin = deps.importSkin ?? (() => importSkinFile());
+  const exportSkin = deps.exportSkin ?? ((id: string) => exportSkinFile(id));
   const [installed, setInstalled] = useState<SkinManifest[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -115,6 +125,29 @@ export function SkinRow(deps: SkinRowDeps = {}) {
     }
   };
 
+  const runImport = () => {
+    if (deps.leave) {
+      deps.leave(async () => {
+        await importSkin();
+      });
+      return;
+    }
+    setBusy(true);
+    void importSkin().finally(() => {
+      setBusy(false);
+      void refresh();
+    });
+  };
+
+  const runExport = async () => {
+    setBusy(true);
+    try {
+      await exportSkin(current.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const label = t('settings.assistant.skin');
   return (
     <SettingRow
@@ -129,6 +162,12 @@ export function SkinRow(deps: SkinRowDeps = {}) {
               </option>
             ))}
           </SelectField>
+          <button type="button" className="btn" disabled={busy} onClick={runImport}>
+            {t('settings.assistant.skin.import')}
+          </button>
+          <button type="button" className="btn" disabled={busy} onClick={() => void runExport()}>
+            {t('settings.assistant.skin.export')}
+          </button>
           <button type="button" className="btn danger" disabled={busy || current.builtin} onClick={() => void run()}>
             {t('settings.assistant.skin.remove')}
           </button>

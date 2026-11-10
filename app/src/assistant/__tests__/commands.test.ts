@@ -48,6 +48,8 @@ describe('assistant commands (spec §10.2, the ones that work after Task 5)', ()
       'assistant.createSection',
       'assistant.createUnitOperation',
       'assistant.createWorkflow',
+      'skins.import',
+      'skins.export',
     ]);
     expect(assistantCommands().map((c) => c.id)).toEqual([...ASSISTANT_COMMAND_IDS]);
     const ids = appCommands().map((c) => c.id);

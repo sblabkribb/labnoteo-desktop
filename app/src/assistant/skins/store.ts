@@ -8,6 +8,7 @@
  */
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import type { InvokeFn } from '../../integrations/netIpc';
+import { t } from '../../i18n/t';
 import { layoutStore } from '../../ui/layoutStore';
 import { BUILTIN_SKIN, BUILTIN_SKIN_ID } from './builtin';
 import type { SkinManifest, SkinState } from './types';
@@ -127,4 +128,78 @@ export interface SkinChoice {
 export function skinChoices(installed: readonly SkinManifest[]): SkinChoice[] {
   const pick = (m: SkinManifest, builtin: boolean): SkinChoice => ({ id: m.id, name: m.name, author: m.author, licence: m.licence, builtin });
   return [pick(BUILTIN_SKIN, true), ...installed.filter((m) => m.id !== BUILTIN_SKIN_ID).map((m) => pick(m, false))];
+}
+
+// ------------------------------------------------------------ 가져오기·내보내기(plan Task 17)
+
+/** Rust 가 읽고 검사해 임시 보관한 팩: 보관 id, manifest(시트 이름은 `<state>.png`), 상태별 다시 만든 PNG 바이트. */
+export interface StagedSkin extends SkinData {
+  stagingId: string;
+}
+
+/**
+ * Rust 의 열기 창으로 `.labnoteo-skin` 파일을 고르게 한다. 경로는 웹뷰가 보내지 않는다. 2 MiB 가 넘는 파일은 읽기 전에 거절한다.
+ * 검사를 통과하면 임시 보관만 한다(설치하지 않는다). 닫으면 null.
+ */
+export function pickSkinFile(invoke: InvokeFn = tauriInvoke): Promise<StagedSkin | null> {
+  return call<StagedSkin | null>(invoke, 'skin_import_pick', {});
+}
+
+/** 가져오기를 그만둘 때 임시 보관한 팩을 버린다. */
+export async function discardStagedSkin(stagingId: string, invoke: InvokeFn = tauriInvoke): Promise<void> {
+  await call<boolean>(invoke, 'skin_staging_discard', { stagingId });
+}
+
+/** 스킨(설치한 것 또는 기본 스킨)을 Rust 의 저장 창으로 팩 파일로 쓴다. 저장했으면 true, 닫았으면 false. */
+export function exportSkin(id: string, invoke: InvokeFn = tauriInvoke): Promise<boolean> {
+  return call<boolean>(invoke, 'skin_export', { id });
+}
+
+/** 스킨 거절을 짧은 안내로(ko·en). 파일 이름은 Rust 가 정리한 글이고 글자로만 보인다. */
+export function skinErrorText(e: unknown): string {
+  const err = toSkinError(e);
+  const detail = err.detail ?? '';
+  switch (err.kind) {
+    case 'tooLarge':
+    case 'tooManyEntries':
+    case 'compressionRatio':
+      return t('skin.error.tooLarge');
+    case 'badArchive':
+    case 'badPath':
+    case 'symlink':
+    case 'encrypted':
+    case 'unsupportedMethod':
+    case 'duplicate':
+    case 'sizeMismatch':
+      return t('skin.error.archive');
+    case 'fileNotAllowed':
+      return t('skin.error.fileNotAllowed', detail);
+    case 'manifestMissing':
+    case 'manifestInvalid':
+    case 'stateMissing':
+    case 'sheetMissing':
+    case 'sheetUnused':
+      return t('skin.error.manifest');
+    case 'licenceMissing':
+      return t('skin.licenceNeeded');
+    case 'licenceNotAllowed':
+      return t('skin.error.licenceNotAllowed');
+    case 'badPng':
+    case 'pngTooLarge':
+    case 'sheetSize':
+    case 'animatedPng':
+      return t('skin.error.image');
+    case 'stagingUnknown':
+      return t('skin.error.staging');
+    case 'exists':
+      return t('skin.error.exists');
+    case 'builtin':
+      return t('skin.error.builtin');
+    case 'notFound':
+      return t('skin.error.notFound');
+    case 'tampered':
+      return t('skin.error.tampered');
+    case 'io':
+      return t('skin.error.io');
+  }
 }

@@ -213,6 +213,9 @@ describe('IPC 인자 이름 계약', () => {
     await skins.readSkin('flasko-blue', r.invoke);
     await skins.installSkin('ab'.repeat(16), false, r.invoke);
     await skins.removeSkin('flasko-blue', r.invoke);
+    await skins.pickSkinFile(r.invoke);
+    await skins.discardStagedSkin('ab'.repeat(16), r.invoke);
+    await skins.exportSkin('flasko', r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

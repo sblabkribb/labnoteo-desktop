@@ -155,7 +155,17 @@ export function SettingsModal(props: {
       case 'integrations':
         return <IntegrationSettingsPage deps={deps.integrations} commitRef={integrationCommit} onLeave={() => finish()} />;
       case 'assistant':
-        return <AssistantPage />;
+        // 스킨 가져오기: 설정 창을 닫고 가져온 뒤 어시스턴트 쪽으로 다시 연다
+        return (
+          <AssistantPage
+            leave={(after) =>
+              void finish(async () => {
+                await after();
+                await openSettings('assistant');
+              })
+            }
+          />
+        );
       case 'shortcuts':
         return <ShortcutsPage />;
       case 'about':

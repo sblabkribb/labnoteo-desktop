@@ -70,6 +70,20 @@ fn ipc_argument_names_match_the_typescript_side() {
         // The assistant's chat history: a temp app data dir, never the real one.
         .manage(labnoteo_app_lib::assistant::AssistantDirs(dir.join("data").join("assistant")))
         .manage(labnoteo_app_lib::skins::SkinStaging::default())
+        // Skin pack dialogs: the open dialog picks a too-big temp file once,
+        // then cancels; the save dialog picks a temp path once, then cancels.
+        .manage(labnoteo_app_lib::skins::SkinFileDialogs {
+            open: std::sync::Arc::new({
+                let picked = dir.join("big.labnoteo-skin");
+                let once = std::sync::atomic::AtomicBool::new(true);
+                move || once.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| picked.clone())
+            }),
+            save: std::sync::Arc::new({
+                let picked = dir.join("flasko.labnoteo-skin");
+                let once = std::sync::atomic::AtomicBool::new(true);
+                move |_: &str| once.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| picked.clone())
+            }),
+        })
         .manage(labnoteo_app_lib::skill::SkillPaths { home: Some(dir.join("home")) })
         .manage(labnoteo_app_lib::skill::SkillPicker(std::sync::Arc::new({
             let picked = dir.join("saved").join("SKILL.md");
@@ -270,6 +284,18 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(call("skin_read", args("skin_read", vec![json!("../x")])).unwrap_err()["kind"], "notFound");
     assert_eq!(call("skin_remove", args("skin_remove", vec![json!("flasko")])).unwrap_err()["kind"], "builtin");
     assert!(!dir.join("vault").join("skins").exists());
+
+    // Import and export (assistant Task 17): paths come only from Rust's
+    // dialogs. A file over 2 MiB is refused; cancel gives null / false; the
+    // built-in skin exports as a pack; an unknown staging id discards nothing.
+    std::fs::write(dir.join("big.labnoteo-skin"), vec![0u8; 2 * 1024 * 1024 + 1]).unwrap();
+    assert_eq!(call("skin_import_pick", args("skin_import_pick", vec![])).unwrap_err()["kind"], "tooLarge");
+    assert_eq!(ok("skin_import_pick", args("skin_import_pick", vec![])), Value::Null);
+    assert_eq!(ok("skin_staging_discard", args("skin_staging_discard", vec![json!("0123456789abcdef0123456789abcdef")])), json!(false));
+    assert_eq!(ok("skin_export", args("skin_export", vec![json!("flasko")])), json!(true));
+    assert!(std::fs::read(dir.join("flasko.labnoteo-skin")).unwrap().starts_with(b"PK"));
+    assert_eq!(ok("skin_export", args("skin_export", vec![json!("flasko")])), json!(false));
+    assert_eq!(call("skin_export", args("skin_export", vec![json!("nope-skin")])).unwrap_err()["kind"], "notFound");
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");

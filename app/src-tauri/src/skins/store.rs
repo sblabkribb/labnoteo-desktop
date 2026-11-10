@@ -17,17 +17,29 @@
 //!   fixed sheet names, PNG decode and sizes, and the content hash against the
 //!   folder name). A file changed on disk is refused with `tampered`.
 //! - The skins folder must not resolve inside the open vault (`io`).
+//! - Import and export (Task 17): `skin_import_pick` asks Rust's own open
+//!   dialog for a `.labnoteo-skin` file (the path never comes from the
+//!   webview), refuses a file over [`MAX_PACK_BYTES`] before reading it,
+//!   validates it and stages it; nothing is installed until `skin_install`.
+//!   `skin_export(id)` writes a pack built from the re-validated installed
+//!   files (or the built-in skin) through Rust's save dialog. Exported packs
+//!   are deterministic (fixed entry order and timestamps) and pass
+//!   [`validate_pack`] before they are written.
 
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::State;
 
-use super::pack::{decode_png, is_skin_id, parse_manifest, Manifest, SkinError, SkinErrorKind as K, ValidPack, MAX_ENTRY_BYTES, MAX_MANIFEST_BYTES, STATES};
+use super::pack::{
+    decode_png, is_skin_id, parse_manifest, validate_pack, Manifest, SkinError, SkinErrorKind as K, ValidPack, MAX_ENTRY_BYTES,
+    MAX_MANIFEST_BYTES, MAX_PACK_BYTES, STATES,
+};
 use crate::assistant::AssistantDirs;
 use crate::vault::VaultState;
 
@@ -339,6 +351,190 @@ pub fn remove(dirs: &AssistantDirs, id: &str) -> Result<(), SkinError> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- import / export
+
+/// The file extension of a skin pack.
+pub const PACK_EXT: &str = "labnoteo-skin";
+
+/// Rust's own open and save dialogs for pack files (the path never comes from
+/// the webview). Blocking: commands call them inside `spawn_blocking`. Tests
+/// and the IPC contract test use closures. `save` gets the suggested file name.
+#[derive(Clone)]
+pub struct SkinFileDialogs {
+    pub open: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+    pub save: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
+}
+
+impl SkinFileDialogs {
+    /// The production dialogs (the dialog plugin, modal to the main window,
+    /// as `skill.rs` `SkillPicker::dialog` does), filtered to `.labnoteo-skin`.
+    pub fn dialog<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> SkinFileDialogs {
+        let app2 = app.clone();
+        SkinFileDialogs {
+            open: Arc::new(move || {
+                use tauri::Manager;
+                use tauri_plugin_dialog::DialogExt;
+                let mut b = app.dialog().file().add_filter("labnoteO skin", &[PACK_EXT]);
+                if let Some(w) = app.get_webview_window("main") {
+                    b = b.set_parent(&w);
+                }
+                b.blocking_pick_file().and_then(|p| p.into_path().ok())
+            }),
+            save: Arc::new(move |name: &str| {
+                use tauri::Manager;
+                use tauri_plugin_dialog::DialogExt;
+                let mut b = app2.dialog().file().set_file_name(name).add_filter("labnoteO skin", &[PACK_EXT]);
+                if let Some(w) = app2.get_webview_window("main") {
+                    b = b.set_parent(&w);
+                }
+                b.blocking_save_file().and_then(|p| p.into_path().ok())
+            }),
+        }
+    }
+}
+
+/// A staged pack as the webview sees it: the staging id, the manifest (sheets
+/// named `<state>.png`) and each state's re-encoded PNG bytes.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedSkin {
+    pub staging_id: String,
+    pub manifest: Manifest,
+    pub sheets: BTreeMap<String, Vec<u8>>,
+}
+
+/// Each state's sheet bytes of a validated pack (a shared sheet is repeated).
+fn per_state(pack: &ValidPack) -> Result<BTreeMap<String, Vec<u8>>, SkinError> {
+    let mut out = BTreeMap::new();
+    for (state, spec) in pack.manifest.states.all() {
+        let bytes = pack.sheets.get(&spec.sheet).ok_or_else(|| err(K::SheetMissing, &spec.sheet))?;
+        out.insert(state.to_string(), bytes.clone());
+    }
+    Ok(out)
+}
+
+/// Stages a validated pack and returns what the import dialog shows.
+pub fn stage_view(staging: &SkinStaging, pack: ValidPack) -> Result<StagedSkin, SkinError> {
+    let manifest = installed_manifest(&pack.manifest);
+    let sheets = per_state(&pack)?;
+    let staging_id = staging.stage(pack);
+    Ok(StagedSkin { staging_id, manifest, sheets })
+}
+
+/// Reads a picked pack file: a regular file of at most [`MAX_PACK_BYTES`],
+/// checked by its size before anything is read (and capped while reading).
+pub fn read_pack_file(path: &Path) -> Result<Vec<u8>, SkinError> {
+    let meta = std::fs::metadata(path).map_err(io("pack file"))?;
+    if !meta.is_file() {
+        return Err(err(K::Io, "not a file"));
+    }
+    if meta.len() > MAX_PACK_BYTES as u64 {
+        return Err(SkinError::new(K::TooLarge, None));
+    }
+    let f = std::fs::File::open(path).map_err(io("pack file"))?;
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    f.take(MAX_PACK_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(io("pack file"))?;
+    if bytes.len() > MAX_PACK_BYTES {
+        return Err(SkinError::new(K::TooLarge, None));
+    }
+    Ok(bytes)
+}
+
+/// Asks the open dialog for a pack file and reads and validates it. Cancel
+/// gives `Ok(None)`.
+fn pick_pack(dialogs: &SkinFileDialogs) -> Result<Option<ValidPack>, SkinError> {
+    let Some(path) = (dialogs.open)() else { return Ok(None) };
+    let bytes = read_pack_file(&path)?;
+    validate_pack(&bytes).map(Some)
+}
+
+/// Asks the open dialog for a pack, validates and stages it. Cancel gives
+/// `Ok(None)`. Nothing is installed.
+pub fn import_pick(dialogs: &SkinFileDialogs, staging: &SkinStaging) -> Result<Option<StagedSkin>, SkinError> {
+    pick_pack(dialogs)?.map(|pack| stage_view(staging, pack)).transpose()
+}
+
+/// Writes `entries` into a zip with fixed options (Deflated or Stored, fixed
+/// timestamp and mode), so the same input always gives the same bytes.
+fn zip_entries<'a>(entries: impl IntoIterator<Item = (String, &'a [u8])>, method: zip::CompressionMethod) -> Result<Vec<u8>, SkinError> {
+    use zip::write::SimpleFileOptions;
+    let opts = SimpleFileOptions::default()
+        .compression_method(method)
+        .last_modified_time(zip::DateTime::default())
+        .unix_permissions(0o644);
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, bytes) in entries {
+        w.start_file(name, opts).map_err(|_| err(K::Io, "pack build"))?;
+        w.write_all(bytes).map_err(|_| err(K::Io, "pack build"))?;
+    }
+    Ok(w.finish().map_err(|_| err(K::Io, "pack build"))?.into_inner())
+}
+
+/// A pack from a manifest (sheets named `<state>.png`) and each state's sheet:
+/// `manifest.json`, then the four sheets in [`STATES`] order.
+pub fn build_pack(manifest: &Manifest, sheets: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, SkinError> {
+    let mbytes = serde_json::to_vec_pretty(manifest).map_err(|_| err(K::Io, MANIFEST))?;
+    let mut entries: Vec<(String, &[u8])> = vec![(MANIFEST.to_string(), &mbytes)];
+    for state in STATES {
+        let bytes = sheets.get(state).ok_or_else(|| err(K::SheetMissing, state))?;
+        entries.push((sheet_name(state), bytes));
+    }
+    zip_entries(entries, zip::CompressionMethod::Deflated)
+}
+
+/// The built-in skin's shipped files (`app/public/skins/flasko`), compiled in.
+fn builtin_files() -> [(&'static str, &'static [u8]); 5] {
+    macro_rules! f {
+        ($n:literal) => {
+            ($n, include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../public/skins/flasko/", $n)) as &[u8])
+        };
+    }
+    [f!("manifest.json"), f!("idle.png"), f!("talk.png"), f!("think.png"), f!("done.png")]
+}
+
+/// The built-in skin, validated (and re-encoded) like any pack.
+fn builtin_pack() -> Result<ValidPack, SkinError> {
+    let zipped = zip_entries(builtin_files().into_iter().map(|(n, b)| (n.to_string(), b)), zip::CompressionMethod::Stored)?;
+    validate_pack(&zipped)
+}
+
+/// The pack file name and bytes for `id` (installed and re-validated, or the
+/// built-in skin). The bytes passed [`validate_pack`].
+pub fn export_bytes(dirs: &AssistantDirs, id: &str) -> Result<(String, Vec<u8>), SkinError> {
+    let (manifest, sheets) = if id == BUILTIN_ID {
+        let pack = builtin_pack()?;
+        (installed_manifest(&pack.manifest), per_state(&pack)?)
+    } else {
+        let data = read(dirs, id)?;
+        (data.manifest, data.sheets)
+    };
+    let bytes = build_pack(&manifest, &sheets)?;
+    validate_pack(&bytes)?;
+    Ok((format!("{}.{PACK_EXT}", manifest.id), bytes))
+}
+
+/// Builds the pack, then asks the save dialog where to write it (temp file +
+/// rename). Returns whether it was saved (`false` on cancel).
+pub fn export(dirs: &AssistantDirs, dialogs: &SkinFileDialogs, id: &str) -> Result<bool, SkinError> {
+    let (name, bytes) = export_bytes(dirs, id)?;
+    let Some(path) = (dialogs.save)(&name) else { return Ok(false) };
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let tmp = parent.join(format!(".{}.tmp", random_id()));
+    let written = (|| -> Result<(), SkinError> {
+        std::fs::write(&tmp, &bytes).map_err(io("pack write"))?;
+        std::fs::rename(&tmp, &path).map_err(io("pack write"))
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.map(|()| true)
+}
+
+/// File work and dialogs block: keep them off the async runtime.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, SkinError> + Send + 'static) -> Result<T, SkinError> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|_| err(K::Io, "skin task"))?
+}
+
 // ---------------------------------------------------------------- commands
 
 #[tauri::command]
@@ -366,6 +562,30 @@ pub fn skin_read(dirs: State<'_, AssistantDirs>, id: String) -> Result<SkinData,
 #[tauri::command]
 pub fn skin_remove(dirs: State<'_, AssistantDirs>, id: String) -> Result<(), SkinError> {
     remove(&dirs, &id)
+}
+
+/// Picks a `.labnoteo-skin` file in Rust's open dialog, validates and stages
+/// it. `null` on cancel. Takes no path; installs nothing.
+#[tauri::command]
+pub async fn skin_import_pick(dialogs: State<'_, SkinFileDialogs>, staging: State<'_, SkinStaging>) -> Result<Option<StagedSkin>, SkinError> {
+    let dialogs = dialogs.inner().clone();
+    let picked = blocking(move || pick_pack(&dialogs)).await?;
+    picked.map(|pack| stage_view(&staging, pack)).transpose()
+}
+
+/// Drops a staged pack (the import dialog was cancelled). Returns whether it was there.
+#[tauri::command]
+pub fn skin_staging_discard(staging: State<'_, SkinStaging>, staging_id: String) -> bool {
+    staging.discard(&staging_id)
+}
+
+/// Writes the skin `id` (installed or built-in) as a pack through Rust's save
+/// dialog. Returns whether it was saved. Takes no path.
+#[tauri::command]
+pub async fn skin_export(dirs: State<'_, AssistantDirs>, dialogs: State<'_, SkinFileDialogs>, id: String) -> Result<bool, SkinError> {
+    let dirs = AssistantDirs(dirs.0.clone());
+    let dialogs = dialogs.inner().clone();
+    blocking(move || export(&dirs, &dialogs, &id)).await
 }
 
 #[cfg(test)]
@@ -596,5 +816,135 @@ mod tests {
         let v = serde_json::to_value(read(&fx.dirs, "skin-j").unwrap()).unwrap();
         assert_eq!(v["sheets"]["idle"][0], 0x89);
         assert_eq!(v["manifest"]["states"]["idle"]["sheet"], "idle.png");
+    }
+
+    // ------------------------------------------------------------ import / export (Task 17)
+
+    fn dialogs(open: Option<PathBuf>, save: Option<PathBuf>) -> (SkinFileDialogs, Arc<Mutex<Vec<String>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let a = asked.clone();
+        let d = SkinFileDialogs {
+            open: Arc::new(move || open.clone()),
+            save: Arc::new(move |name: &str| {
+                a.lock().unwrap().push(name.to_string());
+                save.clone()
+            }),
+        };
+        (d, asked)
+    }
+
+    fn pixels(sheets: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, (u32, u32, Vec<u8>)> {
+        sheets.iter().map(|(k, v)| (k.clone(), decode_png(k, v).unwrap())).collect()
+    }
+
+    #[test]
+    fn export_then_import_round_trips_manifest_and_pixels_and_is_stable() {
+        let fx = Fx::new();
+        let staging = SkinStaging::default();
+        let s = staging.stage(pack("flasko-blue", "Blue"));
+        install(&fx.dirs, None, &staging, &s, false, Instant::now()).unwrap();
+        let installed = read(&fx.dirs, "flasko-blue").unwrap();
+
+        let (name, bytes) = export_bytes(&fx.dirs, "flasko-blue").unwrap();
+        assert_eq!(name, "flasko-blue.labnoteo-skin");
+        let (_, again) = export_bytes(&fx.dirs, "flasko-blue").unwrap();
+        assert_eq!(bytes, again, "two exports of the same skin are byte-identical");
+
+        // Import: the exported pack validates and stages the same manifest and pixels.
+        let file = fx.base.join("out.labnoteo-skin");
+        std::fs::write(&file, &bytes).unwrap();
+        let (d, _) = dialogs(Some(file), None);
+        let staged = import_pick(&d, &staging).unwrap().expect("picked");
+        assert_eq!(staged.manifest, installed.manifest);
+        assert_eq!(pixels(&staged.sheets), pixels(&installed.sheets));
+        // Nothing is installed by the pick; the staged pack installs as the same skin.
+        assert_eq!(list(&fx.dirs).unwrap().len(), 1);
+        install(&fx.dirs, None, &staging, &staged.staging_id, false, Instant::now()).unwrap();
+        assert_eq!(files_under(&skins_dir(&fx.dirs)).len(), 5, "same content: still one copy");
+    }
+
+    #[test]
+    fn the_builtin_skin_exports_as_a_valid_pack() {
+        let fx = Fx::new();
+        let (name, bytes) = export_bytes(&fx.dirs, BUILTIN_ID).unwrap();
+        assert_eq!(name, "flasko.labnoteo-skin");
+        let v = validate_pack(&bytes).unwrap();
+        assert_eq!(v.manifest.id, BUILTIN_ID);
+        assert_eq!(v.manifest.licence, "CC0-1.0");
+        let shipped: BTreeMap<String, Vec<u8>> = flasko_files().into_iter().skip(1).collect();
+        assert_eq!(pixels(&v.sheets), pixels(&shipped));
+        assert_eq!(kind(export_bytes(&fx.dirs, "not-there")), K::NotFound);
+        assert_eq!(kind(export_bytes(&fx.dirs, "../x")), K::NotFound);
+    }
+
+    #[test]
+    fn export_writes_where_the_save_dialog_points_and_cancel_writes_nothing() {
+        let fx = Fx::new();
+        let target = fx.base.join("saved").join("mine.labnoteo-skin");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let (d, asked) = dialogs(None, Some(target.clone()));
+        assert!(export(&fx.dirs, &d, BUILTIN_ID).unwrap());
+        assert_eq!(asked.lock().unwrap().as_slice(), ["flasko.labnoteo-skin"]);
+        validate_pack(&std::fs::read(&target).unwrap()).unwrap();
+        let names: Vec<String> = std::fs::read_dir(target.parent().unwrap()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["mine.labnoteo-skin"], "no temp file left behind");
+
+        let (cancel, asked) = dialogs(None, None);
+        assert!(!export(&fx.dirs, &cancel, BUILTIN_ID).unwrap());
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        // An unknown skin fails before any dialog opens.
+        let (d, asked) = dialogs(None, Some(fx.base.join("x.labnoteo-skin")));
+        assert_eq!(kind(export(&fx.dirs, &d, "skin-none")), K::NotFound);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(!fx.base.join("x.labnoteo-skin").exists());
+    }
+
+    #[test]
+    fn import_pick_refuses_big_files_bad_packs_and_returns_none_on_cancel() {
+        let fx = Fx::new();
+        let staging = SkinStaging::default();
+        let (cancel, _) = dialogs(None, None);
+        assert!(import_pick(&cancel, &staging).unwrap().is_none());
+
+        let big = fx.base.join("big.labnoteo-skin");
+        std::fs::write(&big, vec![0u8; MAX_PACK_BYTES + 1]).unwrap();
+        let (d, _) = dialogs(Some(big), None);
+        assert_eq!(kind(import_pick(&d, &staging)), K::TooLarge);
+
+        let dir = fx.base.join("a-folder");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (d, _) = dialogs(Some(dir), None);
+        assert_eq!(kind(import_pick(&d, &staging)), K::Io);
+
+        let evil = fx.base.join("evil.labnoteo-skin");
+        std::fs::write(&evil, zip_with(&[("manifest.json", b"{}"), ("x.svg", b"<svg/>")], zip::CompressionMethod::Stored)).unwrap();
+        let (d, _) = dialogs(Some(evil), None);
+        assert_eq!(kind(import_pick(&d, &staging)), K::FileNotAllowed);
+
+        let missing = fx.base.join("gone.labnoteo-skin");
+        let (d, _) = dialogs(Some(missing), None);
+        assert_eq!(kind(import_pick(&d, &staging)), K::Io);
+        assert!(list(&fx.dirs).unwrap().is_empty(), "nothing installed");
+    }
+
+    #[test]
+    fn a_staged_import_can_be_discarded() {
+        let fx = Fx::new();
+        let staging = SkinStaging::default();
+        let file = fx.base.join("p.labnoteo-skin");
+        std::fs::write(&file, flasko_pack_with(&{
+            let mut m = flasko_manifest();
+            m["id"] = "skin-d".into();
+            m
+        }))
+        .unwrap();
+        let (d, _) = dialogs(Some(file), None);
+        let staged = import_pick(&d, &staging).unwrap().unwrap();
+        assert_eq!(staged.staging_id.len(), 32);
+        let v = serde_json::to_value(&staged).unwrap();
+        assert_eq!(v["stagingId"], staged.staging_id.as_str());
+        assert_eq!(v["sheets"]["idle"][0], 0x89);
+        assert!(staging.discard(&staged.staging_id));
+        assert_eq!(kind(install(&fx.dirs, None, &staging, &staged.staging_id, false, Instant::now())), K::StagingUnknown);
     }
 }

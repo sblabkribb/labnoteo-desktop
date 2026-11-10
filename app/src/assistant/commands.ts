@@ -4,6 +4,7 @@ import { openSettings } from '../ui/SettingsModal';
 import { captureFocus } from '../ui/returnFocus';
 import type { ChipId } from './chips';
 import { petStore } from './petStore';
+import { activeSkinForExport, exportSkinFile, importSkinFile } from './skins/transfer';
 import { assistantSession } from './useAssistantSession';
 
 /**
@@ -23,6 +24,8 @@ export const ASSISTANT_COMMAND_IDS = [
   'assistant.createSection',
   'assistant.createUnitOperation',
   'assistant.createWorkflow',
+  'skins.import',
+  'skins.export',
 ] as const;
 
 /** 말풍선을 열고(숨겨 두었으면 보이고) 지금 초점 자리를 기억한다: Esc 로 닫으면 거기로 돌아간다. 보관함 설정이 없어도 된다. */
@@ -138,6 +141,40 @@ const createSection = chipCommand('assistant.createSection', 'cmd.assistant.crea
 const createUnitOperation = chipCommand('assistant.createUnitOperation', 'cmd.assistant.createUnitOperation', 'test-tube', 'unitOp');
 const createWorkflow = chipCommand('assistant.createWorkflow', 'cmd.assistant.createWorkflow', 'workflow', 'workflow');
 
+/** 스킨 파일(.labnoteo-skin) 가져오기(Task 17): 미리 보고 확인한 뒤에만 설치한다. */
+const skinsImport: AppCommand = {
+  id: 'skins.import',
+  nameKey: 'cmd.skins.import',
+  icon: 'download',
+  run: async (ctx) => {
+    await importSkinFile({ notify: (kind, message) => ctx.host.notify(kind, message) });
+  },
+};
+
+/** 지금 쓰는 스킨을 스킨 파일로 내보낸다(기본 스킨도 된다). */
+const skinsExport: AppCommand = {
+  id: 'skins.export',
+  nameKey: 'cmd.skins.export',
+  icon: 'upload',
+  run: async (ctx) => {
+    await exportSkinFile(await activeSkinForExport(), { notify: (kind, message) => ctx.host.notify(kind, message) });
+  },
+};
+
 export function assistantCommands(): AppCommand[] {
-  return [open, toggleVisible, resetPosition, settings, chat, stop, clearHistory, howTo, createSection, createUnitOperation, createWorkflow];
+  return [
+    open,
+    toggleVisible,
+    resetPosition,
+    settings,
+    chat,
+    stop,
+    clearHistory,
+    howTo,
+    createSection,
+    createUnitOperation,
+    createWorkflow,
+    skinsImport,
+    skinsExport,
+  ];
 }
