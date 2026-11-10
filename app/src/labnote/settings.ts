@@ -64,7 +64,59 @@ export type AppSettings = Pick<
    * 틀린 항목은 버린다(`cleanMcpServers`, Rust `config::parse_mcp_servers` 와 같은 규칙).
    */
   mcpClientServers: McpServerSetting[];
+  /**
+   * 앱에만 있는 키(문헌 검색, spec §8.4): AI 가 찾아볼 수 있는 공개 문헌 서비스. 기본 모두 켬(저장된 값이 꼭 false 일 때만 끈다,
+   * Rust `config::ScholarSources` 와 같은 규칙).
+   */
+  scholarSources: ScholarSources;
+  /** 앱에만 있는 키(문헌 검색): NCBI 에 연락처로 보낼 이메일. 기본 ''(보내지 않음). 이메일 모양이 아니면 ''. */
+  ncbiEmail: string;
+  /** 앱에만 있는 키(문헌 검색): Crossref 에 `mailto` 로 보낼 이메일. 기본 ''(보내지 않음). 이메일 모양이 아니면 ''. */
+  crossrefMailto: string;
 };
+
+/** 문헌 검색 출처별 켬/끔. */
+export interface ScholarSources {
+  pubmed: boolean;
+  europepmc: boolean;
+  crossref: boolean;
+  biorxiv: boolean;
+}
+
+/** 출처 스위치: 저장된 값이 꼭 false 인 것만 끄고 나머지는 켠다. */
+export function cleanScholarSources(v: unknown): ScholarSources {
+  const o = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  return {
+    pubmed: o.pubmed !== false,
+    europepmc: o.europepmc !== false,
+    crossref: o.crossref !== false,
+    biorxiv: o.biorxiv !== false,
+  };
+}
+
+/** 연락처 이메일의 최대 길이(글자, Rust `MAX_EMAIL`). */
+export const CONTACT_EMAIL_MAX = 254;
+
+/**
+ * 연락처 이메일 모양(Rust `config::is_contact_email` 과 같은 규칙): 254자 이하, `@` 하나 앞뒤에 글자, 도메인 안에 `.`
+ * (양 끝이 아니고 `..` 없음), 빈칸·제어 문자·따옴표·괄호 없음.
+ */
+export function isContactEmail(v: unknown): v is string {
+  if (typeof v !== 'string' || v === '' || [...v].length > CONTACT_EMAIL_MAX) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001f\u007f-\u009f"<>(),;\\]/u.test(v)) return false;
+  const at = v.indexOf('@');
+  if (at <= 0) return false;
+  const domain = v.slice(at + 1);
+  return !domain.includes('@') && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.') && !domain.includes('..');
+}
+
+/** 저장된 연락처 이메일: 다듬어서 이메일 모양이면 그대로, 아니면 ''. */
+export function cleanContactEmail(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  const t = v.trim();
+  return isContactEmail(t) ? t : '';
+}
 
 /** 그림 저장 폴더: 실험의 resources/(기본) 또는 노트 폴더의 images/. */
 export type ImageFolder = 'images' | 'resources';
@@ -249,6 +301,10 @@ const KEYS = [
   'llmContextWindow',
   // MCP 클라이언트(Task 5b): 외부 MCP 서버. 앱 키다.
   'mcpClientServers',
+  // 문헌 검색(Task 11): 출처 스위치와 연락처 이메일. 앱 키다.
+  'scholarSources',
+  'ncbiEmail',
+  'crossrefMailto',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -260,6 +316,8 @@ const APP_DEFAULTS = {
   defaultExperimenter: '',
   imageFolder: 'resources',
   llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
+  ncbiEmail: '',
+  crossrefMailto: '',
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -268,6 +326,7 @@ function pick(s: LabnoteSettings): AppSettings {
   // 배열 기본값은 부를 때마다 새로 만든다(설정끼리 같은 배열을 나눠 쓰지 않게).
   out.allowHttpOrigins = [];
   out.mcpClientServers = [];
+  out.scholarSources = cleanScholarSources(undefined);
   return out as AppSettings;
 }
 
@@ -311,6 +370,11 @@ export function fromStored(raw: unknown): AppSettings {
     settings.llmContextWindow = clampContextWindow((raw as { llmContextWindow?: unknown }).llmContextWindow);
     // MCP 클라이언트(Task 5b): 칸마다 검사하고 틀린 항목은 버린다. 평문 http 허락은 위에서 읽은 목록을 쓴다.
     settings.mcpClientServers = cleanMcpServers((raw as { mcpClientServers?: unknown }).mcpClientServers, settings.allowHttpOrigins);
+    // 문헌 검색(Task 11): 출처는 꼭 false 인 것만 끄고, 이메일은 모양이 맞을 때만 살린다.
+    const lit = raw as { scholarSources?: unknown; ncbiEmail?: unknown; crossrefMailto?: unknown };
+    settings.scholarSources = cleanScholarSources(lit.scholarSources);
+    settings.ncbiEmail = cleanContactEmail(lit.ncbiEmail);
+    settings.crossrefMailto = cleanContactEmail(lit.crossrefMailto);
   }
   return settings;
 }

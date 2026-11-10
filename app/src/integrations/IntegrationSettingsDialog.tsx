@@ -121,8 +121,8 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
 const DEFAULTS = fromPluginData(undefined);
 
 const EMPTY_STATUS: SecretStatus = {
-  set: { partbankDesktop: false, partbankWeb: false, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false },
-  epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0 },
+  set: { partbankDesktop: false, partbankWeb: false, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false },
+  epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0 },
 };
 
 /** 키가 묶이는 주소 설정. 이 값이 바뀌면 키 상태를 다시 읽는다. */

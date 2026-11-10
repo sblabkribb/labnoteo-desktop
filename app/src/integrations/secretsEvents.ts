@@ -4,7 +4,15 @@
  * `notifySecretsChange` 를 부르고, partbank 기능과 bfworkflow 준비 상태가 `onSecretsChange` 로 새로 고친다.
  */
 
-export type Slot = 'partbankDesktop' | 'partbankWeb' | 'llmOpenai' | 'bfwServer' | 'bfwDesktop' | 'slackBot';
+export type Slot =
+  | 'partbankDesktop'
+  | 'partbankWeb'
+  | 'llmOpenai'
+  | 'bfwServer'
+  | 'bfwDesktop'
+  | 'slackBot'
+  // NCBI E-utilities API 키(문헌 검색, 선택). 주소가 고정이다: https://eutils.ncbi.nlm.nih.gov
+  | 'ncbiEutils';
 
 /** Rust `secret_status` 의 모양. */
 export interface SecretStatus {

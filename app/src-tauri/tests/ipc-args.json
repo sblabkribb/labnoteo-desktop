@@ -70,6 +70,8 @@
   "mcp_client_disconnect": ["id"],
   "mcp_client_forget": ["id"],
   "mcp_client_tools_cached": [],
+  "scholar_search": ["source", "query", "limit", "preprintsOnly", "requestId"],
+  "scholar_get": ["source", "id", "requestId"],
   "slack_call": ["requestId", "method", "params"],
   "slack_download": ["requestId", "url"],
   "scan_folder_choose": [],

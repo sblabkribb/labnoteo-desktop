@@ -92,6 +92,9 @@ macro_rules! register_commands {
             $crate::net::mcp_client::mcp_client_disconnect,
             $crate::net::mcp_client::mcp_client_forget,
             $crate::net::mcp_client::mcp_client_tools_cached,
+            // Built-in literature search (spec §8): PubMed now and more sources later.
+            $crate::net::scholar::scholar_search,
+            $crate::net::scholar::scholar_get,
             // SP7 Part A
             $crate::vault::fs::vault_created_times,
             $crate::print::print_open_in_browser,

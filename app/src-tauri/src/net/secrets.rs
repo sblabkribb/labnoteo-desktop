@@ -5,8 +5,9 @@
 //! open vault's settings name for that slot. A key is therefore bound to the
 //! server it was entered for: after the URL changes, the key reads "not set".
 //! `bfwDesktop` uses the fixed origin `loopback` (its port changes per launch),
-//! and `slackBot` the fixed origin `https://slack.com` (only a bot token,
-//! `xoxb-…`, is accepted for it).
+//! `slackBot` the fixed origin `https://slack.com` (only a bot token,
+//! `xoxb-…`, is accepted for it), and `ncbiEutils` the fixed origin
+//! `https://eutils.ncbi.nlm.nih.gov` (the optional NCBI E-utilities API key).
 //!
 //! No function here returns a key to the webview, and no error message ever
 //! contains one: the webview learns only a `set` flag and an `epoch` counter,
@@ -30,6 +31,9 @@ const MAX_SECRET: usize = 4096;
 
 /// The fixed origin the Slack bot token is bound to.
 const SLACK_ORIGIN: &str = "https://slack.com";
+
+/// The fixed origin the NCBI E-utilities API key is bound to (spec §8.2).
+pub const NCBI_EUTILS_ORIGIN: &str = "https://eutils.ncbi.nlm.nih.gov";
 
 /// Where keys are kept. The app uses `KeyringStore`; tests use `MemoryStore`.
 pub trait SecretStore: Send + Sync {
@@ -139,6 +143,7 @@ pub enum Slot {
     BfwServer,
     BfwDesktop,
     SlackBot,
+    NcbiEutils,
 }
 
 impl Slot {
@@ -151,18 +156,19 @@ impl Slot {
             Slot::BfwServer => "bfwServer",
             Slot::BfwDesktop => "bfwDesktop",
             Slot::SlackBot => "slackBot",
+            Slot::NcbiEutils => "ncbiEutils",
         }
     }
 
     /// The URL the slot's key is bound to (`None` for the fixed-origin slots
-    /// `BfwDesktop` and `SlackBot`).
+    /// `BfwDesktop`, `SlackBot` and `NcbiEutils`).
     fn url(self, cfg: &ServiceConfig) -> Option<&Url> {
         match self {
             Slot::PartbankDesktop => cfg.partbank_desktop.as_ref(),
             Slot::PartbankWeb => cfg.partbank_web.as_ref(),
             Slot::LlmOpenai => cfg.llm_openai.as_ref(),
             Slot::BfwServer => cfg.bfw_url.as_ref(),
-            Slot::BfwDesktop | Slot::SlackBot => None,
+            Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils => None,
         }
     }
 }
@@ -174,6 +180,7 @@ pub fn account(slot: Slot, cfg: &ServiceConfig) -> Result<String, NetError> {
     match slot {
         Slot::BfwDesktop => return Ok(format!("{}|loopback", slot.name())),
         Slot::SlackBot => return Ok(format!("{}|{SLACK_ORIGIN}", slot.name())),
+        Slot::NcbiEutils => return Ok(format!("{}|{NCBI_EUTILS_ORIGIN}", slot.name())),
         _ => {}
     }
     let url = slot.url(cfg).ok_or_else(|| {
@@ -202,9 +209,17 @@ pub fn validate_secret(value: &str) -> Result<String, NetError> {
 }
 
 /// `validate_secret`, plus the slot's own rule: the Slack bot slot only takes a
-/// bot token (`xoxb-…`). The error message never includes the value.
+/// bot token (`xoxb-…`), and the NCBI slot only 8 to 64 ASCII letters and
+/// digits (the key goes in a query string, so it must need no escaping and be
+/// found verbatim by the redaction). The error message never includes the value.
 pub fn validate_secret_for(slot: Slot, value: &str) -> Result<String, NetError> {
     let key = validate_secret(value)?;
+    if slot == Slot::NcbiEutils && (!(8..=64).contains(&key.len()) || !key.bytes().all(|b| b.is_ascii_alphanumeric())) {
+        return Err(NetError::new(
+            NetErrorKind::BadInput,
+            "the NCBI API key must be 8 to 64 letters and digits",
+        ));
+    }
     if slot == Slot::SlackBot && !key.starts_with("xoxb-") {
         return Err(NetError::new(
             NetErrorKind::BadInput,
@@ -251,7 +266,7 @@ pub fn store_at_account(store: &dyn SecretStore, account: &str, value: &str) -> 
 /// together. Only for slots bound to a URL; the fixed-origin slots are
 /// `badInput`. A refused key stores nothing, and no error names the value.
 pub fn store_secret_at_url(store: &dyn SecretStore, slot: Slot, url: &Url, value: &str) -> Result<(), NetError> {
-    if matches!(slot, Slot::BfwDesktop | Slot::SlackBot) {
+    if matches!(slot, Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils) {
         return Err(NetError::new(NetErrorKind::BadInput, "this slot is not bound to a URL"));
     }
     let key = validate_secret_for(slot, value)?;
@@ -281,6 +296,7 @@ pub struct SlotValues<T> {
     pub bfw_server: T,
     pub bfw_desktop: T,
     pub slack_bot: T,
+    pub ncbi_eutils: T,
 }
 
 impl<T> SlotValues<T> {
@@ -292,6 +308,7 @@ impl<T> SlotValues<T> {
             bfw_server: f(Slot::BfwServer),
             bfw_desktop: f(Slot::BfwDesktop),
             slack_bot: f(Slot::SlackBot),
+            ncbi_eutils: f(Slot::NcbiEutils),
         }
     }
 }
@@ -479,8 +496,8 @@ mod tests {
     #[test] fn status_serializes_flags_and_epochs_only() {
         let v = serde_json::to_value(status_of(&MemoryStore::default(), &cfg("{}"))).unwrap();
         assert_eq!(v, serde_json::json!({
-            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false},
-            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0}}));
+            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false,"ncbiEutils":false},
+            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0,"ncbiEutils":0}}));
     }
     #[test] fn slack_slot_has_fixed_origin() {
         assert_eq!(account(Slot::SlackBot, &cfg("{}")).unwrap(), "slackBot|https://slack.com");
@@ -527,6 +544,28 @@ mod tests {
         assert_eq!(store.get("epoch|partbankWeb|https://pb.example").unwrap().as_deref(), Some("1"));
         assert_eq!(store_secret_at_url(&store, Slot::SlackBot, &url, "xoxb-1").unwrap_err().kind, NetErrorKind::BadInput);
         assert_eq!(store_secret_at_url(&store, Slot::PartbankWeb, &url, "").unwrap_err().kind, NetErrorKind::BadInput);
+    }
+    #[test] fn ncbi_slot_has_fixed_origin_and_takes_only_alphanumeric_keys() {
+        let c = cfg(r#"{"partbankWebUrl":"https://a.example","llmBaseUrl":"https://b.example"}"#);
+        assert_eq!(account(Slot::NcbiEutils, &c).unwrap(), "ncbiEutils|https://eutils.ncbi.nlm.nih.gov");
+        let slot: Slot = serde_json::from_str("\"ncbiEutils\"").unwrap();
+        assert_eq!((slot, slot.name()), (Slot::NcbiEutils, "ncbiEutils"));
+        assert_eq!(validate_secret_for(Slot::NcbiEutils, " testncbikey123 ").unwrap(), "testncbikey123");
+        for bad in ["short1", "test-ncbi-key-123", "test ncbi key", "키키키키키키키키키"] {
+            let e = validate_secret_for(Slot::NcbiEutils, bad).unwrap_err();
+            assert_eq!(e.kind, NetErrorKind::BadInput, "{bad:?}");
+            assert!(!e.message.contains(bad));
+        }
+        assert_eq!(validate_secret_for(Slot::NcbiEutils, &"a".repeat(65)).unwrap_err().kind, NetErrorKind::BadInput);
+        let store = MemoryStore::default();
+        store_secret(&store, Slot::NcbiEutils, &c, "testncbikey123").unwrap();
+        assert_eq!(store.get("ncbiEutils|https://eutils.ncbi.nlm.nih.gov").unwrap().as_deref(), Some("testncbikey123"));
+        let st = status_of(&store, &c);
+        assert_eq!((st.set.ncbi_eutils, st.epoch.ncbi_eutils), (true, 1));
+        let url = super::super::config::parse_origin_url("https://eutils.ncbi.nlm.nih.gov").unwrap();
+        assert_eq!(store_secret_at_url(&store, Slot::NcbiEutils, &url, "testncbikey123").unwrap_err().kind, NetErrorKind::BadInput);
+        clear_secret(&store, Slot::NcbiEutils, &c).unwrap();
+        assert!(!status_of(&store, &c).set.ncbi_eutils);
     }
     const ACC: &str = "mcpClient:0a1b2c3d|https://rapid.kbiofoundry.kr";
 

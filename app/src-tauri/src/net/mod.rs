@@ -9,6 +9,7 @@ pub mod bfw;
 pub mod llm;
 pub mod mcp_client;
 pub mod partbank;
+pub mod scholar;
 pub mod secrets;
 pub mod slack;
 pub mod sse;

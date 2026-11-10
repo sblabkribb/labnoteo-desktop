@@ -724,6 +724,33 @@ title: 실험
     }
     ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
 
+    // Literature search: the webview names a source and a query or id, never a
+    // host. Nothing here reaches a server: the source is off, or the input is
+    // refused before anything is sent. The NCBI key is a fixed-origin slot.
+    ok(
+        "settings_vault_write",
+        args("settings_vault_write", vec![json!(r#"{"scholarSources":{"pubmed":false,"europepmc":false,"crossref":false,"biorxiv":false}}"#)]),
+    );
+    assert_eq!(
+        call("scholar_search", args("scholar_search", vec![json!("pubmed"), json!("crispr"), json!(5), json!(false), json!("sc1")])).unwrap_err()["kind"],
+        "notConfigured"
+    );
+    assert_eq!(
+        call("scholar_get", args("scholar_get", vec![json!("pubmed"), json!("123"), json!("sc2")])).unwrap_err()["kind"],
+        "notConfigured"
+    );
+    assert_eq!(call("scholar_search", json!({"source": "nowhere", "query": "x"})).unwrap_err()["kind"], "badInput");
+    assert_eq!(
+        call("secret_set", args("secret_set", vec![json!("ncbiEutils"), json!("short")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    ok("secret_set", args("secret_set", vec![json!("ncbiEutils"), json!("testncbikey123")]));
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!((&status["set"]["ncbiEutils"], &status["epoch"]["ncbiEutils"]), (&json!(true), &json!(1)));
+    ok("secret_clear", args("secret_clear", vec![json!("ncbiEutils")]));
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["ncbiEutils"], false);
+    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
+
     // The MCP token (Credential Manager; here the memory store): the webview
     // learns a flag and an epoch, and the copy goes to the clipboard from Rust.
     let first = responses.borrow().len();
@@ -816,7 +843,7 @@ title: 실험
     let fixture_keys: std::collections::BTreeSet<String> = fixture.as_object().unwrap().keys().cloned().collect();
     assert_eq!(*used.borrow(), fixture_keys, "commands this test called vs ipc-args.json");
     // No response, success or error, ever carried a key back to the webview.
-    let leaked: Vec<_> = responses.borrow().iter().filter(|r| r.contains("pbk_t")).cloned().collect();
+    let leaked: Vec<_> = responses.borrow().iter().filter(|r| r.contains("pbk_t") || r.contains("testncbikey")).cloned().collect();
     assert!(leaked.is_empty(), "a response contained the key: {leaked:?}");
 
     drop(webview);

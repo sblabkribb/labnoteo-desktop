@@ -2,6 +2,7 @@ import {
   BFW_DEFAULT_URL,
   fromPluginData,
   fromStored,
+  isContactEmail,
   isOriginUrl,
   isServiceUrl,
   loadVaultSettings,
@@ -69,6 +70,9 @@ describe('보관함별 설정', () => {
         'mcpClientServers',
         'mcpEnabled',
         'mcpPort',
+        'ncbiEmail',
+        'crossrefMailto',
+        'scholarSources',
         'partbankDefaultConnection',
         'partbankDesktopUrl',
         'partbankSendUsages',
@@ -238,6 +242,46 @@ describe('보관함별 설정', () => {
     await saveVaultSettings({ ...settings, llmContextWindow: 4096 }, store.invoke);
     expect(JSON.parse(store.stored()!).llmContextWindow).toBe(4096);
     expect((await loadVaultSettings(store.invoke)).settings.llmContextWindow).toBe(4096);
+  });
+
+  it('literature search (app-only keys): sources default on, emails default empty, both survive a save and reload', async () => {
+    const all = { pubmed: true, europepmc: true, crossref: true, biorxiv: true };
+    expect(fromPluginData(undefined)).toMatchObject({ scholarSources: all, ncbiEmail: '', crossrefMailto: '' });
+    expect(fromPluginData({ ncbiEmail: 'a@b.org' }).ncbiEmail).toBe(''); // not a plugin key
+    expect(fromStored({}).scholarSources).toEqual(all);
+    expect(fromStored({ scholarSources: { pubmed: false, crossref: 'no', biorxiv: false } }).scholarSources).toEqual({
+      pubmed: false,
+      europepmc: true,
+      crossref: true,
+      biorxiv: false,
+    });
+    expect(fromStored({ scholarSources: [false] }).scholarSources).toEqual(all);
+    expect(fromStored({ ncbiEmail: ' lab@example.org ', crossrefMailto: 'x@y.kr' })).toMatchObject({
+      ncbiEmail: 'lab@example.org',
+      crossrefMailto: 'x@y.kr',
+    });
+    expect(fromStored({ ncbiEmail: 'not an email', crossrefMailto: 5 })).toMatchObject({ ncbiEmail: '', crossrefMailto: '' });
+    // A fresh default object each time (settings never share one).
+    expect(fromStored({}).scholarSources).not.toBe(fromStored({}).scholarSources);
+
+    const store = fakeStore({ stored: JSON.stringify({ schemaVersion: 3 }) });
+    const { settings } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings(
+      { ...settings, scholarSources: { ...all, europepmc: false }, ncbiEmail: 'lab@example.org' },
+      store.invoke,
+    );
+    const saved = JSON.parse(store.stored()!);
+    expect(saved).toMatchObject({ scholarSources: { ...all, europepmc: false }, ncbiEmail: 'lab@example.org', crossrefMailto: '' });
+    expect((await loadVaultSettings(store.invoke)).settings.scholarSources.europepmc).toBe(false);
+  });
+
+  it('isContactEmail follows the Rust is_contact_email rule', () => {
+    expect(isContactEmail('lab.member+ncbi@example.org')).toBe(true);
+    expect(isContactEmail(`${'a'.repeat(248)}@x.org`)).toBe(true);
+    expect(isContactEmail(`${'a'.repeat(249)}@x.org`)).toBe(false);
+    for (const bad of ['', 'lab', 'lab@', '@x.org', 'a@b', 'a b@x.org', 'a@x..org', 'a@.x.org', 'a@x.org.', 'a@b@x.org', 'a\u0007@x.org', '<a@x.org>', 'a\\b@x.org', 5, null]) {
+      expect(isContactEmail(bad)).toBe(false);
+    }
   });
 
   it('integration settings get the plugin defaults, with usage sending off', () => {

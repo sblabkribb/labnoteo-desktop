@@ -62,13 +62,14 @@ pub struct Outgoing {
     pub allow_http: bool,
 }
 
-/// Never prints the key: `secret` and every header value show as `***`.
+/// Never prints the key: `secret` and every header value show as `***`, and
+/// so does the key inside the URL (the NCBI key goes in the query string).
 impl std::fmt::Debug for Outgoing {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let headers: Vec<(&str, &str)> = self.headers.iter().map(|(k, _)| (*k, "***")).collect();
         f.debug_struct("Outgoing")
             .field("method", &self.method)
-            .field("url", &self.url.as_str())
+            .field("url", &redact_text(self.url.as_str(), self.secret.as_deref()))
             .field("headers", &headers)
             .field("json", &self.json.as_ref().map(|_| "..."))
             .field("timeout", &self.timeout)

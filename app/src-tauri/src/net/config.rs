@@ -61,6 +61,65 @@ pub struct ServiceConfig {
     pub allow_http: Vec<String>,
     /// MCP servers the app is a client of (spec §5.1), at most 16, each valid.
     pub mcp_servers: Vec<McpServerCfg>,
+    /// Which built-in literature sources the agent may search (spec §8.4).
+    pub scholar_sources: ScholarSources,
+    /// The contact address sent to NCBI as `email=`, only when the user typed one.
+    pub ncbi_email: Option<String>,
+    /// The contact address sent to Crossref as `mailto=`, only when the user typed one.
+    pub crossref_mailto: Option<String>,
+}
+
+/// `scholarSources` (spec §8.4): every source is on unless the stored value
+/// is exactly `false`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScholarSources {
+    pub pubmed: bool,
+    pub europepmc: bool,
+    pub crossref: bool,
+    pub biorxiv: bool,
+}
+
+impl Default for ScholarSources {
+    fn default() -> Self {
+        ScholarSources { pubmed: true, europepmc: true, crossref: true, biorxiv: true }
+    }
+}
+
+impl ScholarSources {
+    fn from_settings(settings: &Value) -> Self {
+        let obj = settings.get("scholarSources");
+        let on = |key: &str| obj.and_then(|o| o.get(key)) != Some(&Value::Bool(false));
+        ScholarSources { pubmed: on("pubmed"), europepmc: on("europepmc"), crossref: on("crossref"), biorxiv: on("biorxiv") }
+    }
+}
+
+/// Longest contact email accepted, in chars.
+pub const MAX_EMAIL: usize = 254;
+
+/// An email shape (spec §8.4): at most 254 chars, one `@` with text on both
+/// sides, a `.` inside the domain (not at either end, never `..`), and no
+/// blank, control char, quote or bracket. The same rule as `isContactEmail`
+/// in `src/labnote/settings.ts`.
+pub fn is_contact_email(s: &str) -> bool {
+    if s.is_empty() || s.chars().count() > MAX_EMAIL {
+        return false;
+    }
+    if s.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '<' | '>' | '(' | ')' | ',' | ';' | '\\')) {
+        return false;
+    }
+    let Some((local, domain)) = s.split_once('@') else { return false };
+    !local.is_empty()
+        && !domain.contains('@')
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains("..")
+}
+
+/// A stored contact email: trimmed, `None` when empty or not an email shape.
+fn email_setting(settings: &Value, key: &str) -> Option<String> {
+    let raw = settings.get(key)?.as_str()?.trim();
+    is_contact_email(raw).then(|| raw.to_string())
 }
 
 /// Most MCP servers kept (spec §4.3).
@@ -236,6 +295,9 @@ impl ServiceConfig {
             bfw_connection,
             allow_http,
             mcp_servers,
+            scholar_sources: ScholarSources::from_settings(&settings),
+            ncbi_email: email_setting(&settings, "ncbiEmail"),
+            crossref_mailto: email_setting(&settings, "crossrefMailto"),
         }
     }
 
@@ -639,6 +701,32 @@ pub mod tests {
         assert!(is_secret_looking_url(&u("https://x.example/sk_live_1234567890abcdefghij/mcp")));
         assert!(!is_secret_looking_url(&u("https://x.example/mcp")));
         assert!(!is_secret_looking_url(&u("https://x.example/a1B2c3D4e5F6g7H8i9J0k1L")));
+    }
+
+    #[test]
+    fn scholar_sources_default_on_and_turn_off_only_on_false() {
+        let c = ServiceConfig::from_settings_json("{}");
+        assert_eq!(c.scholar_sources, ScholarSources { pubmed: true, europepmc: true, crossref: true, biorxiv: true });
+        let c = ServiceConfig::from_settings_json(r#"{"scholarSources":{"pubmed":false,"crossref":"no","biorxiv":false}}"#);
+        assert_eq!(c.scholar_sources, ScholarSources { pubmed: false, europepmc: true, crossref: true, biorxiv: false });
+        assert_eq!(ServiceConfig::from_settings_json(r#"{"scholarSources":3}"#).scholar_sources, ScholarSources::default());
+    }
+
+    #[test]
+    fn contact_emails_are_kept_only_in_an_email_shape() {
+        let c = ServiceConfig::from_settings_json(r#"{"ncbiEmail":" lab@example.org ","crossrefMailto":"x@y.kr"}"#);
+        assert_eq!(c.ncbi_email.as_deref(), Some("lab@example.org"));
+        assert_eq!(c.crossref_mailto.as_deref(), Some("x@y.kr"));
+        let c = ServiceConfig::from_settings_json("{}");
+        assert_eq!((c.ncbi_email, c.crossref_mailto), (None, None));
+        for bad in ["", "lab", "lab@", "@x.org", "a@b", "a b@x.org", "a@x..org", "a@.x.org", "a@x.org.", "a@b@x.org", "a\u{7}@x.org", "<a@x.org>"] {
+            assert!(!is_contact_email(bad), "{bad:?}");
+        }
+        let long = format!("{}@x.org", "a".repeat(MAX_EMAIL - 5));
+        assert!(!is_contact_email(&long));
+        assert!(is_contact_email(&format!("{}@x.org", "a".repeat(MAX_EMAIL - 6))));
+        let c = ServiceConfig::from_settings_json(r#"{"ncbiEmail":"not an email","crossrefMailto":5}"#);
+        assert_eq!((c.ncbi_email, c.crossref_mailto), (None, None));
     }
 
     #[test]
