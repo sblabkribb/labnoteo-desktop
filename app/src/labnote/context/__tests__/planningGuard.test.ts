@@ -126,6 +126,40 @@ describe('parsePlanningReply', () => {
     expect(r.dropped.length).toBeGreaterThan(0);
   });
 
+  it.each([
+    '결과물을 -80도에 보관',
+    'Quality control of DNA',
+    'QC check before use',
+    'Observations during mixing',
+    'Meta data are filled automatically',
+    'Discussion with PI if needed',
+    'Conclusion step skipped',
+    '결과물: PRT-1',
+    '**결과물:** PRT-1',
+    '**Quality control of DNA**',
+    'Results of the gel: check later',
+  ])('keeps a line that only starts with a results-like word: %s', line => {
+    const reply = ['#### Method', '- step 1', line, '- step 2', '', '#### Output', '- PRT-1'].join('\n');
+    const r = parsePlanningReply(reply, ['Method', 'Output']);
+    expect(r.sections.get('Method')).toBe(['- step 1', line, '- step 2'].join('\n'));
+    expect(r.sections.get('Output')).toBe('- PRT-1');
+    expect(r.dropped).toEqual([]);
+  });
+
+  it.each([
+    ['Results and Discussion', 'Results and Discussion\n- yield 80%'],
+    ['Conclusions:', ['Conclusions:', '- yield 80%'].join('\n')],
+    ['결과 및 고찰', '결과 및 고찰\n- 수율 80%'],
+    ['**QC 지표:** 80%', '**QC 지표:** 80%'],
+    ['Quality control', 'Quality control\n- purity 80%'],
+  ])('still drops a whole researcher-side label: %s', (_label, results) => {
+    const reply = ['#### Method', '- step 1', '', results, '', '#### Output', '- PRT-1'].join('\n');
+    const r = parsePlanningReply(reply, ['Method', 'Output']);
+    expect(r.sections.get('Method')).toBe('- step 1');
+    expect([...r.sections.values()].join('\n')).not.toContain('80%');
+    expect(r.dropped.length).toBeGreaterThan(0);
+  });
+
   it('keeps bold text that is not a section label and list items that mention results', () => {
     const reply = ['#### Method', '**Note** keep on ice', '- Check results of the gel later', '*Mix gently*'].join('\n');
     const r = parsePlanningReply(reply, ['Method']);

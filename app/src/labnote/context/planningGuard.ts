@@ -14,12 +14,24 @@ import { draftableSectionsFor, planningOnly } from './planningPrompt';
 
 // ---------------------------------------------------------------- parse
 
+/** One researcher-side section word: results, QC, discussion or meta. */
+const RESEARCHER_TERM =
+  /(?:results?|outcomes?|findings?|observations?|qc(?:\s*metrics?)?|quality\s+control(?:\s+metrics?)?|quality\s+metrics?|discussions?|conclusions?|meta(?:\s*data)?|결과|논의|토의|고찰|결론|관찰|메타(?:\s*데이터)?|qc\s*지표|품질(?:\s*(?:관리|지표))?)/
+    .source;
+
 /**
- * Names that read as results, QC, discussion or meta although they are not a
- * canonical section name; a heading like that starts a section that is dropped.
+ * A whole label that names a results, QC, discussion or meta section although
+ * it is not a canonical section name (`Results`, `Results and Discussion`,
+ * `QC`, `Conclusions`, `결과 및 고찰`, ...). Anchored at both ends, so a line
+ * that merely starts with such a word (`결과물을 -80도에 보관`, `Quality
+ * control of DNA`, `Observations during mixing`) is content, not a heading.
  */
-const RESEARCHER_LIKE_RE =
-  /^(results?\b|outcomes?\b|findings?\b|observations?\b|qc\b|quality control|discussions?\b|conclusions?\b|meta(data)?\b|결과|논의|토의|고찰|결론|관찰|메타|qc\s*지표|품질)/i;
+/** The joiner between two researcher-side words: `&`, `and`, `및`, `/`, ... */
+const RESEARCHER_JOIN = /\s*(?:&|and|및|와|과|\/|,)\s*/.source;
+const RESEARCHER_NAME_RE = new RegExp(
+  `^${RESEARCHER_TERM}(?:${RESEARCHER_JOIN}${RESEARCHER_TERM})*$`,
+  'i'
+);
 
 const HASH_HEADING_RE = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/;
 /**
@@ -52,8 +64,9 @@ type HeadingHit = { name: string; canon: string | undefined; rest?: string };
 
 /**
  * The section heading on `line`, or undefined. Weak styles (emphasis, `Name:`,
- * a bare line) count only for a known or researcher-like name, so a results
- * label in any of these styles starts a dropped section.
+ * a bare line) count only when the whole label is a canonical section name or
+ * a researcher-side name, so a results label in any of these styles starts a
+ * dropped section while ordinary text that begins with such a word stays.
  */
 function headingOf(line: string): HeadingHit | undefined {
   const hash = HASH_HEADING_RE.exec(line);
@@ -61,7 +74,7 @@ function headingOf(line: string): HeadingHit | undefined {
     const name = cleanName(hash[1]);
     return { name, canon: canonicalSection(name) };
   }
-  const known = (name: string) => canonicalSection(name) !== undefined || RESEARCHER_LIKE_RE.test(name.normalize('NFC'));
+  const known = (name: string) => canonicalSection(name) !== undefined || RESEARCHER_NAME_RE.test(name.normalize('NFC').trim());
   const hit = (name: string, rest?: string): HeadingHit => ({
     name,
     canon: canonicalSection(name),
