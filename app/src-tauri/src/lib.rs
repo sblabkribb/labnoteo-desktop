@@ -6,6 +6,7 @@ pub mod mcp;
 pub mod net;
 pub mod print;
 pub mod scan;
+pub mod skins;
 pub mod skill;
 pub mod ui_prefs;
 pub mod vault;

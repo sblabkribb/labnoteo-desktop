@@ -29,6 +29,7 @@ const NET_ERRORS: &str = include_str!("ipc-net-errors.json");
 const MCP_ERRORS: &str = include_str!("ipc-mcp-errors.json");
 const SKILL_ERRORS: &str = include_str!("ipc-skill-errors.json");
 const ASSISTANT_ERRORS: &str = include_str!("ipc-assistant-errors.json");
+const SKIN_ERRORS: &str = include_str!("ipc-skin-errors.json");
 
 /// True when `s` holds a run of 48 or more hex chars: the shape of an MCP token.
 fn has_48_hex(s: &str) -> bool {
@@ -1150,6 +1151,49 @@ fn assistant_error_kinds_match_the_fixture() {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-assistant-errors.json", name(k)));
         let wire = serde_json::to_value(AssistantError::new(*k, "m")).unwrap();
         assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
+    }
+}
+
+/// What `SkinError` puts in `kind`, one entry per `SkinErrorKind`; `detail` is
+/// optional and sanitised.
+#[test]
+fn skin_error_kinds_match_the_fixture() {
+    use labnoteo_app_lib::skins::{SkinError, SkinErrorKind as K};
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(SKIN_ERRORS).unwrap();
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a name (and an entry in the fixture).
+    let name = |k: &K| match k {
+        K::TooLarge => "tooLarge",
+        K::TooManyEntries => "tooManyEntries",
+        K::BadArchive => "badArchive",
+        K::BadPath => "badPath",
+        K::FileNotAllowed => "fileNotAllowed",
+        K::Symlink => "symlink",
+        K::Encrypted => "encrypted",
+        K::UnsupportedMethod => "unsupportedMethod",
+        K::Duplicate => "duplicate",
+        K::SizeMismatch => "sizeMismatch",
+        K::CompressionRatio => "compressionRatio",
+        K::ManifestMissing => "manifestMissing",
+        K::ManifestInvalid => "manifestInvalid",
+        K::LicenceMissing => "licenceMissing",
+        K::LicenceNotAllowed => "licenceNotAllowed",
+        K::StateMissing => "stateMissing",
+        K::SheetMissing => "sheetMissing",
+        K::SheetUnused => "sheetUnused",
+        K::BadPng => "badPng",
+        K::PngTooLarge => "pngTooLarge",
+        K::SheetSize => "sheetSize",
+        K::AnimatedPng => "animatedPng",
+    };
+    let all = [K::TooLarge, K::TooManyEntries, K::BadArchive, K::BadPath, K::FileNotAllowed, K::Symlink, K::Encrypted, K::UnsupportedMethod, K::Duplicate, K::SizeMismatch, K::CompressionRatio, K::ManifestMissing, K::ManifestInvalid, K::LicenceMissing, K::LicenceNotAllowed, K::StateMissing, K::SheetMissing, K::SheetUnused, K::BadPng, K::PngTooLarge, K::SheetSize, K::AnimatedPng];
+    assert_eq!(fixture.len(), all.len(), "ipc-skin-errors.json lists every kind");
+    for k in &all {
+        let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-skin-errors.json", name(k)));
+        let wire = serde_json::to_value(SkinError::new(*k, None)).unwrap();
+        assert_eq!(wire, json!({"kind": expected}), "kind {}", name(k));
+        let wire = serde_json::to_value(SkinError::new(*k, Some("x.svg\u{202E}"))).unwrap();
+        assert_eq!(wire, json!({"kind": expected, "detail": "x.svg"}), "kind {}", name(k));
     }
 }
 

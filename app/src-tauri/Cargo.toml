@@ -50,6 +50,11 @@ sha2 = "0.10"
 # Readable text for the assistant's fetch_page (assistant spec §7.2); shares the
 # lock's dom_query 0.28.0 with tauri-utils.
 dom_smoothie = "=0.18.0"
+# .labnoteo-skin packs (assistant spec §8.2): read zip entries into memory (Stored and
+# Deflated only, no encryption support compiled in) and decode + re-encode their PNGs.
+# Both versions are already in the lock through tauri.
+zip = { version = "9.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+png = "0.18"
 
 [features]
 # Never in `default`, release or CI builds (guarded by src/__tests__/releaseFeatures.test.ts):
