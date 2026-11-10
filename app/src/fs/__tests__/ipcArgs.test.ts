@@ -17,6 +17,7 @@ import * as mcp from '../../labnote/mcp/mcpIpc';
 import { readClipboardLink } from '../../partbank/clipboardIpc';
 import { DEFAULT_PREFS, readUiPrefs, writeUiPrefs } from '../../ui/layoutStore';
 import { skillInstall, skillSaveAs, skillStatus } from '../../labnote/skill/skillIpc';
+import { scholarIpcFor } from '../../integrations/scholar/ipc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -29,9 +30,9 @@ const fixture: Record<string, string[]> = JSON.parse(
  * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
  * SP7 Part C 의 mcp_* 커맨드 아홉은 Task 36 의 mcpIpc.ts 래퍼로 비웠다.
  * MCP 클라이언트 커맨드 여덟 개(Task 5a, Rust)는 Task 5b 의 netIpc.ts 래퍼가 비웠다.
- * 문헌 검색 커맨드 두 개(Task 11, Rust)는 Task 13 의 scholar/ipc.ts 래퍼가 비운다.
+ * 문헌 검색 커맨드 두 개(Task 11, Rust)는 Task 13 의 scholar/ipc.ts 래퍼가 비웠다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = ['scholar_search', 'scholar_get'];
+const PENDING_TS_WRAPPERS: readonly string[] = [];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
@@ -187,6 +188,10 @@ describe('IPC 인자 이름 계약', () => {
     await net.mcpClientDisconnect('0a1b2c3d', r.invoke);
     await net.mcpClientForget('0a1b2c3d', r.invoke);
     await net.mcpClientToolsCached(r.invoke);
+    // 문헌 검색(Task 13): 인자 이름은 늘 다 보낸다(빈 값은 undefined).
+    const scholar = scholarIpcFor(r.invoke);
+    await scholar.search('pubmed', 'crispr', undefined, undefined);
+    await scholar.get('pubmed', '123');
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

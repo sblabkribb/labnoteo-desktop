@@ -10,6 +10,8 @@ import type { ToolCall } from '../labnote/port/llmProvider';
 import { mcpAgentTools, type McpCallFn } from '../integrations/mcpClient/agentTools';
 import type { McpSecretFlag, McpServerInfo } from '../integrations/mcpClient/types';
 import { mcpClientCall, mcpClientSecretStatus, mcpClientToolsCached } from '../integrations/netIpc';
+import { scholarAgentTools } from '../integrations/scholar/agentTools';
+import { scholarIpcFor } from '../integrations/scholar/ipc';
 import type { AiEnv } from './aiEnv';
 
 export interface ExternalToolMeta {
@@ -43,11 +45,20 @@ export interface ExternalRunOpts {
 }
 
 /**
- * 이번 실행에 줄 외부 도구. 실행을 시작할 때 설정, `mcp_client_tools_cached`, `mcp_client_secret_status` 로만 만들고
- * 서버에는 연결하지 않는다(spec §7.5). 켠 MCP 서버가 없으면 Rust 에 묻지도 않는다. 캐시나 토큰 상태를 읽지 못하면 MCP
- * 도구 없이 간다. 문헌 검색 도구(Task 13)도 여기에 붙는다.
+ * 이번 실행에 줄 외부 도구: 켠 문헌 검색 출처의 도구, 그다음 켠 MCP 서버의 도구. 실행을 시작할 때 설정,
+ * `mcp_client_tools_cached`, `mcp_client_secret_status` 로만 만들고 서버에는 연결하지 않는다(spec §7.5).
+ * 켠 MCP 서버가 없으면 Rust 에 묻지도 않는다. 캐시나 토큰 상태를 읽지 못하면 MCP 도구 없이 간다.
+ * 두 쪽 모두 실행의 취소 신호에 묶인다(부르는 중인 호출은 `net_cancel` 로 멈춘다).
  */
 export async function externalAgentTools(env: AiEnv, opts: ExternalRunOpts = {}): Promise<ExternalTools> {
+  const settings = env.settings();
+  const scholar = scholarAgentTools(settings, scholarIpcFor(env.invoke, opts.signal));
+  const mcp = await mcpTools(env, opts);
+  const meta = new Map<string, ExternalToolMeta>([...scholar.meta, ...mcp.meta]);
+  return { tools: [...scholar.tools, ...mcp.tools], meta };
+}
+
+async function mcpTools(env: AiEnv, opts: ExternalRunOpts): Promise<{ tools: ToolDef[]; meta: Map<string, ExternalToolMeta> }> {
   const servers = env.settings().mcpClientServers ?? [];
   if (!servers.some((s) => s.enabled)) return { tools: [], meta: new Map() };
   let cache: Record<string, McpServerInfo>;

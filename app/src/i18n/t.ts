@@ -878,6 +878,20 @@ const ko: Record<string, string> = {
   'mcpClient.import.notText': '{0}: 형식이 올바르지 않아 가져오지 않았어요.',
   'mcpClient.import.badToken': '{0}: 토큰이 올바르지 않아 저장하지 않았어요.',
   'mcpClient.import.keychain': '{0}: 토큰을 저장하지 못했어요.',
+  // 문헌 검색(spec §8.4, §9)
+  'scholar.title': '문헌 검색',
+  'scholar.help': 'AI가 논문을 찾을 때 쓰는 공개 검색이에요.',
+  'scholar.queryNote': '검색어는 아래 공개 서비스로 보내져요. 끈 곳은 쓰지 않아요.',
+  'scholar.source.pubmed': 'PubMed',
+  'scholar.source.europepmc': 'Europe PMC',
+  'scholar.source.crossref': 'Crossref',
+  'scholar.source.biorxiv': 'bioRxiv',
+  'scholar.ncbiKey': 'NCBI API 키 (선택)',
+  'scholar.ncbiKeyHint': '키가 있으면 PubMed를 더 빨리 찾아요. 없어도 돼요.',
+  'scholar.ncbiEmail': 'NCBI 연락처 이메일 (선택)',
+  'scholar.crossrefMailto': 'Crossref 연락처 이메일 (선택)',
+  'scholar.emailHelp': '넣으면 NCBI/Crossref에 연락처로 보내요. 비워 두면 보내지 않아요.',
+  'scholar.emailInvalid': '이메일 주소 모양이 아니라 저장하지 않았어요.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -1755,6 +1769,20 @@ const en: Record<string, string> = {
   'mcpClient.import.notText': '{0}: this entry is not in a form that can be imported.',
   'mcpClient.import.badToken': '{0}: the token is not valid and was not saved.',
   'mcpClient.import.keychain': '{0}: the token could not be saved.',
+  // Literature search (spec §8.4, §9)
+  'scholar.title': 'Literature search',
+  'scholar.help': 'Public search the AI uses to find papers.',
+  'scholar.queryNote': 'Search words are sent to the public services below. Services turned off are not used.',
+  'scholar.source.pubmed': 'PubMed',
+  'scholar.source.europepmc': 'Europe PMC',
+  'scholar.source.crossref': 'Crossref',
+  'scholar.source.biorxiv': 'bioRxiv',
+  'scholar.ncbiKey': 'NCBI API key (optional)',
+  'scholar.ncbiKeyHint': 'With a key, PubMed searches run faster. It is not required.',
+  'scholar.ncbiEmail': 'NCBI contact email (optional)',
+  'scholar.crossrefMailto': 'Crossref contact email (optional)',
+  'scholar.emailHelp': 'If set, it is sent to NCBI/Crossref as a contact. Leave empty to send nothing.',
+  'scholar.emailInvalid': 'This is not an email address, so it was not saved.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

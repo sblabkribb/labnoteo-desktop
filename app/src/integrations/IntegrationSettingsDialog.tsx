@@ -36,6 +36,7 @@ import {
 } from './importFile';
 import { SelectField } from '../ui/SelectField';
 import { McpClientSection, mcpClientDepsFor, type McpClientDeps } from './mcpClient/McpClientSection';
+import { ScholarSection } from './scholar/ScholarSection';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -85,6 +86,9 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     mcpEnabled: s.mcpEnabled,
     mcpPort: s.mcpPort,
     mcpClientServers: s.mcpClientServers.map((m) => ({ ...m, tools: { ...m.tools } })),
+    scholarSources: { ...s.scholarSources },
+    ncbiEmail: s.ncbiEmail,
+    crossrefMailto: s.crossrefMailto,
   };
 }
 
@@ -924,6 +928,15 @@ export function IntegrationSettingsPage(props: {
         </section>
 
         <McpClientSection key={mcpGen} deps={deps} onHide={registerHide} focusServer={mcpFocus} />
+
+        <ScholarSection
+          value={{ scholarSources: val.scholarSources, ncbiEmail: val.ncbiEmail, crossrefMailto: val.crossrefMailto }}
+          save={save}
+          deps={deps}
+          ncbiKeySet={status.set.ncbiEutils}
+          onSaved={onSaved}
+          onHide={registerHide}
+        />
 
         {/* SP7 Part B: 바코드와 스캔, Slack(Task 29) */}
         <ScanSettingsSection
