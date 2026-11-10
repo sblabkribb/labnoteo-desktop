@@ -76,5 +76,8 @@
   "mcp_status": [],
   "mcp_claim": ["callId"],
   "mcp_reply": ["callId", "reply"],
-  "mcp_drain": []
+  "mcp_drain": [],
+  "skill_status": [],
+  "skill_install": ["overwrite"],
+  "skill_save_as": []
 }

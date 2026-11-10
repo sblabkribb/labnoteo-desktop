@@ -27,6 +27,7 @@ const ERRORS: &str = include_str!("ipc-errors.json");
 const EVENTS: &str = include_str!("ipc-events.json");
 const NET_ERRORS: &str = include_str!("ipc-net-errors.json");
 const MCP_ERRORS: &str = include_str!("ipc-mcp-errors.json");
+const SKILL_ERRORS: &str = include_str!("ipc-skill-errors.json");
 
 /// True when `s` holds a run of 48 or more hex chars: the shape of an MCP token.
 fn has_48_hex(s: &str) -> bool {
@@ -61,6 +62,14 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::scan::ScanFolderState::inert())
         .manage(labnoteo_app_lib::mcp::McpState::default())
         .manage(labnoteo_app_lib::mcp::ClipState(clip.clone()))
+        // The skill installer: a temp home (never the real one) and a fake
+        // save dialog that picks a temp path once, then cancels.
+        .manage(labnoteo_app_lib::skill::SkillPaths { home: Some(dir.join("home")) })
+        .manage(labnoteo_app_lib::skill::SkillPicker(std::sync::Arc::new({
+            let picked = dir.join("saved").join("SKILL.md");
+            let once = std::sync::atomic::AtomicBool::new(true);
+            move || once.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| picked.clone())
+        })))
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -663,6 +672,34 @@ title: 실험
         assert!(!has_48_hex(r), "a response holds a 48-hex string: {r}");
     }
 
+    // The skill installer writes only the embedded SKILL.md, only into the
+    // temp home or the (fake) picked path; the commands take no content or path.
+    {
+        use labnoteo_app_lib::skill::SKILL_TEXT;
+        std::fs::create_dir_all(dir.join("home")).unwrap();
+        std::fs::create_dir_all(dir.join("saved")).unwrap();
+        let skill = dir.join("home").join(".claude").join("skills").join("labnoteo").join("SKILL.md");
+        let shown = skill.to_string_lossy().into_owned();
+        assert_eq!(
+            ok("skill_status", args("skill_status", vec![])),
+            json!({"target": shown, "exists": false, "same": false})
+        );
+        assert_eq!(ok("skill_install", args("skill_install", vec![json!(false)])), json!({"written": true}));
+        assert_eq!(std::fs::read(&skill).unwrap(), SKILL_TEXT.as_bytes());
+        assert_eq!(ok("skill_status", args("skill_status", vec![]))["same"], true);
+        assert_eq!(ok("skill_install", args("skill_install", vec![json!(false)])), json!({"written": false}));
+        std::fs::write(&skill, "mine").unwrap();
+        assert_eq!(call("skill_install", args("skill_install", vec![json!(false)])).unwrap_err()["kind"], "exists");
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), "mine");
+        assert_eq!(ok("skill_install", args("skill_install", vec![json!(true)])), json!({"written": true}));
+        assert_eq!(std::fs::read(&skill).unwrap(), SKILL_TEXT.as_bytes());
+        let saved = dir.join("saved").join("SKILL.md");
+        assert_eq!(ok("skill_save_as", args("skill_save_as", vec![])), json!(saved.to_string_lossy()));
+        assert_eq!(std::fs::read(&saved).unwrap(), SKILL_TEXT.as_bytes());
+        assert_eq!(ok("skill_save_as", args("skill_save_as", vec![])), Value::Null, "cancel");
+        assert!(call("skill_install", json!({})).is_err(), "overwrite is required");
+    }
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
@@ -820,6 +857,28 @@ fn mcp_error_kinds_match_the_fixture() {
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-mcp-errors.json", name(k)));
         let wire = serde_json::to_value(McpError::new(*k, "m")).unwrap();
+        assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
+    }
+}
+
+/// What `SkillError` puts in `kind`, one entry per `SkillErrorKind`.
+#[test]
+fn skill_error_kinds_match_the_fixture() {
+    use labnoteo_app_lib::skill::{SkillError, SkillErrorKind as K};
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(SKILL_ERRORS).unwrap();
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a name (and an entry in the fixture).
+    let name = |k: &K| match k {
+        K::Exists => "exists",
+        K::Symlink => "symlink",
+        K::NoHome => "noHome",
+        K::Io => "io",
+    };
+    let all = [K::Exists, K::Symlink, K::NoHome, K::Io];
+    assert_eq!(fixture.len(), all.len(), "ipc-skill-errors.json lists every kind");
+    for k in &all {
+        let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-skill-errors.json", name(k)));
+        let wire = serde_json::to_value(SkillError::new(*k, "m")).unwrap();
         assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
     }
 }
