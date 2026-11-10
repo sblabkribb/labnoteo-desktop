@@ -134,6 +134,27 @@ describe('draftMethodCommand (#112)', () => {
     expect(docOf(OTHER)).toBe(BODY);
   });
 
+  it('request bodies are unchanged by the context-window setting (snapshot, both providers)', async () => {
+    const bodies: Record<string, unknown> = {};
+    for (const provider of ['openai', 'ollama'] as const) {
+      const th = host({ [NOTE]: BODY }, { ...LLM, llmProvider: provider, llmContextWindow: 32768 });
+      await mountAt(th, NOTE, IN_METHOD);
+      const answer = provider === 'openai' ? reply('1. 원심분리') : { status: 200, text: JSON.stringify({ message: { content: '1. 원심분리' } }) };
+      const { f } = aiEnv(th, () => answer);
+      await draftMethodCommand(createAiEnv(th.ctx, f.invoke));
+      const call = f.calls.find(([c]) => c === 'llm_chat');
+      const body = JSON.parse(JSON.stringify(call![1].body)) as Record<string, unknown>;
+      bodies[provider] = { keys: Object.keys(body).sort(), options: body.options, temperature: body.temperature };
+      th.cleanup();
+      hosts = hosts.filter((h) => h !== th);
+      closeAllDialogs();
+    }
+    expect(bodies).toEqual({
+      openai: { keys: ['messages', 'model', 'temperature'], options: undefined, temperature: 0.2 },
+      ollama: { keys: ['messages', 'model', 'options', 'stream'], options: { temperature: 0.2 }, temperature: undefined },
+    });
+  });
+
   // #399
   it('asks nothing when no provider is configured', async () => {
     const th = host({ [NOTE]: BODY }, { llmProvider: 'none' });

@@ -49,6 +49,11 @@ export type AppSettings = Pick<
   defaultExperimenter: string;
   /** 앱에만 있는 키(UI 재설계 R1): 노트에 붙인 그림을 둘 폴더. 기본 'images'(Obsidian·플러그인과 같다). 설정 → 편집기. */
   imageFolder: ImageFolder;
+  /**
+   * 앱에만 있는 키(feat/ai-context): 모델의 컨텍스트 창(토큰). 문맥 예산을 정하고, Ollama 에는 `options.num_ctx` 로 간다.
+   * 2048-1,000,000 정수(벗어나면 잘라 맞춘다), 정수가 아니면 기본 8192.
+   */
+  llmContextWindow: number;
 };
 
 /** 그림 저장 폴더: 노트 폴더의 images/(기본) 또는 실험의 resources/. */
@@ -62,6 +67,17 @@ export function cleanExperimenter(v: unknown): string {
   if (typeof v !== 'string') return '';
   // eslint-disable-next-line no-control-regex
   return v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, EXPERIMENTER_MAX).trim();
+}
+
+/** 컨텍스트 창의 기본값과 범위(토큰). */
+export const LLM_CONTEXT_WINDOW_DEFAULT = 8192;
+export const LLM_CONTEXT_WINDOW_MIN = 2048;
+export const LLM_CONTEXT_WINDOW_MAX = 1_000_000;
+
+/** 컨텍스트 창 값: 유한한 정수면 범위로 잘라 맞추고, 아니면 기본값. */
+export function clampContextWindow(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v)) return LLM_CONTEXT_WINDOW_DEFAULT;
+  return Math.min(LLM_CONTEXT_WINDOW_MAX, Math.max(LLM_CONTEXT_WINDOW_MIN, v));
 }
 
 /** MCP 서버의 기본 포트(플러그인과 같다). */
@@ -151,6 +167,8 @@ const KEYS = [
   // UI 재설계(Task 8): 기본 실험자와 그림 저장 폴더. 앱 키다.
   'defaultExperimenter',
   'imageFolder',
+  // feat/ai-context(Task 8): 모델의 컨텍스트 창. 앱 키다.
+  'llmContextWindow',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -161,6 +179,7 @@ const APP_DEFAULTS = {
   mcpPort: MCP_DEFAULT_PORT,
   defaultExperimenter: '',
   imageFolder: 'images',
+  llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -207,6 +226,8 @@ export function fromStored(raw: unknown): AppSettings {
     const o = raw as { defaultExperimenter?: unknown; imageFolder?: unknown };
     settings.defaultExperimenter = cleanExperimenter(o.defaultExperimenter);
     if (o.imageFolder === 'images' || o.imageFolder === 'resources') settings.imageFolder = o.imageFolder;
+    // feat/ai-context(Task 8): 컨텍스트 창은 정수만 살리고 범위로 잘라 맞춘다.
+    settings.llmContextWindow = clampContextWindow((raw as { llmContextWindow?: unknown }).llmContextWindow);
   }
   return settings;
 }

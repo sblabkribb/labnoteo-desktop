@@ -188,6 +188,24 @@ describe('complete', () => {
     expect(th.notes).toEqual([]);
   });
 
+  it('complete without opts calls chat exactly as before; with contextWindow passes it on', async () => {
+    const th = host({});
+    const { env } = aiEnv(th, () => reply('ok'));
+    const chat = vi.spyOn(env.provider!, 'chat');
+    await complete(env, [{ role: 'user', content: 'hi' }]);
+    expect(chat).toHaveBeenCalledTimes(1);
+    const first = chat.mock.calls[0][1]!;
+    expect(Object.keys(first).sort()).toEqual(['signal', 'temperature']);
+    expect(first.temperature).toBe(0.2);
+    await complete(env, [{ role: 'user', content: 'hi' }], { contextWindow: 4096 });
+    const second = chat.mock.calls[1][1]!;
+    expect(Object.keys(second).sort()).toEqual(['contextWindow', 'signal', 'temperature']);
+    expect(second.contextWindow).toBe(4096);
+    // an empty opts is the same as none
+    await complete(env, [{ role: 'user', content: 'hi' }], {});
+    expect(Object.keys(chat.mock.calls[2][1]!).sort()).toEqual(['signal', 'temperature']);
+  });
+
   it('complete maps errors with describeLlmError and returns undefined', async () => {
     const th = host({});
     vi.spyOn(console, 'error').mockImplementation(() => {});

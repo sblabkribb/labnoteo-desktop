@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/llm/provider.ts:27-267 sha256:50318941b2f8b631
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. The JSON body is built and the reply parsed as in the vendor file.
+// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. ChatOptions gains contextWindow (feat/ai-context): Ollama merges it into options as num_ctx beside temperature; the OpenAI body ignores it. The JSON body is otherwise built and the reply parsed as in the vendor file.
 import type { ToolDef } from '@labnoteo/core';
 import { llmChat, NetError, type InvokeFn } from '../../integrations/netIpc';
 import type { AppSettings } from '../settings';
@@ -49,6 +49,19 @@ export interface ChatOptions {
   tools?: ToolDef[];
   /** Aborting cancels the request in Rust (`net_cancel`) and rejects with `NetError('cancelled')`. */
   signal?: AbortSignal;
+  /**
+   * The model's context window in tokens (`llmContextWindow`). Ollama gets it as
+   * `options.num_ctx`; the OpenAI-compatible body ignores it. Omitted → the body is unchanged.
+   */
+  contextWindow?: number;
+}
+
+/** Ollama's `options`: temperature and num_ctx when given, otherwise omitted. */
+function ollamaOptions(opts: ChatOptions | undefined): Record<string, number> | undefined {
+  const out: Record<string, number> = {};
+  if (opts?.temperature != null) out.temperature = opts.temperature;
+  if (opts?.contextWindow != null) out.num_ctx = opts.contextWindow;
+  return Object.keys(out).length ? out : undefined;
 }
 
 export interface LlmProvider {
@@ -230,7 +243,7 @@ class OllamaProvider implements LlmProvider {
         messages: OllamaProvider.toWire(messages),
         stream: false,
         tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
-        options: opts?.temperature != null ? { temperature: opts.temperature } : undefined,
+        options: ollamaOptions(opts),
       },
       opts?.signal,
       this.invoke
