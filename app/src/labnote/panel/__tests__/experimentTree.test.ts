@@ -2,8 +2,8 @@ import { createFakeVault } from '../../../__tests__/fakeVault';
 import { TauriLabnoteFs } from '../../../fs/tauriLabnoteFs';
 import { setLang } from '../../../i18n/lang';
 import { ExperimentEntryCache } from '../experimentEntries';
-import { buildExperimentTree, experimentNodes, filterTree, groupExperiments, workflowState, type ExpNode } from '../experimentTree';
-import { DONE, EXP, experimentVault, PLAN, WF1, WF2, WF3 } from './experimentFixtures';
+import { buildExperimentTree, coreEntryMatcher, experimentNodes, filterTree, groupExperiments, workflowState, type ExpNode } from '../experimentTree';
+import { DONE, EXP, expReadme, experimentVault, PLAN, WF1, WF2, WF3 } from './experimentFixtures';
 
 async function load(files = experimentVault()): Promise<ExpNode[]> {
   const fs = new TauriLabnoteFs(createFakeVault(files).invoke);
@@ -109,6 +109,35 @@ describe('filterTree', () => {
     const self = filterTree(nodes, '대장균');
     expect(self.nodes[0].workflows).toHaveLength(3);
     expect(self.partial.size).toBe(0);
+  });
+
+  it('keeps the core search terms: dates written with -, discussion words and the folder name', async () => {
+    const files = experimentVault();
+    files[`${PLAN}/README.labnote.md`] = expReadme('계획만', 'planned', [], 'discuss: true\n').replace('2026-02-03', '2026-11-05');
+    const nodes = await load(files);
+    const match = coreEntryMatcher('Flagged for discussion Something to discuss', {});
+    expect(filterTree(nodes, '2026-11', undefined, match).nodes.map((n) => n.dir)).toEqual([PLAN]);
+    expect(filterTree(nodes, '2026-02', undefined, match).nodes.map((n) => n.dir)).toEqual([EXP, DONE]);
+    expect(filterTree(nodes, 'something to', undefined, match).nodes.map((n) => n.dir)).toEqual([PLAN]);
+    expect(filterTree(nodes, 'discuss', undefined, match).nodes.map((n) => n.dir)).toEqual([PLAN]);
+    // 폴더 이름(밑줄 그대로)도 실험 자체의 맞음이다
+    const byFolder = filterTree(nodes, 'e_coli', undefined, match);
+    expect(byFolder.nodes.map((n) => n.dir)).toEqual([EXP]);
+    expect(byFolder.nodes[0].workflows).toHaveLength(3);
+    expect(byFolder.partial.size).toBe(0);
+  });
+
+  it('an experiment that matches keeps every UO and the add rows of a workflow matched only by a UO', async () => {
+    const nodes = (await load()).map((n) => (n.dir === EXP ? { ...n, project: 'Incubation lab' } : n));
+    const r = filterTree(nodes, 'incubation');
+    const exp = r.nodes.find((n) => n.dir === EXP)!;
+    expect(exp.workflows).toHaveLength(3);
+    const wf2 = exp.workflows.find((w) => w.path === WF2)!;
+    expect(wf2.uos.map((u) => u.code)).toEqual(['UHW180', 'UHW380']);
+    expect(r.partial.has(wf2.id)).toBe(false);
+    expect(r.partial.has(exp.id)).toBe(false);
+    expect(r.expanded.has(wf2.id)).toBe(true);
+    expect(r.expanded.has(exp.id)).toBe(true);
   });
 
   it('no match gives no nodes; an empty query changes nothing', async () => {

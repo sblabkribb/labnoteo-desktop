@@ -306,6 +306,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     else showLeft(next === 'workflows' ? 'experiments' : next);
   };
   const openNote = (path: string) => openFile(path);
+  // 파일 탭에서 펼쳐 보일 경로(실험 탭의 images/·resources/ 줄). seq 는 같은 경로를 다시 골라도 다시 보이게 한다.
+  const [fileReveal, setFileReveal] = useState<{ path: string; seq: number }>();
+  const revealInFiles = (path: string) => {
+    showLeft('files');
+    setFileReveal((prev) => ({ path, seq: (prev?.seq ?? 0) + 1 }));
+  };
   // 개요에서 제목을 고르면: 열린 편집기면 그 줄로 커서를 옮기고 초점을 편집기로 돌려준다(reveal 이 focus 한다).
   // 열려 있지 않으면(개요가 낡았다) 열면서 그 줄로 간다.
   const onOutlineReveal = (path: string, line0: number) => {
@@ -351,6 +357,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     openFile,
     closeActive,
     showPanel,
+    revealInFiles,
     navigate: (dir) => void navFns.go(dir),
     newNote: () => void newNote(),
   });
@@ -711,6 +718,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
                 onView={(path, kind) => setViewing({ path, kind })}
                 onContextMenu={onTreeMenu}
                 collapseAllRef={collapseFiles}
+                reveal={fileReveal}
               />
             )}
           </div>

@@ -18,11 +18,13 @@ import { coreLocale, coreT } from '../i18n';
 import { samePath, VAULT_ROOT } from '../paths';
 import { catalogDescription } from '../port/aliasHints';
 import { CATALOG_DIR, ensureVaultCatalogs } from '../port/catalogUpdate';
-import { showMarkers, treeLabels } from '../port/workflowView';
+import { statusNames } from '../port/status';
+import { discussWords, showMarkers, treeLabels } from '../port/workflowView';
 import { statusLabel, statusShape } from '../statusLabels';
 import { openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
 import { ExperimentEntryCache, type PanelEntry } from './experimentEntries';
 import {
+  coreEntryMatcher,
   experimentLabel,
   experimentNodes,
   filterTree,
@@ -30,6 +32,7 @@ import {
   groupExperiments,
   settingFromGroupBy,
   uoDone,
+  WorkflowNodeCache,
   workflowState,
   type ExpNode,
   type GroupBy,
@@ -114,13 +117,15 @@ function useCursorLine(path: string | undefined): number | undefined {
  *   vaultRefresh 에 바뀐 것만 버리고 다시 읽는다. 새 줄이 올 때까지 옛 줄을 둔다.
  */
 export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
-  useLang();
+  const lang = useLang();
   const { host } = ctx;
   const cache = useMemo(() => new ExperimentEntryCache(host.fs), [host]);
   const [entries, setEntries] = useState<PanelEntry[]>();
   /** 워크플로 경로 -> 본문(UO 제목). 바뀐 경로만 버린다. */
   const texts = useRef(new Map<string, string>());
   const [textsVersion, setTextsVersion] = useState(0);
+  /** 워크플로 노드: 본문이 같으면 다시 읽지 않는다(열린 노트를 고칠 때마다 보관함 전체를 다시 읽지 않게). */
+  const wfCache = useMemo(() => new WorkflowNodeCache(), []);
   const [catalog, setCatalog] = useState<Catalog>();
   const [query, setQuery] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>(groupByFromSetting(ctx.settings.workflowViewGroupBy));
@@ -214,31 +219,41 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
   // 열린 워크플로 노트는 편집기의 본문으로 그린다(저장 전 UO 도 보인다)
   const liveText = useEditorText(activePath);
   const cursorLine = useCursorLine(activePath);
-  const all = entries ?? [];
   const nodes = useMemo(() => {
+    const all = entries ?? [];
     const map = new Map(texts.current);
     if (activePath && liveText) {
       const key = [...map.keys()].find((k) => samePath(k, activePath));
       if (key !== undefined) map.set(key, liveText);
     }
-    return experimentNodes(all, map);
+    wfCache.keepOnly(all.flatMap((e) => e.workflowFiles.map((w) => w.path)));
+    return experimentNodes(all, map, wfCache);
     // textsVersion: 뒤에서 읽은 본문이 들어왔다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, textsVersion, activePath, liveText]);
+  }, [entries, textsVersion, activePath, liveText, wfCache]);
 
-  const found = filterTree(nodes, query);
-  const fullWorkflows = new Map(nodes.flatMap((n) => n.workflows).map((w) => [w.id, w]));
+  // 찾기는 플러그인처럼 날짜(`2026-11`), 논의 낱말, 폴더·노트 이름도 본다(코어 filterExperiments)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const matcher = useMemo(() => coreEntryMatcher(discussWords(host), statusNames(host)), [host, lang]);
+  // 커서 줄만 바뀌면 다시 찾거나 묶지 않는다
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const found = useMemo(() => filterTree(nodes, query, undefined, matcher), [nodes, query, matcher, lang]);
+  const fullWorkflows = useMemo(() => new Map(nodes.flatMap((n) => n.workflows).map((w) => [w.id, w])), [nodes]);
   const searching = query.trim() !== '';
-  const shownNodes = searching ? [...found.nodes, ...nodes.filter((n) => kept.current.has(n.dir) && !found.nodes.some((f) => f.id === n.id))] : found.nodes;
-  const labels = {
-    ...treeLabels(host),
-    project: t('experiments.project'),
-    noProject: t('experiments.noProject'),
-    author: t('experiments.experimenter'),
-    noAuthor: t('experiments.noExperimenter'),
-    noStatus: t('experiments.noStatus'),
-  };
-  const groups = groupExperiments(shownNodes, groupBy, labels);
+  const groups = useMemo(() => {
+    const shownNodes = searching ? [...found.nodes, ...nodes.filter((n) => kept.current.has(n.dir) && !found.nodes.some((f) => f.id === n.id))] : found.nodes;
+    const labels = {
+      ...treeLabels(host),
+      project: t('experiments.project'),
+      noProject: t('experiments.noProject'),
+      author: t('experiments.experimenter'),
+      noAuthor: t('experiments.noExperimenter'),
+      noStatus: t('experiments.noStatus'),
+    };
+    return groupExperiments(shownNodes, groupBy, labels);
+    // lang: 묶음 이름이 지역화된다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [found, nodes, searching, groupBy, host, lang]);
 
   // 줄 모델: TreeNode 와 그 줄이 무엇인지(items)
   const items = new Map<string, Item>();
@@ -341,6 +356,9 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
     }
   };
 
+  /** README 체크리스트에서 그 워크플로를 체크하거나 푼다(상태 아이콘과 맥락 메뉴). */
+  const tickWorkflow = (exp: ExpNode, wf: WfNode) => changed(exp.dir, () => toggleWorkflowTick(ctx, exp.dir, posix.basename(wf.path)));
+
   const addWorkflow = (exp: ExpNode) => void runCommand(ctx, () => createWorkflow(ctx, undefined, { experimentDir: exp.dir }));
   const addUo = (wf: WfNode) => void runCommand(ctx, () => insertUnitOp(ctx, undefined, { workflowPath: wf.path }));
 
@@ -358,9 +376,12 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
       case 'uo':
         void runCommand(ctx, () => ctx.openFile(item.wf.path, { line: item.uo.line }));
         break;
-      case 'folder':
-        ctx.showPanel('files');
+      case 'folder': {
+        const dir = `${item.exp.dir}/${item.name}`;
+        if (ctx.revealInFiles) ctx.revealInFiles(dir);
+        else ctx.showPanel('files');
         break;
+      }
       case 'addWorkflow':
         addWorkflow(item.exp);
         break;
@@ -382,7 +403,15 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
         ...(status === 'failed' || status === 'needs-repeat' ? [{ label: coreT('Retry this experiment'), run: () => retryExperiment(ctx, folder) }] : []),
       ];
     }
-    if (item?.kind === 'workflow') return [{ label: t('experiments.addUo'), run: () => insertUnitOp(ctx, undefined, { workflowPath: item.wf.path }) }];
+    if (item?.kind === 'workflow') {
+      const { exp, wf } = item;
+      const ticked = (fullWorkflows.get(wf.id) ?? wf).ticked;
+      return [
+        { label: t('experiments.addUo'), run: () => insertUnitOp(ctx, undefined, { workflowPath: wf.path }) },
+        // 상태 아이콘은 탭 정지가 아니다: 키보드(메뉴 키, Shift+F10)로는 여기서 체크한다
+        { label: ticked ? t('experiments.wf.untick') : t('experiments.wf.tick'), run: tickWorkflow(exp, wf) },
+      ];
+    }
     // 카탈로그 트리
     if (node.kind === 'workflow') {
       const wf = node.payload as WorkflowItem;
@@ -421,8 +450,7 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
       return {
         icon: WF_ICON[s],
         label: s === 'ticked' ? t('experiments.wf.ticked') : s === 'partial' ? t('experiments.wf.partial') : t('experiments.wf.none'),
-        onClick: () =>
-          void runCommand(ctx, changed(exp.dir, () => toggleWorkflowTick(ctx, exp.dir, posix.basename(wf.path)))),
+        onClick: () => void runCommand(ctx, tickWorkflow(exp, wf)),
       };
     }
     return undefined;

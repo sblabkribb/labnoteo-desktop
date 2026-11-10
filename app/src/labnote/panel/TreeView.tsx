@@ -46,6 +46,8 @@ export interface TreeViewProps {
   state?(node: TreeNode): TreeState | undefined;
   /** 줄에 커서를 올리면 보이는 작은 단추들(마우스용: 탭 정지가 아니다. 같은 일은 줄과 메뉴로도 한다). */
   actions?(node: TreeNode): TreeAction[] | undefined;
+  /** 이 id 의 줄로 초점을 옮기고 보이게 스크롤한다. seq 마다 한 번, 그 줄이 그려진 뒤에(조상이 펼쳐지길 기다린다). */
+  focusRequest?: { id: string; seq: number };
 }
 
 export interface TreeState {
@@ -111,7 +113,7 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
  *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
  * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, actions }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, actions, focusRequest }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -133,6 +135,18 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     // jsdom 에는 scrollIntoView 가 없다. focus() 는 부르지 않는다.
     refs.current.get(currentKey)?.scrollIntoView?.({ block: 'nearest' });
   }, [scrollCurrent, currentKey]);
+
+  const handledFocus = useRef<number>();
+  useEffect(() => {
+    if (!focusRequest || handledFocus.current === focusRequest.seq) return;
+    const row = rows.find((r) => r.node.id === focusRequest.id);
+    if (!row) return; // 아직 접힌 부모 아래: 펼친 뒤 다시 본다
+    handledFocus.current = focusRequest.seq;
+    setFocusKey(row.key);
+    const el = refs.current.get(row.key);
+    el?.scrollIntoView?.({ block: 'nearest' });
+    el?.focus();
+  }, [focusRequest, rows]);
 
   const activate = (row: Row) => {
     setFocusKey(row.key);

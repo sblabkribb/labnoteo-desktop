@@ -7,7 +7,7 @@
  *   buildExperimentTree 가 정한 묶음과 이름을 그대로 쓴다(꼬리의 ` [n]` 만 떼고 개수는 따로 그린다).
  */
 import type { ExperimentEntry, ExperimentGrouping, ExperimentTreeLabels } from '@labnoteo/core';
-import { buildExperimentTree as coreExperimentTree, EXPERIMENT_STATUSES } from '@labnoteo/core';
+import { buildExperimentTree as coreExperimentTree, EXPERIMENT_STATUSES, filterExperiments } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import { experimentTitleFromFolderName } from '@labnoteo/core/lib/labnoteStructure';
 import { parseWorkflowFileName, parseWorkflowHeading } from '@labnoteo/core/lib/workflowStructure';
@@ -98,10 +98,37 @@ function workflowNode(path: string, fileName: string, ticked: boolean, text: str
 }
 
 /**
+ * 워크플로 노드의 캐시: 경로마다 마지막으로 만든 노드를 두고, 파일 이름·체크·본문이 같으면 다시 읽지(parseWorkflowHeading,
+ * notePosition) 않는다. 실험 탭은 열린 노트를 고칠 때마다 노드를 다시 만들므로 큰 보관함에서도 바뀐 노트만 다시 읽는다.
+ */
+export class WorkflowNodeCache {
+  private readonly nodes = new Map<string, { fileName: string; ticked: boolean; text: string | undefined; node: WfNode }>();
+
+  get(path: string, fileName: string, ticked: boolean, text: string | undefined): WfNode {
+    const hit = this.nodes.get(path);
+    if (hit && hit.fileName === fileName && hit.ticked === ticked && hit.text === text) return hit.node;
+    const node = workflowNode(path, fileName, ticked, text);
+    this.nodes.set(path, { fileName, ticked, text, node });
+    return node;
+  }
+
+  /** 지금 없는 경로를 버린다(지운 노트가 쌓이지 않게). */
+  keepOnly(paths: Iterable<string>): void {
+    const keep = new Set(paths);
+    for (const p of [...this.nodes.keys()]) if (!keep.has(p)) this.nodes.delete(p);
+  }
+}
+
+/**
  * 읽은 본문(`texts`: 워크플로 경로 -> 본문)으로 만든 실험 노드들. 본문이 없는 워크플로는 파일 이름만으로 그리고 UO 가 없다
  * (첫 그리기는 README 만 읽고, 본문은 뒤에서 채운다).
  */
-export function experimentNodes(entries: readonly PanelEntry[], texts: ReadonlyMap<string, string> = new Map()): ExpNode[] {
+export function experimentNodes(
+  entries: readonly PanelEntry[],
+  texts: ReadonlyMap<string, string> = new Map(),
+  cache?: WorkflowNodeCache,
+): ExpNode[] {
+  const wfNode = cache ? cache.get.bind(cache) : workflowNode;
   return entries.map((e) => {
     const name = posix.basename(e.folder);
     const authors = e.authors ?? [];
@@ -115,7 +142,7 @@ export function experimentNodes(entries: readonly PanelEntry[], texts: ReadonlyM
       status: e.status?.trim() ?? '',
       ...(e.project?.trim() ? { project: e.project.trim() } : {}),
       ...(authors.length > 0 ? { experimenter: authors.join(', ') } : {}),
-      workflows: e.workflowFiles.map((w) => workflowNode(w.path, w.fileName, w.ticked, texts.get(w.path))),
+      workflows: e.workflowFiles.map((w) => wfNode(w.path, w.fileName, w.ticked, texts.get(w.path))),
       ...(e.images !== undefined ? { images: e.images } : {}),
       ...(e.resources !== undefined ? { resources: e.resources } : {}),
       entry: e,
@@ -214,13 +241,33 @@ export interface FilterResult {
 }
 
 /**
- * 세 단계를 다 보는 찾기. 실험은 이름(번호 · 제목), 프로젝트, 실험자, 상태(지역화한 이름과 저장 값), 워크플로는 별칭,
- * 카탈로그 이름, 코드, UO 는 별칭, 이름, 코드를 본다.
- * - 실험 자체가 맞으면 그 아래를 다 남긴다(아래에서도 맞은 것이 있으면 그 조상을 펼친다).
+ * 실험 항목이 찾는 말에 맞는가(코어 filterExperiments 와 같은 말들: 폴더 이름, 워크플로 노트 이름, `-` 가 든 날짜
+ * (last_updated_date, created), 논의 표시 낱말, 지역화한 상태). 패널이 낱말들(discussWords, statusNames)을 넣어 준다.
+ */
+export type EntryMatcher = (entry: ExperimentEntry, query: string) => boolean;
+
+/** 워크플로 노트 이름(찾기용, 코어 workflowNames 와 같은 꼴): `001_WD010_Design.labnote.md` -> `001 WD010 Design`. */
+const noteName = (path: string) => posix.basename(path).replace(/\.labnote\.md$/i, '').replace(/_/g, ' ');
+
+/** 코어 filterExperiments 로 실험 항목 하나를 본다. */
+export function coreEntryMatcher(discussLabel?: string, statusWords: Readonly<Record<string, string>> = {}): EntryMatcher {
+  return (entry, query) => filterExperiments([entry], query, discussLabel, statusWords).length > 0;
+}
+
+/**
+ * 세 단계를 다 보는 찾기. 실험은 이름(번호 · 제목), 프로젝트, 실험자, 상태(지역화한 이름과 저장 값), 그리고 `entryMatch`
+ * (코어 filterExperiments: 폴더 이름, 워크플로 노트 이름, 날짜, 논의 낱말), 워크플로는 별칭, 카탈로그 이름, 코드,
+ * UO 는 별칭, 이름, 코드를 본다.
+ * - 실험 자체가 맞으면 그 아래를 다 남긴다(아래에서도 맞은 것이 있으면 그 조상을 펼치되, 워크플로의 UO 와 추가 줄은 그대로 둔다).
  * - 아니면 맞은 워크플로만 남긴다. 워크플로 자체가 맞으면 그 UO 를 다 남기고, UO 만 맞았으면 맞은 UO 만 남기고 펼친다.
  * - 맞은 것의 조상은 펼치고(expanded), 맞은 글자는 marks 에 둔다. 빈 말이면 모두 그대로, 아무것도 펼치지 않는다.
  */
-export function filterTree(nodes: readonly ExpNode[], query: string, label: (status: string) => string = statusLabel): FilterResult {
+export function filterTree(
+  nodes: readonly ExpNode[],
+  query: string,
+  label: (status: string) => string = statusLabel,
+  entryMatch: EntryMatcher = coreEntryMatcher(),
+): FilterResult {
   const q = query.trim().toLowerCase();
   const marks = new Map<string, Range[]>();
   const expanded = new Set<string>();
@@ -236,21 +283,23 @@ export function filterTree(nodes: readonly ExpNode[], query: string, label: (sta
   const out: ExpNode[] = [];
   for (const exp of nodes) {
     const shown = mark(exp.id, experimentLabel(exp));
-    const self = shown || has(exp.project) || has(exp.experimenter) || (exp.status !== '' && (has(label(exp.status)) || has(exp.status)));
+    const self =
+      [shown, has(exp.project), has(exp.experimenter), exp.status !== '' && (has(label(exp.status)) || has(exp.status))].some(Boolean) ||
+      // 워크플로 노트 이름은 아래 워크플로 줄이 본다: 실험 전체를 남기지 않고 그 워크플로만 남긴다
+      entryMatch({ ...exp.entry, workflowNames: [] }, query);
     const workflows: WfNode[] = [];
     for (const wf of exp.workflows) {
-      const wfSelf = [mark(wf.id, wf.alias), mark(`${wf.id}:code`, wf.code), has(wf.name)].some(Boolean);
+      const wfSelf = [mark(wf.id, wf.alias), mark(`${wf.id}:code`, wf.code), has(wf.name), has(noteName(wf.path))].some(Boolean);
       const uos = wf.uos.filter((uo) => [mark(uo.id, uo.alias), mark(`${uo.id}:code`, uo.code), has(uo.name)].some(Boolean));
       if (uos.length > 0) expanded.add(wf.id);
-      if (wfSelf || uos.length > 0) {
-        expanded.add(exp.id);
-        if (!wfSelf) partial.add(wf.id);
-        workflows.push(wfSelf ? wf : { ...wf, uos });
-      } else if (self) {
-        workflows.push(wf);
+      if (wfSelf || uos.length > 0) expanded.add(exp.id);
+      if (self || wfSelf) workflows.push(wf);
+      else if (uos.length > 0) {
+        partial.add(wf.id);
+        workflows.push({ ...wf, uos });
       }
     }
-    if (self) out.push({ ...exp, workflows: exp.workflows.map((wf) => workflows.find((w) => w.id === wf.id) ?? wf) });
+    if (self) out.push(exp);
     else if (workflows.length > 0) {
       partial.add(exp.id);
       out.push({ ...exp, workflows });

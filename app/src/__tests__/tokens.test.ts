@@ -153,6 +153,8 @@ function contrastFailures(t: Record<string, string>, name: string): string[] {
   need('--text', '--bg-selection', 4.5);
   need('--text', '--accent-soft', 4.5);
   need('--text-muted', '--accent-soft', 4.5);
+  // 찾기에 맞은 글자(<mark>)는 그 칠 위에서도 읽힌다
+  need('--text', '--search-hit', 4.5);
   // 포커스 링(강조색)은 바탕 대비 3:1 이상
   for (const bg of SURFACES) need('--accent', bg, 3);
   return out;
@@ -161,7 +163,7 @@ function contrastFailures(t: Record<string, string>, name: string): string[] {
 const REQUIRED = [
   '--bg', '--bg-side', '--bg-ribbon', '--bg-elevated', '--menu-bg', '--bg-hover', '--bg-selected', '--bg-selection', '--border',
   '--border-strong', '--guide', '--text', '--text-muted', '--text-faint', '--accent', '--accent-fill', '--accent-fill-hover', '--accent-text',
-  '--accent-soft', '--danger', '--warning', '--success', '--shadow', '--shadow-menu', '--scrim', '--checker-a', '--checker-b',
+  '--accent-soft', '--search-hit', '--danger', '--warning', '--success', '--shadow', '--shadow-menu', '--scrim', '--checker-a', '--checker-b',
   '--radius', '--radius-s', '--radius-m', '--radius-l', '--radius-xl',
   '--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6', '--space-7', '--space-8',
   '--row-h', '--ribbon-w', '--side-w', '--right-w', '--viewheader-h', '--statusbar-h',

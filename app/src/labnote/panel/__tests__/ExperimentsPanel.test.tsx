@@ -173,6 +173,39 @@ describe('ExperimentsPanel', () => {
     expect(h.opened).toEqual([]);
   });
 
+  it('the workflow context menu ticks and unticks it in the README (keyboard reach)', async () => {
+    const user = userEvent.setup();
+    mount();
+    await expandExperiment();
+    fireEvent.keyDown(row(/GFP/), { key: 'F10', shiftKey: true });
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['유닛 오퍼레이션 추가', 'README 에서 완료로 체크']);
+    await user.click(screen.getByRole('menuitem', { name: 'README 에서 완료로 체크' }));
+    await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
+    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('data-icon')).toBe('circle-check'));
+    fireEvent.contextMenu(row(/GFP/));
+    expect(screen.getByRole('menuitem', { name: 'README 에서 체크 해제' })).toBeTruthy();
+  });
+
+  it('clicking images/ reveals that folder in the Files tab', async () => {
+    const user = userEvent.setup();
+    mount();
+    const reveal = vi.fn();
+    h.ctx.revealInFiles = reveal;
+    await expandExperiment();
+    await user.click(row(/^images/));
+    expect(reveal).toHaveBeenCalledWith(`${EXP}/images`);
+  });
+
+  it('the filter keeps the plugin search terms: a date written with -', async () => {
+    const user = userEvent.setup();
+    mount();
+    await findRow(/003 · /);
+    await user.type(screen.getByRole('searchbox', { name: '실험 찾기' }), '2026-02');
+    expect(await findRow(/005 · /)).toBeTruthy();
+    expect(row(/003 · /)).toBeTruthy();
+    expect(screen.queryByText('일치하는 실험·워크플로·UO 없음')).toBeNull();
+  });
+
   it('the filter reaches UOs, marks the match and hides the rest; no match shows the empty state', async () => {
     const user = userEvent.setup();
     mount();

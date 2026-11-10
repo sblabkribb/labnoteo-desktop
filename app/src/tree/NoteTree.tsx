@@ -16,6 +16,8 @@ interface Props {
   onView?: (path: string, kind: FileKind) => void;
   /** 이 ref 에 "모두 접기" 함수를 걸어 둔다(파일 탭 머리의 단추). */
   collapseAllRef?: MutableRefObject<(() => void) | undefined>;
+  /** 펼쳐 보이고 초점을 줄 경로(폴더면 그 폴더도 펼친다). seq 가 바뀔 때마다 한 번. */
+  reveal?: { path: string; seq: number };
   /**
    * 줄의 맥락 메뉴를 연다: 오른쪽 클릭(누른 좌표), 또는 Shift+F10 / 메뉴 키(그 줄 아래). 없으면 기본 동작 그대로.
    */
@@ -71,7 +73,7 @@ const dimClass = (node: TreeNode) => {
  * 왼쪽·오른쪽으로 접고 펴고, Enter·Space 로 노트를 연다. 폴더는 처음에 모두 펼쳐져 있고, 지금 열린 노트의 조상은
  * 그 노트가 열릴 때 다시 펼쳐진다.
  */
-export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, collapseAllRef }: Props) {
+export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, collapseAllRef, reveal }: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const nodes = useMemo(() => nest(entries), [entries]);
   const expanded = useMemo(
@@ -91,6 +93,20 @@ export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, c
       return next;
     });
   }, [selectedKey]);
+
+  // 실험 탭이 고른 폴더: 그 폴더와 조상을 펼치고 그 줄에 초점을 둔다(TreeView focusRequest)
+  const revealKey = reveal === undefined ? undefined : fold(reveal.path);
+  useEffect(() => {
+    if (revealKey === undefined) return;
+    setCollapsed((prev) => {
+      const open = [...prev].filter((dir) => dir === revealKey || revealKey.startsWith(`${dir}/`));
+      if (open.length === 0) return prev;
+      const next = new Set(prev);
+      open.forEach((dir) => next.delete(dir));
+      return next;
+    });
+  }, [revealKey, reveal?.seq]);
+  const focusRequest = useMemo(() => (revealKey === undefined ? undefined : { id: revealKey, seq: reveal!.seq }), [revealKey, reveal?.seq]);
 
   // 파일 탭 머리의 "모두 접기": 지금 목록의 모든 폴더를 접는다.
   useEffect(() => {
@@ -138,6 +154,7 @@ export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, c
           })
         }
         isCurrent={(node) => node.id === selectedKey}
+        focusRequest={focusRequest}
       />
     </nav>
   );

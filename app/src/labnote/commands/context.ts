@@ -32,6 +32,8 @@ export interface CommandContext {
   refresh(): void;
   /** 사이드바 탭을 바꾼다. */
   showPanel(panel: 'files' | 'workflows' | 'samples' | 'outline' | 'links'): void;
+  /** 파일 탭으로 가서 그 폴더(또는 파일)를 펼치고 그 줄에 초점을 둔다(실험 탭의 images/·resources/ 줄). 앱은 늘 준다. */
+  revealInFiles?(path: string): void;
   /** 링크 색인과 고침 기록. 앱은 늘 준다. */
   links?: LinkDeps;
   /** 뒤로·앞으로 가기(SP4 Task 28). 앱은 늘 준다. */

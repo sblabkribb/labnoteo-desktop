@@ -217,6 +217,24 @@ describe('insert-unit-operation', () => {
     expect(headings.map((l) => l.slice(5, 11))).toEqual(['UHW010', 'UHW180', 'USW010']);
   });
 
+  it('with unsaved edits in the target workflow note, the new UO goes after its last UO in the editor text', async () => {
+    h = createTestHost({ [README_PATH]: README, [WF_PATH]: workflowNote() });
+    const mounted = await h.mount(WF_PATH);
+    // 저장하지 않은 줄 여럿을 첫 UO 블록 안에 넣는다: 디스크의 마지막 UO 줄 번호는 편집기에서 첫 UO 블록 안이다
+    const view = mounted.view();
+    const text = view.state.doc.toString();
+    const at = text.indexOf('\n', text.indexOf('### ['));
+    view.dispatch({ changes: { from: at, insert: '\n\n- 메모\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n' } });
+    // 그 노트가 이미 열린 노트다(저장 전): openFile 은 아무것도 다시 읽지 않는다
+    h.ctx.openFile = async (path) => h.setActive(path);
+    expect(h.vault.files()[WF_PATH]).toBe(workflowNote());
+    h.answer.pick(pickOp('USW010'));
+    h.answer.alias('끝');
+    await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx, undefined, { workflowPath: WF_PATH })));
+    const headings = mounted.view().state.doc.toString().split('\n').filter((l) => /^### \[/.test(l));
+    expect(headings.map((l) => l.slice(5, 11))).toEqual(['UHW010', 'UHW180', 'USW010']);
+  });
+
   it('with a target that is not a workflow note, it says why and opens nothing', async () => {
     h = createTestHost({ [README_PATH]: README });
     const openFile = vi.spyOn(h.ctx, 'openFile');

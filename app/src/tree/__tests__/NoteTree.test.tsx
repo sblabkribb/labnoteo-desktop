@@ -156,6 +156,19 @@ describe('노트 트리', () => {
     expect(screen.getByRole('treeitem', { name: '02' }).getAttribute('aria-current')).toBe('true');
   });
 
+  it('reveal expands a collapsed folder and its ancestors and moves focus to it, once per seq', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<NoteTree entries={entries} onSelect={() => {}} />);
+    await user.click(screen.getByRole('treeitem', { name: '001' }));
+    await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
+    expect(screen.queryByText('001')).toBeNull();
+    rerender(<NoteTree entries={entries} onSelect={() => {}} reveal={{ path: 'LabNote/001', seq: 1 }} />);
+    const row = screen.getByRole('treeitem', { name: '001' });
+    expect(row.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(row);
+    expect(row.getAttribute('tabindex')).toBe('0');
+  });
+
   it('노트가 없으면 빈 상태 문구를 보여준다', () => {
     render(<NoteTree entries={[]} onSelect={() => {}} />);
     expect(screen.getByText('노트가 없습니다')).toBeTruthy();

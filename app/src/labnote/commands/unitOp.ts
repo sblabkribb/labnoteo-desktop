@@ -12,6 +12,7 @@
 import type { InsertUnitOperationInput, NotifyKind, PickItem, UnitOperationItem } from '@labnoteo/core';
 import { listUnitOpBlocks, workflowPathProblem } from '@labnoteo/core';
 import { loadUnitOperations } from '@labnoteo/core/lib/workflowDataLoader';
+import { t } from '../../i18n/t';
 import { editTargetFor } from '../editTarget';
 import { coreLocale } from '../i18n';
 import { NoteBusyError } from '../noteErrors';
@@ -71,32 +72,34 @@ const OPEN_WAIT_MS = 5000;
 
 /**
  * 실험 탭에서 고른 워크플로 노트를 열고, 커서를 마지막 UO 제목(없으면 노트 끝)에 둔다: 새 UO 가 마지막 UO 뒤에 들어간다.
- * 편집기가 그 노트를 읽을 때까지 기다린다. 열지 못하면(저장 못 함, 시간 초과) false.
+ * 줄은 편집기가 그 노트를 다 읽은 뒤 **편집기의 본문**에서 센다(저장하지 않은 고침이 있어도 다른 블록 안에 들어가지 않게).
+ * 열지 못하면 그 까닭(알림 문구)을, 열었으면 undefined.
  */
-async function openAtLastUnitOp(ctx: CommandContext, path: string): Promise<boolean> {
-  let text: string;
-  try {
-    text = await ctx.host.fs.read(path);
-  } catch {
-    return false;
-  }
-  const blocks = listUnitOpBlocks(text);
-  const line = blocks.length > 0 ? blocks[blocks.length - 1].headingLine : text.split(/\r?\n/).length - 1;
-  await ctx.openFile(path, { line });
+async function openAtLastUnitOp(ctx: CommandContext, path: string): Promise<string | undefined> {
+  const { host } = ctx;
+  if (!(await host.fs.exists(path))) return t('experiments.uo.noNote', path);
+  await ctx.openFile(path);
   const ready = () => {
     const handle = openNote(path);
     const view = ctx.activeView();
     return samePath(ctx.activePath(), path) && handle !== undefined && !handle.busy() && view !== undefined && handle.view() === view;
   };
   for (const start = Date.now(); !ready(); ) {
-    if (Date.now() - start > OPEN_WAIT_MS) return false;
+    if (Date.now() - start > OPEN_WAIT_MS) {
+      // 다른 노트가 열려 있으면(저장하지 못해 바꾸지 못했다) 그 까닭은 편집기가 이미 알렸다
+      return samePath(ctx.activePath(), path)
+        ? t('experiments.uo.stillLoading')
+        : t('experiments.uo.notOpened');
+    }
     await new Promise((r) => setTimeout(r, 30));
   }
   const view = ctx.activeView()!;
   const doc = view.state.doc;
+  const blocks = listUnitOpBlocks(doc.toString());
+  const line = blocks.length > 0 ? blocks[blocks.length - 1].headingLine : doc.lines - 1;
   const at = doc.line(Math.min(Math.max(1, line + 1), doc.lines)).from;
-  view.dispatch({ selection: { anchor: at } });
-  return true;
+  view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+  return undefined;
 }
 
 /**
@@ -111,8 +114,9 @@ export async function insertUnitOp(ctx: CommandContext, chosen?: ChosenUnitOp, i
       host.notify('warn', problem);
       return;
     }
-    if (!(await openAtLastUnitOp(ctx, into.workflowPath))) {
-      host.notify('warn', host.t('Please open a workflow file.'));
+    const failed = await openAtLastUnitOp(ctx, into.workflowPath);
+    if (failed) {
+      host.notify('warn', failed);
       return;
     }
   }

@@ -83,6 +83,8 @@ export interface CommandContextDeps {
   openFile(path: string, at?: At): Promise<void>;
   closeActive(): Promise<boolean>;
   showPanel?: (p: 'files' | 'workflows' | 'samples' | 'outline' | 'links') => void;
+  /** 파일 탭에서 그 경로를 펼쳐 보인다. */
+  revealInFiles?: (path: string) => void;
   /** 뒤로·앞으로 가기(SP4 Task 28). */
   navigate?: (dir: 'back' | 'forward') => void;
   /** 새 노트 대화상자를 연다(UI 재설계 Task 5). */
@@ -116,6 +118,7 @@ export function useCommandContext(deps: CommandContextDeps): CommandContext | un
         vaultRefresh.emit();
       },
       showPanel: (p) => latest.current.showPanel?.(p),
+      revealInFiles: (path) => (latest.current.revealInFiles ? latest.current.revealInFiles(path) : latest.current.showPanel?.('files')),
       links: APP_LINKS,
       navigate: (dir) => latest.current.navigate?.(dir),
       newNote: () => latest.current.newNote?.(),

@@ -302,4 +302,5 @@ button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
 .wf-tree-row.ghost:hover { color: var(--text); }
 .wf-tree-row.ghost .tree-icon { color: inherit; }
 .wf-tree-row.uo-current { color: var(--accent); }
-.wf-tree-row mark { background: var(--accent-soft); color: var(--text); border-radius: 2px; }
+/* 찾기에 맞은 글자: 어두운 사이드바에서도 보이게 노란 칠(Obsidian 의 텍스트 강조)에 밑줄 */
+.wf-tree-row mark { background: var(--search-hit); color: var(--text); border-radius: 2px; box-shadow: inset 0 -1px 0 var(--accent); }
