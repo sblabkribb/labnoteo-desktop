@@ -77,14 +77,23 @@ function ViewerItems(p: { path: string }) {
 }
 
 /**
- * 창 아래 상태 줄(26px): 구조 위치, 저장 상태, 줄·열, 단어 수, 그리고 앱 알림(색인 중 등). 오른쪽 끝에 모양 단추(appearance).
+ * 창 아래 상태 줄(26px): 맨 앞에 업데이트 버튼(leading), 구조 위치, 저장 상태, 줄·열, 단어 수, 그리고 앱 알림(색인 중 등). 오른쪽 끝에 모양 단추(appearance).
  * 맞지 않는 칸은 숨긴다.
  */
-export function StatusBar(p: { path?: string; viewerPath?: string; onReveal: () => void; notes?: ReactNode; trailing?: ReactNode }) {
+export function StatusBar(p: {
+  path?: string;
+  viewerPath?: string;
+  onReveal: () => void;
+  /** 맨 앞 칸(창의 왼쪽 아래): 업데이트 버튼. */
+  leading?: ReactNode;
+  notes?: ReactNode;
+  trailing?: ReactNode;
+}) {
   useLang();
   return (
     <footer className="statusbar" aria-label={t('statusbar.label')}>
       <div className="statusbar-group">
+        {p.leading}
         {p.path !== undefined && <PositionItem path={p.path} onReveal={p.onReveal} />}
         {p.path !== undefined && <EditorItems path={p.path} />}
         {p.viewerPath !== undefined && <ViewerItems path={p.viewerPath} />}

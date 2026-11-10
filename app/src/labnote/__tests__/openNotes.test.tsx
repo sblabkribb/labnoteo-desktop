@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { createFakeVault } from '../../__tests__/fakeVault';
 import { TauriLabnoteFs } from '../../fs/tauriLabnoteFs';
 import { ERROR_KINDS } from '../../fs/errorKinds';
-import { activeEditTarget, NoteBusyError, NoteSaveError, openNote, processNote, registerOpenNote } from '../openNotes';
+import { activeEditTarget, flushAllNotes, NoteBusyError, NoteSaveError, openNote, openNoteHandles, processNote, registerOpenNote } from '../openNotes';
 import { NoteGoneError } from '../noteErrors';
 import type { EditorHandle } from '../../editor/Editor';
 import { mountEditor } from './editorHarness';
@@ -197,5 +197,65 @@ describe('Editor reveal / initialReveal', () => {
     await m.type('c');
     expect(m.ref.current!.rawText()).toBe('﻿a\r\nb\r\nc');
     m.unmount();
+  });
+});
+
+describe('openNoteHandles and flushAllNotes (update install, spec §3.4)', () => {
+  const handle = (ok: boolean | Error) =>
+    ({
+      busy: () => false,
+      flush: vi.fn(async () => {
+        if (ok instanceof Error) throw ok;
+        return ok;
+      }),
+    }) as unknown as EditorHandle & { flush: ReturnType<typeof vi.fn> };
+
+  it('lists registered handles and drops unregistered ones', () => {
+    const a = handle(true);
+    const b = handle(true);
+    const offA = registerOpenNote('x/a.md', a);
+    const offB = registerOpenNote('x/b.md', b);
+    expect(openNoteHandles()).toEqual(expect.arrayContaining([a, b]));
+    offA();
+    expect(openNoteHandles()).toContain(b);
+    expect(openNoteHandles()).not.toContain(a);
+    offB();
+    expect(openNoteHandles()).not.toContain(b);
+  });
+
+  it('flushes every open note and the current editor once each, then the sample sync', async () => {
+    const a = handle(true);
+    const off = registerOpenNote('x/a.md', a);
+    const order: string[] = [];
+    a.flush.mockImplementation(async () => (order.push('a'), true));
+    const sync = { flush: vi.fn(async () => void order.push('sync')) };
+    // the current editor is the same handle: de-duplicated
+    await expect(flushAllNotes(a, sync)).resolves.toBe(true);
+    expect(a.flush).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['a', 'sync']);
+    const cur = handle(true);
+    await expect(flushAllNotes(cur, sync)).resolves.toBe(true);
+    expect(cur.flush).toHaveBeenCalledTimes(1);
+    await expect(flushAllNotes(null, sync)).resolves.toBe(true);
+    off();
+  });
+
+  it('fails when one flush resolves false or throws, or the sample sync throws', async () => {
+    const good = handle(true);
+    const offGood = registerOpenNote('x/good.md', good);
+    const sync = { flush: vi.fn(async () => {}) };
+    const bad = handle(false);
+    const offBad = registerOpenNote('x/bad.md', bad);
+    await expect(flushAllNotes(null, sync)).resolves.toBe(false);
+    expect(good.flush).toHaveBeenCalled();
+    offBad();
+    const throws = handle(new Error('disk'));
+    const offThrow = registerOpenNote('x/throw.md', throws);
+    await expect(flushAllNotes(null, sync)).resolves.toBe(false);
+    offThrow();
+    await expect(flushAllNotes(handle(false), sync)).resolves.toBe(false);
+    const syncThrows = { flush: vi.fn(async () => Promise.reject(new Error('sync'))) };
+    await expect(flushAllNotes(null, syncThrows)).resolves.toBe(false);
+    offGood();
   });
 });

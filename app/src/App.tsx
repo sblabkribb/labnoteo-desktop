@@ -24,7 +24,7 @@ import { Editor, type EditorHandle } from './editor/Editor';
 import { followLink, linkAt, type OpenTarget } from './editor/live/links';
 import type { EditorView } from '@codemirror/view';
 import { fetchAppVersion } from './appVersion';
-import { UpdateBanner } from './update/UpdateBanner';
+import { UpdateButton } from './update/UpdateButton';
 import { startUpdateChecks } from './update/updateStore';
 import { ThemeToggle } from './theme/ThemeToggle';
 import { chooseTheme, useTheme, type Theme } from './theme/useTheme';
@@ -53,7 +53,7 @@ import { startMcpForVault } from './labnote/mcp/commands';
 import { cancelAllRequests } from './integrations/netIpc';
 import { startBfworkflow } from './bfworkflow/bfwApp';
 import { editorAwareFs } from './labnote/editorAwareFs';
-import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
+import { activeEditTarget, flushAllNotes, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
 import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
@@ -425,7 +425,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     setWindowTitle(vault.name);
     return () => setWindowTitle(undefined);
   }, [vault.name]);
-  // 새 버전 확인(B-R8): 지금, 6시간마다, 오래 떠나 있다 돌아왔을 때. 알림은 UpdateBanner 가 이 상태를 읽어 보인다.
+  // 새 버전 확인(B-R8): 지금, 6시간마다, 오래 떠나 있다 돌아왔을 때. 새 버전은 뒤에서 받고, 상태 줄 맨 앞의 UpdateButton 이 보인다.
   useEffect(() => startUpdateChecks(), []);
   // 저장 때의 샘플 동기화(D12)가 쓸 SampleEnv. 맥락이 바뀌거나 보관함 화면이 내려가면, 기다리던 동기화를 그 맥락으로 먼저 돌린다.
   useEffect(() => {
@@ -556,6 +556,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     };
   }, [hasCtx, host]);
   const flush = async () => !editor.current || (await editor.current.flush());
+  // 업데이트 설치 전(spec §3.4): 열린 노트 모두와 지금 편집기, 그리고 샘플 동기화를 저장한다. 하나라도 못 하면 설치하지 않는다.
+  const flushAll = () => flushAllNotes(editor.current, samplesSync);
   // 새 노트(리본, Ctrl+N, 팔레트): 대화상자에서 이름을 받아 보관함 맨 위에 만들고 연다.
   async function newNote(): Promise<void> {
     if (currentDialog() !== null) return;
@@ -694,7 +696,6 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       <div className="shell" ref={shell}>
         <Ribbon onCommand={runShellCommand} leftHidden={layout.leftHidden} rightOpen={layout.rightOpen} ready={ctx !== undefined} />
         <div className="notices">
-          <UpdateBanner beforeInstall={flush} />
           {failed && <p role="alert">{t('tree.error')}</p>}
           {settingsImported && <p role="status">{t('settings.imported')}</p>}
         </div>
@@ -843,6 +844,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           path={viewing ? undefined : selected}
           viewerPath={viewing?.path}
           onReveal={() => showLeft('experiments')}
+          leading={<UpdateButton flushAll={flushAll} />}
           notes={
             <>
               {indexing && <span className="statusbar-item">{t('search.indexing')}</span>}

@@ -490,6 +490,36 @@ button.crumb:hover:not(:disabled) { background: var(--bg-hover); color: var(--te
 .statusbar-save[data-tone="danger"] { color: var(--danger); }
 .statusbar-save[data-tone="warning"] { color: var(--warning); }
 .statusbar-save .icon { color: currentColor; }
+/* 업데이트 버튼(상태 줄 맨 앞, 창의 왼쪽 아래, spec §3.3): 받는 동안은 흐린 알약과 아래 얇은 막대(폭은 CSSOM 으로 정한
+   --update-progress), 다 받으면 강조색 알약, 실패하면 흐린 알약과 경고 아이콘. 누를 수 없는 동안은 aria-disabled */
+.update-pill {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: inherit;
+}
+.update-pill[aria-disabled="true"] { cursor: default; }
+.update-pill:not([aria-disabled="true"]):hover { background: var(--bg-hover); color: var(--text); }
+.update-pill .icon { color: currentColor; }
+.update-pill[data-state="determinate"]::after,
+.update-pill[data-state="indeterminate"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+}
+.update-pill[data-state="determinate"]::after { width: var(--update-progress, 0%); }
+.update-pill[data-state="indeterminate"]::after { width: 30%; animation: update-indeterminate 1.4s ease-in-out infinite; }
+@keyframes update-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .update-pill[data-state="indeterminate"]::after { animation: none; width: 100%; opacity: 0.5; } }
+.update-pill[data-state="ready"] { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--accent-text); }
+.update-pill[data-state="ready"]:not([aria-disabled="true"]):hover { background: var(--accent-fill-hover); color: var(--accent-text); }
+.update-pill[data-state="failed"] .icon { color: var(--warning); }
 .icon.spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icon.spin { animation: none; } }

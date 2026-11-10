@@ -35,6 +35,28 @@ export function openNote(path: string): EditorHandle | undefined {
   return registry.get(keyOf(path));
 }
 
+/** 지금 등록된 열린 노트의 손잡이 모두 (업데이트 설치 전 저장, spec §3.4). */
+export function openNoteHandles(): EditorHandle[] {
+  return [...registry.values()];
+}
+
+/**
+ * 업데이트를 설치하기 전에 모두 저장한다: 열린 노트 손잡이와 지금 편집기(같으면 한 번만)를 모두 flush 하고,
+ * 그 뒤 샘플 동기화를 flush 한다. 하나라도 false 이거나 throw 하면 false. throw 하지 않는다.
+ */
+export async function flushAllNotes(current: EditorHandle | null | undefined, sync: { flush(): Promise<void> }): Promise<boolean> {
+  const handles = new Set(openNoteHandles());
+  if (current) handles.add(current);
+  const results = await Promise.all([...handles].map((h) => h.flush().then((ok) => ok === true, () => false)));
+  if (!results.every(Boolean)) return false;
+  try {
+    await sync.flush();
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 type WriteListener = (path: string) => void;
 const writeListeners = new Set<WriteListener>();
 

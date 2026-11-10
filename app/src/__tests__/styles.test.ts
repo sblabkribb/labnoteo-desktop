@@ -131,3 +131,22 @@ describe('styles/*.css', () => {
     }
   });
 });
+
+describe('update button and toaster (spec §3.1)', () => {
+  const rules = parseRules(allCss());
+  const decl = (selector: string, prop: string) =>
+    rules
+      .filter((r) => !r.atRule && r.selectors.includes(selector))
+      .flatMap((r) => declarations(r.body))
+      .filter((d) => d.prop === prop)
+      .map((d) => d.value);
+
+  it('the bottom-left toaster sits above the status bar, so a toast never covers the update pill', () => {
+    expect(decl('.toaster-bottom-left', 'bottom')).toEqual(['calc(var(--statusbar-h) + var(--space-5))']);
+  });
+
+  it('the pill progress bar width comes only from --update-progress (set with CSSOM)', () => {
+    expect(decl('.update-pill[data-state="determinate"]::after', 'width')).toEqual(['var(--update-progress, 0%)']);
+    expect(decl('.update-pill[data-state="ready"]', 'background')).toEqual(['var(--accent-fill)']);
+  });
+});
