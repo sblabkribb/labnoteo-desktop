@@ -26,9 +26,10 @@ export const SOURCE_MAX = 100;
 // eslint-disable-next-line no-control-regex
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g;
 
-function cleanLabel(label: string, fallback: string): string {
-  const text = label.replace(/[\r\n\t]+/g, ' ').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim();
-  return (text || fallback).slice(0, SOURCE_LABEL_MAX);
+/** 한 줄 이름표: 줄바꿈은 빈칸, 제어·양방향 글자는 빼고 `max` 글자까지. 비면 `fallback`. 상태 줄에도 쓴다. */
+export function cleanLabel(label: string, fallback: string, max: number = SOURCE_LABEL_MAX): string {
+  const text = String(label).replace(/[\r\n\t]+/g, ' ').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim();
+  return (text || fallback).slice(0, max);
 }
 
 /** http/https 주소를 파싱한 그대로(`href`). 다른 스킴, 계정 정보, 파싱 실패는 undefined. */
@@ -99,7 +100,8 @@ export class SourceLedger {
       if (typeof last === 'string') out[out.length - 1] = last + s;
       else out.push(s);
     };
-    const re = /\[(\d{1,3})\]/g;
+    // 1–999 with no leading zero: `[01]` and `[001]` stay text.
+    const re = /\[([1-9]\d{0,2})\]/g;
     let at = 0;
     for (let m = re.exec(text); m; m = re.exec(text)) {
       const n = Number(m[1]);

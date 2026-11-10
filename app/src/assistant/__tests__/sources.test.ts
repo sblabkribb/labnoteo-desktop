@@ -97,6 +97,11 @@ describe('SourceLedger.render', () => {
     expect(ledger().render('see [3] and [0]')).toEqual(['see [3] and [0]']);
   });
 
+  it('a number with a leading zero is not a citation: [01] and [001] stay text', () => {
+    const l = ledger();
+    expect(l.render('[01] [001] [1]')).toEqual(['[01] [001] ', { n: 1, src: l.get(1) }]);
+  });
+
   it('an empty ledger renders the text unchanged', () => {
     expect(new SourceLedger().render('[1]')).toEqual(['[1]']);
     expect(new SourceLedger().render('')).toEqual([]);

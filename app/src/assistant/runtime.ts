@@ -4,6 +4,9 @@
  * 말풍선은 `AssistantRuntime` 하나만 안다. 앱에 들어 있는 런타임은 내장 에이전트 루프(`builtinRuntime`) 하나뿐이고,
  * 다른 AI 도구(Claude Code, DeepSeek Harness `dsh` …)는 앱에 넣지 않는다: labnoteO MCP 서버와 스킬로 같은 보관함에
  * 붙는다(README "Using another AI tool"). 테스트는 가짜 런타임(`fakeRuntime.ts`)을 등록한다.
+ *
+ * spec §5.2 는 등록부를 `runtimes.ts` 로 적었지만, 인터페이스와 한 곳에 두려고 이 파일(`registerRuntime`,
+ * `getRuntime`, `runtimeIds`)에 둔다.
  */
 import type { Translator } from '@labnoteo/core';
 import type { AgentRun } from '../labnote/port/llmAgent';
