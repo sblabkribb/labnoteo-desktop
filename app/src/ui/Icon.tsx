@@ -26,6 +26,9 @@ import {
   BetweenVerticalEnd,
   BookOpen,
   Bot,
+  CircleStop,
+  Eraser,
+  SendHorizontal,
   Braces,
   Calendar,
   Check,
@@ -211,6 +214,9 @@ const ICONS = {
   bot: Bot,
   'eye-off': EyeOff,
   'locate-fixed': LocateFixed,
+  send: SendHorizontal,
+  'circle-stop': CircleStop,
+  eraser: Eraser,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

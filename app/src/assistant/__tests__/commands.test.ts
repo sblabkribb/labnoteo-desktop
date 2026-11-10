@@ -8,6 +8,9 @@ import { layoutStore, PET_DEFAULT } from '../../ui/layoutStore';
 import { shellShortcut } from '../../ui/shellKeys';
 import { ASSISTANT_COMMAND_IDS, assistantCommands } from '../commands';
 import { petStore } from '../petStore';
+import { emptyHistory } from '../history';
+import type { AssistantRuntime } from '../runtime';
+import { assistantSession } from '../useAssistantSession';
 
 vi.mock('../../ui/SettingsModal', () => ({ openSettings: vi.fn(async () => undefined) }));
 
@@ -26,13 +29,22 @@ beforeEach(() => {
 afterEach(() => {
   clearAppCommandsForTest();
   petStore.resetForTest();
+  assistantSession.resetForTest();
 });
 
 const run = (id: string, c = ctx()) => appCommandById(id)!.run(c);
 
 describe('assistant commands (spec §10.2, the ones that work after Task 5)', () => {
   it('are registered through allAppCommands, with ko and en names and icons', () => {
-    expect(ASSISTANT_COMMAND_IDS).toEqual(['assistant.open', 'assistant.toggleVisible', 'assistant.resetPosition', 'assistant.settings']);
+    expect(ASSISTANT_COMMAND_IDS).toEqual([
+      'assistant.open',
+      'assistant.toggleVisible',
+      'assistant.resetPosition',
+      'assistant.settings',
+      'assistant.chat',
+      'assistant.stop',
+      'assistant.clearHistory',
+    ]);
     expect(assistantCommands().map((c) => c.id)).toEqual([...ASSISTANT_COMMAND_IDS]);
     const ids = appCommands().map((c) => c.id);
     for (const id of ASSISTANT_COMMAND_IDS) {
@@ -81,6 +93,70 @@ describe('assistant commands (spec §10.2, the ones that work after Task 5)', ()
     const { openSettings } = await import('../../ui/SettingsModal');
     await run('assistant.settings');
     expect(openSettings).toHaveBeenCalledWith('assistant');
+  });
+});
+
+describe('chat commands (Task 10)', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  function wire(opts: { hold?: boolean } = {}) {
+    const cleared: string[] = [];
+    let release: () => void = () => {};
+    const rt: AssistantRuntime = {
+      id: 'fake',
+      label: () => 'Fake',
+      available: async () => ({ ok: true }),
+      run: (_turn, _sink, signal) =>
+        new Promise((resolve) => {
+          const done = () => resolve({ content: 'ok', sources: [], executed: [], tainted: false, cancelled: signal.aborted });
+          release = done;
+          if (!opts.hold) done();
+          signal.addEventListener('abort', done);
+        }),
+    };
+    assistantSession.resetForTest({
+      runtime: () => rt,
+      history: {
+        read: async (folder) => ({ doc: emptyHistory(folder), token: 't' }),
+        write: async () => {},
+        clear: async (folder) => void cleared.push(folder),
+      },
+      confirm: async () => true,
+      setPetState: () => {},
+    });
+    return { cleared, release: () => release() };
+  }
+
+  it('assistant.chat opens the bubble', async () => {
+    await run('assistant.chat');
+    expect(petStore.get().open).toBe(true);
+  });
+
+  it('assistant.stop is shown only while a reply runs, and says so when nothing runs', async () => {
+    wire({ hold: true });
+    const stop = appCommandById('assistant.stop')!;
+    const c = ctx();
+    expect(stop.available!(c)).toBe(false);
+    await stop.run(c);
+    expect(c.notes).toEqual([['info', '지금 진행 중인 대화가 없어요.']]);
+    const p = assistantSession.send('q');
+    await flush();
+    expect(stop.available!(c)).toBe(true);
+    await stop.run(c);
+    await p;
+    expect(assistantSession.get().streaming).toBe(false);
+    expect(assistantSession.get().messages[1]!.stopped).toBe(true);
+  });
+
+  it('assistant.clearHistory clears this experiment, or says why it cannot', async () => {
+    const { cleared } = wire();
+    const c = ctx();
+    assistantSession.setActivePath('notes/free.md');
+    await run('assistant.clearHistory', c);
+    expect(c.notes).toEqual([['info', '실험 노트를 열면 그 실험의 대화 기록을 지울 수 있어요.']]);
+    assistantSession.setActivePath('labnote/001_A/README.labnote.md');
+    await flush();
+    await run('assistant.clearHistory', c);
+    expect(cleared).toEqual(['labnote/001_A']);
   });
 });
 

@@ -4,6 +4,10 @@ import { useLang } from '../i18n/useLang';
 import { notify } from '../labnote/host/toastStore';
 import { BUILTIN_SKIN } from './skins/builtin';
 import { Bubble } from './Bubble';
+import type { BubbleActions } from './MessageView';
+
+export type { BubbleActions } from './MessageView';
+import { useAssistantSession, type AssistantSession } from './useAssistantSession';
 import {
   applySkinVars,
   DRAG_THRESHOLD,
@@ -37,11 +41,13 @@ const ARROW: Readonly<Record<string, [number, number]>> = {
  * - 누르기(4px 이하로 움직이고 놓기)는 말풍선을 열고 닫는다. 그보다 멀리 끌면 옮기고, 놓을 때 저장한다(PC 마다, Rust ui.json).
  * - Alt+화살표 8px, Alt+Shift+화살표 32px, Alt+Home 처음 자리. 기본 동작을 막는다(WebView2 에서 Alt+←/→ 는 뒤로·앞으로 가기).
  * - 숨기면 아무것도 그리지 않는다. 리본 단추와 assistant.toggleVisible 이 다시 보인다.
+ * - 대화 갈래(useAssistantSession)는 숨겨도, 말풍선을 닫아도 열린 노트의 실험 폴더를 따른다(폴더가 바뀌면 멈추고 바꾼다).
  */
-export function PetLayer(props: { store?: PetStore }) {
+export function PetLayer(props: { store?: PetStore; session?: AssistantSession; activePath?: string; actions?: BubbleActions }) {
   useLang();
   const store = props.store ?? defaultStore;
   const snap = useSyncExternalStore(store.subscribe, store.get);
+  const chat = useAssistantSession({ activePath: props.activePath, session: props.session });
   const wrap = useRef<HTMLDivElement>(null);
   const sprite = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -138,7 +144,7 @@ export function PetLayer(props: { store?: PetStore }) {
   const label = t('pet.open');
   return (
     <div ref={wrap} className="pet-wrap" data-open={snap.open}>
-      {snap.open && <Bubble id={bubbleId} onClose={close} onHide={hide} />}
+      {snap.open && <Bubble id={bubbleId} onClose={close} onHide={hide} chat={chat} actions={props.actions} />}
       <button
         ref={button}
         type="button"

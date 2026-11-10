@@ -178,7 +178,7 @@ describe('PetLayer', () => {
     const { store } = setup();
     fireEvent.click(pet());
     const close = screen.getByRole('button', { name: '닫기' });
-    expect(document.activeElement).toBe(close);
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '어시스턴트에게 보낼 글' }));
     fireEvent.keyDown(close, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(pet());

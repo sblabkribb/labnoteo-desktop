@@ -54,9 +54,13 @@
 }
 html[data-reduced-motion] .pet-sprite { animation: none; }
 
-/* 말풍선: 그림 위에, 오른쪽 끝을 맞춰 뜬다(전환 없이) */
+/* 말풍선: 그림 위에, 오른쪽 끝을 맞춰 뜬다(전환 없이). 대화가 길어지면 대화 칸만 스크롤한다 */
 .pet-bubble {
-  width: min(18rem, calc(100vw - 2 * var(--space-6)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(22rem, calc(100vw - 2 * var(--space-6)));
+  max-height: min(32rem, calc(100vh - 8rem));
   padding: var(--space-5) var(--space-6);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -75,10 +79,149 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   font-size: 1em;
   font-weight: 600;
 }
-.pet-bubble-greeting { margin: var(--space-4) 0; }
+.pet-bubble-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pet-bubble-folder {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-bubble-tools {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+.pet-bubble-note,
+.pet-bubble-notice {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.pet-bubble-notice { color: var(--warning); }
+.pet-bubble-greeting { margin: var(--space-2) 0; }
 .pet-bubble-foot {
   display: flex;
   justify-content: flex-end;
+}
+
+/* 대화: 글 그대로(pre-wrap, 모델의 글은 HTML 이 되지 않는다), 내 글은 오른쪽, 답은 왼쪽 */
+.pet-log {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 3rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pet-divider {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+.pet-msg {
+  max-width: 92%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-element);
+  background: var(--bg-hover);
+}
+.pet-msg[data-role="user"] {
+  align-self: flex-end;
+  background: var(--accent-soft);
+}
+.pet-msg[data-role="assistant"] { align-self: flex-start; }
+.pet-msg-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.pet-msg-wait,
+.pet-msg-status {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.pet-msg-wait { margin: 0; }
+.pet-msg-error {
+  margin: var(--space-2) 0 0;
+  color: var(--danger);
+  font-size: var(--font-size-sm);
+}
+
+/* 인용 [n] 과 출처 목록: 단추지만 글처럼 보인다(밑줄, 강조색) */
+.pet-cite,
+.pet-source-link {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--accent-text);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.pet-cite:hover:not(:disabled),
+.pet-source-link:hover:not(:disabled) { background: transparent; }
+.pet-sources {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-sm);
+}
+.pet-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-source-n { color: var(--text-muted); }
+.pet-msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+/* 입력 칸: 두 줄, Enter 보내기, Shift+Enter 줄바꿈 */
+.pet-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pet-composer-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 3.2em;
+  max-height: 8em;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-element);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.pet-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* 화면에는 보이지 않고 읽기 프로그램만 읽는 글(누가 말했는지) */
+.pet-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* 자리 안내(aria-live): 화면에는 보이지 않고 읽기 프로그램만 읽는다 */
@@ -94,6 +237,8 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
 @media (forced-colors: active) {
   .pet:focus-visible { outline: 2px solid Highlight; }
   .pet-bubble { border: 1px solid CanvasText; }
+  .pet-msg { border: 1px solid CanvasText; }
+  .pet-cite, .pet-source-link { color: LinkText; }
 }
 
 @media print {

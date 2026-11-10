@@ -3,13 +3,22 @@ import type { AppCommand } from '../editor/commands/appCommands';
 import { openSettings } from '../ui/SettingsModal';
 import { captureFocus } from '../ui/returnFocus';
 import { petStore } from './petStore';
+import { assistantSession } from './useAssistantSession';
 
 /**
  * 어시스턴트 명령(assistant 명세 §10.2): 앱 명령(AppCommand)이다. 이름은 앱 번역 키(ko·en), key 는 보여 주기만 한다
  * (Ctrl+Shift+Y 는 ui/shellKeys.ts 가 code 로 듣는다). 명령은 그것이 동작하게 되는 작업에서 하나씩 등록한다:
  * 팔레트와 리본이 아직 없는 기능을 가리키지 않는다. editor/commands/appCommands.ts 의 allAppCommands() 가 이것을 넣는다.
  */
-export const ASSISTANT_COMMAND_IDS = ['assistant.open', 'assistant.toggleVisible', 'assistant.resetPosition', 'assistant.settings'] as const;
+export const ASSISTANT_COMMAND_IDS = [
+  'assistant.open',
+  'assistant.toggleVisible',
+  'assistant.resetPosition',
+  'assistant.settings',
+  'assistant.chat',
+  'assistant.stop',
+  'assistant.clearHistory',
+] as const;
 
 /** 말풍선을 열고(숨겨 두었으면 보이고) 지금 초점 자리를 기억한다: Esc 로 닫으면 거기로 돌아간다. 보관함 설정이 없어도 된다. */
 export function openAssistant(): void {
@@ -57,6 +66,49 @@ const settings: AppCommand = {
   run: () => openSettings('assistant'),
 };
 
+/** 대화를 연다: 말풍선을 열고 입력 칸에 초점을 둔다(이미 열려 있으면 입력 칸으로만). 칩이 붙으면(11B) 대화 칩이 된다. */
+const chat: AppCommand = {
+  id: 'assistant.chat',
+  nameKey: 'cmd.assistant.chat',
+  icon: 'bot',
+  run: () => {
+    if (petStore.get().open && !petStore.get().hidden) {
+      document.querySelector<HTMLTextAreaElement>('.pet-composer-input')?.focus();
+      return;
+    }
+    openAssistant();
+  },
+};
+
+/** 흘러 들어오는 답을 멈춘다. 진행 중일 때만 팔레트에 보이고, 다른 데서 불리면 왜 아무것도 안 했는지 말한다. */
+const stop: AppCommand = {
+  id: 'assistant.stop',
+  nameKey: 'cmd.assistant.stop',
+  icon: 'circle-stop',
+  available: () => assistantSession.get().streaming,
+  run: (ctx) => {
+    if (!assistantSession.get().streaming) {
+      ctx.host.notify('info', t('pet.notRunning'));
+      return;
+    }
+    assistantSession.stop();
+  },
+};
+
+/** 열린 실험의 대화 기록을 (확인 후) 지운다. 실험 밖이면 왜 못 하는지 말한다. */
+const clearHistory: AppCommand = {
+  id: 'assistant.clearHistory',
+  nameKey: 'cmd.assistant.clearHistory',
+  icon: 'eraser',
+  run: async (ctx) => {
+    if (assistantSession.get().folder === null) {
+      ctx.host.notify('info', t('history.noFolder'));
+      return;
+    }
+    await assistantSession.clear();
+  },
+};
+
 export function assistantCommands(): AppCommand[] {
-  return [open, toggleVisible, resetPosition, settings];
+  return [open, toggleVisible, resetPosition, settings, chat, stop, clearHistory];
 }

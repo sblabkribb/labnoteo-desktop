@@ -91,6 +91,7 @@ import { unsolicitedHost } from './labnote/host/whenNotComposing';
 import { Ribbon } from './ui/Ribbon';
 import { PetLayer } from './assistant/PetLayer';
 import { openAssistant, toggleAssistant } from './assistant/commands';
+import { bubbleActions, connectAssistant } from './assistant/wiring';
 import { EmptyState } from './ui/EmptyState';
 import { Dock } from './ui/Dock';
 import { RightDock } from './ui/RightDock';
@@ -363,6 +364,11 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     treeFiles: () => shownEntries.filter((e) => !e.isDir).map((e) => e.path),
   });
   usePaletteHotkey(ctx);
+  // 떠 있는 도우미의 대화(assistant 명세 §4.5): 내장 런타임과 압축은 지금 명령 맥락으로 돈다(실행마다 새 AiEnv).
+  const assistantCtx = useRef(ctx);
+  assistantCtx.current = ctx;
+  useEffect(() => connectAssistant(() => assistantCtx.current), []);
+  const petActions = useMemo(() => bubbleActions(() => assistantCtx.current), []);
   // 쓰는 동안의 손질(Task 20): last_updated_date 찍기와 저장 때의 UO 목록 맞추기. 보관함마다 새로 만든다(손으로 정한 날짜도 보관함마다).
   const upkeepSettings = useRef(settings);
   upkeepSettings.current = settings;
@@ -887,7 +893,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       <Toaster />
       {/* 떠 있는 도우미 층(assistant 명세 §4.1). 탭 순서의 맨 끝(상태 줄 뒤)이다. 대화상자가 열려 있는 동안 DialogLayer 가 inert 로 막는다 */}
       <div id={PET_LAYER_ID}>
-        <PetLayer />
+        <PetLayer activePath={selected} actions={petActions} />
       </div>
       <ContextMenu />
     </>
