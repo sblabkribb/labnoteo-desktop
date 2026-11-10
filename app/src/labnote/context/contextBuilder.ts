@@ -6,9 +6,14 @@
 // Reads stay inside `scope.folder` (chain, local sample registry) plus the
 // global sample registry; a folder in `scope.named` adds only its outline
 // (README goal and workflow/unit-op outline), never its samples (spec §4.1, §13).
+//
+// The builder never writes: it backs the context preview and the read-only
+// (`mutates: false`) agent and MCP context tools. That is why it parses the
+// sample registry itself instead of calling core `loadSamplesByType`, which
+// rewrites a `{type}.json` whose IDs collide by case.
 import { createLabnoteTools, runTool, type LabnoteFs, type ToolContext, type ToolDef } from '@labnoteo/core';
 import { buildSampleIdPattern, SAMPLE_TYPES } from '@labnoteo/core/lib/sampleUtils';
-import { loadSamplesByType, type SampleRecord } from '@labnoteo/core/lib/sampleStorage';
+import type { SampleRecord } from '@labnoteo/core/lib/sampleStorage';
 import { applyBudget, type BudgetResult } from './budget';
 import {
   buildChain,
@@ -22,7 +27,7 @@ import {
   type UnitOpTarget,
   type WorkflowNode,
 } from './chain';
-import type { Scope } from './scope';
+import { experimentFolderOf, ScopeError, type Scope } from './scope';
 import { estimateTokens } from './tokens';
 import type { ContextSource, SourceKind } from './types';
 
@@ -134,8 +139,8 @@ function sectionsText(uo: UnitOpNode, names: readonly string[]): string | undefi
   return blocks.length > 0 ? [uo.heading, ...blocks].join('\n\n') : undefined;
 }
 
+/** Planning sections of the target; Environment (optional) only when the note has it, for any kind, as for earlier unit ops. */
 function targetSections(uo: UnitOpNode): readonly string[] {
-  if (uo.kind === 'hw') return PLANNING_SECTIONS_HW;
   const base = uo.kind === 'sw' ? PLANNING_SECTIONS_SW.filter(s => s !== 'Environment') : PLANNING_SECTIONS_HW;
   return 'Environment' in uo.sections ? [...base, 'Environment'] : base;
 }
@@ -169,28 +174,67 @@ function typeOf(id: string, types: readonly string[]): string | undefined {
   return best;
 }
 
+/** A registry keyed by lower-cased ID: the registry's own IDs (more than one when they collide by case) and records. */
+type RegistryIndex = Map<string, { id: string; record: SampleRecord }[]>;
+
+/** The same guard core applies to a sample type before it becomes a file name. */
+function isSafeSampleType(type: string): boolean {
+  return type !== '' && !/[\\/]/.test(type) && type !== '.' && type !== '..';
+}
+
+/**
+ * `{folder}/{type}.json` parsed and indexed by lower-cased ID, read-only
+ * (core treats sample IDs case-insensitively). IDs that collide by case are
+ * all kept for the lookup to choose from; nothing is merged back into the file. Empty when the file is
+ * missing, unreadable or not a JSON object.
+ */
+async function readRegistry(fs: LabnoteFs, folder: string, type: string): Promise<RegistryIndex> {
+  const index: RegistryIndex = new Map();
+  if (!isSafeSampleType(type)) return index;
+  const filePath = `${folder}/${type}.json`;
+  try {
+    if (!(await fs.exists(filePath))) return index;
+    const data: unknown = JSON.parse(await fs.read(filePath));
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return index;
+    for (const [id, record] of Object.entries(data as Record<string, unknown>)) {
+      if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+      const key = id.toLowerCase();
+      const entries = index.get(key) ?? [];
+      entries.push({ id, record: record as SampleRecord });
+      index.set(key, entries);
+    }
+  } catch {
+    return new Map();
+  }
+  return index;
+}
+
 /**
  * Registry lookups limited to the scope folder's local `resources/labsamples`
- * and the global registry; never another experiment's registry.
+ * and the global registry; never another experiment's registry. Read-only and
+ * case-insensitive (a registry key `dna-2` still answers the note's `DNA-2`);
+ * the hit carries the note's spelling of the ID.
  */
 function sampleLookup(fs: LabnoteFs, scopeFolder: string, globalFolder: string | undefined) {
   const local = `${scopeFolder}/resources/labsamples`;
   const folders: { folder: string; where: 'local' | 'global' }[] = [{ folder: local, where: 'local' }];
   if (globalFolder && pathKey(globalFolder) !== pathKey(local)) folders.push({ folder: globalFolder, where: 'global' });
-  const cache = new Map<string, Promise<Record<string, SampleRecord>>>();
+  const cache = new Map<string, Promise<RegistryIndex>>();
   const load = (folder: string, type: string) => {
     const key = `${folder}\u0000${type}`;
     let p = cache.get(key);
     if (!p) {
-      p = loadSamplesByType(fs, folder, type).catch(() => ({}));
+      p = readRegistry(fs, folder, type);
       cache.set(key, p);
     }
     return p;
   };
   return async (type: string, id: string): Promise<SampleHit | undefined> => {
     for (const { folder, where } of folders) {
-      const db = await load(folder, type);
-      if (Object.prototype.hasOwnProperty.call(db, id)) return { type, id, folder, where, record: db[id] };
+      const entries = (await load(folder, type)).get(id.toLowerCase());
+      // The exact spelling first, then the first key that differs only by case.
+      const entry = entries?.find(e => e.id === id) ?? entries?.[0];
+      if (entry) return { type, id, folder, where, record: entry.record };
     }
     return undefined;
   };
@@ -275,8 +319,18 @@ async function readmeTitleOf(fs: LabnoteFs, readmePath: string | undefined): Pro
  */
 export async function buildContext(input: BuildInput): Promise<BuiltContext> {
   const { fs, scope } = input;
+  // Defensive: isolation must not rest on every caller resolving the scope
+  // through scope.ts; refuse anything that is not a `labnote/NNN_*` folder
+  // before reading it.
+  const folder = experimentFolderOf(scope.folder);
+  if (!folder) throw new ScopeError('noExperiment', [scope.folder]);
+  const named = scope.named.map(n => {
+    const f = experimentFolderOf(n);
+    if (!f) throw new ScopeError('outOfScope', [n, scope.folder]);
+    return f;
+  });
   const types = [...SAMPLE_TYPES, ...(input.customTypes ?? [])];
-  const chain = await buildChain(fs, scope.folder, { customTypes: input.customTypes });
+  const chain = await buildChain(fs, folder, { customTypes: input.customTypes });
   const found = findTarget(chain, input.target);
   const target = found?.uo;
   const sources: ContextSource[] = [];
@@ -338,26 +392,30 @@ export async function buildContext(input: BuildInput): Promise<BuiltContext> {
   sources.push(...unitOpSources);
 
   // 4. Named folders: outlines only, never samples.
-  const seenNamed = new Set([pathKey(scope.folder)]);
+  const seenNamed = new Set([pathKey(folder)]);
   let namedDistance = 0;
-  for (const folder of scope.named) {
-    const key = pathKey(folder);
+  for (const other of named) {
+    const key = pathKey(other);
     if (seenNamed.has(key)) continue;
     seenNamed.add(key);
-    sources.push(await namedSource(input, folder.replace(/\\/g, '/').replace(/\/+$/, ''), ++namedDistance));
+    sources.push(await namedSource(input, other, ++namedDistance));
   }
 
   // 5. Samples: previous Output, then the target's Input and Output.
   const previous = target ? previousUnitOp(chain, { workflowPath: target.workflowPath, unitOpIndex: target.index }) : undefined;
   const lookup = sampleLookup(fs, chain.folder, input.globalSampleFolder);
-  const sampleIds = [...new Set([...(previous?.outputIds ?? []), ...(target?.inputIds ?? []), ...(target?.outputIds ?? [])])];
+  // Keyed by lower-cased ID: core treats sample IDs case-insensitively.
+  const sampleIds = new Map<string, string>();
+  for (const id of [...(previous?.outputIds ?? []), ...(target?.inputIds ?? []), ...(target?.outputIds ?? [])]) {
+    if (!sampleIds.has(id.toLowerCase())) sampleIds.set(id.toLowerCase(), id);
+  }
   const hits = new Map<string, SampleHit>();
-  for (const id of sampleIds) {
+  for (const [key, id] of sampleIds) {
     if (hits.size >= MAX_SAMPLE_SOURCES) break;
     const type = typeOf(id, types);
     if (!type) continue;
     const hit = await lookup(type, id);
-    if (hit) hits.set(id, hit);
+    if (hit) hits.set(key, hit);
   }
   let sampleIndex = 0;
   for (const hit of hits.values()) {
@@ -396,11 +454,13 @@ export async function buildContext(input: BuildInput): Promise<BuiltContext> {
   }
 
   // 7. Input prefill: the previous Output IDs with their registry names (no LLM).
+  // TODO(Task 6): switch to the shared `prefillInput` so the registry-name
+  // lookup and the `- ID — name` format live in one place.
   if (target && previous && previous.outputIds.length > 0) {
     const lines: string[] = [];
     for (const id of previous.outputIds) {
       const type = typeOf(id, types);
-      const hit = hits.get(id) ?? (type ? await lookup(type, id) : undefined);
+      const hit = hits.get(id.toLowerCase()) ?? (type ? await lookup(type, id) : undefined);
       lines.push(hit?.record.alias ? `- ${id} — ${hit.record.alias}` : `- ${id}`);
     }
     sources.push(

@@ -59,6 +59,24 @@ function basenameOf(folder: string): string {
 
 const TOP_LEVEL_EXPERIMENT = /^labnote\/\d{3}_[^/]+$/;
 
+/**
+ * `folder` as a top-level experiment folder (`labnote/NNN_X`, `/` separators,
+ * no trailing `/`), or undefined when it is anything else: a note, a nested
+ * or relative path, `..` or an absolute path. A defensive check for callers
+ * handed folders they did not resolve themselves.
+ */
+export function experimentFolderOf(folder: string): string | undefined {
+  if (!folder || /[\0:]/.test(folder)) return undefined;
+  let cleaned: string;
+  try {
+    cleaned = normalizeVaultPath(folder.normalize('NFC'));
+  } catch {
+    return undefined;
+  }
+  if (!TOP_LEVEL_EXPERIMENT.test(cleaned)) return undefined;
+  return getExperimentDir(cleaned) === cleaned ? cleaned : undefined;
+}
+
 function uniqueFolders(refs: readonly ExperimentRef[]): ExperimentRef[] {
   const seen = new Set<string>();
   return refs.filter(r => {

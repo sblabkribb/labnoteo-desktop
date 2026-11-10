@@ -441,3 +441,92 @@ describe('catalogFromTools', () => {
     expect(await catalog('ZZZ999')).toBeUndefined();
   });
 });
+
+describe('buildContext: read-only and defensive', () => {
+  const dir = 'labnote/011_W';
+  const wfPath = `${dir}/001_WB010_W.labnote.md`;
+  const registryPath = `${dir}/resources/labsamples/DNA.json`;
+  const collidingVault = () =>
+    new MemFileSystem({
+      [`${dir}/README.labnote.md`]: '## Goal\n\nW.\n\n## Related Workflows\n\n- [ ] [W](./001_WB010_W.labnote.md)\n',
+      [wfPath]: [
+        '## [WB010 W]',
+        '',
+        '### [UHW010 A]',
+        '',
+        '#### Output',
+        '- DNA-2',
+        '',
+        '### [UHW020 B]',
+        '',
+        '#### Input',
+        '- DNA-1',
+        '',
+        '#### Environment',
+        '- cold room',
+        '',
+      ].join('\n'),
+      [registryPath]: JSON.stringify({
+        'DNA-1': { type: 'DNA', alias: 'upper one', descriptions: [], sources: [] },
+        'dna-1': { type: 'DNA', alias: 'lower one', descriptions: [], sources: [] },
+        'dna-2': { type: 'DNA', alias: 'two', descriptions: [], sources: [] },
+      }),
+    });
+
+  /** `fs` with the name of every method called recorded. */
+  function methodSpy(inner: LabnoteFs): { fs: LabnoteFs; calls: string[] } {
+    const calls: string[] = [];
+    const fs = new Proxy(inner, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          calls.push(String(prop));
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return { fs, calls };
+  }
+
+  const buildW = (fs: LabnoteFs, scope: Scope = scopeOf(dir)) =>
+    buildContext({
+      fs,
+      scope,
+      target: { workflowPath: wfPath, unitOpIndex: 1 },
+      budgetTokens: 100_000,
+      globalSampleFolder: GLOBAL_SAMPLE_FOLDER,
+      catalog: fakeCatalog(),
+    });
+
+  it('never writes, even when the registry holds IDs that collide by case', async () => {
+    const inner = collidingVault();
+    const before = await inner.read(registryPath);
+    const { fs, calls } = methodSpy(inner);
+    await buildW(fs);
+    expect(calls.filter(c => !['read', 'exists', 'list'].includes(c))).toEqual([]);
+    expect(await inner.read(registryPath)).toBe(before);
+  });
+
+  it('looks sample IDs up case-insensitively, preferring the exact spelling', async () => {
+    const ctx = await buildW(collidingVault());
+    expect(byId(ctx.sources, 'sample:DNA:DNA-2').text).toContain('alias: two');
+    expect(byId(ctx.sources, 'sample:DNA:DNA-1').text).toContain('alias: upper one');
+    expect(ctx.sources.filter(s => s.kind === 'sample').map(s => s.id)).toEqual(['sample:DNA:DNA-2', 'sample:DNA:DNA-1']);
+    expect(byId(ctx.sources, 'target:input-prefill').text).toContain('- DNA-2 — two');
+  });
+
+  it('shows Environment for a hardware target when the note has it', async () => {
+    const ctx = await buildW(collidingVault());
+    expect(byId(ctx.sources, 'target').text).toContain('#### Environment\n- cold room');
+  });
+
+  it('refuses a scope or named folder that is not a labnote/NNN_* experiment, before reading it', async () => {
+    for (const bad of ['labnote', 'labnote/011_W/sub', '../labnote/011_W', 'other/011_W', 'C:/labnote/011_W', `${wfPath}`]) {
+      const { fs, calls } = methodSpy(collidingVault());
+      await expect(buildW(fs, scopeOf(dir, [bad]))).rejects.toMatchObject({ code: 'outOfScope' });
+      await expect(buildW(fs, scopeOf(bad))).rejects.toMatchObject({ code: 'noExperiment' });
+      expect(calls).toEqual([]);
+    }
+  });
+});
