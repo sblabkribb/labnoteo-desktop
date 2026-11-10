@@ -19,9 +19,8 @@ use serde_json::Value;
 use tauri::State;
 
 use super::api::{classify, valid_segment, ApiOutcome, ApiReply, GithubCall};
-use super::auth::{call_authed, token, Account, GithubState};
+use super::auth::{call_authed, ensure_account, token, AccountCheck, GithubState};
 use super::{endpoints, GithubEndpoints};
-use crate::gitsync::state::{read_doc, GithubDoc};
 use crate::net::config::{origin, Url};
 use crate::net::secrets::{SecretStore, Secrets};
 use crate::net::{IntegrationDirs, NetError, NetErrorKind, NetState};
@@ -257,8 +256,8 @@ pub(crate) fn repo_facts(j: &Value) -> Option<RepoFacts> {
 }
 
 /// The owner list: the signed-in login (from the account record, else
-/// `GET user`) and every org from `GET user/orgs`, at most `MAX_ORG_PAGES`
-/// pages. No token: `needsSignIn` with nothing sent.
+/// `GET user`, which then records it: `ensure_account`) and every org from
+/// `GET user/orgs`, at most `MAX_ORG_PAGES` pages. No token: `needsSignIn` with nothing sent.
 pub async fn owners_at(
     ep: &GithubEndpoints,
     dirs: &Path,
@@ -271,16 +270,12 @@ pub async fn owners_at(
         Some(t) => t.starts_with("github_pat_"),
         None => return Ok(OwnersOutcome::Api(ApiOutcome::NeedsSignIn)),
     };
-    let recorded = read_doc::<Option<Account>>(dirs, None, GithubDoc::Account)?.map(|a| a.login);
-    let me = match recorded.filter(|l| valid_segment(l)) {
-        Some(login) => login,
-        None => {
-            let reply = call_authed(ep, dirs, store, net, gh, request_id, GithubCall::User, None).await?;
-            if let Some(o) = outcome_of(&GithubCall::User, &reply)? {
-                return Ok(OwnersOutcome::Api(o));
-            }
-            reply.json["login"].as_str().filter(|l| valid_segment(l)).ok_or_else(unexpected_shape)?.to_string()
-        }
+    let me = match ensure_account(ep, dirs, store, net, gh, request_id).await? {
+        AccountCheck::Found(a) => a.login,
+        AccountCheck::Refused(_, reply) => match outcome_of(&GithubCall::User, &reply)? {
+            Some(o) => return Ok(OwnersOutcome::Api(o)),
+            None => return Err(unexpected_shape()),
+        },
     };
     let mut owners = vec![Owner { login: me, kind: OwnerKind::User }];
     for page in 1..=MAX_ORG_PAGES {
@@ -399,7 +394,8 @@ pub async fn github_resolve_repo(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gitsync::state::write_doc;
+    use crate::gitsync::state::{read_doc, write_doc, GithubDoc};
+    use crate::net::github::auth::Account;
     use crate::net::config::tests::scratch_dir;
     use crate::net::config::ServiceConfig;
     use crate::net::secrets::{store_secret, MemoryStore, Slot};
@@ -581,6 +577,19 @@ mod tests {
         ]);
         assert_eq!(owners(&f, &s), OwnersOutcome::Ok { owners: vec![user("park"), org("lab")], orgs_listed: true });
         assert_eq!(s.requests.lock().unwrap()[0].path, "/user");
+        // The account is recorded (an imported token is signed in from now on).
+        let a = read_doc::<Option<Account>>(&f.dir, None, GithubDoc::Account).unwrap().unwrap();
+        assert_eq!((a.login.as_str(), a.id), ("park", 7));
+        assert_eq!(crate::net::github::auth::account_at(&f.dir, &f.store, &f.gh).unwrap().unwrap().login, "park");
+    }
+
+    #[test]
+    fn a_refused_token_without_an_account_record_is_needs_sign_in() {
+        let f = fx("gh-repos-noacct-401", Some(GHP), false);
+        let s = serve(vec![Canned::status(401).body("{\"message\":\"Bad credentials\"}")]);
+        assert_eq!(owners(&f, &s), OwnersOutcome::Api(ApiOutcome::NeedsSignIn));
+        assert_eq!(quiet_count(&s), 1);
+        assert!(!f.dir.join("github").join("account.json").exists());
     }
 
     #[test]

@@ -8,7 +8,8 @@ use crate::gitsync::overlay::LocalTime;
 use crate::gitsync::plan::{build_plan, PlanEnv, PlanOutcome, PlanRequest};
 use crate::gitsync::repo::blob_at;
 use crate::gitsync::repo::tests::snapshot;
-use crate::gitsync::state::write_doc;
+use crate::gitsync::state::{read_doc, write_doc};
+use crate::net::github::auth::Account;
 use crate::net::config::tests::scratch_dir;
 use crate::net::config::ServiceConfig;
 use crate::net::secrets::{store_secret, MemoryStore, Slot};
@@ -499,6 +500,50 @@ fn no_token_means_sign_in_with_nothing_sent() {
     assert_eq!(fx.upload(&s, &fx.create(true), UploadChoices::default()), UploadOutcome::NeedsSignIn);
     assert_eq!(quiet_count(&s), 0);
     assert!(fx.links().links.is_empty());
+}
+
+/// Signs out, then imports `FAKE` from a connection file, as the import
+/// commands do (offline: no account record is written).
+fn import_token(fx: &Fx) {
+    crate::gitsync::state::sign_out_stored(&fx.dirs, &fx.store).unwrap();
+    let text = format!("GITHUB_TOKEN={FAKE}
+");
+    let mut out = crate::net::import::import_bytes(&fx.store, "lab.env", text.as_bytes(), &ServiceConfig::from_settings_json("{}"));
+    crate::net::import::finish_github_import(&fx.dirs, &fx.store, &fx.gh, &mut out);
+    assert!(token(&fx.gh, &fx.store).unwrap().is_some());
+    assert_eq!(read_doc::<Option<Account>>(&fx.dirs, None, GithubDoc::Account).unwrap(), None);
+}
+
+#[test]
+fn an_imported_token_uploads_after_one_account_check() {
+    let fx = Fx::new("gh-up-imported");
+    import_token(&fx);
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![Canned::ok(r#"{"login":"kim-lab","id":4242,"avatar_url":""}"#), created(NAME, true)]);
+    let out = fx.upload(&s, &fx.create(true), UploadChoices::default());
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    let reqs = s.requests.lock().unwrap().clone();
+    let calls: Vec<(&str, &str)> = reqs.iter().map(|r| (r.method.as_str(), r.path.as_str())).collect();
+    assert_eq!(calls, vec![("GET", "/user"), ("POST", "/user/repos")]);
+    // The account is recorded: the next upload asks GitHub no more about it,
+    // and the commit is signed with it.
+    let account = read_doc::<Option<Account>>(&fx.dirs, None, GithubDoc::Account).unwrap().unwrap();
+    assert_eq!((account.login.as_str(), account.id), ("kim-lab", 4242));
+    let commit = remote.find_commit(remote.refname_to_id("refs/heads/main").unwrap()).unwrap();
+    assert_eq!(commit.author().name().ok(), Some("kim-lab"));
+    fx.no_token();
+}
+
+#[test]
+fn an_imported_token_github_refuses_is_sign_in_with_no_repo_made() {
+    let fx = Fx::new("gh-up-imported-401");
+    import_token(&fx);
+    let s = serve(vec![Canned::status(401).body(r#"{"message":"Bad credentials"}"#), created(NAME, true)]);
+    assert_eq!(fx.upload(&s, &fx.create(true), UploadChoices::default()), UploadOutcome::NeedsSignIn);
+    assert_eq!(quiet_count(&s), 1);
+    assert_eq!(s.requests.lock().unwrap()[0].path, "/user");
+    assert!(fx.links().links.is_empty());
+    assert_eq!(read_doc::<Option<Account>>(&fx.dirs, None, GithubDoc::Account).unwrap(), None);
 }
 
 #[test]

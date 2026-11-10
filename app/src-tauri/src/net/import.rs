@@ -111,6 +111,9 @@ pub enum Problem {
     BadToken,
     /// Not the shape of a GitHub OAuth App client ID.
     BadClientId,
+    /// The app's own GitHub settings (`github/app.json`, the account record)
+    /// could not be read or written.
+    AppData,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -627,13 +630,32 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
 /// tokens, account record; with `forgetOnExit` on it moves into memory). A new
 /// client ID with no token signs out, as in the settings, since a token
 /// belongs to the OAuth App that issued it. Nothing for any other outcome.
-pub fn finish_github_import(
+/// It never fails the command: a keychain or app-data error is added to the
+/// summary as the GitHub part's problem (`keychain` / `appData`).
+pub fn finish_github_import(dirs: &Path, store: &dyn SecretStore, gh: &GithubState, outcome: &mut ImportOutcome) {
+    let ImportOutcome::Done { imported, invalid, github: Some(part), .. } = outcome else { return };
+    let Err(e) = settle_github_import(dirs, store, gh, part) else { return };
+    // The other parts' keys are already saved, so the summary still goes
+    // back (with its offer to delete the file); the GitHub part is reported
+    // as not imported. A token that could not be settled is dropped again
+    // (with the old account record), so no token is left paired with another
+    // account's record. Best effort: the error already says what failed.
+    if part.token_saved {
+        let _ = gh.sign_out(dirs, store);
+    }
+    imported.retain(|i| i.part != Part::Github);
+    let field = if part.token_saved { "token" } else { "clientId" };
+    let reason = if e.kind == NetErrorKind::Keychain { Problem::Keychain } else { Problem::AppData };
+    invalid.push(Invalid { part: Part::Github, field, reason });
+}
+
+/// `finish_github_import`'s steps; any error leaves the rest to the caller.
+fn settle_github_import(
     dirs: &Path,
     store: &dyn SecretStore,
     gh: &GithubState,
-    outcome: &ImportOutcome,
+    imported: &GithubImport,
 ) -> Result<(), NetError> {
-    let ImportOutcome::Done { github: Some(imported), .. } = outcome else { return Ok(()) };
     let mut app: GithubAppSettings = read_doc(dirs, None, GithubDoc::App)?;
     let before = github_client_id(&app);
     if let Some(id) = &imported.client_id {
@@ -784,7 +806,8 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
     })
     .await
     .map_err(|e| NetError::new(NetErrorKind::Io, format!("import failed: {e}")))?;
-    finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &outcome)?;
+    let mut outcome = outcome;
+    finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &mut outcome);
     Ok(Some(outcome))
 }
 
@@ -812,8 +835,8 @@ pub fn integration_import_bytes(
         .map_err(|_| NetError::new(NetErrorKind::BadInput, "the file name is missing"))?;
     let root = vault.root().map_err(|_| no_vault())?;
     let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
-    let outcome = import_bytes(secrets.0.as_ref(), &name, bytes, &cfg);
-    finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &outcome)?;
+    let mut outcome = import_bytes(secrets.0.as_ref(), &name, bytes, &cfg);
+    finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &mut outcome);
     Ok(outcome)
 }
 
@@ -1180,8 +1203,8 @@ mod tests {
 
     /// The import, then the command's app-wide step.
     fn import_github(dir: &Path, store: &MemoryStore, gh: &GithubState, name: &str, text: &str) -> ImportOutcome {
-        let out = import_bytes(store, name, text.as_bytes(), &cfg("{}"));
-        finish_github_import(dir, store, gh, &out).unwrap();
+        let mut out = import_bytes(store, name, text.as_bytes(), &cfg("{}"));
+        finish_github_import(dir, store, gh, &mut out);
         out
     }
 
@@ -1278,6 +1301,29 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn a_github_part_that_cannot_be_settled_is_a_problem_not_a_failed_import() {
+        let dir = gh_dir("import-gh-appdata");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        // `github/app.json` cannot be read (a folder in its place).
+        std::fs::create_dir_all(dir.join("github").join("app.json")).unwrap();
+        let text = format!("PARTBANK_URL=https://partbank.example.org
+PARTBANK_API_KEY=pb-FAKE-1
+GITHUB_TOKEN={GH_FAKE}
+");
+        let out = import_github(&dir, &store, &gh, "lab.env", &text);
+        let (imported, invalid, _) = done(&out);
+        // The other part's key was saved and is still reported, so the
+        // webview gets its summary (and the offer to delete the file).
+        assert_eq!(imported, &vec![Imported { part: Part::Partbank, key_saved: true }]);
+        assert_eq!(invalid, &vec![Invalid { part: Part::Github, field: "token", reason: Problem::AppData }]);
+        // The token that could not be settled was dropped again.
+        assert_eq!(gh_token(&gh, &store), None);
+        let wire = serde_json::to_value(&out).unwrap();
+        assert_eq!(wire["invalid"][0]["reason"], "appData");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

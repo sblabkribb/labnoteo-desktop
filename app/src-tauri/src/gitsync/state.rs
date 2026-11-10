@@ -177,6 +177,19 @@ pub(crate) fn sign_out_stored(dirs: &Path, store: &dyn SecretStore) -> Result<()
     remove_doc(dirs, None, GithubDoc::Account)
 }
 
+/// The startup sweep of "sign out when the app closes": with `forgetOnExit`
+/// on, no sign-in survives a start. The exit hook already zeroized the memory
+/// token and forgot the account record; this also covers a crash, and a
+/// token a connection import stored in the keychain just before a crash
+/// (it moves into memory only after the keychain write). Best effort: a
+/// failure is not a reason to stop the app from starting.
+pub fn sweep_forgotten_sign_in(dirs: &Path, store: &dyn SecretStore) {
+    let app: GithubAppSettings = read_doc(dirs, None, GithubDoc::App).unwrap_or_default();
+    if app.forget_on_exit {
+        let _ = sign_out_stored(dirs, store);
+    }
+}
+
 pub fn app_settings_get_at(dirs: &Path) -> Result<GithubAppSettingsView, NetError> {
     Ok(view_of(&read_doc(dirs, None, GithubDoc::App)?))
 }
@@ -356,6 +369,31 @@ mod tests {
         store_secret(&store, Slot::Github, &cfg, FAKE).unwrap();
         app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":"Iv1.other"}"#)).unwrap();
         assert!(status_of(&store, &cfg).set.github);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_startup_sweep_clears_a_sign_in_only_with_forget_on_exit() {
+        let dir = scratch_dir("gh-sweep");
+        let store = MemoryStore::default();
+        let cfg = ServiceConfig::from_settings_json("{}");
+        let stored = |store: &MemoryStore| {
+            store_secret(store, Slot::Github, &cfg, FAKE).unwrap();
+            store_secret(store, Slot::GithubRefresh, &cfg, "ghr_FAKE").unwrap();
+            write_doc(&dir, None, GithubDoc::Account, &serde_json::json!({"login": "me", "id": 1})).unwrap();
+        };
+        // Off (and no app.json at all): the sign-in stays.
+        stored(&store);
+        sweep_forgotten_sign_in(&dir, &store);
+        assert!(status_of(&store, &cfg).set.github);
+        assert!(dir.join("github").join("account.json").exists());
+        // On: a token left in the keychain by a crash (say, right after a
+        // connection import stored it) and the account record are gone.
+        write_doc(&dir, None, GithubDoc::App, &GithubAppSettings { client_id: None, forget_on_exit: true }).unwrap();
+        sweep_forgotten_sign_in(&dir, &store);
+        let st = status_of(&store, &cfg);
+        assert!(!st.set.github && !st.set.github_refresh);
+        assert!(!dir.join("github").join("account.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

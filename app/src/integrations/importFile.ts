@@ -29,7 +29,8 @@ export type ImportProblem =
   | 'keyNotUsed'
   | 'keychain'
   | 'badToken'
-  | 'badClientId';
+  | 'badClientId'
+  | 'appData';
 
 /** Rust `ImportOutcome`. `settings` 는 키가 아닌 연동 설정만 담는다. */
 export type ImportOutcome =

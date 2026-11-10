@@ -54,7 +54,7 @@ use super::state::{github_client_id, read_doc, GithubAppSettings, GithubDoc};
 use super::walk::{status_hash, walk, CacheEntry, FolderCache, Limits, WalkError};
 use crate::net::config::Url;
 use crate::net::github::api::{classify, valid_segment, ApiOutcome, ApiReply, GithubCall};
-use crate::net::github::auth::{call_authed, token, Account};
+use crate::net::github::auth::{call_authed, ensure_account, token, AccountCheck};
 use crate::net::github::repos::repo_facts;
 use crate::net::github::{endpoints, GithubEndpoints, GithubState, GITHUB_WEB};
 use crate::net::secrets::{SecretStore, Secrets};
@@ -655,8 +655,9 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         }
     }
     let Some(tok) = token(env.gh, env.store)? else { return Ok(UploadOutcome::NeedsSignIn) };
-    let Some(account) = read_doc::<Option<Account>>(env.dirs, None, GithubDoc::Account)? else {
-        return Ok(UploadOutcome::NeedsSignIn);
+    let account = match block_on(ensure_account(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id))? {
+        AccountCheck::Found(a) => a,
+        AccountCheck::Refused(o, reply) => return api_outcome(env.dirs, o, &reply),
     };
     let sig = signature(&account.login, account.id).map_err(git_error)?;
 
@@ -1015,6 +1016,13 @@ pub fn retry_at(env: &UploadEnv<'_>, folder: &str) -> Result<UploadOutcome, NetE
         LinkState::RepoCreating | LinkState::Committed => {}
     }
     let Some(tok) = token(env.gh, env.store)? else { return Ok(UploadOutcome::NeedsSignIn) };
+    // An imported token has no account record yet: check it (a 401 is
+    // `needsSignIn`) and record the account, as an upload does.
+    if let AccountCheck::Refused(o, reply) =
+        block_on(ensure_account(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id))?
+    {
+        return api_outcome(env.dirs, o, &reply);
+    }
     let outcome = match link.state {
         LinkState::RepoCreating => adopt(env, &link, &tok),
         _ => finish_push(env, &link, &tok),

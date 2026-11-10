@@ -203,7 +203,11 @@ pub fn run() {
             // never in the vault (D13).
             app.manage(net::IntegrationDirs(data.join("integrations")));
             // Integration keys: Windows Credential Manager only, never a file (D6).
-            app.manage(net::secrets::Secrets::keyring());
+            let secrets = net::secrets::Secrets::keyring();
+            // "Sign out when the app closes" (GitHub): no sign-in survives a
+            // start, even one a crash left in the keychain.
+            gitsync::state::sweep_forgotten_sign_in(&data.join("integrations"), secrets.0.as_ref());
+            app.manage(secrets);
             // Save as... for SKILL.md: Rust's own save dialog, modal to the main window.
             app.manage(skill::SkillPicker::dialog(app.handle().clone()));
             // Watches the open vault for changes made outside the app; started

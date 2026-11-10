@@ -170,7 +170,9 @@ describe('Integration settings: Import from file…', () => {
     });
     show(f.deps);
     await userEvent.click(await importButton());
-    expect(await screen.findByText(t('integrations.import.importedKey', t('github.import.part')))).toBeTruthy();
+    // GitHub 은 API 키가 아니라 토큰을 가져온다.
+    expect(await screen.findByText(t('github.import.importedToken', t('github.import.part')))).toBeTruthy();
+    expect(screen.queryByText(t('integrations.import.importedKey', t('github.import.part')))).toBeNull();
     expect(
       screen.getByText(t('integrations.import.invalid', t('github.import.part'), 'clientId', t('github.import.badClientId'))),
     ).toBeTruthy();
@@ -187,9 +189,26 @@ describe('Integration settings: Import from file…', () => {
       await screen.findByText(t('integrations.import.invalid', t('github.import.part'), 'token', t('github.import.badToken'))),
     ).toBeTruthy();
     expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
+    cleanup();
+    // 앱의 GitHub 설정을 저장하지 못했다: 다른 부분의 키는 저장됐으니 요약과 지우기 제안이 그대로 나온다.
+    const h = importDeps({
+      outcome: {
+        status: 'done',
+        imported: [{ part: 'partbank', keySaved: true }],
+        invalid: [{ part: 'github', field: 'token', reason: 'appData' }],
+        settings: {},
+      },
+    });
+    show(h.deps);
+    await userEvent.click(await importButton());
+    expect(
+      await screen.findByText(t('integrations.import.invalid', t('github.import.part'), 'token', t('github.import.appData'))),
+    ).toBeTruthy();
+    expect(await screen.findByText(t('integrations.import.deleteAsk'))).toBeTruthy();
     setLang('ko');
     expect(t('github.import.part')).toBe('GitHub');
-    expect(t('github.import.badToken')).toBe('GitHub 토큰 형식이 아닙니다');
+    expect(t('github.import.badToken')).toBe('GitHub 토큰 형식이 아닙니다.');
+    expect(t('github.import.importedToken', 'GitHub')).toBe('가져옴: GitHub(토큰 포함)');
   });
 
   it('nothing imported: says so and offers no delete', async () => {

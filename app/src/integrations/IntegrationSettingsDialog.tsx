@@ -178,6 +178,7 @@ const PROBLEM_TEXT: Record<ImportProblem, () => string> = {
   keychain: () => t('integrations.import.reason.keychain'),
   badToken: () => t('github.import.badToken'),
   badClientId: () => t('github.import.badClientId'),
+  appData: () => t('github.import.appData'),
 };
 
 const DELETED_TEXT: Record<Exclude<DeleteOutcome, 'trashUnavailable'>, () => string> = {
@@ -190,7 +191,11 @@ const DELETED_TEXT: Record<Exclude<DeleteOutcome, 'trashUnavailable'>, () => str
 function summaryLines(out: ImportOutcome): ImportLine[] {
   if (out.status === 'refused') return [{ text: REFUSAL_TEXT[out.reason](), warn: true }];
   const lines: ImportLine[] = out.imported.map((i) => ({
-    text: t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
+    // GitHub 은 API 키가 아니라 토큰을 가져온다.
+    text:
+      i.keySaved && i.part === 'github'
+        ? t('github.import.importedToken', PART_LABEL[i.part]())
+        : t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
     warn: false,
   }));
   if (out.imported.length === 0) lines.push({ text: t('integrations.import.nothing'), warn: true });

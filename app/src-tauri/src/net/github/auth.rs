@@ -502,6 +502,47 @@ pub fn account_at(dirs: &Path, store: &dyn SecretStore, gh: &GithubState) -> Res
     read_doc::<Option<Account>>(dirs, None, GithubDoc::Account)
 }
 
+/// What `ensure_account` found.
+#[derive(Debug)]
+pub enum AccountCheck {
+    /// The recorded account, or the one `GET /user` just recorded.
+    Found(Account),
+    /// `GET /user` did not pass: GitHub's answer (a 401 is `NeedsSignIn`).
+    /// No token at all is `NeedsSignIn` with nothing sent.
+    Refused(ApiOutcome, ApiReply),
+}
+
+/// The account of the held token. A token without an account record (a
+/// connection import keeps the token and drops the old record, offline) is
+/// checked here with one `GET /user`, and the account it names is recorded.
+/// Every GitHub call that needs the identity goes through this, so an
+/// imported token works without a new sign-in.
+pub async fn ensure_account(
+    ep: &GithubEndpoints,
+    dirs: &Path,
+    store: &dyn SecretStore,
+    net: &NetState,
+    gh: &GithubState,
+    request_id: Option<&str>,
+) -> Result<AccountCheck, NetError> {
+    if token(gh, store)?.is_some() {
+        if let Some(a) = read_doc::<Option<Account>>(dirs, None, GithubDoc::Account)? {
+            if super::api::valid_segment(&a.login) {
+                return Ok(AccountCheck::Found(a));
+            }
+        }
+    }
+    let reply = call_authed(ep, dirs, store, net, gh, request_id, GithubCall::User, None).await?;
+    match classify(&GithubCall::User, &reply) {
+        ApiOutcome::Ok => {}
+        other => return Ok(AccountCheck::Refused(other, reply)),
+    }
+    let account = account_of(&reply)
+        .ok_or_else(|| NetError::new(NetErrorKind::BadInput, "GitHub's account answer is incomplete"))?;
+    write_doc(dirs, None, GithubDoc::Account, &account)?;
+    Ok(AccountCheck::Found(account))
+}
+
 /// Uses the refresh token once. `true` when a new token was kept; `false`
 /// when there is no refresh token or GitHub refused it (the dead refresh
 /// token is then forgotten). Never starts a sign-in.
@@ -579,7 +620,10 @@ pub async fn github_sign_in_wait(
     sign_in_wait_at(&endpoints(), &dirs.0, secrets.0.as_ref(), &net, &github, Some(&request_id), &RealPace).await
 }
 
-/// The signed-in account, or `null`. Offline.
+/// The signed-in account, or `null`. Offline, so a held token without an
+/// account record (just imported from a connection file) reads as `null`
+/// until the next GitHub call records it (`github_owners`, which the
+/// settings section's owner list makes, or an upload).
 #[tauri::command]
 pub fn github_account(
     dirs: State<'_, IntegrationDirs>,
