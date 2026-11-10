@@ -1,6 +1,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import type { SecretStatus, Slot } from './secretsEvents';
+import type { McpCallResult, McpSecretFlag, McpServerInfo } from './mcpClient/types';
 
 /**
  * SP6 net 커맨드의 타입 있는 래퍼. 네트워크는 모두 Rust 가 한다: 웹뷰는 커맨드만 부르고, 주소와 키는
@@ -160,16 +161,20 @@ function sendCancel(id: string, invoke: InvokeFn): Promise<void> {
 /**
  * 요청 id 를 만들어 `run` 에 넘기고, 끝날 때까지 추적한다. `signal` 이나 보관함 신호가 끊기면 Rust 에
  * `net_cancel` 을 보내고 Rust 를 기다리지 않고 곧바로 `NetError('cancelled')` 로 거절한다.
- * 이미 끊긴 신호면 아무것도 부르지 않는다.
+ * 이미 끊긴 신호면 아무것도 부르지 않는다. `requestId` 를 주면 그 id 를 쓴다(이미 추적 중인 id 면 `badInput`).
  */
 export function trackRequest<T>(
   signal: AbortSignal | undefined,
   run: (requestId: string) => Promise<T>,
   invoke: InvokeFn = tauriInvoke,
+  requestId?: string,
 ): Promise<T> {
   const vault = vaultSignal();
   if (signal?.aborted || vault.aborted) return Promise.reject(cancelled());
-  const id = crypto.randomUUID();
+  if (requestId !== undefined && (requestId === '' || openRequests.has(requestId))) {
+    return Promise.reject(new NetError('badInput', 'request id in use'));
+  }
+  const id = requestId ?? crypto.randomUUID();
   openRequests.add(id);
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -448,4 +453,93 @@ export async function integrationStateWrite(
   invoke: InvokeFn = tauriInvoke,
 ): Promise<void> {
   await call<null>(invoke, 'integration_state_write', { name, content });
+}
+
+// ── MCP 클라이언트(외부 MCP 서버, spec §4.5) ──────────────────────────
+//
+// 서버는 id 로만 고른다: 주소는 Rust 가 저장된 설정에서 읽고, 웹뷰는 주소를 넘기지 않는다. 토큰은
+// `mcpClientSecretSet` 으로 한 번 Rust 에 가고 다시 오지 않는다.
+
+/** 토큰을 저장한다(앞의 `Bearer ` 는 Rust 가 지운다). 거절 글에 값이 남지 않는다. */
+export async function mcpClientSecretSet(id: string, value: string, invoke: InvokeFn = tauriInvoke): Promise<void> {
+  try {
+    await invoke<null>('mcp_client_secret_set', { id, value });
+  } catch (e) {
+    const err = toNetError(e);
+    if (value && (err.message.includes(value) || (err.body ?? '').includes(value))) {
+      throw new NetError(err.kind, err.message.split(value).join('***'), err.status);
+    }
+    throw err;
+  }
+}
+
+export async function mcpClientSecretClear(id: string, invoke: InvokeFn = tauriInvoke): Promise<void> {
+  await call<null>(invoke, 'mcp_client_secret_clear', { id });
+}
+
+/** 서버 id → 토큰이 저장됐는지와 epoch. 값은 오지 않는다. */
+export async function mcpClientSecretStatus(invoke: InvokeFn = tauriInvoke): Promise<Record<string, McpSecretFlag>> {
+  return (await call<Record<string, McpSecretFlag> | null>(invoke, 'mcp_client_secret_status', {})) ?? {};
+}
+
+/** 연결해 서버 정보와 도구 목록을 받는다. Rust 가 도구 목록을 캐시한다. */
+export function mcpClientConnect(id: string, invoke: InvokeFn = tauriInvoke): Promise<McpServerInfo> {
+  return call<McpServerInfo>(invoke, 'mcp_client_connect', { id });
+}
+
+/**
+ * 도구를 부른다. `trackRequest` 를 거치므로 `signal`(에이전트의 취소)과 보관함 바꾸기가 `net_cancel` 로 Rust 에 닿는다.
+ * `requestId` 를 주면 그 id 로 추적한다(없으면 새로 만든다).
+ */
+export function mcpClientCall(
+  id: string,
+  tool: string,
+  args: Record<string, unknown>,
+  requestId?: string,
+  invoke: InvokeFn = tauriInvoke,
+  signal?: AbortSignal,
+): Promise<McpCallResult> {
+  return trackRequest(
+    signal,
+    (rid) => call<McpCallResult>(invoke, 'mcp_client_call', { id, tool, args, requestId: rid }),
+    invoke,
+    requestId,
+  );
+}
+
+export async function mcpClientDisconnect(id: string, invoke: InvokeFn = tauriInvoke): Promise<void> {
+  await call<null>(invoke, 'mcp_client_disconnect', { id });
+}
+
+/** 서버를 지우기 전에 부른다: 토큰 조각, 캐시, 세션을 지운다(Rust 는 저장된 설정에서 origin 을 찾는다). */
+export async function mcpClientForget(id: string, invoke: InvokeFn = tauriInvoke): Promise<void> {
+  await call<null>(invoke, 'mcp_client_forget', { id });
+}
+
+/** 캐시된 도구 목록(서버 id → 정보). 웹뷰는 읽기만 한다. */
+export async function mcpClientToolsCached(invoke: InvokeFn = tauriInvoke): Promise<Record<string, McpServerInfo>> {
+  return (await call<Record<string, McpServerInfo> | null>(invoke, 'mcp_client_tools_cached', {})) ?? {};
+}
+
+/** 새 서버 id: 8자리 소문자 16진수(`crypto.getRandomValues`). */
+export function newServerId(): string {
+  const b = new Uint8Array(4);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * 경로 조각 하나가 비밀처럼 보인다: `[A-Za-z0-9_-]` 24자 이상이고 글자와 숫자가 섞였다(Rust
+ * `config::is_secret_looking_url` 과 같은 규칙, spec §5.1). 주소가 아니면 false.
+ */
+export function isSecretLookingUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return false;
+  }
+  return u.pathname
+    .split('/')
+    .some((seg) => seg.length >= 24 && /^[A-Za-z0-9_-]+$/.test(seg) && /[A-Za-z]/.test(seg) && /[0-9]/.test(seg));
 }

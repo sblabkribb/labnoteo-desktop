@@ -35,7 +35,9 @@ export type IntegrationSettingsValue = Pick<
   | 'mcpPort'
 > &
   // feat/ai-context: the context-window field (ContextWindowField). Optional so older values still type-check.
-  Partial<Pick<AppSettings, 'llmContextWindow'>>;
+  Partial<Pick<AppSettings, 'llmContextWindow'>> &
+  // MCP 클라이언트(Task 5b): 외부 MCP 서버 목록(토큰 없음). 없으면 []로 읽는다(예전 값도 타입이 맞게 선택 칸).
+  Partial<Pick<AppSettings, 'mcpClientServers'>>;
 
 export type ProbeId = 'partbankDesktop' | 'partbankWeb' | 'llm' | 'bfw';
 

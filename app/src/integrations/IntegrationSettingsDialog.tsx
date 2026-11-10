@@ -73,6 +73,7 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     scanEmbedWidth: s.scanEmbedWidth,
     mcpEnabled: s.mcpEnabled,
     mcpPort: s.mcpPort,
+    mcpClientServers: s.mcpClientServers.map((m) => ({ ...m, tools: { ...m.tools } })),
   };
 }
 

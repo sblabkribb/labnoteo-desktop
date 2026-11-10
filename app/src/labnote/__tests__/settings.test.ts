@@ -66,6 +66,7 @@ describe('보관함별 설정', () => {
         'llmEndpointOpenai',
         'llmModel',
         'llmProvider',
+        'mcpClientServers',
         'mcpEnabled',
         'mcpPort',
         'partbankDefaultConnection',

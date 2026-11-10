@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { migrateSettings, type LabnoteSettings } from '../../vendor/labnoteo/src/settings';
+import { isSecretLookingUrl } from '../integrations/netIpc';
+import type { McpServerSetting } from '../integrations/mcpClient/types';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -57,6 +59,11 @@ export type AppSettings = Pick<
    * 2048-1,000,000 정수(벗어나면 잘라 맞춘다), 정수가 아니면 기본 8192.
    */
   llmContextWindow: number;
+  /**
+   * 앱에만 있는 키(MCP 클라이언트, spec §5.1): AI 가 쓸 외부 MCP 서버. 기본 []. 토큰은 여기 없다(자격 증명 관리자).
+   * 틀린 항목은 버린다(`cleanMcpServers`, Rust `config::parse_mcp_servers` 와 같은 규칙).
+   */
+  mcpClientServers: McpServerSetting[];
 };
 
 /** 그림 저장 폴더: 실험의 resources/(기본) 또는 노트 폴더의 images/. */
@@ -135,6 +142,74 @@ function httpOrigins(v: unknown): string[] {
   return out;
 }
 
+/** MCP 클라이언트 서버의 최대 수와 이름 길이(Rust `MAX_MCP_SERVERS`, `MAX_MCP_NAME`). */
+export const MCP_CLIENT_MAX_SERVERS = 16;
+export const MCP_CLIENT_MAX_NAME = 40;
+
+/** loopback 호스트(Rust `config::is_loopback`): localhost, 127.0.0.0/8, ::1. */
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h === '[::1]') return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
+/**
+ * MCP 서버 주소로 쓸 수 있다: `isServiceUrl`(경로 가능), 비밀처럼 보이는 경로 없음, 평문 http 는 loopback 이거나
+ * `allowHttp` 에 있는 origin 일 때만(Rust `config::parse_mcp_url`).
+ */
+export function isMcpServerUrl(v: unknown, allowHttp: readonly string[]): v is string {
+  if (!isServiceUrl(v) || isSecretLookingUrl(v)) return false;
+  const url = new URL(v.trim());
+  if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
+    return allowHttp.some((o) => {
+      try {
+        return new URL(o).origin === url.origin;
+      } catch {
+        return false;
+      }
+    });
+  }
+  return true;
+}
+
+/** 서버 이름: 1-40자(코드 포인트), 빈칸만은 안 되고, 제어 문자(C0, DEL, C1)가 없다. */
+function isMcpName(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  const n = [...v].length;
+  // eslint-disable-next-line no-control-regex
+  return n >= 1 && n <= MCP_CLIENT_MAX_NAME && v.trim() !== '' && !/[\u0000-\u001f\u007f-\u009f]/.test(v);
+}
+
+/** 저장된 항목 하나. 칸 하나라도 틀리면 undefined. 도구 스위치는 불 값만 남긴다. */
+function cleanMcpServer(v: unknown, allowHttp: readonly string[]): McpServerSetting | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id)) return undefined;
+  if (!isMcpName(o.name)) return undefined;
+  if (!isMcpServerUrl(o.url, allowHttp)) return undefined;
+  if (o.auth !== 'bearer' && o.auth !== 'none') return undefined;
+  if (o.preset !== undefined && o.preset !== null && o.preset !== 'rapid' && o.preset !== 'biomodel') return undefined;
+  if (o.enabled !== undefined && typeof o.enabled !== 'boolean') return undefined;
+  if (o.tools !== undefined && (!o.tools || typeof o.tools !== 'object' || Array.isArray(o.tools))) return undefined;
+  const tools: Record<string, boolean> = {};
+  for (const [k, b] of Object.entries((o.tools ?? {}) as Record<string, unknown>)) if (typeof b === 'boolean') tools[k] = b;
+  const out: McpServerSetting = { id: o.id, name: o.name, url: o.url.trim(), auth: o.auth, enabled: o.enabled === true, tools };
+  if (o.preset === 'rapid' || o.preset === 'biomodel') out.preset = o.preset;
+  return out;
+}
+
+/** `mcpClientServers`: 올바른 항목만 차례대로, 같은 id 는 처음 것만, 많아야 16개. */
+export function cleanMcpServers(v: unknown, allowHttp: readonly string[]): McpServerSetting[] {
+  if (!Array.isArray(v)) return [];
+  const out: McpServerSetting[] = [];
+  for (const e of v) {
+    if (out.length >= MCP_CLIENT_MAX_SERVERS) break;
+    const s = cleanMcpServer(e, allowHttp);
+    if (s && !out.some((o) => o.id === s.id)) out.push(s);
+  }
+  return out;
+}
+
 /** 고르는 키. 저장하기 전에도 이 목록으로 다시 걸러, 타입을 우회해 섞여 든 키도 저장되지 않게 한다. */
 const KEYS = [
   'schemaVersion',
@@ -172,6 +247,8 @@ const KEYS = [
   'imageFolder',
   // feat/ai-context(Task 8): 모델의 컨텍스트 창. 앱 키다.
   'llmContextWindow',
+  // MCP 클라이언트(Task 5b): 외부 MCP 서버. 앱 키다.
+  'mcpClientServers',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -190,6 +267,7 @@ function pick(s: LabnoteSettings): AppSettings {
   for (const k of KEYS) out[k] = k in APP_DEFAULTS ? APP_DEFAULTS[k as keyof typeof APP_DEFAULTS] : s[k as keyof LabnoteSettings];
   // 배열 기본값은 부를 때마다 새로 만든다(설정끼리 같은 배열을 나눠 쓰지 않게).
   out.allowHttpOrigins = [];
+  out.mcpClientServers = [];
   return out as AppSettings;
 }
 
@@ -231,6 +309,8 @@ export function fromStored(raw: unknown): AppSettings {
     if (o.imageFolder === 'images' || o.imageFolder === 'resources') settings.imageFolder = o.imageFolder;
     // feat/ai-context(Task 8): 컨텍스트 창은 정수만 살리고 범위로 잘라 맞춘다.
     settings.llmContextWindow = clampContextWindow((raw as { llmContextWindow?: unknown }).llmContextWindow);
+    // MCP 클라이언트(Task 5b): 칸마다 검사하고 틀린 항목은 버린다. 평문 http 허락은 위에서 읽은 목록을 쓴다.
+    settings.mcpClientServers = cleanMcpServers((raw as { mcpClientServers?: unknown }).mcpClientServers, settings.allowHttpOrigins);
   }
   return settings;
 }

@@ -1,4 +1,5 @@
 import { NetError, type InvokeFn, type NetErrorKind, type SecretStatus, type Slot } from '../netIpc';
+import type { McpServerInfo, McpToolInfo } from '../mcpClient/types';
 
 /** 이 파일이 쓰는 슬롯 전부. `secretStatusOf` 가 빠진 슬롯을 채울 때 쓴다. */
 const SLOTS: readonly Slot[] = ['partbankDesktop', 'partbankWeb', 'llmOpenai', 'bfwServer', 'bfwDesktop', 'slackBot'];
@@ -40,5 +41,36 @@ export function secretStatusOf(
   return {
     set: Object.fromEntries(SLOTS.map((s) => [s, set[s] ?? false])) as Record<Slot, boolean>,
     epoch: Object.fromEntries(SLOTS.map((s) => [s, epoch[s] ?? 0])) as Record<Slot, number>,
+  };
+}
+
+/**
+ * 가짜 `McpServerInfo`(Rust `mcp_client_connect`/`mcp_client_tools_cached` 의 답 모양). 도구는 이름이나 일부 칸으로
+ * 준다. 빠진 칸은 읽기 전용이 아닌 평범한 도구로 채운다.
+ */
+export function mcpServerInfoOf(
+  a: {
+    name?: string;
+    version?: string;
+    protocolVersion?: string;
+    tools?: Array<string | (Partial<McpToolInfo> & { name: string })>;
+    truncated?: boolean;
+  } = {},
+): McpServerInfo {
+  return {
+    name: a.name ?? 'Fake MCP',
+    version: a.version ?? '1.0.0',
+    protocolVersion: a.protocolVersion ?? '2025-06-18',
+    hasInstructions: false,
+    truncated: a.truncated ?? false,
+    tools: (a.tools ?? []).map((t) => ({
+      description: '',
+      readOnly: false,
+      destructive: false,
+      openWorld: false,
+      inputSchema: { type: 'object' },
+      tooLarge: false,
+      ...(typeof t === 'string' ? { name: t } : t),
+    })),
   };
 }
