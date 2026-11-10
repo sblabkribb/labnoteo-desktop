@@ -25,12 +25,18 @@ fn gone() -> NetError {
 
 /// `repoCreating`: records the new link before the create request is sent
 /// (`requestedAt`, `sentDescription`). Refused when the folder already has a
-/// link, so a folder never gets a second repository by accident.
+/// link, so a folder never gets a second repository by accident, and when the
+/// folder is no longer there: the vault renames a folder on disk before the
+/// rename hook re-keys the links under the same write lock, so a record is
+/// never written under a name the folder has just left.
 pub(crate) fn begin_create(dirs: &Path, root: &Path, folder: &str, record: LinkRecord) -> Result<(), NetError> {
     debug_assert_eq!(record.state, LinkState::RepoCreating);
     update_links(dirs, root, |doc| {
         if doc.links.contains_key(folder) {
             return Err(NetError::new(NetErrorKind::BadInput, "this folder is already linked to a repository"));
+        }
+        if !crate::vault::path::confine(root, folder).is_ok_and(|p| p.is_dir()) {
+            return Err(NetError::new(NetErrorKind::BadInput, "the folder was moved or renamed; prepare the upload again"));
         }
         doc.links.insert(folder.to_string(), record);
         Ok(())
@@ -83,6 +89,10 @@ mod tests {
             sent_description: Some("단백질 · labnoteO".into()),
             ..LinkRecord::default()
         };
+        // A folder that is not (or no longer) there gets no record.
+        assert_eq!(begin_create(&dirs, &root, "labnote/001_a", rec.clone()).unwrap_err().kind, NetErrorKind::BadInput);
+        assert!(read_links(&dirs, &root).unwrap().links.is_empty());
+        std::fs::create_dir_all(root.join("labnote").join("001_a")).unwrap();
         begin_create(&dirs, &root, "labnote/001_a", rec.clone()).unwrap();
         // A second create for the same folder is refused.
         assert_eq!(begin_create(&dirs, &root, "labnote/001_a", rec.clone()).unwrap_err().kind, NetErrorKind::BadInput);

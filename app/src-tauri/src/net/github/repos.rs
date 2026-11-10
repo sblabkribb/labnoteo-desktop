@@ -190,7 +190,8 @@ pub(crate) struct RepoFacts {
     pub empty: bool,
     pub can_push: bool,
     pub default_branch: String,
-    /// `html_url` when it is `https` (the web page of the repo); empty otherwise.
+    /// `html_url` when it is `https` (the web page of the repo), or `http` on a
+    /// loopback host (the test servers); empty otherwise.
     pub html_url: String,
 }
 
@@ -213,7 +214,9 @@ pub(crate) fn repo_facts(j: &Value) -> Option<RepoFacts> {
         default_branch: branch.to_string(),
         html_url: j["html_url"]
             .as_str()
-            .filter(|u| Url::parse(u).is_ok_and(|u| matches!(u.scheme(), "https" | "http")))
+            .filter(|u| {
+                Url::parse(u).is_ok_and(|u| u.scheme() == "https" || (u.scheme() == "http" && crate::net::config::is_loopback(&u)))
+            })
             .unwrap_or("")
             .to_string(),
     })
@@ -368,6 +371,19 @@ mod tests {
     use crate::net::secrets::{store_secret, MemoryStore, Slot};
     use crate::net::testserver::{serve, Canned, TestServer};
     use serde_json::json;
+
+    #[test]
+    fn repo_facts_keeps_only_an_https_or_loopback_page() {
+        let facts = |u: &str| {
+            let j = json!({"id": 1, "name": "exp", "owner": {"login": "lab"}, "private": true, "html_url": u});
+            repo_facts(&j).unwrap().html_url
+        };
+        assert_eq!(facts("https://github.com/lab/exp"), "https://github.com/lab/exp");
+        assert_eq!(facts("http://127.0.0.1:9/lab/exp"), "http://127.0.0.1:9/lab/exp");
+        assert_eq!(facts("http://github.com/lab/exp"), "");
+        assert_eq!(facts("javascript:alert(1)"), "");
+        assert_eq!(facts("file:///C:/x"), "");
+    }
     use tauri::async_runtime::block_on;
 
     /// Made-up tokens of GitHub's shapes; never real ones.

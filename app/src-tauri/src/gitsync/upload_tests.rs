@@ -368,6 +368,49 @@ fn a_repo_that_is_not_private_stops_before_any_push() {
     assert_eq!(link.state, LinkState::RepoReady);
     assert_eq!(link.repo_id, 99);
     assert!(link.last_pushed_commit.is_none());
+    assert_eq!((link.private, link.intended_private), (false, Some(true)));
+    // Trying again (repoReady: re-plan, preview, upload) still pushes nothing
+    // while the repository is public, and asks for no typed name instead.
+    for confirm in [json!({}), json!({"publicConfirm": NAME})] {
+        let s = serve(vec![got(NAME, false)]);
+        let out = fx.upload_with(&s, &steps, &fx.plan(PlanTarget::Update), choices(confirm));
+        assert_eq!(out, UploadOutcome::VisibilityMismatch { html_url: format!("https://github.com/kim-lab/{NAME}") });
+        assert_eq!((steps.fetches.load(Ordering::SeqCst), steps.pushes.load(Ordering::SeqCst)), (0, 0));
+        assert_eq!(quiet_count(&s), 1, "only the GET");
+    }
+    assert!(fx.link().last_pushed_commit.is_none());
+    // Made private on GitHub: the upload goes through.
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload_with(&s, &steps, &fx.plan(PlanTarget::Update), UploadChoices::default());
+    let UploadOutcome::Done { warnings, .. } = out else { panic!("{out:?}") };
+    assert!(warnings.is_empty());
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 1);
+    let link = fx.link();
+    assert_eq!((link.state, link.private), (LinkState::Pushed, true));
+}
+
+#[test]
+fn a_public_create_that_came_out_private_is_pushed() {
+    let fx = Fx::new("gh-up-vis-pub");
+    fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, true)]);
+    let out = fx.upload(&s, &fx.create(false), choices(json!({"publicConfirm": NAME})));
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    let link = fx.link();
+    assert_eq!((link.private, link.intended_private, link.state), (true, Some(false), LinkState::Pushed));
+}
+
+#[test]
+fn a_folder_renamed_after_the_plan_gets_no_record_and_no_post() {
+    let fx = Fx::new("gh-up-rename-race");
+    let s = serve(vec![created(NAME, true)]);
+    let id = fx.create(true);
+    fs::rename(fx.root.join(FOLDER), fx.root.join("labnote/001_renamed")).unwrap();
+    // Stopped before the journal (re-hash), and begin_create refuses a folder
+    // that is gone in any case (journal tests).
+    assert_eq!(fx.upload(&s, &id, UploadChoices::default()), UploadOutcome::PlanStale);
+    assert_eq!(quiet_count(&s), 0);
+    assert!(fx.links().links.is_empty());
 }
 
 #[test]

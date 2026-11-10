@@ -9,7 +9,9 @@
 //!   and once more while its blob is written.
 //! - The journal state is saved before each side effect (spec §8.4).
 //! - The create body is fixed here; a repository that is not private when
-//!   private was asked for stops before any push (`visibilityMismatch`).
+//!   private was asked for stops before any push (`visibilityMismatch`), on
+//!   this upload and on every later one until it is private (the link keeps
+//!   `intendedPrivate`).
 //! - One upload per link at a time (`busy`), in this process and across app
 //!   instances (P-R13).
 //! - Status, default owner and unlink never reach the network.
@@ -162,6 +164,12 @@ pub enum Point {
 
 /// The Git side effects of an upload, behind a trait so tests can count
 /// them, pause at a point, or fail a step. `RealSteps` is the app's.
+///
+/// Only the fetch and the push can be replaced. The create request, the
+/// journal writes and the commit are reachable only through `reached`;
+/// fault injection at every journal state (a lost create answer, a crash
+/// after the push and before its journal write) will need more seams here
+/// (Task 9C).
 pub trait Steps: Sync {
     /// Called before the side effect at `point` runs.
     fn reached(&self, _point: Point) {}
@@ -433,6 +441,7 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
                 name: name.clone(),
                 branch: NEW_BRANCH.to_string(),
                 private,
+                intended_private: Some(private),
                 state: LinkState::RepoCreating,
                 requested_at: Some(now_ms()),
                 sent_description: Some(description.clone()),
@@ -466,7 +475,9 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
                 r.private = f.private;
                 r.state = LinkState::RepoReady;
             })?;
-            if f.private != private {
+            // Only "private asked, public made" stops: a repository that came
+            // out private when public was confirmed is safe to push to.
+            if private && !f.private {
                 return Ok(UploadOutcome::VisibilityMismatch { html_url: f.html_url });
             }
             (link_id, f.owner, f.name, f.html_url, NEW_BRANCH.to_string(), None)
@@ -484,10 +495,16 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
             if !f.can_push {
                 return Ok(UploadOutcome::ReadOnly);
             }
+            let html_url = if f.html_url.is_empty() { l.html_url.clone() } else { f.html_url.clone() };
+            // Nothing has been pushed to a repository the app created as
+            // private that is public now: the first push waits until it is
+            // private again (spec §5.3: verified, never assumed).
+            if l.last_pushed_commit.is_none() && l.intended_private == Some(true) && !f.private {
+                return Ok(UploadOutcome::VisibilityMismatch { html_url });
+            }
             if l.private && !f.private {
                 warnings.push(UploadWarning::NowPublic);
             }
-            let html_url = if f.html_url.is_empty() { l.html_url.clone() } else { f.html_url.clone() };
             if (f.owner.as_str(), f.name.as_str(), f.private, html_url.as_str()) != (l.owner.as_str(), l.name.as_str(), l.private, l.html_url.as_str()) {
                 journal::advance(env.dirs, env.root, &l.link_id, |r| {
                     r.owner = f.owner.clone();

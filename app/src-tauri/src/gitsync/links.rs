@@ -54,7 +54,14 @@ pub struct LinkRecord {
     pub name: String,
     pub html_url: String,
     pub branch: String,
+    /// What GitHub last said about the repository's visibility.
     pub private: bool,
+    /// The visibility the user asked for when the app created the repository
+    /// (`None` for a linked one). Kept apart from `private` so a repository
+    /// that came out public when private was asked for is never pushed to
+    /// until it is private, however often the upload is retried.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intended_private: Option<bool>,
     pub state: LinkState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_commit: Option<String>,
