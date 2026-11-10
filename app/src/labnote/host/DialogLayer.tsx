@@ -9,6 +9,7 @@ import { PromptDialog } from './PromptDialog';
 import { SampleDefinitionDialog } from '../../samples/SampleDefinitionDialog';
 import { ProgressDialog } from '../../integrations/ProgressDialog';
 import { SettingsModal } from '../../ui/SettingsModal';
+import { restoreFocusTo } from '../../ui/returnFocus';
 import { PartbankSearchDialog } from '../../partbank/PartbankSearchDialog';
 import { AiAnswerDialog } from '../port/aiAnswerDialog';
 import { WorksheetDialog } from '../print/WorksheetDialog';
@@ -90,8 +91,7 @@ export function DialogLayer({ blockRef }: { blockRef?: RefObject<HTMLElement> })
       // 초점을 돌려주기 전에 푼다: 열기 전 초점이 도우미 안에 있었을 수 있다.
       shell?.removeAttribute('inert');
       pet?.removeAttribute('inert');
-      const el = takeReturnFocus();
-      if (el?.isConnected) el.focus();
+      restoreFocusTo(takeReturnFocus());
     };
   }, [open, blockRef]);
 

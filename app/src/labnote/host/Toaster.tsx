@@ -1,3 +1,4 @@
+import { useRef, type FocusEvent } from 'react';
 import { useLang } from '../../i18n/useLang';
 import { t } from '../../i18n/t';
 import { Icon, type IconName } from '../../ui/Icon';
@@ -16,50 +17,67 @@ const KIND_ICON: Record<Toast['kind'], IconName> = {
  * info·success 는 role=status(조용히 읽힌다), warn·error 는 role=alert 다. 모든 알림에 닫기 단추(×)가 있다(명세 §5.4).
  * 왼쪽 띠(.toast-<kind>)와 상태 아이콘이 종류를 보인다. 제목이 있으면 굵은 .toast-title 아래 .toast-detail 을 그린다.
  * 단추가 있는 알림(`action`)은 .toast-action 단추를 그린다: 누르면 알림을 닫고 그 일을 한다.
- * 마우스가 올라가 있는 동안은 시계가 멈춘다. 알림은 초점을 옮기지 않는다.
+ * 마우스가 올라가 있거나 초점이 안에 있는 동안은 시계가 멈춘다(둘 다 떠나야 다시 돈다). 알림은 초점을 옮기지 않는다.
  */
 export function Toaster() {
   useLang();
   const toasts = useToasts();
   return (
     <section className="toaster toaster-bottom-left" aria-label={t('toast.region')}>
-      {toasts.map((toast) => {
-        const quiet = toast.kind === 'info' || toast.kind === 'success';
-        const detail = toast.title ? (toast.detail ?? toast.message) : toast.message;
-        return (
-          <div
-            key={toast.id}
-            role={quiet ? 'status' : 'alert'}
-            className={`toast toast-${toast.kind}`}
-            onMouseEnter={() => pauseToast(toast.id)}
-            onMouseLeave={() => resumeToast(toast.id)}
-          >
-            <Icon name={KIND_ICON[toast.kind]} className="toast-icon" />
-            {toast.title || detail ? (
-              <div className="toast-body">
-                {toast.title ? <p className="toast-title">{toast.title}</p> : null}
-                {detail ? <p className={toast.title ? 'toast-detail' : 'toast-message'}>{detail}</p> : null}
-              </div>
-            ) : null}
-            {toast.action ? (
-              <button
-                type="button"
-                className="toast-action"
-                onClick={() => {
-                  const { run } = toast.action!;
-                  dismissToast(toast.id);
-                  run();
-                }}
-              >
-                {toast.action.label}
-              </button>
-            ) : null}
-            <button type="button" className="toast-close" aria-label={t('toast.close')} title={t('toast.close')} onClick={() => dismissToast(toast.id)}>
-              <Icon name="x" size={14} />
-            </button>
-          </div>
-        );
-      })}
+      {toasts.map((toast) => (
+        <ToastItem key={toast.id} toast={toast} />
+      ))}
     </section>
+  );
+}
+
+/** 알림 하나. 마우스(hover)와 초점(focus) 중 하나라도 있으면 시계가 멈추고, 둘 다 떠나면 남은 시간으로 다시 돈다. */
+function ToastItem({ toast }: { toast: Toast }) {
+  const held = useRef({ hover: false, focus: false });
+  const hold = (why: 'hover' | 'focus', on: boolean) => {
+    const was = held.current.hover || held.current.focus;
+    held.current[why] = on;
+    const now = held.current.hover || held.current.focus;
+    if (now && !was) pauseToast(toast.id);
+    else if (!now && was) resumeToast(toast.id);
+  };
+  const quiet = toast.kind === 'info' || toast.kind === 'success';
+  const detail = toast.title ? (toast.detail ?? toast.message) : toast.message;
+  return (
+    <div
+      role={quiet ? 'status' : 'alert'}
+      className={`toast toast-${toast.kind}`}
+      onMouseEnter={() => hold('hover', true)}
+      onMouseLeave={() => hold('hover', false)}
+      onFocus={() => hold('focus', true)}
+      onBlur={(e: FocusEvent<HTMLDivElement>) => {
+        // 같은 알림 안의 다른 단추로 옮겨 가면 멈춘 채로 둔다
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hold('focus', false);
+      }}
+    >
+      <Icon name={KIND_ICON[toast.kind]} className="toast-icon" />
+      {toast.title || detail ? (
+        <div className="toast-body">
+          {toast.title ? <p className="toast-title">{toast.title}</p> : null}
+          {detail ? <p className={toast.title ? 'toast-detail' : 'toast-message'}>{detail}</p> : null}
+        </div>
+      ) : null}
+      {toast.action ? (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            const { run } = toast.action!;
+            dismissToast(toast.id);
+            run();
+          }}
+        >
+          {toast.action.label}
+        </button>
+      ) : null}
+      <button type="button" className="toast-close" aria-label={t('toast.close')} title={t('toast.close')} onClick={() => dismissToast(toast.id)}>
+        <Icon name="x" size={14} />
+      </button>
+    </div>
   );
 }

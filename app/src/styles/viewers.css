@@ -156,7 +156,20 @@
   [aria-current]:not([aria-current="false"]) { border-left: 3px solid CanvasText; }
   [aria-selected="true"] { outline: 2px solid CanvasText; outline-offset: -2px; }
   :focus-visible { outline: 2px solid Highlight; }
+  [data-focus-ring]:focus { outline: 2px solid Highlight; }
   .editor-frame:focus-within { outline: 2px solid Highlight; }
+  /* 윤곽선을 지우고 테두리·그림자로 초점을 보이던 곳: 고대비는 그림자를 지우므로 윤곽선을 다시 그린다(forcedColors.test.ts) */
+  input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"])):focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  .input:focus-visible { outline: 2px solid Highlight; outline-offset: 0; }
+  .resizer:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+  .context-menu-item:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+  .context-menu:focus-visible,
+  .select-menu-list:focus-visible { outline: 2px solid Highlight; }
+  /* 고르기 목록은 aria-activedescendant 라 초점이 목록에 있다: 지금 항목을 윤곽선으로 보인다 */
+  .select-menu-list [role="option"][data-active] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .dialog.picker.palette > input[role="combobox"]:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
 }
 
 /* 인쇄: 노트 본문만 종이에 남긴다. 창 틀(리본·사이드바·상태줄·알림·대화상자·메뉴)을 숨기고, 창 높이 격자와 본문의 스크롤을 풀어

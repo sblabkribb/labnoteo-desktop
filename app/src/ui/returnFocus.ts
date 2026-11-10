@@ -1,3 +1,5 @@
+import { getInteractionModality } from './interactionModality';
+
 /**
  * 대화상자가 닫힐 때 초점을 돌려주는 도우미. 초점은 그림자 루트(CodeMirror 편집기) 안에 있을 수 있으므로
  * document.activeElement 가 아니라 그 안쪽 끝까지 따라간 요소를 기억한다.
@@ -17,7 +19,18 @@ export function deepActiveElement(): HTMLElement | null {
  */
 export function captureFocus(): () => void {
   const el = deepActiveElement();
-  return () => {
-    if (el?.isConnected) el.focus();
-  };
+  return () => restoreFocusTo(el);
+}
+
+/**
+ * 초점을 el 로 돌려준다(문서에 붙어 있을 때만). 키보드로 일하던 중이면 el 에 data-focus-ring 을 달아 고리를 보이고
+ * (CSS `[data-focus-ring]:focus`), 초점이 떠나면 뗀다. 마우스로 닫았으면 고리를 달지 않는다.
+ */
+export function restoreFocusTo(el: HTMLElement | null | undefined): void {
+  if (!el?.isConnected) return;
+  if (getInteractionModality() === 'keyboard') {
+    el.setAttribute('data-focus-ring', '');
+    el.addEventListener('blur', () => el.removeAttribute('data-focus-ring'), { once: true });
+  }
+  el.focus();
 }

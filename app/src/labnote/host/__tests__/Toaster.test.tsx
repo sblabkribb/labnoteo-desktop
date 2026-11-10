@@ -54,6 +54,49 @@ describe('알림(토스트)', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('focus inside a toast pauses its timer; moving between its buttons keeps it paused; blur resumes the rest', () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    act(() => notify('info', '잠깐', { action: { label: '자세히', run: () => {} } }));
+    act(() => vi.advanceTimersByTime(3000));
+    const toast = screen.getByRole('status');
+    const action = within(toast).getByRole('button', { name: '자세히' });
+    const close = within(toast).getByRole('button', { name: '알림 닫기' });
+    act(() => action.focus());
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    // 같은 알림 안에서 초점이 옮겨 가면 시계는 그대로 멈춰 있다
+    act(() => close.focus());
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    // 알림 밖으로 나가면 남은 1 초가 다시 돈다
+    act(() => close.blur());
+    act(() => vi.advanceTimersByTime(999));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('leaving with the mouse does not resume while focus is still inside, and blur does not resume while hovered', () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    act(() => notify('info', '잠깐'));
+    const toast = screen.getByRole('status');
+    const close = within(toast).getByRole('button', { name: '알림 닫기' });
+    fireEvent.mouseEnter(toast);
+    act(() => close.focus());
+    fireEvent.mouseLeave(toast);
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    fireEvent.mouseEnter(toast);
+    act(() => close.blur());
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    fireEvent.mouseLeave(toast);
+    act(() => vi.advanceTimersByTime(4000));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('the stripe class follows the kind', () => {
     render(<Toaster />);
     act(() => {
