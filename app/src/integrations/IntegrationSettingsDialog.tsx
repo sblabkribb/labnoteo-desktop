@@ -7,7 +7,14 @@ import type { Notify } from '../labnote/mcp/commands';
 import { McpSection } from '../labnote/mcp/McpSection';
 import { SkillSection } from '../labnote/skill/SkillSection';
 import { ContextWindowField } from '../labnote/context/ContextWindowField';
-import { BFW_DEFAULT_URL, LLM_CONTEXT_WINDOW_DEFAULT, fromPluginData, isOriginUrl, type AppSettings } from '../labnote/settings';
+import {
+  BFW_DEFAULT_URL,
+  LLM_CONTEXT_WINDOW_DEFAULT,
+  cleanMcpServers,
+  fromPluginData,
+  isOriginUrl,
+  type AppSettings,
+} from '../labnote/settings';
 import { KeyField } from './KeyField';
 import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
@@ -20,6 +27,7 @@ import {
   deleteImportedFile,
   importConnectionsBytes,
   importConnectionsFile,
+  MAX_IMPORT_BYTES,
   type DeleteOutcome,
   type ImportOutcome,
   type ImportPart,
@@ -141,6 +149,7 @@ const PART_LABEL: Record<ImportPart, () => string> = {
   llm: () => t('integrations.import.part.llm'),
   partbank: () => t('integrations.import.part.partbank'),
   bfworkflow: () => t('integrations.import.part.bfworkflow'),
+  mcpServer: () => t('mcpClient.import.part'),
 };
 
 const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
@@ -180,6 +189,29 @@ const PROBLEM_TEXT: Record<ImportProblem, () => string> = {
   noUrl: () => t('integrations.import.reason.noUrl'),
   keyNotUsed: () => t('integrations.import.reason.keyNotUsed'),
   keychain: () => t('integrations.import.reason.keychain'),
+  // MCP 서버 항목에만 오는 까닭(줄은 MCP_PROBLEM_TEXT 가 서버 이름과 함께 만든다).
+  stdioSkipped: () => t('mcpClient.import.stdio', ''),
+  sseSkipped: () => t('mcpClient.import.sse', ''),
+  badType: () => t('mcpClient.import.badType', ''),
+  otherHeaders: () => t('mcpClient.import.otherHeaders', ''),
+  needsToken: () => t('mcpClient.import.needsToken', ''),
+  urlSecret: () => t('mcpClient.import.urlSecret', ''),
+  tooMany: () => t('mcpClient.import.tooMany', ''),
+};
+
+/** MCP 서버 항목의 줄: "{이름}: 까닭"(spec §9). 이름은 파일의 키를 다듬은 것이고 평문으로만 보인다. */
+const MCP_PROBLEM_TEXT: Partial<Record<ImportProblem, (name: string) => string>> = {
+  stdioSkipped: (n) => t('mcpClient.import.stdio', n),
+  sseSkipped: (n) => t('mcpClient.import.sse', n),
+  badType: (n) => t('mcpClient.import.badType', n),
+  otherHeaders: (n) => t('mcpClient.import.otherHeaders', n),
+  needsToken: (n) => t('mcpClient.import.needsToken', n),
+  urlSecret: (n) => t('mcpClient.import.urlSecret', n),
+  tooMany: (n) => t('mcpClient.import.tooMany', n),
+  badUrl: (n) => t('mcpClient.import.badUrl', n),
+  notText: (n) => t('mcpClient.import.notText', n),
+  badKey: (n) => t('mcpClient.import.badToken', n),
+  keychain: (n) => t('mcpClient.import.keychain', n),
 };
 
 const DELETED_TEXT: Record<Exclude<DeleteOutcome, 'trashUnavailable'>, () => string> = {
@@ -195,8 +227,17 @@ function summaryLines(out: ImportOutcome): ImportLine[] {
     text: t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
     warn: false,
   }));
-  if (out.imported.length === 0) lines.push({ text: t('integrations.import.nothing'), warn: true });
+  const mcp = out.mcp ?? [];
+  for (const m of mcp) {
+    lines.push({ text: t(m.tokenStored ? 'mcpClient.import.doneToken' : 'mcpClient.import.done', m.name), warn: false });
+  }
+  if (out.imported.length === 0 && mcp.length === 0) lines.push({ text: t('integrations.import.nothing'), warn: true });
   for (const i of out.invalid) {
+    const mcpLine = i.part === 'mcpServer' ? MCP_PROBLEM_TEXT[i.reason] : undefined;
+    if (mcpLine) {
+      lines.push({ text: mcpLine(i.name ?? '?'), warn: true });
+      continue;
+    }
     lines.push({
       text: t('integrations.import.invalid', PART_LABEL[i.part](), i.field, PROBLEM_TEXT[i.reason]()),
       warn: true,
@@ -291,6 +332,13 @@ export function IntegrationSettingsPage(props: {
   const [deleteAsk, setDeleteAsk] = useState<'trash' | 'permanent' | undefined>(undefined);
   /** 연결 파일을 끌고 가져오기 칸 위에 있는 중. */
   const [dropOver, setDropOver] = useState(false);
+  /** "JSON 붙여넣기" 칸이 열려 있다. 붙여 넣은 글은 React 상태에 두지 않는다(제어하지 않는 칸, ref 로만 읽는다). */
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
+  /** 가져오기가 `mcpClientServers` 를 바꿀 때마다 올려, "외부 MCP 서버" 묶음이 새 목록으로 다시 그려지게 한다. */
+  const [mcpGen, setMcpGen] = useState(0);
+  /** 가져온 뒤 토큰 칸에 포커스를 줄 서버 id(토큰을 넣어 달라는 서버). */
+  const [mcpFocus, setMcpFocus] = useState<string | undefined>(undefined);
   /** 섹션이 맡긴, 아직 떠나지 않은 칸의 저장(플러그인 ctx.onHide). 닫기 전에 부른다. */
   const hideCommits = useRef<Array<() => Promise<void>>>([]);
 
@@ -398,7 +446,12 @@ export function IntegrationSettingsPage(props: {
    * 가져온 결과를 반영한다: 요약 → 설정 저장(늘 쓰는 흐름) → 키 상태 다시 읽기 → 고른 파일이면 지우기 제안, 끌어 놓은
    * 파일이면 "직접 지우세요". 설정을 저장하지 못하면 경고하고 지우기를 제안하지 않는다(파일이 유일한 원본일 수 있다).
    */
-  const applyImport = async (out: ImportOutcome, source: 'picked' | 'dropped') => {
+  const applyImport = async (out: ImportOutcome, source: 'picked' | 'dropped' | 'pasted') => {
+    if (out.status === 'done' && out.settings.mcpClientServers !== undefined) {
+      // Rust 가 만든 전체 목록도 설정 규칙으로 한 번 더 거른다(fromStored 와 같은 검사).
+      const cleaned = cleanMcpServers(out.settings.mcpClientServers, valRef.current.allowHttpOrigins);
+      out = { ...out, settings: { ...out.settings, mcpClientServers: cleaned } };
+    }
     const lines = summaryLines(out);
     // 파일이 공급자를 말하지 않으면 저장된 공급자를 그대로 둔다(Rust). 그것이 '없음'이면 AI 는 꺼진 채라서 알린다.
     if (
@@ -429,7 +482,14 @@ export function IntegrationSettingsPage(props: {
       setImportLines([...lines, { text: t('integrations.import.saveFailed'), warn: true }]);
       return;
     }
-    if (out.imported.length === 0) return;
+    const mcp = out.mcp ?? [];
+    if ('mcpClientServers' in patch) {
+      // 새 목록으로 "외부 MCP 서버" 묶음을 다시 그리고, 토큰을 넣어야 하는 첫 서버의 토큰 칸에 포커스를 준다.
+      setMcpFocus(mcp.find((m) => m.needsToken)?.id);
+      setMcpGen((g) => g + 1);
+    }
+    if (out.imported.length === 0 && mcp.length === 0) return;
+    if (source === 'pasted') return;
     if (source === 'picked') setDeleteAsk('trash');
     else setImportLines([...lines, { text: t('integrations.import.dropDeleteYourself'), warn: true }]);
   };
@@ -491,6 +551,42 @@ export function IntegrationSettingsPage(props: {
         bytes?.fill(0);
       }
       await applyImport(out, 'dropped');
+    } catch {
+      setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  /**
+   * "JSON 붙여넣기" → "가져오기"(spec §6.2): 칸의 글을 ref 로 읽어 바이트로 바꾸고, 칸을 곧바로 비운다. 64 KiB 를 넘으면
+   * Rust 를 부르지 않고 거절한다. 끌어 놓은 파일과 같은 길(`runBytes("pasted.json", …)`)로 보내고, 보낸 뒤 버퍼를 0 으로 지운다.
+   */
+  const runPaste = async () => {
+    const io = deps.importFile;
+    const area = pasteRef.current;
+    if (!io || !area || importBusy) return;
+    const bytes = new TextEncoder().encode(area.value);
+    area.value = '';
+    setDeleteAsk(undefined);
+    if (bytes.length === 0) return;
+    if (bytes.length > MAX_IMPORT_BYTES) {
+      bytes.fill(0);
+      setImportLines([{ text: t('integrations.import.refused.tooLarge'), warn: true }]);
+      return;
+    }
+    setImportBusy(true);
+    try {
+      let out: ImportOutcome;
+      try {
+        out = await io.runBytes('pasted.json', bytes);
+      } catch {
+        setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
+        return;
+      } finally {
+        bytes.fill(0);
+      }
+      await applyImport(out, 'pasted');
     } catch {
       setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
     } finally {
@@ -614,6 +710,29 @@ export function IntegrationSettingsPage(props: {
             >
               {t('integrations.import.dropHere')}
             </div>
+            <div className="integration-test">
+              <button type="button" aria-expanded={pasteOpen} onClick={() => setPasteOpen((o) => !o)}>
+                {t('mcpClient.import.paste')}
+              </button>
+            </div>
+            {pasteOpen ? (
+              <div className="integration-field">
+                <p className="prompt-hint">{t('mcpClient.import.pasteHint')}</p>
+                <textarea
+                  ref={pasteRef}
+                  className="integration-paste"
+                  aria-label={t('mcpClient.import.paste')}
+                  autoComplete="off"
+                  spellCheck={false}
+                  rows={6}
+                />
+                <div className="integration-test">
+                  <button type="button" disabled={importBusy} onClick={() => void runPaste()}>
+                    {t('mcpClient.import.run')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {importLines.length > 0 ? (
               <div role="status" className="integration-field">
                 {importLines.map((line, i) => (
@@ -804,7 +923,7 @@ export function IntegrationSettingsPage(props: {
           />
         </section>
 
-        <McpClientSection deps={deps} onHide={registerHide} />
+        <McpClientSection key={mcpGen} deps={deps} onHide={registerHide} focusServer={mcpFocus} />
 
         {/* SP7 Part B: 바코드와 스캔, Slack(Task 29) */}
         <ScanSettingsSection

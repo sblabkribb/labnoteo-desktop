@@ -664,7 +664,7 @@ title: 실험
     let done = raw_call("integration_import_bytes", vec!["%EC%97%B0%EA%B2%B0.json"], conn).unwrap();
     assert_eq!(
         done,
-        json!({"status": "done", "imported": [{"part": "partbank", "keySaved": true}], "invalid": [],
+        json!({"status": "done", "imported": [{"part": "partbank", "keySaved": true}], "invalid": [], "mcp": [],
                "settings": {"partbankWebUrl": "https://pb.ipc.example"}})
     );
     assert!(!done.to_string().contains("pbk_t"), "{done}");

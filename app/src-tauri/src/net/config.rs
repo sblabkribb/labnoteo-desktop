@@ -86,6 +86,9 @@ pub struct McpServerCfg {
     pub auth: McpAuthKind,
     pub preset: Option<String>,
     pub enabled: bool,
+    /// The per-tool switches as stored (only boolean values kept). Rust does
+    /// not use them; the JSON import writes them back unchanged.
+    pub tools: serde_json::Map<String, Value>,
 }
 
 impl ServiceConfig {
@@ -157,11 +160,12 @@ fn parse_mcp_server(v: &Value, allow_http: &[String]) -> Option<McpServerCfg> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return None,
     };
-    match v.get("tools") {
-        None | Some(Value::Object(_)) => {}
+    let tools = match v.get("tools") {
+        None => serde_json::Map::new(),
+        Some(Value::Object(m)) => m.iter().filter(|(_, b)| b.is_boolean()).map(|(k, b)| (k.clone(), b.clone())).collect(),
         Some(_) => return None,
-    }
-    Some(McpServerCfg { id: id.to_string(), name: name.to_string(), url, auth, preset, enabled })
+    };
+    Some(McpServerCfg { id: id.to_string(), name: name.to_string(), url, auth, preset, enabled, tools })
 }
 
 /// `mcpClientServers`: the valid entries in order, a repeated id dropped, at most 16.

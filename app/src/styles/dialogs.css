@@ -109,6 +109,8 @@
   font-size: 0.9em;
 }
 .integration-drop.over { border-color: var(--accent); color: var(--text); background: var(--bg-hover); }
+/* "JSON 붙여넣기": MCP 서버 설정(JSON)을 붙여 넣는 칸. 가져오면 곧바로 비운다 */
+.integration-paste { width: 100%; min-height: 7rem; resize: vertical; font-family: var(--font-mono); font-size: 0.9em; }
 
 /* 샘플 정의 창(SP5 Task 23): 짧은 이름 칸과 넓은 값 칸(JSON 경로가 길다). 본문만 스크롤하고 단추 줄은 감싼다(#283) */
 .dialog.sample-def { width: min(44rem, 100%); }

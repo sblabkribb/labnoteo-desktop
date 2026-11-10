@@ -10,7 +10,8 @@ import type { RawInvoke } from '../fs/vaultImage';
  * 코드)과 저장할 설정뿐이다. 키는 IPC 를 건너 돌아오지 않는다. 설정은 대화상자가 늘 쓰는 저장 흐름으로 저장한다(하나의 원천).
  */
 
-export type ImportPart = 'llm' | 'partbank' | 'bfworkflow';
+/** `mcpServer`: Claude-Desktop 모양 JSON 의 `mcpServers`(또는 VS Code 의 `servers`) 항목 하나. */
+export type ImportPart = 'llm' | 'partbank' | 'bfworkflow' | 'mcpServer';
 
 export type ImportRefusal = 'insideVault' | 'tooLarge' | 'unreadable' | 'notText' | 'unrecognized' | 'wrongType';
 
@@ -26,7 +27,26 @@ export type ImportProblem =
   | 'notText'
   | 'noUrl'
   | 'keyNotUsed'
-  | 'keychain';
+  | 'keychain'
+  // MCP 서버 항목만(spec §6.2): 로컬 명령(stdio)과 예전 SSE 는 건너뛰고, 다른 헤더는 가져오지 않는다.
+  | 'stdioSkipped'
+  | 'sseSkipped'
+  | 'badType'
+  | 'otherHeaders'
+  | 'needsToken'
+  | 'urlSecret'
+  | 'tooMany';
+
+/** 가져온 MCP 서버 하나(Rust `McpImported`). 토큰도 헤더 값도 없다. */
+export interface McpImported {
+  id: string;
+  /** 파일의 키에서 온, 다듬은 이름(평문으로만 보인다). */
+  name: string;
+  origin: string;
+  preset?: 'rapid' | 'biomodel';
+  tokenStored: boolean;
+  needsToken: boolean;
+}
 
 /** Rust `ImportOutcome`. `settings` 는 키가 아닌 연동 설정만 담는다. */
 export type ImportOutcome =
@@ -34,7 +54,11 @@ export type ImportOutcome =
   | {
       status: 'done';
       imported: Array<{ part: ImportPart; keySaved: boolean }>;
-      invalid: Array<{ part: ImportPart; field: string; reason: ImportProblem }>;
+      /** `name` 은 MCP 서버 항목에만 있다. */
+      invalid: Array<{ part: ImportPart; field: string; reason: ImportProblem; name?: string }>;
+      /** 더하거나 고친 MCP 서버. 예전 답에는 없을 수 있다. */
+      mcp?: McpImported[];
+      /** `mcpClientServers` 가 있으면 저장된 것과 가져온 것을 합친 전체 목록이다. */
       settings: Partial<IntegrationSettingsValue>;
     };
 
@@ -62,6 +86,9 @@ function keepImportable(out: ImportOutcome): ImportOutcome {
     const v = (out.settings as Record<string, unknown>)[k];
     if (typeof v === 'string') settings[k] = v;
   }
+  // 대화상자가 저장하기 전에 `cleanMcpServers` 로 한 번 더 거른다.
+  const servers = (out.settings as Record<string, unknown>).mcpClientServers;
+  if (Array.isArray(servers)) settings.mcpClientServers = servers;
   return { ...out, settings: settings as Partial<IntegrationSettingsValue> };
 }
 

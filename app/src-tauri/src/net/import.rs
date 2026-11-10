@@ -31,6 +31,22 @@
 //! answer is a summary of codes: it never holds a key, and nothing in it is
 //! copied from the file. A file that names no LLM provider leaves the stored
 //! provider as it is, and its LLM fields fill that provider's settings.
+//!
+//! The same JSON may also hold MCP servers in the Claude-Desktop form
+//! (`{"mcpServers": {"<name>": {"url": "…", "headers": {"Authorization":
+//! "Bearer …"}}}}`) or the VS Code form (`"servers"`), spec §6.2. Each
+//! streamable-HTTP entry is checked like a server added by hand (URL rules,
+//! no secret-looking path, at most 16 servers); a real bearer token goes to
+//! the keychain under `mcpClient:<id>|<origin>` (chunked), a placeholder such
+//! as `<YOUR_TOKEN>` is never stored and the server is marked `needsToken`.
+//! stdio entries (`command`/`args`) and legacy SSE entries are listed as
+//! skipped: nothing is ever started or contacted, and their command, args and
+//! env values are never copied anywhere. Only an `Authorization: Bearer`
+//! header is used; any other header is dropped with a problem line. This is
+//! the one place where the answer holds text copied from the file: the
+//! sanitised server names and the URLs of the servers saved (in the
+//! `mcpClientServers` settings patch, which holds the whole new list), never a
+//! header value. A secret-looking URL is skipped and never echoed.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -39,9 +55,13 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use tauri::State;
 
-use super::config::{parse_llm_endpoint, parse_origin_url, LlmKind, ServiceConfig, Url};
+use super::config::{
+    is_loopback, is_secret_looking_url, origin, parse_llm_endpoint, parse_origin_url, parse_service_url, LlmKind, McpAuthKind,
+    ServiceConfig, Url, MAX_MCP_NAME, MAX_MCP_SERVERS,
+};
 use super::error::{NetError, NetErrorKind};
-use super::secrets::{store_secret_at_url, validate_secret_for, SecretStore, Secrets, Slot};
+use super::mcp_client::placeholder::{is_placeholder, strip_bearer};
+use super::secrets::{get_long, mcp_account, store_long, store_secret_at_url, validate_secret_for, SecretStore, Secrets, Slot};
 use super::NetState;
 use crate::vault::{SettingsFile, VaultState};
 
@@ -75,6 +95,8 @@ pub enum Part {
     Llm,
     Partbank,
     Bfworkflow,
+    /// One entry of `mcpServers` / `servers`.
+    McpServer,
 }
 
 /// Why a field was refused.
@@ -94,6 +116,20 @@ pub enum Problem {
     KeyNotUsed,
     /// Credential Manager refused the key.
     Keychain,
+    /// A stdio MCP server (`command`/`args`): never started, listed as skipped.
+    StdioSkipped,
+    /// A legacy SSE MCP server: not supported.
+    SseSkipped,
+    /// An MCP connection type other than streamable HTTP, SSE or stdio.
+    BadType,
+    /// Headers other than `Authorization: Bearer …` were not imported.
+    OtherHeaders,
+    /// A bearer server with no usable token: the user enters it.
+    NeedsToken,
+    /// The URL looks like it holds a secret: skipped, never echoed.
+    UrlSecret,
+    /// Already 16 MCP servers: skipped.
+    TooMany,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -110,6 +146,26 @@ pub struct Invalid {
     /// The file's field name (`baseUrl`, `url`, `apiKey`, `model`, `provider`, `connection`).
     pub field: &'static str,
     pub reason: Problem,
+    /// The MCP server's sanitised name (MCP entries only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// One MCP server the import added or updated. No token, no header value.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpImported {
+    /// The server's id in `mcpClientServers` (8 lowercase hex).
+    pub id: String,
+    pub name: String,
+    /// The origin its token is bound to.
+    pub origin: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// A token from the file was saved.
+    pub token_stored: bool,
+    /// A bearer server with no stored token: the user is asked for it.
+    pub needs_token: bool,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -121,6 +177,8 @@ pub enum ImportOutcome {
     Done {
         imported: Vec<Imported>,
         invalid: Vec<Invalid>,
+        /// MCP servers added or updated (spec §6.2).
+        mcp: Vec<McpImported>,
         /// The non-secret settings to save, keyed like the frontend's settings.
         settings: Map<String, Value>,
     },
@@ -184,6 +242,8 @@ struct Parsed {
     llm: LlmFields,
     partbank: PartbankFields,
     bfw: BfwFields,
+    /// The `mcpServers` (or `servers`) object as found.
+    mcp: Option<Map<String, Value>>,
 }
 
 impl Parsed {
@@ -255,6 +315,7 @@ fn parse_json(text: &str) -> Option<Parsed> {
     if let Some(o) = part("bfworkflow") {
         p.bfw = BfwFields { url: Field::of_json(o.get("url")), api_key: Field::of_json(o.get("apiKey")) };
     }
+    p.mcp = part("mcpServers").or_else(|| part("servers")).cloned();
     Some(p)
 }
 
@@ -318,7 +379,7 @@ fn text_of<'a>(f: &'a Field, part: Part, name: &'static str, bad: &mut Vec<Inval
         Field::Absent => None,
         Field::Text(s) => Some(s),
         Field::NotText => {
-            bad.push(Invalid { part, field: name, reason: Problem::NotText });
+            bad.push(Invalid { part, field: name, reason: Problem::NotText, name: None });
             None
         }
     }
@@ -330,7 +391,7 @@ fn checked_key(f: &Field, slot: Slot, part: Part, bad: &mut Vec<Invalid>) -> Opt
     match validate_secret_for(slot, raw) {
         Ok(k) => Some(k),
         Err(_) => {
-            bad.push(Invalid { part, field: "apiKey", reason: Problem::BadKey });
+            bad.push(Invalid { part, field: "apiKey", reason: Problem::BadKey, name: None });
             None
         }
     }
@@ -352,26 +413,26 @@ fn plan_llm(f: &LlmFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
         Some("openai") => false,
         Some("ollama") => true,
         Some(_) => {
-            bad.push(Invalid { part, field: "provider", reason: Problem::BadProvider });
+            bad.push(Invalid { part, field: "provider", reason: Problem::BadProvider, name: None });
             false
         }
     };
     let url = text_of(&f.base_url, part, "baseUrl", bad).and_then(|raw| {
         let u = parse_llm_endpoint(raw);
         if u.is_none() {
-            bad.push(Invalid { part, field: "baseUrl", reason: Problem::BadUrl });
+            bad.push(Invalid { part, field: "baseUrl", reason: Problem::BadUrl, name: None });
         }
         u
     });
     let model = text_of(&f.model, part, "model", bad).and_then(|m| {
         let ok = m.chars().count() <= MAX_MODEL && !m.chars().any(char::is_control);
         if !ok {
-            bad.push(Invalid { part, field: "model", reason: Problem::BadModel });
+            bad.push(Invalid { part, field: "model", reason: Problem::BadModel, name: None });
         }
         ok.then(|| m.to_string())
     });
     let key = if ollama && !f.api_key.is_absent() {
-        bad.push(Invalid { part, field: "apiKey", reason: Problem::KeyNotUsed });
+        bad.push(Invalid { part, field: "apiKey", reason: Problem::KeyNotUsed, name: None });
         None
     } else {
         checked_key(&f.api_key, Slot::LlmOpenai, part, bad)
@@ -383,7 +444,7 @@ fn plan_llm(f: &LlmFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
         Some(k) => match url.clone().or_else(|| cfg.llm_openai.clone()) {
             Some(u) => Some((Slot::LlmOpenai, u, k)),
             None => {
-                bad.push(Invalid { part, field: "apiKey", reason: Problem::NoUrl });
+                bad.push(Invalid { part, field: "apiKey", reason: Problem::NoUrl, name: None });
                 return None;
             }
         },
@@ -410,14 +471,14 @@ fn plan_partbank(f: &PartbankFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>
         None | Some("web") => false,
         Some("desktop") => true,
         Some(_) => {
-            bad.push(Invalid { part, field: "connection", reason: Problem::BadConnection });
+            bad.push(Invalid { part, field: "connection", reason: Problem::BadConnection, name: None });
             false
         }
     };
     let url = text_of(&f.url, part, "url", bad).and_then(|raw| {
         let u = parse_origin_url(raw);
         if u.is_none() {
-            bad.push(Invalid { part, field: "url", reason: Problem::BadUrl });
+            bad.push(Invalid { part, field: "url", reason: Problem::BadUrl, name: None });
         }
         u
     });
@@ -431,7 +492,7 @@ fn plan_partbank(f: &PartbankFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>
         Some(k) => match url.clone().or(stored) {
             Some(u) => Some((slot, u, k)),
             None => {
-                bad.push(Invalid { part, field: "apiKey", reason: Problem::NoUrl });
+                bad.push(Invalid { part, field: "apiKey", reason: Problem::NoUrl, name: None });
                 return None;
             }
         },
@@ -453,7 +514,7 @@ fn plan_bfw(f: &BfwFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
     let url = text_of(&f.url, part, "url", bad).and_then(|raw| {
         let u = parse_origin_url(raw);
         if u.is_none() {
-            bad.push(Invalid { part, field: "url", reason: Problem::BadUrl });
+            bad.push(Invalid { part, field: "url", reason: Problem::BadUrl, name: None });
         }
         u
     });
@@ -465,7 +526,7 @@ fn plan_bfw(f: &BfwFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
         Some(k) => match url.clone().or_else(|| cfg.bfw_url.clone()) {
             Some(u) => Some((Slot::BfwServer, u, k)),
             None => {
-                bad.push(Invalid { part, field: "apiKey", reason: Problem::NoUrl });
+                bad.push(Invalid { part, field: "apiKey", reason: Problem::NoUrl, name: None });
                 return None;
             }
         },
@@ -506,13 +567,15 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
             Part::Llm => plan_llm(&parsed.llm, cfg, &mut invalid),
             Part::Partbank => plan_partbank(&parsed.partbank, cfg, &mut invalid),
             Part::Bfworkflow => plan_bfw(&parsed.bfw, cfg, &mut invalid),
+            // MCP entries are imported one by one below.
+            Part::McpServer => None,
         };
         let Some(plan) = plan else { continue };
         // The key first: if Credential Manager refuses it, the part's settings are not saved either.
         let key_saved = match &plan.key {
             Some((slot, url, key)) => {
                 if store_secret_at_url(store, *slot, url, key).is_err() {
-                    invalid.push(Invalid { part, field: "apiKey", reason: Problem::Keychain });
+                    invalid.push(Invalid { part, field: "apiKey", reason: Problem::Keychain, name: None });
                     continue;
                 }
                 true
@@ -524,7 +587,232 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
         }
         imported.push(Imported { part, key_saved });
     }
-    ImportOutcome::Done { imported, invalid, settings }
+    let mut mcp = Vec::new();
+    if let Some(entries) = &parsed.mcp {
+        let (done, servers) = plan_mcp(store, entries, cfg, &mut invalid);
+        if !done.is_empty() {
+            settings.insert("mcpClientServers".to_string(), servers);
+        }
+        mcp = done;
+    }
+    ImportOutcome::Done { imported, invalid, mcp, settings }
+}
+
+/// The preset servers (spec §5.3): preset, name, URL. Same as `presets.ts`.
+const MCP_PRESETS: [(&str, &str, &str); 2] = [
+    ("rapid", "RAPID", "https://rapid.kbiofoundry.kr/mcp"),
+    ("biomodel", "BioModel Portal", "https://biomodel.kbiofoundry.kr/mcp"),
+];
+
+/// One `mcpClientServers` entry while the import builds the new list.
+struct McpEntry {
+    id: String,
+    name: String,
+    url: Url,
+    auth: McpAuthKind,
+    preset: Option<String>,
+    enabled: bool,
+    tools: Map<String, Value>,
+}
+
+impl McpEntry {
+    fn to_json(&self) -> Value {
+        let mut o = Map::new();
+        o.insert("id".into(), Value::from(self.id.clone()));
+        o.insert("name".into(), Value::from(self.name.clone()));
+        o.insert("url".into(), Value::from(url_setting(&self.url)));
+        o.insert("auth".into(), Value::from(if self.auth == McpAuthKind::Bearer { "bearer" } else { "none" }));
+        if let Some(p) = &self.preset {
+            o.insert("preset".into(), Value::from(p.clone()));
+        }
+        o.insert("enabled".into(), Value::from(self.enabled));
+        o.insert("tools".into(), Value::Object(self.tools.clone()));
+        Value::Object(o)
+    }
+}
+
+/// A server name from a JSON key: control chars removed, trimmed, at most 40 chars.
+fn mcp_name(key: &str) -> String {
+    let cleaned: String = key.chars().filter(|c| !c.is_control()).collect();
+    cleaned.trim().chars().take(MAX_MCP_NAME).collect::<String>().trim_end().to_string()
+}
+
+/// A fresh 8-hex id not used by `taken`.
+fn new_mcp_id(taken: &[McpEntry]) -> String {
+    loop {
+        let mut b = [0u8; 4];
+        getrandom::getrandom(&mut b).expect("the OS random number generator failed");
+        let id: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        if !taken.iter().any(|e| e.id == id) {
+            return id;
+        }
+    }
+}
+
+/// What an entry's `headers` hold: the `Authorization: Bearer` value (maybe a
+/// placeholder) and whether anything else was there.
+fn mcp_headers(v: Option<&Value>) -> (Option<String>, bool) {
+    match v {
+        None | Some(Value::Null) => (None, false),
+        Some(Value::Object(h)) => {
+            let mut bearer = None;
+            let mut other = false;
+            for (k, v) in h {
+                let is_bearer = |s: &str| s.trim().get(..6).is_some_and(|w| w.eq_ignore_ascii_case("bearer"));
+                match v.as_str() {
+                    Some(s) if k.eq_ignore_ascii_case("authorization") && is_bearer(s) => bearer = Some(s.to_string()),
+                    _ => other = true,
+                }
+            }
+            (bearer, other)
+        }
+        Some(_) => (None, true),
+    }
+}
+
+fn mcp_problem(bad: &mut Vec<Invalid>, name: &str, field: &'static str, reason: Problem) {
+    bad.push(Invalid { part: Part::McpServer, field, reason, name: Some(name.to_string()) });
+}
+
+/// The stored URL an entry would use, or the problem noted.
+fn mcp_entry_url(o: &Map<String, Value>, cfg: &ServiceConfig, name: &str, bad: &mut Vec<Invalid>) -> Option<Url> {
+    match o.get("type") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(t)) if matches!(t.as_str(), "http" | "streamable-http" | "streamableHttp") => {}
+        Some(Value::String(t)) if t == "sse" => {
+            mcp_problem(bad, name, "type", Problem::SseSkipped);
+            return None;
+        }
+        Some(Value::String(t)) if t == "stdio" => {
+            mcp_problem(bad, name, "command", Problem::StdioSkipped);
+            return None;
+        }
+        Some(_) => {
+            mcp_problem(bad, name, "type", Problem::BadType);
+            return None;
+        }
+    }
+    let raw = match o.get("url") {
+        Some(Value::String(u)) => u,
+        None | Some(Value::Null) if o.contains_key("command") || o.contains_key("args") => {
+            mcp_problem(bad, name, "command", Problem::StdioSkipped);
+            return None;
+        }
+        None | Some(Value::Null) => {
+            mcp_problem(bad, name, "url", Problem::BadUrl);
+            return None;
+        }
+        Some(_) => {
+            mcp_problem(bad, name, "url", Problem::NotText);
+            return None;
+        }
+    };
+    let Some(url) = parse_service_url(raw) else {
+        mcp_problem(bad, name, "url", Problem::BadUrl);
+        return None;
+    };
+    if is_secret_looking_url(&url) {
+        mcp_problem(bad, name, "url", Problem::UrlSecret);
+        return None;
+    }
+    if url.scheme() == "http" && !is_loopback(&url) && !cfg.allows_http(&url) {
+        mcp_problem(bad, name, "url", Problem::BadUrl);
+        return None;
+    }
+    Some(url)
+}
+
+/// Imports the MCP entries into the stored list; returns what was added or
+/// updated and the whole new `mcpClientServers` array. Never starts or
+/// contacts anything. A real token is stored under the entry's origin.
+fn plan_mcp(store: &dyn SecretStore, entries: &Map<String, Value>, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> (Vec<McpImported>, Value) {
+    let mut list: Vec<McpEntry> = cfg
+        .mcp_servers
+        .iter()
+        .map(|s| McpEntry {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            url: s.url.clone(),
+            auth: s.auth,
+            preset: s.preset.clone(),
+            enabled: s.enabled,
+            tools: s.tools.clone(),
+        })
+        .collect();
+    let mut done: Vec<McpImported> = Vec::new();
+    for (key, v) in entries {
+        let key_name = mcp_name(key);
+        let Some(o) = v.as_object() else {
+            mcp_problem(bad, &key_name, "mcpServers", Problem::NotText);
+            continue;
+        };
+        let Some(url) = mcp_entry_url(o, cfg, &key_name, bad) else { continue };
+        let (bearer, other_headers) = mcp_headers(o.get("headers"));
+        let at = match list.iter().position(|e| e.url == url) {
+            Some(i) => i,
+            None => {
+                if list.len() >= MAX_MCP_SERVERS {
+                    mcp_problem(bad, &key_name, "mcpServers", Problem::TooMany);
+                    continue;
+                }
+                // Same URL as a preset not yet stored: the import fills that preset row.
+                let preset = MCP_PRESETS
+                    .iter()
+                    .find(|(_, _, u)| parse_service_url(u).as_ref() == Some(&url))
+                    .filter(|(p, _, _)| !list.iter().any(|e| e.preset.as_deref() == Some(*p)));
+                let name = match preset {
+                    Some((_, n, _)) => n.to_string(),
+                    None if key_name.is_empty() => mcp_name(url.host_str().unwrap_or("MCP")),
+                    None => key_name.clone(),
+                };
+                let auth = if bearer.is_some() || preset.is_some() { McpAuthKind::Bearer } else { McpAuthKind::None };
+                let id = new_mcp_id(&list);
+                list.push(McpEntry {
+                    id,
+                    name,
+                    url: url.clone(),
+                    auth,
+                    preset: preset.map(|(p, _, _)| p.to_string()),
+                    enabled: true,
+                    tools: Map::new(),
+                });
+                list.len() - 1
+            }
+        };
+        if bearer.is_some() {
+            list[at].auth = McpAuthKind::Bearer;
+        }
+        let entry = &list[at];
+        let account = mcp_account(&entry.id, &origin(&entry.url));
+        let mut token_stored = false;
+        if let Some(raw) = bearer.as_deref().filter(|b| !is_placeholder(b)) {
+            match store_long(store, &account, strip_bearer(raw)) {
+                Ok(()) => token_stored = true,
+                Err(e) if e.kind == NetErrorKind::BadInput => mcp_problem(bad, &entry.name, "headers", Problem::BadKey),
+                Err(_) => mcp_problem(bad, &entry.name, "headers", Problem::Keychain),
+            }
+        }
+        let needs_token = entry.auth == McpAuthKind::Bearer && !token_stored && !matches!(get_long(store, &account), Ok(Some(_)));
+        if needs_token {
+            mcp_problem(bad, &entry.name, "headers", Problem::NeedsToken);
+        }
+        if other_headers {
+            mcp_problem(bad, &entry.name, "headers", Problem::OtherHeaders);
+        }
+        let item = McpImported {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            origin: origin(&entry.url),
+            preset: entry.preset.clone(),
+            token_stored,
+            needs_token,
+        };
+        match done.iter_mut().find(|d| d.id == item.id) {
+            Some(prev) => *prev = item,
+            None => done.push(item),
+        }
+    }
+    (done, Value::Array(list.iter().map(McpEntry::to_json).collect()))
 }
 
 /// The text of an import file's bytes: at most `MAX_IMPORT_BYTES`, UTF-8 with
@@ -599,7 +887,7 @@ pub fn import_file(
             let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let outcome = import_bytes(store, &name, &bytes, cfg);
             bytes.fill(0);
-            let any = matches!(&outcome, ImportOutcome::Done { imported, .. } if !imported.is_empty());
+            let any = matches!(&outcome, ImportOutcome::Done { imported, mcp, .. } if !imported.is_empty() || !mcp.is_empty());
             (outcome, any.then_some(file))
         }
     }
@@ -748,7 +1036,8 @@ pub async fn integration_import_delete(net: State<'_, NetState>, permanent: bool
 mod tests {
     use super::*;
     use crate::net::config::tests::scratch_dir;
-    use crate::net::secrets::{status_of, MemoryStore};
+    use crate::net::config::{MAX_MCP_NAME, MAX_MCP_SERVERS};
+    use crate::net::secrets::{get_long, status_of, MemoryStore};
 
     fn cfg(json: &str) -> ServiceConfig {
         ServiceConfig::from_settings_json(json)
@@ -756,7 +1045,7 @@ mod tests {
 
     fn done(o: &ImportOutcome) -> (&Vec<Imported>, &Vec<Invalid>, &Map<String, Value>) {
         match o {
-            ImportOutcome::Done { imported, invalid, settings } => (imported, invalid, settings),
+            ImportOutcome::Done { imported, invalid, settings, .. } => (imported, invalid, settings),
             other => panic!("expected done, got {other:?}"),
         }
     }
@@ -850,9 +1139,9 @@ mod tests {
         assert_eq!(
             invalid,
             &vec![
-                Invalid { part: Part::Llm, field: "baseUrl", reason: Problem::BadUrl },
-                Invalid { part: Part::Partbank, field: "apiKey", reason: Problem::BadKey },
-                Invalid { part: Part::Bfworkflow, field: "url", reason: Problem::BadUrl },
+                Invalid { part: Part::Llm, field: "baseUrl", reason: Problem::BadUrl, name: None },
+                Invalid { part: Part::Partbank, field: "apiKey", reason: Problem::BadKey, name: None },
+                Invalid { part: Part::Bfworkflow, field: "url", reason: Problem::BadUrl, name: None },
             ]
         );
         assert_eq!(store.get("llmOpenai|https://api.openai.com").unwrap(), None);
@@ -869,14 +1158,14 @@ mod tests {
         let o = apply_import(&store, r#"{"llm":{"provider":"ollama","apiKey":"sk-x"}}"#, &cfg("{}"));
         assert_eq!(done(&o).1[0].reason, Problem::KeyNotUsed);
         let o = apply_import(&store, r#"{"llm":{"model":7}}"#, &cfg("{}"));
-        assert_eq!(done(&o).1[0], Invalid { part: Part::Llm, field: "model", reason: Problem::NotText });
+        assert_eq!(done(&o).1[0], Invalid { part: Part::Llm, field: "model", reason: Problem::NotText, name: None });
         let o = apply_import(&store, r#"{"partbank":{"connection":"cloud"}}"#, &cfg("{}"));
         assert_eq!(done(&o).1[0].reason, Problem::BadConnection);
         let o = apply_import(&store, r#"{"llm":{"model":"a\tb"}}"#, &cfg("{}"));
         assert_eq!(done(&o).1[0].reason, Problem::BadModel);
         // A key whose stored address is invalid, with none in the file, has nowhere to go.
         let o = apply_import(&store, r#"{"partbank":{"apiKey":"pbk_1"}}"#, &cfg(r#"{"partbankWebUrl":"nope"}"#));
-        assert_eq!(done(&o).1[0], Invalid { part: Part::Partbank, field: "apiKey", reason: Problem::NoUrl });
+        assert_eq!(done(&o).1[0], Invalid { part: Part::Partbank, field: "apiKey", reason: Problem::NoUrl, name: None });
         // Blank values count as absent; a part with nothing in it is skipped silently.
         let o = apply_import(&store, r#"{"llm":{"apiKey":"  "},"partbank":{},"bfworkflow":{"url":"https://wf.example"}}"#, &cfg("{}"));
         let (imported, invalid, _) = done(&o);
@@ -1064,5 +1353,224 @@ mod tests {
         assert!(!file.exists());
         assert_eq!(delete_import_with(&file, true, |_| unreachable!()).unwrap(), DeleteOutcome::Gone);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── MCP servers (Claude-Desktop / VS Code JSON, spec §6.2) ──
+
+    fn done_mcp(o: &ImportOutcome) -> (&Vec<Invalid>, &Vec<McpImported>, &Map<String, Value>) {
+        match o {
+            ImportOutcome::Done { invalid, mcp, settings, .. } => (invalid, mcp, settings),
+            other => panic!("expected done, got {other:?}"),
+        }
+    }
+
+    fn servers_of(settings: &Map<String, Value>) -> Vec<Value> {
+        settings.get("mcpClientServers").and_then(Value::as_array).cloned().unwrap_or_default()
+    }
+
+    fn reasons_for(invalid: &[Invalid], name: &str) -> Vec<Problem> {
+        invalid.iter().filter(|i| i.part == Part::McpServer && i.name.as_deref() == Some(name)).map(|i| i.reason).collect()
+    }
+
+    const TOKEN: &str = "test-token-rapid-123";
+
+    const MCP_JSON: &str = r#"{"mcpServers": {
+        "rapid": {"type": "http", "url": "https://rapid.kbiofoundry.kr/mcp", "headers": {"Authorization": "Bearer test-token-rapid-123"}},
+        "biomodel": {"url": "https://biomodel.kbiofoundry.kr/mcp/", "headers": {"Authorization": "Bearer <KBF_SSO_ACCESS_TOKEN>"}},
+        "local": {"url": "http://127.0.0.1:9000/mcp"},
+        "fs": {"command": "npx", "args": ["-y", "server-fs"], "env": {"API_KEY": "sk-test-123"}},
+        "old": {"type": "sse", "url": "https://old.example/sse"},
+        "extra": {"type": "streamable-http", "url": "https://extra.example/mcp", "headers": {"Authorization": "Bearer extra-token-456", "X-Api-Key": "xkey-789"}}
+    }}"#;
+
+    #[test]
+    fn claude_desktop_json_imports_mcp_servers() {
+        let store = MemoryStore::with_entry_limit(1280);
+        let out = apply_import(&store, MCP_JSON, &cfg("{}"));
+        let (invalid, mcp, settings) = done_mcp(&out);
+        let servers = servers_of(settings);
+        assert_eq!(servers.len(), 4, "{servers:?}");
+        let by_url = |u: &str| servers.iter().find(|s| s["url"] == u).cloned().unwrap_or_else(|| panic!("{u} in {servers:?}"));
+        // RAPID merged into its preset, the token in the keychain under its origin.
+        let rapid = by_url("https://rapid.kbiofoundry.kr/mcp");
+        assert_eq!((rapid["preset"].as_str(), rapid["name"].as_str(), rapid["auth"].as_str()), (Some("rapid"), Some("RAPID"), Some("bearer")));
+        let rid = rapid["id"].as_str().unwrap().to_string();
+        assert_eq!(get_long(&store, &format!("mcpClient:{rid}|https://rapid.kbiofoundry.kr")).unwrap().as_deref(), Some(TOKEN));
+        // BioModel: a placeholder is never stored; the server asks for the token.
+        let bio = by_url("https://biomodel.kbiofoundry.kr/mcp");
+        assert_eq!((bio["preset"].as_str(), bio["auth"].as_str()), (Some("biomodel"), Some("bearer")));
+        let bid = bio["id"].as_str().unwrap().to_string();
+        assert_eq!(get_long(&store, &format!("mcpClient:{bid}|https://biomodel.kbiofoundry.kr")).unwrap(), None);
+        // A custom server without headers needs no auth.
+        let local = by_url("http://127.0.0.1:9000/mcp");
+        assert_eq!((local["auth"].as_str(), local["name"].as_str(), local.get("preset")), (Some("none"), Some("local"), None));
+        assert_eq!(local["enabled"], true);
+        assert_eq!(local["tools"], serde_json::json!({}));
+        let extra = by_url("https://extra.example/mcp");
+        assert_eq!(extra["auth"], "bearer");
+        let eid = extra["id"].as_str().unwrap().to_string();
+        assert_eq!(get_long(&store, &format!("mcpClient:{eid}|https://extra.example")).unwrap().as_deref(), Some("extra-token-456"));
+        // The summary, per server.
+        let row = |n: &str| mcp.iter().find(|m| m.name == n).cloned().unwrap_or_else(|| panic!("{n} in {mcp:?}"));
+        let r = row("RAPID");
+        assert_eq!((r.token_stored, r.needs_token, r.preset.as_deref(), r.origin.as_str()), (true, false, Some("rapid"), "https://rapid.kbiofoundry.kr"));
+        assert_eq!(r.id, rid);
+        let b = row("BioModel Portal");
+        assert_eq!((b.token_stored, b.needs_token, b.id.as_str()), (false, true, bid.as_str()));
+        let l = row("local");
+        assert_eq!((l.token_stored, l.needs_token), (false, false));
+        assert_eq!(mcp.len(), 4);
+        // Problems: placeholder, stdio, sse, other headers.
+        assert_eq!(reasons_for(invalid, "BioModel Portal"), vec![Problem::NeedsToken]);
+        assert_eq!(reasons_for(invalid, "fs"), vec![Problem::StdioSkipped]);
+        assert_eq!(reasons_for(invalid, "old"), vec![Problem::SseSkipped]);
+        assert_eq!(reasons_for(invalid, "extra"), vec![Problem::OtherHeaders]);
+        assert_eq!(invalid.len(), 4, "{invalid:?}");
+        // Ids: 8 lowercase hex, unique.
+        let ids: Vec<&str> = servers.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        for id in &ids {
+            assert!(id.len() == 8 && id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)), "{id}");
+        }
+        let mut uniq = ids.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), ids.len());
+        // No token, header value, command or env value anywhere in the outcome.
+        let text = serde_json::to_string(&out).unwrap();
+        for secret in [TOKEN, "extra-token-456", "xkey-789", "sk-test-123", "npx", "server-fs", "KBF_SSO_ACCESS_TOKEN", "Bearer"] {
+            assert!(!text.contains(secret), "{secret} in {text}");
+        }
+        // The settings round-trip through the config parser.
+        assert_eq!(cfg(&Value::Object(settings.clone()).to_string()).mcp_servers.len(), 4);
+    }
+
+    #[test]
+    fn vs_code_servers_form_is_accepted() {
+        let store = MemoryStore::default();
+        let out = apply_import(&store, r#"{"servers": {"Mine": {"type": "streamableHttp", "url": "https://mine.example/mcp"}}}"#, &cfg("{}"));
+        let (invalid, mcp, settings) = done_mcp(&out);
+        assert!(invalid.is_empty(), "{invalid:?}");
+        assert_eq!(mcp.len(), 1);
+        assert_eq!(servers_of(settings)[0]["name"], "Mine");
+    }
+
+    #[test]
+    fn reimport_updates_in_place_and_keeps_stored_entries() {
+        let store = MemoryStore::default();
+        let stored = serde_json::json!({"mcpClientServers": [
+            {"id": "0a1b2c3d", "name": "Lab", "url": "https://lab.example/mcp", "auth": "none", "enabled": false, "tools": {"t1": true, "bad": 3}},
+            {"id": "0a1b2c3e", "name": "RAPID", "url": "https://rapid.kbiofoundry.kr/mcp", "auth": "bearer", "preset": "rapid", "enabled": true, "tools": {}}
+        ]})
+        .to_string();
+        let json = r#"{"mcpServers": {
+            "Renamed": {"url": "https://lab.example/mcp/", "headers": {"Authorization": "Bearer lab-token-1"}},
+            "rapid": {"url": "https://rapid.kbiofoundry.kr/mcp", "headers": {"Authorization": "Bearer rapid-token-2"}}
+        }}"#;
+        let out = apply_import(&store, json, &cfg(&stored));
+        let (invalid, mcp, settings) = done_mcp(&out);
+        assert!(invalid.is_empty(), "{invalid:?}");
+        let servers = servers_of(settings);
+        assert_eq!(servers.len(), 2, "{servers:?}");
+        assert_eq!(servers[0]["id"], "0a1b2c3d");
+        assert_eq!(servers[0]["name"], "Lab", "an existing name is kept");
+        assert_eq!(servers[0]["auth"], "bearer", "a token header switches the server to bearer");
+        assert_eq!(servers[0]["enabled"], false);
+        assert_eq!(servers[0]["tools"], serde_json::json!({"t1": true}));
+        assert_eq!(servers[1]["id"], "0a1b2c3e");
+        assert_eq!(get_long(&store, "mcpClient:0a1b2c3d|https://lab.example").unwrap().as_deref(), Some("lab-token-1"));
+        assert_eq!(get_long(&store, "mcpClient:0a1b2c3e|https://rapid.kbiofoundry.kr").unwrap().as_deref(), Some("rapid-token-2"));
+        let mut ids: Vec<&str> = mcp.iter().map(|m| m.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["0a1b2c3d", "0a1b2c3e"]);
+        // A placeholder for a server whose token is already stored does not ask again.
+        let again = apply_import(
+            &store,
+            r#"{"mcpServers":{"rapid":{"url":"https://rapid.kbiofoundry.kr/mcp","headers":{"Authorization":"Bearer <YOUR_TOKEN>"}}}}"#,
+            &cfg(&stored),
+        );
+        let (invalid, mcp, _) = done_mcp(&again);
+        assert!(invalid.is_empty(), "{invalid:?}");
+        assert!(!mcp[0].needs_token && !mcp[0].token_stored);
+        assert_eq!(get_long(&store, "mcpClient:0a1b2c3e|https://rapid.kbiofoundry.kr").unwrap().as_deref(), Some("rapid-token-2"));
+    }
+
+    #[test]
+    fn the_17th_server_is_dropped_with_a_problem() {
+        let store = MemoryStore::default();
+        let entries: Vec<String> = (0..17).map(|i| format!(r#""s{i:02}": {{"url": "https://s{i}.example/mcp"}}"#)).collect();
+        let out = apply_import(&store, &format!(r#"{{"mcpServers": {{{}}}}}"#, entries.join(",")), &cfg("{}"));
+        let (invalid, mcp, settings) = done_mcp(&out);
+        assert_eq!(servers_of(settings).len(), MAX_MCP_SERVERS);
+        assert_eq!(mcp.len(), MAX_MCP_SERVERS);
+        assert_eq!(invalid.iter().filter(|i| i.reason == Problem::TooMany).count(), 1, "{invalid:?}");
+    }
+
+    #[test]
+    fn secret_looking_urls_are_skipped_without_echo() {
+        let store = MemoryStore::default();
+        let out = apply_import(
+            &store,
+            r#"{"mcpServers": {"hosted": {"url": "https://h.example/mcp/a1B2c3D4e5F6g7H8i9J0k1L2"},
+                               "bad": {"url": "ftp://x.example"}, "plain": {"url": "http://10.0.0.5/mcp"}}}"#,
+            &cfg("{}"),
+        );
+        let (invalid, mcp, settings) = done_mcp(&out);
+        assert!(mcp.is_empty());
+        assert!(servers_of(settings).is_empty());
+        assert_eq!(reasons_for(invalid, "hosted"), vec![Problem::UrlSecret]);
+        assert_eq!(reasons_for(invalid, "bad"), vec![Problem::BadUrl]);
+        assert_eq!(reasons_for(invalid, "plain"), vec![Problem::BadUrl]);
+        let text = serde_json::to_string(&out).unwrap();
+        assert!(!text.contains("a1B2c3D4e5F6g7H8i9J0k1L2") && !text.contains("h.example"), "{text}");
+    }
+
+    #[test]
+    fn names_are_cleaned_and_bad_entries_reported() {
+        let store = MemoryStore::default();
+        let long = "N".repeat(60);
+        let json = serde_json::json!({"mcpServers": {
+            format!("  a\u{7}b {long}"): {"url": "https://a.example/mcp"},
+            "weird": {"type": "websocket", "url": "wss://w.example"},
+            "nothing": {},
+            "num": 7,
+            "basic": {"url": "https://b.example/mcp", "headers": {"Authorization": "Basic dXNlcjpwYXNz"}},
+            "toolong": {"url": "https://c.example/mcp", "headers": {"Authorization": format!("Bearer {}", "t".repeat(9000))}}
+        }})
+        .to_string();
+        let out = apply_import(&store, &json, &cfg("{}"));
+        let (invalid, mcp, _) = done_mcp(&out);
+        let a = mcp.iter().find(|m| m.origin == "https://a.example").unwrap();
+        assert_eq!(a.name.chars().count(), MAX_MCP_NAME);
+        assert!(a.name.starts_with("ab N") && !a.name.chars().any(char::is_control), "{:?}", a.name);
+        assert_eq!(reasons_for(invalid, "weird"), vec![Problem::BadType]);
+        assert_eq!(reasons_for(invalid, "nothing"), vec![Problem::BadUrl]);
+        assert_eq!(reasons_for(invalid, "num"), vec![Problem::NotText]);
+        // A non-bearer Authorization header is another header: imported without auth.
+        assert_eq!(reasons_for(invalid, "basic"), vec![Problem::OtherHeaders]);
+        assert!(!mcp.iter().find(|m| m.name == "basic").unwrap().needs_token);
+        // A token over 8,192 chars is refused; the server asks for the token.
+        assert_eq!(reasons_for(invalid, "toolong"), vec![Problem::BadKey, Problem::NeedsToken]);
+        let text = serde_json::to_string(&out).unwrap();
+        assert!(!text.contains("dXNlcjpwYXNz") && !text.contains("ttttttttt"), "too much in {}", text.len());
+    }
+
+    #[test]
+    fn a_file_with_only_mcp_servers_is_kept_for_deletion() {
+        let dir = scratch_dir("import-mcp");
+        std::fs::create_dir_all(dir.join("vault")).unwrap();
+        let file = dir.join("claude_desktop_config.json");
+        std::fs::write(&file, MCP_JSON).unwrap();
+        let (out, kept) = import_file(&MemoryStore::default(), &file, &dir.join("vault"), &cfg("{}"));
+        assert!(!done_mcp(&out).1.is_empty());
+        assert_eq!(kept, Some(std::fs::canonicalize(&file).unwrap()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_import_module_never_starts_a_process() {
+        let src = include_str!("import.rs");
+        for needle in [["std::", "process"].concat(), ["Command", "::new"].concat(), [".sp", "awn("].concat()] {
+            assert!(!src.contains(&needle), "{needle}");
+        }
     }
 }

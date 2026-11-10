@@ -355,6 +355,23 @@ describe('Integration settings: drop a connections file', () => {
     expect(checkDroppedFiles([])).toEqual({ refused: 'oneFile' });
   });
 
+  it('importConnectionsBytes keeps the mcpClientServers list and the mcp summary', async () => {
+    const { importConnectionsBytes } = await import('../importFile');
+    const servers = [{ id: '0a1b2c3d', name: 'RAPID', url: 'https://rapid.kbiofoundry.kr/mcp', auth: 'bearer', preset: 'rapid', enabled: true, tools: {} }];
+    const mcp = [{ id: '0a1b2c3d', name: 'RAPID', origin: 'https://rapid.kbiofoundry.kr', preset: 'rapid', tokenStored: true, needsToken: false }];
+    const invoke = (async () => ({
+      status: 'done',
+      imported: [],
+      invalid: [{ part: 'mcpServer', field: 'command', reason: 'stdioSkipped', name: 'fs' }],
+      mcp,
+      settings: { mcpClientServers: servers, mcpEnabled: true, other: [1] },
+    })) as never;
+    const out = await importConnectionsBytes('pasted.json', new Uint8Array([123, 125]), invoke);
+    expect(out.status === 'done' && out.settings).toEqual({ mcpClientServers: servers });
+    expect(out.status === 'done' && out.mcp).toEqual(mcp);
+    expect(out.status === 'done' && out.invalid[0]!.name).toBe('fs');
+  });
+
   it('importConnectionsBytes sends a raw body with the encoded name and zeroes the buffer even on failure', async () => {
     const { importConnectionsBytes } = await import('../importFile');
     const seen: unknown[] = [];
