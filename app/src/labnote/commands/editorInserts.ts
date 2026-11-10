@@ -271,7 +271,7 @@ export async function insertIssueMarker(ctx: CommandContext): Promise<boolean> {
 }
 
 export const editorInsertCommands: Command[] = [
-  { id: 'insert-date', nameKey: 'Insert date', run: async (ctx) => insertDate(ctx, getSeoulDateString) },
-  { id: 'insert-datetime', nameKey: 'Insert date and time', run: async (ctx) => insertDate(ctx, getSeoulDateTimeString) },
-  { id: 'insert-issue-marker', nameKey: 'Insert issue marker', run: (ctx) => insertIssueMarker(ctx) },
+  { id: 'insert-date', nameKey: 'Insert date', icon: 'calendar', run: async (ctx) => insertDate(ctx, getSeoulDateString) },
+  { id: 'insert-datetime', nameKey: 'Insert date and time', icon: 'clock', run: async (ctx) => insertDate(ctx, getSeoulDateTimeString) },
+  { id: 'insert-issue-marker', nameKey: 'Insert issue marker', icon: 'triangle-alert', run: (ctx) => insertIssueMarker(ctx) },
 ];

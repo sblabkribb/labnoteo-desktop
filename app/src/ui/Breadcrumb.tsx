@@ -34,7 +34,14 @@ export function StatusChip(p: { status: string; onClick?: () => void }) {
     </>
   );
   return p.onClick ? (
-    <button type="button" className="chip status" data-shape={shape} title={t('header.statusChange', label)} onClick={p.onClick}>
+    <button
+        type="button"
+        className="chip status"
+        data-shape={shape}
+        data-command-id="change-experiment-status"
+        title={t('header.statusChange', label)}
+        onClick={p.onClick}
+      >
       {body}
     </button>
   ) : (

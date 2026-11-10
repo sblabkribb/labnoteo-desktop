@@ -1,5 +1,4 @@
 import type { CommandContext } from '../../labnote/commands/context';
-import { commands } from '../../labnote/commands/registry';
 import type { EditorView } from '@codemirror/view';
 import { t } from '../../i18n/t';
 import { openNote } from '../../labnote/openNotes';
@@ -20,6 +19,13 @@ import { layoutStore } from '../../ui/layoutStore';
 import { runQuickSwitcher } from '../../ui/quickSwitcher';
 import { chooseTheme, type Theme } from '../../theme/useTheme';
 import { setLang, type Lang } from '../../i18n/lang';
+import type { IconName } from '../../ui/Icon';
+import { requestAppearance } from '../../ui/AppearancePopover';
+import { commandById, type Command } from '../../labnote/commands/registry';
+import { openPalette } from '../../labnote/ui/CommandPalette';
+import { insertTable } from '../table/commands';
+import { insertBlock, type BlockKind } from './insertBlocks';
+import { isNotePath } from '../../labnote/panel/treeIcons';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -34,6 +40,10 @@ export interface AppCommand {
   run(ctx: CommandContext): Promise<unknown> | unknown;
   /** false 면 팔레트에서 숨긴다. */
   available?(ctx: CommandContext): boolean;
+  /** 팔레트 줄의 아이콘. */
+  icon?: IconName;
+  /** false 면 팔레트에 두지 않는다(팔레트 자신을 여는 명령). 리본·단축키·메뉴는 그대로 부른다. */
+  inPalette?: false;
 }
 
 /** 등록 순서를 지키는 목록. */
@@ -42,7 +52,7 @@ const registry = new Map<string, AppCommand>();
 /** 하나를 등록한다. 같은 id 가 이미 있으면(앱 명령이든 플러그인 명령이든) 던진다. */
 export function registerAppCommand(c: AppCommand): void {
   if (registry.has(c.id)) throw new Error(`duplicate app command id: ${c.id}`);
-  if (commands().some((v) => v.id === c.id)) throw new Error(`app command id collides with a vendor command: ${c.id}`);
+  if (commandById(c.id)) throw new Error(`app command id collides with a vendor command: ${c.id}`);
   registry.set(c.id, c);
 }
 
@@ -56,6 +66,7 @@ export function clearAppCommandsForTest(): void {
 
 const toggleSource: AppCommand = {
   id: 'editor-toggle-source',
+  icon: 'code',
   nameKey: 'cmd.toggleSource',
   key: TOGGLE_MODE_KEY,
   run: () => toggleMode(),
@@ -64,6 +75,7 @@ const toggleSource: AppCommand = {
 /** 사이드바를 개요 탭으로 바꾼다. */
 const outlineShow: AppCommand = {
   id: 'outline-show',
+  icon: 'list-tree',
   nameKey: 'cmd.outlineShow',
   run: (ctx) => ctx.showPanel('outline'),
 };
@@ -71,20 +83,23 @@ const outlineShow: AppCommand = {
 /** 사이드바를 링크 탭으로 바꾼다(SP4 Task 17). */
 const linksShow: AppCommand = {
   id: 'links-show',
+  icon: 'link',
   nameKey: 'cmd.linksShow',
   run: (ctx) => ctx.showPanel('links'),
 };
 
 /** 뒤로·앞으로 가기(SP4 Task 28). 키는 보여 주기만 한다: App 의 window keydown 이 Alt+←/→ 를 듣는다. */
 const navBack: AppCommand = {
-  id: 'nav-back',
+  id: 'app.back',
+  icon: 'arrow-left',
   nameKey: 'cmd.navBack',
   key: 'Alt-ArrowLeft',
   run: (ctx) => ctx.navigate?.('back'),
 };
 
 const navForward: AppCommand = {
-  id: 'nav-forward',
+  id: 'app.forward',
+  icon: 'arrow-right',
   nameKey: 'cmd.navForward',
   key: 'Alt-ArrowRight',
   run: (ctx) => ctx.navigate?.('forward'),
@@ -139,6 +154,7 @@ const propsEditYaml: AppCommand = {
 /** 샘플 설정(SP5 Task 28, D17): 설정 창의 샘플 쪽을 연다(UI 재설계 Task 8). */
 const sampleSettings: AppCommand = {
   id: 'app.sample-settings',
+  icon: 'test-tube',
   nameKey: 'cmd.sampleSettings',
   run: () => openSettings('samples'),
 };
@@ -153,13 +169,15 @@ const convertLegacyNotes: AppCommand = {
 /** 연동 설정(SP6 D17): partbank, AI 제공자, bfworkflow 의 주소와 키. 키는 Windows 자격 증명 관리자에만 저장한다. */
 const integrationSettings: AppCommand = {
   id: 'app.integration-settings',
+  icon: 'settings',
   nameKey: 'cmd.integrationSettings',
   run: () => openSettings('integrations'),
 };
 
 /** 설정 창(UI 재설계 Task 8): 일반 쪽으로 연다. 키는 보여 주기만 한다: App 의 window keydown 이 code === 'Comma' 로 듣는다. */
 const openSettingsCommand: AppCommand = {
-  id: 'app.open-settings',
+  id: 'app.settings',
+  icon: 'settings',
   nameKey: 'cmd.openSettings',
   key: 'Mod-,',
   run: () => openSettings(),
@@ -225,7 +243,8 @@ const checkForUpdates: AppCommand = {
 
 /** 왼쪽 독 숨기기·보이기(UI 재설계 Task 5). 키는 보여 주기만 한다: App 의 window keydown 이 code === 'Backslash' 로 듣는다(₩ 키도). */
 const toggleLeft: AppCommand = {
-  id: 'app.toggle-left-sidebar',
+  id: 'app.toggleLeft',
+  icon: 'panel-left',
   nameKey: 'cmd.toggleLeft',
   key: 'Mod-\\',
   run: () => layoutStore.toggleLeft(),
@@ -233,7 +252,8 @@ const toggleLeft: AppCommand = {
 
 /** 오른쪽 사이드바(개요·링크) 열기·닫기(Task 6). 키는 보여 주기만 한다: App 의 window keydown 이 Ctrl+Shift 와 code === 'Backslash' 로 듣는다. */
 const toggleRight: AppCommand = {
-  id: 'app.toggle-right-sidebar',
+  id: 'app.toggleRight',
+  icon: 'panel-right',
   nameKey: 'cmd.toggleRight',
   key: 'Mod-Shift-\\',
   run: () => layoutStore.toggleRight(),
@@ -241,7 +261,8 @@ const toggleRight: AppCommand = {
 
 /** 새 노트 대화상자(리본의 새 노트와 같다). 키는 App 의 window keydown 이 듣는다. */
 const newNote: AppCommand = {
-  id: 'app.new-note',
+  id: 'app.newNote',
+  icon: 'file-plus',
   nameKey: 'cmd.newNote',
   key: 'Mod-n',
   run: (ctx) => ctx.newNote?.(),
@@ -249,24 +270,123 @@ const newNote: AppCommand = {
 
 /** 빠른 이동: 노트 이름으로 골라 연다. 키는 App 의 window keydown 이 듣는다. */
 const quickSwitcher: AppCommand = {
-  id: 'app.quick-switcher',
+  id: 'app.quickSwitcher',
+  icon: 'search',
   nameKey: 'cmd.quickSwitcher',
   key: 'Mod-o',
   run: (ctx) => runQuickSwitcher(ctx),
 };
 
 /** 테마와 언어: 창 틀의 고르기 상자가 빠진 뒤(Task 5) 팔레트에서 바꾼다. 모양 팝오버(Task 7)와 설정(Task 8)도 같은 값을 쓴다. */
-const themeCommand = (id: string, nameKey: string, theme: Theme): AppCommand => ({ id, nameKey, run: () => chooseTheme(theme) });
+const themeCommand = (id: string, nameKey: string, theme: Theme): AppCommand => ({ id, nameKey, icon: 'sun-moon', run: () => chooseTheme(theme) });
 const themeCommands: AppCommand[] = [
-  themeCommand('theme-system', 'cmd.theme.system', 'system'),
-  themeCommand('theme-light', 'cmd.theme.light', 'light'),
-  themeCommand('theme-dark', 'cmd.theme.dark', 'dark'),
+  themeCommand('app.theme.system', 'cmd.theme.system', 'system'),
+  themeCommand('app.theme.light', 'cmd.theme.light', 'light'),
+  themeCommand('app.theme.dark', 'cmd.theme.dark', 'dark'),
 ];
-const langCommand = (id: string, nameKey: string, lang: Lang): AppCommand => ({ id, nameKey, run: () => setLang(lang) });
-const langCommands: AppCommand[] = [langCommand('lang-ko', 'cmd.lang.ko', 'ko'), langCommand('lang-en', 'cmd.lang.en', 'en')];
+const langCommand = (id: string, nameKey: string, lang: Lang): AppCommand => ({ id, nameKey, icon: 'languages', run: () => setLang(lang) });
+const langCommands: AppCommand[] = [langCommand('app.lang.ko', 'cmd.lang.ko', 'ko'), langCommand('app.lang.en', 'cmd.lang.en', 'en')];
+
+/** 명령 팔레트(리본의 terminal 단추와 Ctrl+P). 팔레트 안에서는 보이지 않는다. 키는 CommandPalette 의 처리기가 듣는다. */
+const palette: AppCommand = {
+  id: 'app.palette',
+  nameKey: 'palette.open',
+  key: 'Mod-p',
+  icon: 'terminal',
+  inPalette: false,
+  run: (ctx) => openPalette(ctx),
+};
+
+/** 모양 창(테마·언어): 상태 줄 오른쪽 끝의 단추가 연다. */
+const appearance: AppCommand = {
+  id: 'app.appearance',
+  nameKey: 'cmd.appearance',
+  icon: 'sun-moon',
+  run: () => requestAppearance(),
+};
+
+/** 보관함 바꾸기(보관함 줄의 단추와 같다): 저장하지 못하면 바꾸지 않는다. */
+const switchVault: AppCommand = {
+  id: 'app.switchVault',
+  nameKey: 'cmd.switchVault',
+  icon: 'vault',
+  run: (ctx) => ctx.switchVault?.(),
+};
+
+/** 파일 탭의 시스템 파일(카탈로그 JSON, 샘플 등록부) 보이기·숨기기(파일 탭 머리의 눈 단추와 같다). */
+const showSystemFiles: AppCommand = {
+  id: 'app.showSystemFiles',
+  nameKey: 'cmd.showSystemFiles',
+  icon: 'eye',
+  run: () => layoutStore.update({ showSystemFiles: !layoutStore.get().showSystemFiles }),
+};
+
+/** 열린 노트를 트리에서 보이기: 실험 노트는 실험 탭(그 갈래가 펼쳐진다), 그 밖의 노트는 파일 탭. */
+const revealInTree: AppCommand = {
+  id: 'app.revealInTree',
+  nameKey: 'cmd.revealInTree',
+  icon: 'folder-search',
+  run: (ctx) => {
+    const path = ctx.activePath();
+    if (!path) {
+      ctx.host.notify('info', t('cmd.props.noNote'));
+      return;
+    }
+    if (/^labnote\/\d{3}_[^/]+\/.+/i.test(path) && isNotePath(path)) ctx.showPanel('workflows');
+    else ctx.revealInFiles?.(path);
+  },
+};
+
+/** 표 넣기(머리의 표 단추와 같다). 키는 편집기의 keymap 이 듣는다. */
+const insertTableCommand: AppCommand = {
+  id: 'editor.insert.table',
+  nameKey: 'cmd.insert.table',
+  key: 'Mod-Alt-t',
+  icon: 'table',
+  run: (ctx) => runOnNote(ctx, (view) => insertTable(view)),
+};
+
+const blockCommand = (kind: BlockKind, nameKey: string, icon: IconName): AppCommand => ({
+  id: `editor.insert.${kind}`,
+  nameKey,
+  icon,
+  run: (ctx) =>
+    runOnNote(ctx, (view) => {
+      const spec = insertBlock(view.state, kind);
+      if (!spec) return false;
+      view.dispatch(spec);
+      view.focus();
+      return true;
+    }),
+});
+
+/** 넣기 묶음(명세 §5.5): 콜아웃, 코드 블록, 가로줄, 수식 블록. 날짜와 이슈 표시는 플러그인 명령(insert-date, insert-issue-marker)이다. */
+const insertBlockCommands: AppCommand[] = [
+  blockCommand('callout', 'cmd.insert.callout', 'quote'),
+  blockCommand('codeBlock', 'cmd.insert.codeBlock', 'square-code'),
+  blockCommand('hr', 'cmd.insert.hr', 'minus'),
+  blockCommand('mathBlock', 'cmd.insert.mathBlock', 'sigma'),
+];
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, ...themeCommands, ...langCommands];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, palette, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, appearance, switchVault, showSystemFiles, revealInTree, insertTableCommand, ...insertBlockCommands, ...themeCommands, ...langCommands];
+}
+
+export function appCommandById(id: string): AppCommand | undefined {
+  return registry.get(id);
+}
+
+/** 앱 명령을 runCommand 가 받는 꼴로 감싼다(run 이 동기여도 된다). */
+export function asCommand(c: AppCommand): Command {
+  return { id: c.id, nameKey: c.nameKey, run: async (ctx) => c.run(ctx) };
+}
+
+/** id 로 명령 하나: 플러그인 명령이 먼저, 없으면 앱 명령(runCommand 가 받는 꼴). 리본, 머리 단추, 셸 단축키가 이것으로 부른다. */
+export function findCommand(id: string): Command | undefined {
+  const vendor = commandById(id);
+  if (vendor) return vendor;
+  const app = registry.get(id);
+  return app ? asCommand(app) : undefined;
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */

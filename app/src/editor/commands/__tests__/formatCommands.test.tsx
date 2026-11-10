@@ -195,8 +195,9 @@ describe('format commands in the palette', () => {
   it('the palette lists all format commands with ko names and display keys', async () => {
     h = createTestHost();
     await openPalette(h.ctx);
-    const labels = (h.asked.pick[0].items as PickItem<unknown>[]).map((i) => i.label);
-    expect(labels).toEqual(expect.arrayContaining(['굵게 (Ctrl+B)', '제목 2 (Ctrl+2)', '인용 (Ctrl+Shift+.)', '코드 블록 (Ctrl+Alt+C)']));
+    // 이름과 단축키는 따로다: 단축키는 줄 오른쪽 끝의 kbd 칩(UI 재설계 Task 12)
+    const rows = (h.asked.pick[0].items as PickItem<{ kbd?: string }>[]).map((i) => `${i.label} ${i.value.kbd}`);
+    expect(rows).toEqual(expect.arrayContaining(['굵게 Ctrl+B', '제목 2 Ctrl+2', '인용 Ctrl+Shift+.', '코드 블록 Ctrl+Alt+C']));
   });
 
   it('every D10 format row is registered as an app command with ko and en names', () => {

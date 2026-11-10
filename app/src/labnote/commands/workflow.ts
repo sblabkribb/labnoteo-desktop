@@ -299,5 +299,5 @@ export async function insertWorkflowOnReadme(ctx: CommandContext): Promise<void>
 
 /** registerAll.ts 가 등록하는 워크플로 명령. id 와 이름은 플러그인 그대로. */
 export const workflowCommands: Command[] = [
-  { id: 'create-workflow', nameKey: 'Create workflow', run: (ctx) => createWorkflow(ctx) },
+  { id: 'create-workflow', nameKey: 'Create workflow', icon: 'workflow', run: (ctx) => createWorkflow(ctx) },
 ];

@@ -26,6 +26,7 @@ export function NavButtons(p: { canBack: boolean; canForward: boolean; onBack: (
         aria-label={t('header.back')}
         title={t('ribbon.withKey', t('header.back'), 'Alt+←')}
         aria-keyshortcuts="Alt+ArrowLeft"
+        data-command-id="app.back"
         disabled={!p.canBack}
         onClick={p.onBack}
       >
@@ -37,6 +38,7 @@ export function NavButtons(p: { canBack: boolean; canForward: boolean; onBack: (
         aria-label={t('header.forward')}
         title={t('ribbon.withKey', t('header.forward'), 'Alt+→')}
         aria-keyshortcuts="Alt+ArrowRight"
+        data-command-id="app.forward"
         disabled={!p.canForward}
         onClick={p.onForward}
       >

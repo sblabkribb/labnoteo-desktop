@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Icon } from '../../ui/Icon';
 import type { PickItem } from '@labnoteo/core';
 import { t } from '../../i18n/t';
 import { rankPickItems, withSelectedFirst } from '../port/rankPickItems';
 import { DialogFrame, isComposing } from './DialogFrame';
-import type { DialogSpec } from './dialogStore';
+import type { DialogSpec, PickExtras } from './dialogStore';
 
 /** 한 번에 그리는 줄 수. 그 뒤는 picker.more 로 "더 있다"고만 말한다. */
 export const PICKER_MAX_ROWS = 200;
@@ -60,6 +61,54 @@ function CatalogText({ item, active }: { item: PickItem<unknown>; active: boolea
 }
 
 /**
+ * 이름에서 검색어가 맞은 자리(빈칸으로 나눈 낱말마다 처음 맞은 곳, 겹치면 합친다). 이름에 없는 낱말(설명이나 숨은 열쇠에서 맞았다)은 건너뛴다.
+ */
+export function matchRanges(label: string, query: string): [number, number][] {
+  const lower = label.toLowerCase();
+  const ranges: [number, number][] = [];
+  for (const word of query.toLowerCase().split(/\s+/).filter(Boolean)) {
+    const at = lower.indexOf(word);
+    if (at >= 0) ranges.push([at, at + word.length]);
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([r[0], r[1]]);
+  }
+  return merged;
+}
+
+function marked(text: string, query: string): ReactNode {
+  const ranges = matchRanges(text, query);
+  if (ranges.length === 0) return text;
+  const out: ReactNode[] = [];
+  let at = 0;
+  ranges.forEach(([from, to], i) => {
+    if (from > at) out.push(<Fragment key={`t${i}`}>{text.slice(at, from)}</Fragment>);
+    out.push(<mark key={`m${i}`}>{text.slice(from, to)}</mark>);
+    at = to;
+  });
+  if (at < text.length) out.push(<Fragment key="end">{text.slice(at)}</Fragment>);
+  return out;
+}
+
+/** 팔레트 줄: 아이콘(없으면 빈 자리), 맞은 글자를 칠한 이름, 흐린 설명, 오른쪽 끝 kbd 칩. */
+function PaletteText(p: { item: PickItem<unknown>; query: string; palette: NonNullable<PickExtras['palette']> }) {
+  const icon = p.palette.iconOf?.(p.item);
+  const kbd = p.palette.kbdOf?.(p.item);
+  return (
+    <>
+      <span className="picker-icon">{icon ? <Icon name={icon} /> : null}</span>
+      <span className="picker-label">{marked(p.item.label, p.query)}</span>
+      {p.item.description ? <small className="picker-desc">{p.item.description}</small> : null}
+      {kbd ? <kbd className="picker-kbd">{kbd}</kbd> : null}
+    </>
+  );
+}
+
+/**
  * 보이는 차례와 묶음 머리. 검색어가 있으면 순위 그대로(머리 없음). 없으면 최근 고른 것을 맨 위 "최근" 묶음에, 나머지는
  * groupOf 의 묶음(처음 나온 차례)으로 모은다.
  */
@@ -68,10 +117,11 @@ function arrange(
   query: string,
   recent: readonly string[],
   groupOf: ((item: PickItem<unknown>) => string | undefined) | undefined,
+  keyOf: (item: PickItem<unknown>) => string = itemKey,
 ): { items: PickItem<unknown>[]; heads: Map<number, string> } {
   const heads = new Map<number, string>();
   if (query.trim() || (!groupOf && recent.length === 0)) return { items: ranked, heads };
-  const recentItems = recent.flatMap((id) => ranked.filter((item) => itemKey(item) === id).slice(0, 1));
+  const recentItems = recent.flatMap((id) => ranked.filter((item) => keyOf(item) === id).slice(0, 1));
   const rest = ranked.filter((item) => !recentItems.includes(item));
   const order: string[] = [];
   const byGroup = new Map<string, PickItem<unknown>[]>();
@@ -122,8 +172,8 @@ export function Picker(props: {
   const optionEls = useRef<(HTMLLIElement | null)[]>([]);
   const id = useId();
   const { items: ranked, heads } = useMemo(
-    () => arrange(withSelectedFirst(rankPickItems(spec.items, query), query, spec.selected), query, recent, spec.groupOf),
-    [spec.items, spec.selected, spec.groupOf, query, recent],
+    () => arrange(withSelectedFirst(rankPickItems(spec.items, query), query, spec.selected), query, recent, spec.groupOf, spec.recentId),
+    [spec.items, spec.selected, spec.groupOf, spec.recentId, query, recent],
   );
   const shown = ranked.slice(0, PICKER_MAX_ROWS);
   const current = Math.min(active, shown.length - 1);
@@ -136,7 +186,7 @@ export function Picker(props: {
   }, [current]);
 
   const choose = (item: PickItem<unknown>) => {
-    if (spec.recentKey) writeRecent(spec.recentKey, itemKey(item));
+    if (spec.recentKey) writeRecent(spec.recentKey, (spec.recentId ?? itemKey)(item));
     props.onDone(item.value);
   };
   const move = (delta: number) => setActive(Math.max(0, Math.min(shown.length - 1, current + delta)));
@@ -166,12 +216,23 @@ export function Picker(props: {
       onMouseMove={() => i !== current && setActive(i)}
       onClick={() => choose(item)}
     >
-      {spec.catalog ? <CatalogText item={item} active={i === current} /> : <ItemText item={item} />}
+      {spec.palette ? (
+        <PaletteText item={item} query={query} palette={spec.palette} />
+      ) : spec.catalog ? (
+        <CatalogText item={item} active={i === current} />
+      ) : (
+        <ItemText item={item} />
+      )}
     </li>
   );
 
   return (
-    <DialogFrame title={spec.title} className={spec.catalog ? 'picker catalog' : 'picker'} onCancel={props.onCancel} unsolicited={spec.unsolicited}>
+    <DialogFrame
+      title={spec.title}
+      className={spec.palette ? 'picker palette' : spec.catalog ? 'picker catalog' : 'picker'}
+      onCancel={props.onCancel}
+      unsolicited={spec.unsolicited}
+    >
       <input
         ref={input}
         type="text"
@@ -209,6 +270,11 @@ export function Picker(props: {
         })}
       </ul>
       <MoreOrEmpty shown={shown.length} total={ranked.length} />
+      {spec.palette?.hint ? (
+        <p className="picker-hint" aria-hidden="true">
+          {spec.palette.hint}
+        </p>
+      ) : null}
     </DialogFrame>
   );
 }

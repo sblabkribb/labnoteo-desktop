@@ -54,11 +54,11 @@ import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
 import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
-import { registerAllAppCommands } from './editor/commands/appCommands';
+import { findCommand, registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { legacyNotesOfferOnOpen } from './labnote/commands/legacyConvert';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
-import { openPalette, usePaletteHotkey } from './labnote/ui/CommandPalette';
+import { usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
 import { closeMenu, openMenu } from './labnote/ui/menuStore';
 import { EditorActions, NoteQrButton } from './labnote/ui/EditorActions';
@@ -82,13 +82,13 @@ import { cancelNoteIdTouches, notifyingRun, startIdWatch } from './labnote/barco
 import { startScan } from './labnote/scan/commands';
 import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
-import { Ribbon, type RibbonActions } from './ui/Ribbon';
+import { Ribbon } from './ui/Ribbon';
 import { Dock } from './ui/Dock';
 import { RightDock } from './ui/RightDock';
 import { VaultBar } from './ui/VaultBar';
 import { layoutStore, useLayout, type LeftTab, type RightTab } from './ui/layoutStore';
 import { setWindowTitle } from './ui/windowTitle';
-import { runQuickSwitcher } from './ui/quickSwitcher';
+import { shellShortcut } from './ui/shellKeys';
 import { NavButtons, ViewHeader } from './ui/ViewHeader';
 import { NoteLead } from './ui/Breadcrumb';
 import { StatusBar } from './ui/StatusBar';
@@ -129,16 +129,6 @@ function markTabChosen(root: string, tab: string): void {
   } catch {
     // 저장소가 막혀 있다: 표시 없이 지나간다
   }
-}
-
-/** Ctrl 만(Shift·Alt·Meta 없이), 한글 조합 중이 아닐 때. */
-function plainCtrl(e: globalThis.KeyboardEvent): boolean {
-  return e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && !e.isComposing && e.keyCode !== 229;
-}
-
-/** Ctrl+Shift 만(Alt·Meta 없이), 한글 조합 중이 아닐 때. */
-function ctrlShift(e: globalThis.KeyboardEvent): boolean {
-  return e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && !e.isComposing && e.keyCode !== 229;
 }
 
 interface ViewProps {
@@ -360,6 +350,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     revealInFiles,
     navigate: (dir) => void navFns.go(dir),
     newNote: () => void newNote(),
+    switchVault: () => void switchVault(),
+    treeFiles: () => shownEntries.filter((e) => !e.isDir).map((e) => e.path),
   });
   usePaletteHotkey(ctx);
   // 설정 창의 값: 열 때마다 지금 값으로 만든다. 보관함 설정을 읽기 전(ctx 없음)에는 열지 않는다.
@@ -536,49 +528,34 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   const switchVault = async () => {
     if (await flush()) onChangeVault();
   };
-  const ribbonActions: RibbonActions = {
-    toggleLeft: () => layoutStore.toggleLeft(),
-    toggleRight: () => layoutStore.toggleRight(),
-    newNote: () => void newNote(),
-    palette: () => {
-      if (ctx) void runCommand(ctx, () => openPalette(ctx));
-    },
-    quickSwitcher: () => {
-      if (ctx) void runCommand(ctx, () => runQuickSwitcher(ctx));
-    },
-    newExperiment: () => {
-      const c = commandById('create-experiment');
-      if (ctx && c) void runCommand(ctx, c);
-    },
-    scan: () => {
-      const c = commandById('import-scanned-pages');
-      if (ctx && c) void runCommand(ctx, c);
-    },
-  };
   // 설정 창(Task 8): Ctrl+,, 보관함 줄의 톱니, 모양 창의 "모든 설정 열기". 실패(샘플 폴더 옮기기 등)는 알림으로 바뀐다.
   const openSettings = () => {
     if (ctx) void runCommand(ctx, () => openSettingsModal());
   };
-  // 셸 단축키: Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바(둘 다 code 로 맞춘다: 한국어 자판의 ₩ 키도 Backslash 다),
-  // Ctrl+N 새 노트, Ctrl+O 빠른 이동. 편집기 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 는 넷 다 묶지 않는다
-  // (기본 keymap 의 Shift-Mod-\ 는 Editor.tsx 가 뺀다). 대화상자가 열려 있으면 듣지 않는다.
-  const shortcuts = useRef({ ...ribbonActions, openSettings });
-  shortcuts.current = { ...ribbonActions, openSettings };
+  // 리본 단추와 셸 단축키는 등록된 명령을 id 로 부른다(Task 12). 보관함 설정을 읽기 전(ctx 없음)에는 설정이 필요 없는
+  // 셋(사이드바 둘, 새 노트)만 돈다. 리본은 그동안 나머지 단추를 끈다.
+  const runShellCommand = (id: string) => {
+    if (ctx) {
+      const c = findCommand(id);
+      if (c) void runCommand(ctx, c);
+      return;
+    }
+    if (id === 'app.toggleLeft') layoutStore.toggleLeft();
+    else if (id === 'app.toggleRight') layoutStore.toggleRight();
+    else if (id === 'app.newNote') void newNote();
+  };
+  // 셸 단축키(shellKeys.ts): Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바, Ctrl+N 새 노트, Ctrl+O 빠른 이동, Ctrl+, 설정.
+  // 편집기 키는 그림자 DOM 을 지나 window 까지 온다. 대화상자가 열려 있으면 듣지 않는다.
+  const shellRun = useRef(runShellCommand);
+  shellRun.current = runShellCommand;
   useEffect(() => {
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const run =
-        ctrlShift(e) ? (e.code === 'Backslash' ? shortcuts.current.toggleRight : undefined)
-        : !plainCtrl(e) ? undefined
-        : e.code === 'Backslash' ? shortcuts.current.toggleLeft
-        : e.code === 'KeyN' ? shortcuts.current.newNote
-        : e.code === 'KeyO' ? shortcuts.current.quickSwitcher
-        : e.code === 'Comma' ? shortcuts.current.openSettings
-        : undefined;
-      if (!run) return;
+      const id = shellShortcut(e);
+      if (!id) return;
       e.preventDefault();
       if (e.repeat || currentDialog() !== null) return;
-      run();
+      shellRun.current(id);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -644,6 +621,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       title={t('ribbon.withKey', t('ribbon.toggleRight'), 'Ctrl+Shift+\\')}
       aria-expanded={layout.rightOpen}
       aria-controls="right-dock"
+      data-command-id="app.toggleRight"
       onClick={() => layoutStore.toggleRight()}
     >
       <Icon name="panel-right" />
@@ -666,7 +644,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   return (
     <>
       <div className="shell" ref={shell}>
-        <Ribbon actions={ribbonActions} leftHidden={layout.leftHidden} rightOpen={layout.rightOpen} ready={ctx !== undefined} />
+        <Ribbon onCommand={runShellCommand} leftHidden={layout.leftHidden} rightOpen={layout.rightOpen} ready={ctx !== undefined} />
         <div className="notices">
           <UpdateBanner beforeInstall={flush} />
           {failed && <p role="alert">{t('tree.error')}</p>}
@@ -678,7 +656,14 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
             <div className="nav-header">
               <span className="nav-header-title">{t('files.title')}</span>
               <div className="nav-header-actions">
-                <button type="button" className="ibtn" aria-label={t('files.newNote')} title={t('ribbon.withKey', t('files.newNote'), 'Ctrl+N')} onClick={() => void newNote()}>
+                <button
+                  type="button"
+                  className="ibtn"
+                  aria-label={t('files.newNote')}
+                  title={t('ribbon.withKey', t('files.newNote'), 'Ctrl+N')}
+                  data-command-id="app.newNote"
+                  onClick={() => void newNote()}
+                >
                   <Icon name="file-plus" />
                 </button>
                 <button
@@ -699,6 +684,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
                   aria-label={t('settings.systemFiles')}
                   title={t('settings.systemFiles')}
                   aria-pressed={layout.showSystemFiles}
+                  data-command-id="app.showSystemFiles"
                   onClick={() => layoutStore.update({ showSystemFiles: !layout.showSystemFiles })}
                 >
                   <Icon name="eye" />

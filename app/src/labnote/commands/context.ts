@@ -40,6 +40,10 @@ export interface CommandContext {
   navigate?(dir: 'back' | 'forward'): void;
   /** 새 노트 대화상자(리본, Ctrl+N). 앱은 늘 준다. */
   newNote?(): void;
+  /** 보관함 바꾸기(저장하지 못하면 바꾸지 않는다). 앱은 늘 준다. */
+  switchVault?(): void;
+  /** 파일 탭에 보이는 파일(폴더 빼고, 보관함 기준 경로). 빠른 이동이 첨부까지 찾는다. 없으면 링크 색인의 파일. */
+  treeFiles?(): readonly string[];
 }
 
 const listeners = new Set<() => void>();

@@ -2,6 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { catalogs } from '../t';
 import { firstArgsOf } from './callArgs';
+import { findCommand, registerAllAppCommands } from '../../editor/commands/appCommands';
+import { registerAllCommands } from '../../labnote/commands/registerAll';
 
 /** 템플릿이 쓰는 자리 표시 목록(정렬, 중복 포함): `{0}` 을 두 번 쓰는 문장에서 하나를 빠뜨리면 다르다. */
 const placeholders = (s: string) => (s.match(/\{\d+\}/g) ?? []).sort();
@@ -112,7 +114,11 @@ describe('소스가 부르는 번역 키', () => {
   it('번역 키 모양의 문자열 글자(변수로 t 에 넘길 키)도 두 목록 모두에 있다', () => {
     const spaces = new Set(Object.keys(ko).map((k) => k.split('.')[0]));
     const KEYLIKE = new RegExp(String.raw`^(${[...spaces].join('|')})\.[A-Za-z][\w.]*$`);
-    const keys = files.flatMap(({ f, code }) => literals(code).filter((s) => KEYLIKE.test(s)).map((key) => ({ f, key })));
+    // 명령 id(app.toggleLeft, editor.insert.table …)는 번역 키가 아니다: 등록된 명령의 id 는 뺀다(UI 재설계 Task 12)
+    registerAllCommands();
+    registerAllAppCommands();
+    const isCommandId = (s: string) => findCommand(s) !== undefined && !Object.hasOwn(ko, s);
+    const keys = files.flatMap(({ f, code }) => literals(code).filter((s) => KEYLIKE.test(s) && !isCommandId(s)).map((key) => ({ f, key })));
     expect(keys.map((k) => k.key)).toEqual(expect.arrayContaining(['theme.system', 'vault.error.missing'])); // 변수로 넘기는 키를 실제로 찾았다
     expect(missing(keys)).toEqual([]);
   });

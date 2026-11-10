@@ -1,25 +1,15 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { Ribbon, type RibbonActions } from '../Ribbon';
+import { Ribbon } from '../Ribbon';
 import { setLang } from '../../i18n/lang';
 
-function actions(): RibbonActions {
-  return {
-    toggleLeft: vi.fn(),
-    quickSwitcher: vi.fn(),
-    palette: vi.fn(),
-    newExperiment: vi.fn(),
-    newNote: vi.fn(),
-    scan: vi.fn(),
-    toggleRight: vi.fn(),
-  };
-}
+const noop = () => undefined;
 
 afterEach(() => setLang('ko'));
 
 describe('Ribbon', () => {
   it('renders 7 icon buttons with localised names and shortcut tooltips', () => {
-    render(<Ribbon actions={actions()} leftHidden={false} rightOpen={false} ready />);
+    render(<Ribbon onCommand={noop} leftHidden={false} rightOpen={false} ready />);
     const bar = screen.getByRole('toolbar', { name: '리본' });
     expect(bar.getAttribute('aria-orientation')).toBe('vertical');
     const buttons = within(bar).getAllByRole('button');
@@ -53,31 +43,33 @@ describe('Ribbon', () => {
 
   it('names follow the language', () => {
     setLang('en');
-    render(<Ribbon actions={actions()} leftHidden={false} rightOpen={false} ready />);
+    render(<Ribbon onCommand={noop} leftHidden={false} rightOpen={false} ready />);
     const bar = screen.getByRole('toolbar', { name: 'Ribbon' });
     expect(within(bar).getByRole('button', { name: 'Command palette' }).title).toBe('Command palette (Ctrl+P)');
     expect(within(bar).getByRole('button', { name: 'New note' }).title).toBe('New note (Ctrl+N)');
   });
 
-  it('each button runs its action; the sidebar toggles show their state', () => {
-    const a = actions();
-    render(<Ribbon actions={a} leftHidden rightOpen ready />);
+  it('each button runs its registered command by id; the sidebar toggles show their state', () => {
+    const run = vi.fn();
+    render(<Ribbon onCommand={run} leftHidden rightOpen ready />);
     const bar = within(screen.getByRole('toolbar', { name: '리본' }));
     const left = bar.getByRole('button', { name: '왼쪽 사이드바 보이기/숨기기' });
     expect(left.getAttribute('aria-expanded')).toBe('false');
     expect(bar.getByRole('button', { name: '오른쪽 사이드바 보이기/숨기기' }).getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(left);
-    fireEvent.click(bar.getByRole('button', { name: '새 노트' }));
-    fireEvent.click(bar.getByRole('button', { name: '새 실험' }));
-    fireEvent.click(bar.getByRole('button', { name: '명령 팔레트' }));
-    fireEvent.click(bar.getByRole('button', { name: '빠른 이동' }));
-    fireEvent.click(bar.getByRole('button', { name: '스캔 가져오기' }));
-    fireEvent.click(bar.getByRole('button', { name: '오른쪽 사이드바 보이기/숨기기' }));
-    for (const fn of Object.values(a)) expect(fn).toHaveBeenCalledTimes(1);
+    for (const b of bar.getAllByRole('button')) fireEvent.click(b);
+    expect(run.mock.calls.map((c) => c[0])).toEqual([
+      'app.toggleLeft',
+      'app.quickSwitcher',
+      'app.palette',
+      'create-experiment',
+      'app.newNote',
+      'import-scanned-pages',
+      'app.toggleRight',
+    ]);
   });
 
   it('commands that need the vault context are disabled until it is ready; the sidebar toggles are not', () => {
-    render(<Ribbon actions={actions()} leftHidden={false} rightOpen={false} ready={false} />);
+    render(<Ribbon onCommand={noop} leftHidden={false} rightOpen={false} ready={false} />);
     const bar = within(screen.getByRole('toolbar', { name: '리본' }));
     const disabled = (name: string) => (bar.getByRole('button', { name }) as HTMLButtonElement).disabled;
     expect(disabled('왼쪽 사이드바 보이기/숨기기')).toBe(false);
@@ -88,7 +80,7 @@ describe('Ribbon', () => {
   });
 
   it('Up and Down arrows move focus between the buttons', () => {
-    render(<Ribbon actions={actions()} leftHidden={false} rightOpen={false} ready />);
+    render(<Ribbon onCommand={noop} leftHidden={false} rightOpen={false} ready />);
     const buttons = within(screen.getByRole('toolbar', { name: '리본' })).getAllByRole('button');
     buttons[0].focus();
     fireEvent.keyDown(buttons[0], { key: 'ArrowDown' });

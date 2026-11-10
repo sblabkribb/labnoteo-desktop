@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { LANG_NAMES, LANGS, type Lang } from '../i18n/lang';
@@ -64,11 +64,23 @@ export function AppearancePanel(p: Props & { onDone: () => void }) {
   );
 }
 
+const openRequests = new Set<() => void>();
+
+/** 모양 창을 연다(팔레트의 app.appearance). 상태 줄의 모양 단추가 듣는다. 단추가 없으면 아무 일도 없다. */
+export function requestAppearance(): void {
+  [...openRequests].forEach((open) => open());
+}
+
 /** 상태 줄 오른쪽 끝의 모양 단추(sun-moon)와 그 창. */
 export function AppearanceButton(p: Props) {
   useLang();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const open = () => setOpen(true);
+    openRequests.add(open);
+    return () => void openRequests.delete(open);
+  }, []);
   const close = ({ restoreFocus }: { restoreFocus: boolean }) => {
     setOpen(false);
     if (restoreFocus) button.current?.focus();

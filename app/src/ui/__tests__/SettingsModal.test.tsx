@@ -252,7 +252,7 @@ describe('Settings modal', () => {
     act(() => void openSettings('shortcuts'));
     const panel = within(dialog().getByRole('tabpanel', { name: '단축키' }));
     const rows = panel.getAllByRole('row').map((r) => r.textContent);
-    expect(rows).toEqual(expect.arrayContaining(['왼쪽 사이드바 보이기/숨기기Ctrl+\\', '빠른 이동: 노트 열기Ctrl+O', '설정 열기Ctrl+,', '명령 팔레트Ctrl+P', '뒤로 가기Alt+←']));
+    expect(rows).toEqual(expect.arrayContaining(['왼쪽 사이드바 보이기/숨기기Ctrl+\\', '빠른 이동: 노트, UO, 첨부 열기Ctrl+O', '설정 열기Ctrl+,', '명령 팔레트Ctrl+P', '뒤로 가기Alt+←']));
     expect(panel.queryByRole('textbox')).toBeNull();
     expect(panel.queryAllByRole('button')).toHaveLength(0);
   });

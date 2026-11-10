@@ -138,11 +138,11 @@ describe('명령 팔레트', () => {
     await user.keyboard('{Enter}');
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
 
-    // 영어 화면: 영어 이름만. 이름은 열 때 만든다
+    // 영어 화면: 영어 이름만. 이름은 열 때 만든다. 방금 돌린 명령이 "최근" 묶음으로 맨 위에 온다(id 로 기억한다)
     act(() => setLang('en'));
     ctrlPInShadow();
     await screen.findByRole('dialog');
-    expect(optionLabels()).toEqual(['Create experiment', 'Create workflow']);
+    expect(optionLabels()).toEqual(['Create workflow', 'Create experiment']);
   });
 
   it('palette lists editor-toggle-source with its shortcut and runs it', async () => {
@@ -151,16 +151,19 @@ describe('명령 팔레트', () => {
     render(<Harness ctx={makeCtx()} />);
     ctrlPInShadow();
     await screen.findByRole('dialog');
-    expect(optionLabels().slice(0, 3)).toEqual(['실험 생성 (Create experiment)', '워크플로 생성 (Create workflow)', '소스 보기 전환 (Ctrl+E)']);
-    expect(optionLabels()).toContain('굵게 (Ctrl+B)'); // 서식 명령도 앱 명령으로 이어진다(formatCommands.test.tsx)
+    expect(optionLabels().slice(0, 3)).toEqual(['실험 생성 (Create experiment)', '워크플로 생성 (Create workflow)', '소스 보기 전환']);
+    // 단축키는 이름 뒤가 아니라 줄 오른쪽 끝의 kbd 칩이다(UI 재설계 Task 12)
+    const kbdOf = (label: string) => screen.queryAllByRole('option').find((o) => o.querySelector('.picker-label')?.textContent === label)?.querySelector('kbd')?.textContent;
+    expect(kbdOf('소스 보기 전환')).toBe('Ctrl+E');
+    expect(kbdOf('굵게')).toBe('Ctrl+B'); // 서식 명령도 앱 명령으로 이어진다(formatCommands.test.tsx)
     await user.type(screen.getByRole('combobox'), 'editor-toggle-source');
-    expect(optionLabels()[0]).toBe('소스 보기 전환 (Ctrl+E)');
+    expect(optionLabels()[0]).toBe('소스 보기 전환');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(getMode()).toBe('source'));
 
     act(() => setLang('en'));
     ctrlPInShadow();
     await screen.findByRole('dialog');
-    expect(optionLabels()).toContain('Toggle source view (Ctrl+E)');
+    expect(optionLabels()).toContain('Toggle source view');
   });
 });

@@ -27,5 +27,5 @@ export async function catalogNoticeOnOpen(ctx: CommandContext): Promise<void> {
 
 /** registerAll.ts 가 등록하는 카탈로그 명령. */
 export const catalogCommands: Command[] = [
-  { id: 'update-catalogs', nameKey: 'Update catalogs', run: (ctx) => updateCatalogs(ctx) },
+  { id: 'update-catalogs', nameKey: 'Update catalogs', icon: 'refresh-cw', run: (ctx) => updateCatalogs(ctx) },
 ];

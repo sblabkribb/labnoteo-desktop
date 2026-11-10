@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import type { PickItem } from '@labnoteo/core';
 import { t } from '../../i18n/t';
-import { appCommands, displayKey, type AppCommand } from '../../editor/commands/appCommands';
+import { appCommands, asCommand, displayKey, type AppCommand } from '../../editor/commands/appCommands';
+import type { IconName } from '../../ui/Icon';
 import type { CommandContext } from '../commands/context';
 import { commands, type Command } from '../commands/registry';
 import { runCommand } from '../commands/runCommand';
@@ -17,29 +18,48 @@ function available(c: Command | AppCommand, ctx: CommandContext): boolean {
   }
 }
 
-/** 앱 명령을 runCommand 가 받는 꼴로 감싼다(run 이 동기여도 된다). */
-function asCommand(c: AppCommand): Command {
-  return { id: c.id, nameKey: c.nameKey, run: async (ctx) => c.run(ctx) };
+/** 팔레트 한 줄의 값: 돌릴 명령과 그 줄의 아이콘·단축키. */
+interface Entry {
+  command: Command;
+  icon?: IconName;
+  kbd?: string;
 }
 
+/** 최근 고른 명령을 적는 이름(이 사람의 편의, localStorage). */
+export const PALETTE_RECENT_KEY = 'command';
+
 /**
- * 명령 팔레트: 지금 쓸 수 있는 명령을 host.pick 으로 고르게 하고, 고른 명령을 runCommand 로 돌린다.
- * 이름은 열 때 만든다(한국어: '실험 생성 (Create experiment)', 영어: 'Create experiment'). id 와 영어 키로도 찾는다.
+ * 명령 팔레트: 지금 쓸 수 있는 명령을 host.pick 의 팔레트 꼴로 고르게 하고, 고른 명령을 runCommand 로 돌린다.
+ * - 이름은 열 때 만든다(한국어: '실험 생성 (Create experiment)', 영어: 'Create experiment'). id 와 영어 키, 단축키로도 찾는다.
+ * - 줄마다 아이콘과 오른쪽 끝의 단축키 칩. 검색어가 없으면 최근 고른 명령(id 로 기억한다)이 "최근" 묶음으로 맨 위에 온다.
  */
 export async function openPalette(ctx: CommandContext): Promise<void> {
-  const vendor: PickItem<Command>[] = commands()
-    .filter((c) => available(c, ctx))
-    .map((c) => ({ label: paletteName(c.nameKey), keywords: [c.id, c.nameKey], value: c }));
-  const app: PickItem<Command>[] = appCommands()
+  const vendor: PickItem<Entry>[] = commands()
     .filter((c) => available(c, ctx))
     .map((c) => ({
-      label: c.key ? `${t(c.nameKey)} (${displayKey(c.key)})` : t(c.nameKey),
-      keywords: c.key ? [c.id, c.nameKey, c.key] : [c.id, c.nameKey],
-      value: asCommand(c),
+      label: paletteName(c.nameKey),
+      keywords: [c.id, c.nameKey],
+      value: { command: c, icon: c.icon, kbd: c.shortcut ? displayKey(c.shortcut) : undefined },
     }));
-  const items = [...vendor, ...app];
-  const chosen = await ctx.host.pick(items, { title: t('palette.title'), placeholder: t('palette.placeholder') });
-  if (chosen) await runCommand(ctx, chosen);
+  const app: PickItem<Entry>[] = appCommands()
+    .filter((c) => c.inPalette !== false && available(c, ctx))
+    .map((c) => {
+      const kbd = c.key ? displayKey(c.key) : undefined;
+      return {
+        label: t(c.nameKey),
+        keywords: kbd ? [c.id, c.nameKey, kbd] : [c.id, c.nameKey],
+        value: { command: asCommand(c), icon: c.icon, kbd },
+      };
+    });
+  const entry = (item: PickItem<unknown>) => item.value as Entry;
+  const chosen = await ctx.host.pick([...vendor, ...app], {
+    title: t('palette.title'),
+    placeholder: t('palette.placeholder'),
+    palette: { iconOf: (item) => entry(item).icon, kbdOf: (item) => entry(item).kbd, hint: t('palette.hint') },
+    recentKey: PALETTE_RECENT_KEY,
+    recentId: (item) => entry(item).command.id,
+  });
+  if (chosen) await runCommand(ctx, chosen.command);
 }
 
 /** Ctrl+P 와 Ctrl+Shift+P. 한글 자판에서는 key 가 'ㅔ' 이므로 물리 키(code)로도 본다. */

@@ -197,5 +197,5 @@ export async function insertUnitOp(ctx: CommandContext, chosen?: ChosenUnitOp, i
 }
 
 export const unitOpCommands: Command[] = [
-  { id: 'insert-unit-operation', nameKey: 'Insert unit operation', run: (ctx) => insertUnitOp(ctx) },
+  { id: 'insert-unit-operation', nameKey: 'Insert unit operation', icon: 'circle-dot', run: (ctx) => insertUnitOp(ctx) },
 ];

@@ -292,8 +292,8 @@ export async function toggleDiscussionFlag(ctx: CommandContext, experimentDir?: 
 
 /** registerAll.ts 가 등록하는 실험 명령. id 와 이름은 플러그인 그대로. */
 export const experimentCommands: Command[] = [
-  { id: 'create-experiment', nameKey: 'Create experiment', run: (ctx) => createExperiment(ctx) },
-  { id: 'change-experiment-status', nameKey: 'Change experiment status', run: (ctx) => changeExperimentStatus(ctx) },
+  { id: 'create-experiment', nameKey: 'Create experiment', icon: 'flask-conical', run: (ctx) => createExperiment(ctx) },
+  { id: 'change-experiment-status', nameKey: 'Change experiment status', icon: 'circle-half', run: (ctx) => changeExperimentStatus(ctx) },
   { id: 'retry-experiment', nameKey: 'Retry this experiment', run: (ctx) => retryFromActive(ctx) },
   { id: 'toggle-discussion-flag', nameKey: 'Toggle discussion flag', run: (ctx) => toggleDiscussionFlag(ctx) },
 ];

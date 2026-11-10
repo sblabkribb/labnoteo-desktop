@@ -144,3 +144,55 @@
 .catalog-popover-desc, .catalog-popover-tool { margin: 0; color: var(--text-muted); line-height: 1.45; }
 .catalog-popover-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); margin-top: var(--space-2); }
 .catalog-popover-reason { margin: 0; color: var(--text-muted); font-size: var(--font-size-label); }
+
+/* 명령 팔레트와 빠른 이동(UI 재설계 Task 12, 명세 §5.5): 640px, 12vh 아래, 메뉴 바탕, 테두리 없는 44px 검색 칸,
+   32px 줄 [아이콘][맞은 글자를 칠한 이름][흐린 설명 …][kbd 칩], 아래에 키 안내. 제목은 화면 낭독기만 읽는다(aria-labelledby) */
+.dialog.picker.palette {
+  width: min(640px, 100%);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--menu-bg);
+}
+.dialog.picker.palette > .dialog-head { display: none; }
+.dialog.picker.palette > input[role="combobox"] {
+  min-height: 44px;
+  padding: 0 var(--space-6);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 1.05em;
+}
+.dialog.picker.palette > input[role="combobox"]:focus-visible { outline: none; border-bottom-color: var(--accent); box-shadow: none; }
+.dialog.picker.palette > .picker-list { padding: var(--space-2); }
+.picker.palette .picker-option {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 32px;
+  padding: 0 var(--space-4);
+}
+.picker-icon { display: inline-flex; flex: none; width: 16px; color: var(--text-muted); }
+.picker.palette .picker-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker.palette .picker-desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker.palette .picker-label mark { background: transparent; color: var(--accent); font-weight: 600; }
+.picker-kbd {
+  flex: none;
+  margin-left: auto;
+  padding: 0 var(--space-3);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.6;
+}
+.dialog.picker.palette > .picker-note { padding: var(--space-3) var(--space-6); }
+.picker-hint {
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+}

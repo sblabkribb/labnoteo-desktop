@@ -850,7 +850,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
             <button
               type="button"
               className="btn"
-              title={t('table.insert')}
+              title={t('ribbon.withKey', t('table.insert'), 'Ctrl+Alt+T')}
+              data-command-id="editor.insert.table"
               disabled={editLocked}
               onClick={() => {
                 const view = viewRef.current;
@@ -867,6 +868,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
               aria-label={modeLabel}
               title={t('header.mode', modeLabel, 'Ctrl+E')}
               aria-keyshortcuts="Control+E"
+              data-command-id="editor-toggle-source"
               onClick={() => toggleMode()}
             >
               <Icon name={liveMode ? 'book-open' : 'code'} />

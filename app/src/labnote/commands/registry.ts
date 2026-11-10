@@ -1,3 +1,4 @@
+import type { IconName } from '../../ui/Icon';
 import type { CommandContext } from './context';
 
 /** 명령 하나. 팔레트, 맥락 메뉴, 패널 동작, 머리 단추는 모두 runCommand 로 부른다. */
@@ -9,6 +10,10 @@ export interface Command {
   run(ctx: CommandContext): Promise<unknown>;
   /** false 면 팔레트에서 숨긴다. 실험 단위 명령에는 쓰지 않는다: 그 명령들은 숨지 않고 왜 못 하는지 말한다. */
   available?(ctx: CommandContext): boolean;
+  /** 단축키(CodeMirror 표기, 예: 'Mod-Shift-d'). 보여 주기만 한다: 팔레트의 kbd 칩. 실제 바인딩은 따로 한다. */
+  shortcut?: string;
+  /** 팔레트 줄의 아이콘. */
+  icon?: IconName;
 }
 
 /** 등록 순서를 지키는 목록. 같은 id 를 다시 등록하면 자리는 그대로 두고 바꾼다. */

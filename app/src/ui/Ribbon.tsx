@@ -3,19 +3,10 @@ import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { Icon, type IconName } from './Icon';
 
-/** 리본 단추가 부르는 일. App 이 명령 맥락에 묶어 넘긴다. */
-export interface RibbonActions {
-  toggleLeft(): void;
-  quickSwitcher(): void;
-  palette(): void;
-  newExperiment(): void;
-  newNote(): void;
-  scan(): void;
-  toggleRight(): void;
-}
-
+/** 리본 단추 하나: 등록된 명령 하나를 부른다(명세 §5.5 "모든 동작은 명령이다"). */
 interface Item {
-  action: keyof RibbonActions;
+  /** 부를 명령의 id(labnote/commands/registry 또는 앱 명령). */
+  commandId: string;
   icon: IconName;
   labelKey: string;
   /** 툴팁에 보이는 단축키(보여 주기만 한다: 키는 App 의 처리기가 듣는다). */
@@ -27,31 +18,31 @@ interface Item {
 }
 
 const TOP: readonly Item[] = [
-  { action: 'toggleLeft', icon: 'panel-left', labelKey: 'ribbon.toggleLeft', key: 'Ctrl+\\', expands: 'left' },
+  { commandId: 'app.toggleLeft', icon: 'panel-left', labelKey: 'ribbon.toggleLeft', key: 'Ctrl+\\', expands: 'left' },
 ];
 const MIDDLE: readonly Item[] = [
-  { action: 'quickSwitcher', icon: 'search', labelKey: 'ribbon.quickSwitcher', key: 'Ctrl+O', needsCtx: true },
-  { action: 'palette', icon: 'terminal', labelKey: 'palette.open', key: 'Ctrl+P', needsCtx: true },
-  { action: 'newExperiment', icon: 'flask-conical', labelKey: 'ribbon.newExperiment', needsCtx: true },
-  { action: 'newNote', icon: 'file-plus', labelKey: 'ribbon.newNote', key: 'Ctrl+N' },
-  { action: 'scan', icon: 'scan-barcode', labelKey: 'ribbon.scan', needsCtx: true },
+  { commandId: 'app.quickSwitcher', icon: 'search', labelKey: 'ribbon.quickSwitcher', key: 'Ctrl+O', needsCtx: true },
+  { commandId: 'app.palette', icon: 'terminal', labelKey: 'palette.open', key: 'Ctrl+P', needsCtx: true },
+  { commandId: 'create-experiment', icon: 'flask-conical', labelKey: 'ribbon.newExperiment', needsCtx: true },
+  { commandId: 'app.newNote', icon: 'file-plus', labelKey: 'ribbon.newNote', key: 'Ctrl+N' },
+  { commandId: 'import-scanned-pages', icon: 'scan-barcode', labelKey: 'ribbon.scan', needsCtx: true },
 ];
 const BOTTOM: readonly Item[] = [
-  { action: 'toggleRight', icon: 'panel-right', labelKey: 'ribbon.toggleRight', key: 'Ctrl+Shift+\\', expands: 'right' },
+  { commandId: 'app.toggleRight', icon: 'panel-right', labelKey: 'ribbon.toggleRight', key: 'Ctrl+Shift+\\', expands: 'right' },
 ];
 
 /**
  * 왼쪽 끝의 리본(44px, 늘 보인다): 18px 아이콘 단추와 그 툴팁(단축키 포함). 세로 toolbar 라 ↑/↓ 로 단추 사이를 옮긴다.
- * 이름은 aria-label 에 있고 단추에는 글자가 없다.
+ * 이름은 aria-label 에 있고 단추에는 글자가 없다. 단추마다 등록된 명령 하나를 부른다(data-command-id).
  */
-export function Ribbon(p: { actions: RibbonActions; leftHidden: boolean; rightOpen: boolean; ready: boolean }) {
+export function Ribbon(p: { onCommand: (commandId: string) => void; leftHidden: boolean; rightOpen: boolean; ready: boolean }) {
   useLang();
   const button = (item: Item) => {
     const label = t(item.labelKey);
     const expanded = item.expands === 'left' ? !p.leftHidden : item.expands === 'right' ? p.rightOpen : undefined;
     return (
       <button
-        key={item.action}
+        key={item.commandId}
         type="button"
         className="ibtn ribbon-btn"
         aria-label={label}
@@ -60,7 +51,8 @@ export function Ribbon(p: { actions: RibbonActions; leftHidden: boolean; rightOp
         aria-expanded={expanded}
         aria-controls={item.expands === 'left' ? 'dock' : item.expands === 'right' ? 'right-dock' : undefined}
         disabled={item.needsCtx && !p.ready}
-        onClick={() => p.actions[item.action]()}
+        data-command-id={item.commandId}
+        onClick={() => p.onCommand(item.commandId)}
       >
         <Icon name={item.icon} size={18} />
       </button>

@@ -631,7 +631,7 @@ describe('라이브 미리보기: 속성 명령과 키보드로 격자 들어가
     registerAllAppCommands();
     const pick = vi.fn(async () => undefined);
     await openPalette({ host: { pick, notify: vi.fn() }, activePath: () => undefined, activeView: () => undefined } as unknown as CommandContext);
-    const labels = (pick.mock.calls[0] as unknown as [PickItem<unknown>[]])[0].map((i) => i.label);
-    expect(labels).toEqual(expect.arrayContaining(['속성 추가 (Ctrl+;)', '속성을 YAML로 편집']));
+    const rows = (pick.mock.calls[0] as unknown as [PickItem<{ kbd?: string }>[]])[0].map((i) => `${i.label}|${i.value.kbd ?? ''}`);
+    expect(rows).toEqual(expect.arrayContaining(['속성 추가|Ctrl+;', '속성을 YAML로 편집|']));
   });
 });

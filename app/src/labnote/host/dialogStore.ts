@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import type { IconName } from '../../ui/Icon';
 import type { PickItem, PromptOpts } from '@labnoteo/core';
 import type { AliasOpts } from './AliasDialog';
 import type { SampleDefinitionModel, SampleDefinitionResult, UsageGroup } from '../port/sampleDefinitionModel';
@@ -73,6 +74,18 @@ export type DialogSpec =
  */
 export interface PickExtras {
   catalog?: boolean;
+  /**
+   * 팔레트 꼴(UI 재설계 Task 12, 명세 §5.5): 제목 줄 없는 640px 창, 테두리 없는 검색 칸, 32px 줄(아이콘, 맞은 글자를 칠한 이름,
+   * 오른쪽 끝 kbd 칩), 아래에 키 안내. 명령 팔레트와 빠른 이동이 쓴다.
+   */
+  palette?: {
+    iconOf?: (item: PickItem<unknown>) => IconName | undefined;
+    kbdOf?: (item: PickItem<unknown>) => string | undefined;
+    /** 목록 아래의 키 안내(예: "↑↓ 이동 · Enter 실행 · Esc 닫기"). */
+    hint?: string;
+  };
+  /** 최근 목록에 적을 열쇠(기본: 카탈로그 코드, 없으면 이름). 명령은 id 로 적는다: 이름은 언어를 따라 바뀐다. */
+  recentId?: (item: PickItem<unknown>) => string;
   groupOf?: (item: PickItem<unknown>) => string | undefined;
   recentKey?: string;
   query?: string;

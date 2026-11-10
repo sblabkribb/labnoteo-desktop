@@ -89,6 +89,10 @@ export interface CommandContextDeps {
   navigate?: (dir: 'back' | 'forward') => void;
   /** 새 노트 대화상자를 연다(UI 재설계 Task 5). */
   newNote?: () => void;
+  /** 보관함 바꾸기(UI 재설계 Task 12). */
+  switchVault?: () => void;
+  /** 파일 탭에 보이는 파일(Task 12, 빠른 이동). */
+  treeFiles?: () => readonly string[];
 }
 
 /**
@@ -122,6 +126,8 @@ export function useCommandContext(deps: CommandContextDeps): CommandContext | un
       links: APP_LINKS,
       navigate: (dir) => latest.current.navigate?.(dir),
       newNote: () => latest.current.newNote?.(),
+      switchVault: () => latest.current.switchVault?.(),
+      treeFiles: () => latest.current.treeFiles?.() ?? linkIndex.files(),
     }),
     [deps.host, deps.vaultRoot],
   );

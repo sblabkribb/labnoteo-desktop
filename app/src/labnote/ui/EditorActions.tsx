@@ -25,9 +25,9 @@ interface Props {
 export function EditorActions({ ctx, path, disabled }: Props) {
   useLang();
   const action = isValidWorkflowPath(path)
-    ? { label: t('header.addUo'), title: coreT('Insert unit operation'), run: () => insertUnitOp(ctx) }
+    ? { label: t('header.addUo'), title: coreT('Insert unit operation'), commandId: 'insert-unit-operation', run: () => insertUnitOp(ctx) }
     : isExperimentReadme(path)
-      ? { label: t('header.addWorkflow'), title: coreT('Create workflow'), run: () => createWorkflow(ctx) }
+      ? { label: t('header.addWorkflow'), title: coreT('Create workflow'), commandId: 'create-workflow', run: () => createWorkflow(ctx) }
       : undefined;
   if (!action) return null;
   return (
@@ -35,6 +35,7 @@ export function EditorActions({ ctx, path, disabled }: Props) {
       type="button"
       className="btn primary view-primary"
       title={action.title}
+      data-command-id={action.commandId}
       disabled={disabled}
       onClick={() => void runCommand(ctx, action.run)}
     >
@@ -54,6 +55,7 @@ export function NoteQrButton({ ctx, path, disabled }: Props) {
       className="ibtn editor-qr"
       aria-label={coreT('Show note barcode')}
       title={coreT('Show note barcode')}
+      data-command-id="show-note-barcode"
       disabled={disabled}
       onClick={() => void runCommand(ctx, () => showBarcode(ctx, path))}
     >
