@@ -4,7 +4,12 @@
 //!
 //! - `transport`: one HTTP exchange (POST with a JSON or SSE answer, GET
 //!   resume, DELETE of a session).
+//! - `session`: initialize with version negotiation, re-initialize on 404,
+//!   tools/list and tools/call.
+//! - `tools`: sanitising tool descriptors and compacting call results.
 
+pub mod session;
+pub mod tools;
 pub mod transport;
 
 #[cfg(test)]
