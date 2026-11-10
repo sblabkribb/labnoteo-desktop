@@ -21,6 +21,9 @@ export const TREE_ICONS: Readonly<Record<string, IconName>> = Object.freeze({
   'symbol-class': 'workflow',
   'symbol-method': 'circle-dot',
   'symbol-function': 'code',
+  // 실험 탭(experimentTree): 끝난 UO, 추가 줄
+  'uo-done': 'circle-check',
+  add: 'plus',
   // 파일 종류
   experiment: 'flask-conical',
   readme: 'flask-conical',

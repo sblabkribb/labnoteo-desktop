@@ -198,6 +198,33 @@ describe('insert-unit-operation', () => {
     expect(h.vault.files()[README_PATH]).toBe(README);
   });
 
+  it('with a target workflow (Experiments tab), it opens that note and adds the UO after its last one', async () => {
+    h = createTestHost({ [README_PATH]: README, [WF_PATH]: workflowNote() });
+    // 편집기는 이미 그 노트를 읽었고(앱에서는 openFile 이 바꿔 연다), 열린 노트는 README 다
+    const mounted = await h.mount(WF_PATH);
+    h.setActive(README_PATH);
+    const opened: Array<[string, unknown]> = [];
+    h.ctx.openFile = async (path, at) => {
+      opened.push([path, at]);
+      h.setActive(path);
+    };
+    h.answer.pick(pickOp('USW010'));
+    h.answer.alias('끝');
+    await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx, undefined, { workflowPath: WF_PATH })));
+    expect(opened.map(([p]) => p)).toEqual([WF_PATH]);
+    const doc = mounted.view().state.doc.toString();
+    const headings = doc.split('\n').filter((l) => /^### \[/.test(l));
+    expect(headings.map((l) => l.slice(5, 11))).toEqual(['UHW010', 'UHW180', 'USW010']);
+  });
+
+  it('with a target that is not a workflow note, it says why and opens nothing', async () => {
+    h = createTestHost({ [README_PATH]: README });
+    const openFile = vi.spyOn(h.ctx, 'openFile');
+    await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx, undefined, { workflowPath: README_PATH })));
+    expect(openFile).not.toHaveBeenCalled();
+    expect(h.notes).toEqual([{ kind: 'warn', message: expect.stringContaining('README.labnote.md') }]);
+  });
+
   it('with no note open, it asks to open a workflow note', async () => {
     h = createTestHost({ [README_PATH]: README });
     await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx)));

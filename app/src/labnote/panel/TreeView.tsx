@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import type { TreeNode } from '@labnoteo/core';
 import { treeKeyAction, type KeyRow } from '../../../vendor/labnoteo/src/views/treeKeys';
 import type { MenuAnchor } from '../ui/menuStore';
 import { treeIcon } from './treeIcons';
 import { depthAttrs } from '../../tree/depth';
-import { Icon } from '../../ui/Icon';
+import { Icon, type IconName } from '../../ui/Icon';
 
 interface Row extends KeyRow {
   node: TreeNode;
@@ -38,6 +38,26 @@ export interface TreeViewProps {
   rowClass?(node: TreeNode): string | undefined;
   /** 이름 뒤 오른쪽에 붙는 흐린 덧말(개수 등, 괄호 없이). 없으면 그리지 않는다. */
   meta?(node: TreeNode): string | undefined;
+  /** 줄 이름 대신 그릴 것(찾기의 <mark> 칠하기). 없으면 node.label. */
+  renderLabel?(node: TreeNode): ReactNode;
+  /** 이름 뒤 오른쪽에 붙는 흐린 고정폭 코드(WB030, UHW250). 덧말보다 앞이다. */
+  code?(node: TreeNode): ReactNode | undefined;
+  /** 아이콘 뒤의 상태 모양. onClick 이 있으면 단추(줄을 열지 않는다), 없으면 이름이 붙은 그림이다. */
+  state?(node: TreeNode): TreeState | undefined;
+  /** 줄에 커서를 올리면 보이는 작은 단추들(마우스용: 탭 정지가 아니다. 같은 일은 줄과 메뉴로도 한다). */
+  actions?(node: TreeNode): TreeAction[] | undefined;
+}
+
+export interface TreeState {
+  icon: IconName;
+  label: string;
+  onClick?: () => void;
+}
+
+export interface TreeAction {
+  icon: IconName;
+  label: string;
+  run: () => void;
 }
 
 /**
@@ -91,7 +111,7 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
  *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
  * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, actions }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -163,6 +183,9 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
         const mark = nodeClass?.(row.node);
         const icon = treeIcon(row.node.icon, row.expanded);
         const note = meta?.(row.node);
+        const codeText = code?.(row.node);
+        const shape = state?.(row.node);
+        const buttons = actions?.(row.node) ?? [];
         return (
           <li
             key={row.key}
@@ -190,8 +213,50 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             </span>
             {icon ? <Icon name={icon} className={`tree-icon ti-${row.node.icon}`} /> : <span className="tree-icon" aria-hidden="true" />}
             {mark && <span className={mark} aria-hidden="true" />}
-            <span className="wf-tree-label">{row.node.label}</span>
+            {shape &&
+              (shape.onClick ? (
+                <button
+                  type="button"
+                  className="tree-state"
+                  data-icon={shape.icon}
+                  tabIndex={-1}
+                  aria-label={shape.label}
+                  title={shape.label}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    shape.onClick!();
+                  }}
+                >
+                  <Icon name={shape.icon} size={14} />
+                </button>
+              ) : (
+                <span className="tree-state" data-icon={shape.icon} role="img" aria-label={shape.label} title={shape.label}>
+                  <Icon name={shape.icon} size={14} />
+                </span>
+              ))}
+            <span className="wf-tree-label">{renderLabel ? renderLabel(row.node) : row.node.label}</span>
+            {codeText !== undefined && codeText !== '' && <span className="meta code">{codeText}</span>}
             {note && <span className="tree-meta">{note}</span>}
+            {buttons.length > 0 && (
+              <span className="tree-actions">
+                {buttons.map((b) => (
+                  <button
+                    key={b.label}
+                    type="button"
+                    className="tree-action"
+                    tabIndex={-1}
+                    aria-label={b.label}
+                    title={b.label}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      b.run();
+                    }}
+                  >
+                    <Icon name={b.icon} size={14} />
+                  </button>
+                ))}
+              </span>
+            )}
           </li>
         );
       })}

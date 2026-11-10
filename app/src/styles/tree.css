@@ -249,3 +249,57 @@ button.links-target:focus-visible { outline-offset: -2px; }
 .tree-icon.ti-beaker,
 .tree-icon.ti-experiment,
 .tree-icon.ti-readme { color: var(--accent); }
+
+/* 실험 탭(UI 재설계 Task 10): 묶음 줄, 상태 모양, 고정폭 코드, 줄 위의 + 단추, 추가 줄, 찾기 칠하기, 커서가 든 UO */
+.wf-tree-row.tree-group { color: var(--text-muted); font-size: var(--font-size-label); font-weight: 600; }
+.tree-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+}
+button.tree-state { cursor: pointer; }
+button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
+.tree-state[data-icon="circle-check"] { color: var(--success); }
+.tree-state[data-icon="circle-half"] { color: var(--accent); }
+/* 오른쪽 끝의 코드(WB030, UHW250): 흐린 고정폭. 덧말(1/2)이 뒤에 오면 그 앞에 붙는다 */
+.wf-tree-row .meta.code {
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--space-4);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-label);
+}
+.wf-tree-row .meta.code + .tree-meta { margin-left: 0; padding-left: var(--space-3); }
+/* 줄 위에 커서가 있을 때만 보이는 + 단추. 자리를 차지하지 않다가 나타난다 */
+.tree-actions { display: none; flex: none; gap: var(--space-1); margin-left: var(--space-2); }
+.wf-tree-row:hover > .tree-actions { display: inline-flex; }
+.wf-tree-label + .tree-actions { margin-left: auto; }
+.tree-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tree-action:hover { background: var(--bg-selected); color: var(--text); }
+/* "+ 워크플로 추가", "+ 유닛 오퍼레이션 추가": 흐린 글, 커서를 올리면 또렷해진다 */
+.wf-tree-row.ghost { color: var(--text-muted); }
+.wf-tree-row.ghost:hover { color: var(--text); }
+.wf-tree-row.ghost .tree-icon { color: inherit; }
+.wf-tree-row.uo-current { color: var(--accent); }
+.wf-tree-row mark { background: var(--accent-soft); color: var(--text); border-radius: 2px; }

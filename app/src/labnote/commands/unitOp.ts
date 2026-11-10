@@ -16,7 +16,7 @@ import { editTargetFor } from '../editTarget';
 import { coreLocale } from '../i18n';
 import { NoteBusyError } from '../noteErrors';
 import { openNote } from '../openNotes';
-import { VAULT_ROOT } from '../paths';
+import { VAULT_ROOT, samePath } from '../paths';
 import { catalogDescription, catalogKoFields, unitOpAliasHint, workflowAliasValidator } from '../port/aliasHints';
 import { ensureVaultCatalogs } from '../port/catalogUpdate';
 import { insertUnitOpAndUpdateToc } from '../port/insertUnitOpAndUpdateToc';
@@ -61,12 +61,61 @@ function viewOf(ctx: CommandContext, path: string) {
   return undefined;
 }
 
+/** UO 를 넣을 워크플로 노트(실험 탭의 줄): 없으면 열린 노트다. */
+export interface UnitOpTarget {
+  workflowPath: string;
+}
+
+/** 편집기가 그 노트를 다 읽을 때까지 기다리는 가장 긴 시간(ms). */
+const OPEN_WAIT_MS = 5000;
+
+/**
+ * 실험 탭에서 고른 워크플로 노트를 열고, 커서를 마지막 UO 제목(없으면 노트 끝)에 둔다: 새 UO 가 마지막 UO 뒤에 들어간다.
+ * 편집기가 그 노트를 읽을 때까지 기다린다. 열지 못하면(저장 못 함, 시간 초과) false.
+ */
+async function openAtLastUnitOp(ctx: CommandContext, path: string): Promise<boolean> {
+  let text: string;
+  try {
+    text = await ctx.host.fs.read(path);
+  } catch {
+    return false;
+  }
+  const blocks = listUnitOpBlocks(text);
+  const line = blocks.length > 0 ? blocks[blocks.length - 1].headingLine : text.split(/\r?\n/).length - 1;
+  await ctx.openFile(path, { line });
+  const ready = () => {
+    const handle = openNote(path);
+    const view = ctx.activeView();
+    return samePath(ctx.activePath(), path) && handle !== undefined && !handle.busy() && view !== undefined && handle.view() === view;
+  };
+  for (const start = Date.now(); !ready(); ) {
+    if (Date.now() - start > OPEN_WAIT_MS) return false;
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  const view = ctx.activeView()!;
+  const doc = view.state.doc;
+  const at = doc.line(Math.min(Math.max(1, line + 1), doc.lines)).from;
+  view.dispatch({ selection: { anchor: at } });
+  return true;
+}
+
 /**
  * 열린 워크플로 노트의 커서가 있는 블록 뒤에 단위 공정 블록을 넣고 목차를 맞춘다. 블록과 목차는 되돌리기 한 번이다.
- * `chosen` 을 주면(Workflows 패널) 고르기를 건너뛴다.
+ * `chosen` 을 주면(카탈로그) 고르기를 건너뛴다. `into` 를 주면(실험 탭의 추가 줄과 `+`) 그 워크플로 노트를 열고 마지막 UO 뒤에 넣는다.
  */
-export async function insertUnitOp(ctx: CommandContext, chosen?: ChosenUnitOp): Promise<void> {
+export async function insertUnitOp(ctx: CommandContext, chosen?: ChosenUnitOp, into?: UnitOpTarget): Promise<void> {
   const { host } = ctx;
+  if (into) {
+    const problem = workflowPathProblem(host, into.workflowPath);
+    if (problem) {
+      host.notify('warn', problem);
+      return;
+    }
+    if (!(await openAtLastUnitOp(ctx, into.workflowPath))) {
+      host.notify('warn', host.t('Please open a workflow file.'));
+      return;
+    }
+  }
   const path = ctx.activePath();
   if (!path) {
     host.notify('warn', host.t('Please open a workflow file.'));

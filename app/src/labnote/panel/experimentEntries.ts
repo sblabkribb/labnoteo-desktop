@@ -14,6 +14,11 @@ import { README } from '../paths';
 import { checklistProgress } from '../port/workflowView';
 
 const NOTE = /\.labnote\.md$/i;
+/** 실험 폴더 안의 그림 폴더와 첨부 폴더(실험 탭이 개수와 함께 보인다). */
+const IMAGES = 'images';
+const RESOURCES = 'resources';
+/** resources/ 안의 시스템 폴더: 첨부로 세지 않는다. */
+const SYSTEM_IN_RESOURCES = new Set(['labsamples', 'workflows']);
 const EXPERIMENT = /^\d{3}_/;
 /** 마커를 동시에 세는 실험의 수. */
 const MARKER_CONCURRENCY = 4;
@@ -28,8 +33,36 @@ async function listNames(fs: LabnoteFs, dir: string): Promise<string[]> {
   }
 }
 
+/** 실험 폴더의 워크플로 노트 하나: README 체크리스트에서 체크했는가. */
+export interface WorkflowFile {
+  /** 보관함 경로. */
+  path: string;
+  fileName: string;
+  /** README "Related Workflows" 체크리스트에서 이 노트의 항목이 [x] 다. */
+  ticked: boolean;
+}
+
+/**
+ * 실험 탭의 항목: 코어의 ExperimentEntry 에 앱이 더 읽은 것. 워크플로 노트(파일 이름 차례), 그림과 첨부의 개수
+ * (폴더가 있을 때만), README 경로.
+ */
+export interface PanelEntry extends ExperimentEntry {
+  readme: string;
+  workflowFiles: WorkflowFile[];
+  images?: number;
+  resources?: number;
+}
+
+/** 하위 폴더의 항목 수(폴더가 없으면 undefined). `skip` 의 이름(소문자)은 세지 않는다. */
+async function countIn(fs: LabnoteFs, folder: string, names: readonly string[], sub: string, skip?: ReadonlySet<string>): Promise<number | undefined> {
+  const name = names.find((n) => fold(n) === sub);
+  if (name === undefined) return undefined;
+  const kids = await listNames(fs, posix.join(folder, name));
+  return kids.filter((k) => !k.startsWith('.') && !skip?.has(fold(k))).length;
+}
+
 /** 폴더 목록 `names` 를 이미 읽은 실험 폴더의 항목. */
-async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[], markers?: number): Promise<ExperimentEntry> {
+async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[], markers?: number): Promise<PanelEntry> {
   let text = '';
   try {
     text = await fs.read(posix.join(folder, README));
@@ -56,10 +89,25 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     }
   }
 
+  // 워크플로 노트: 파일 이름(번호) 차례. 체크 여부는 체크리스트에서 그 파일 이름(대소문자 무시)의 항목을 본다
+  const tickedNames = new Set(items.filter((i) => i.done && i.fileName).map((i) => fold(posix.basename(i.fileName))));
+  const workflowFiles = names
+    .filter((n) => NOTE.test(n) && fold(n) !== fold(README))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .map((fileName) => ({ path: posix.join(folder, fileName), fileName, ticked: tickedNames.has(fold(fileName)) }));
+  const [images, resources] = await Promise.all([
+    countIn(fs, folder, names, IMAGES),
+    countIn(fs, folder, names, RESOURCES, SYSTEM_IN_RESOURCES),
+  ]);
+
   const linkpath = retryOfLinkpath(fm.retry_of);
   const retryOf = linkpath ? posix.dirname(linkpath) : undefined;
   return {
     folder,
+    readme: posix.join(folder, README),
+    workflowFiles,
+    ...(images !== undefined ? { images } : {}),
+    ...(resources !== undefined ? { resources } : {}),
     title: typeof fm.title === 'string' ? fm.title : undefined,
     status: typeof fm.status === 'string' ? fm.status : undefined,
     discuss: isDiscussFlagged(fm),
@@ -80,7 +128,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
  * (노트가 있는 항목만, 두 번 적힌 노트는 첫 항목으로 한 번), 폴더의 워크플로 노트 이름(찾기용), retry_of 가 가리키는 폴더.
  * `markers` 는 준 값, 없으면 0 이다(마커는 countMarkers 가 따로 센다).
  */
-export async function readExperimentEntry(fs: LabnoteFs, folder: string, markers?: number): Promise<ExperimentEntry> {
+export async function readExperimentEntry(fs: LabnoteFs, folder: string, markers?: number): Promise<PanelEntry> {
   return entryFrom(fs, folder, await listNames(fs, folder), markers);
 }
 
@@ -90,7 +138,7 @@ export async function readExperimentEntry(fs: LabnoteFs, folder: string, markers
  */
 export class ExperimentEntryCache {
   /** 폴더(소문자) -> 항목. null 은 README 가 없는 번호 폴더(실험이 아니다). */
-  private readonly entries = new Map<string, ExperimentEntry | null>();
+  private readonly entries = new Map<string, PanelEntry | null>();
   /** 폴더(소문자) -> 센 마커 수. */
   private readonly markers = new Map<string, number>();
   /** 폴더(소문자) -> 버린 횟수(+ epoch). 읽는 사이 버려졌으면 읽은 값을 기억하지 않는다. */
@@ -113,7 +161,7 @@ export class ExperimentEntryCache {
   }
 
   /** labnote/ 바로 아래 ###_ 폴더 가운데 README 가 있는 것들의 항목(재실험 연결 포함). 노트 본문은 읽지 않는다. */
-  async all(): Promise<ExperimentEntry[]> {
+  async all(): Promise<PanelEntry[]> {
     const names = (await listNames(this.fs, 'labnote')).filter((n) => EXPERIMENT.test(n));
     const folders = [...new Map(names.map((n) => [fold(n), posix.join('labnote', n)])).values()];
     const read = await Promise.all(
@@ -130,9 +178,10 @@ export class ExperimentEntryCache {
     );
     this.folders = folders.filter((_, i) => read[i] !== null);
     const out = read
-      .filter((e): e is ExperimentEntry => e !== null)
+      .filter((e): e is PanelEntry => e !== null)
       .map((e) => ({ ...e, markers: this.markers.get(fold(e.folder)) ?? 0 }));
-    return linkRetries(out);
+    // linkRetries 는 항목을 펼쳐 복사하므로 앱의 칸(workflowFiles 등)이 남는다
+    return linkRetries(out) as PanelEntry[];
   }
 
   /**

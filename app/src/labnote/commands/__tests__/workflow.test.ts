@@ -207,6 +207,17 @@ describe('create-workflow', () => {
     expect(fine).toBeNull();
   });
 
+  it('with a target, the workflow goes into that experiment, not the open note', async () => {
+    const OTHER = 'labnote/002_다른_실험';
+    h = createTestHost({ [README_PATH]: readme(), [`${OTHER}/README.labnote.md`]: readme() });
+    h.setActive(`${OTHER}/README.labnote.md`);
+    h.answer.pick(byId('WD030'));
+    h.answer.alias('');
+    await createWorkflow(h.ctx, undefined, { experimentDir: DIR });
+    expect(h.vault.files()[`${DIR}/001_WD030_Growth_Media_Design.labnote.md`]).toBeDefined();
+    expect(Object.keys(h.vault.files()).filter((p) => p.startsWith(OTHER))).toEqual([`${OTHER}/README.labnote.md`]);
+  });
+
   it("outside an experiment: 'Open a lab note first.'", async () => {
     h = createTestHost({ 'notes/a.md': 'x\n' });
     h.setActive('notes/a.md');

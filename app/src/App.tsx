@@ -63,7 +63,7 @@ import { ContextMenu } from './labnote/ui/ContextMenu';
 import { closeMenu, openMenu } from './labnote/ui/menuStore';
 import { EditorActions, NoteQrButton } from './labnote/ui/EditorActions';
 import { editorMenu, noteTreeMenu, viewMoreMenu } from './labnote/menus';
-import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
+import { ExperimentsPanel } from './labnote/panel/ExperimentsPanel';
 import { SamplesPanel } from './samples/SamplesPanel';
 import { OutlinePanel } from './editor/outline/OutlinePanel';
 import { LinksPanel } from './links/LinksPanel';
@@ -716,7 +716,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           </div>
           {tab === 'experiments' && (
             <div role="tabpanel" id="sidebar-panel-experiments" className="sidebar-panel" aria-labelledby="sidebar-tab-experiments">
-              {ctx ? <WorkflowsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
+              {ctx ? <ExperimentsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
             </div>
           )}
           {tab === 'samples' && (

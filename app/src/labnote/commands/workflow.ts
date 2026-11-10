@@ -21,6 +21,8 @@ import {
   hasWorkflowChecklistSection,
   insertWorkflowChecklistEntries,
   parseExperimenterFromReadme,
+  workflowChecklistEntryLink,
+  workflowChecklistSectionRange,
 } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
 import { coreLocale } from '../i18n';
@@ -169,11 +171,53 @@ export async function registerWorkflowInReadme(
   return hasSection ? 'registered' : 'noSection';
 }
 
-/** 'create-workflow': 열린 노트의 실험에 카탈로그 워크플로를 만들고 연다. `chosen` 은 Workflows 패널이 이미 고른 것. */
-export async function createWorkflow(ctx: CommandContext, chosen?: WorkflowItem): Promise<void> {
-  const labnoteDir = resolveLabnoteDir(ctx.host, ctx.activePath());
+/** 워크플로를 더할 실험(실험 탭의 줄): 없으면 열린 노트의 실험이다. */
+export interface WorkflowTarget {
+  experimentDir: string;
+}
+
+/**
+ * 'create-workflow': 카탈로그 워크플로를 만들고 연다. `chosen` 은 이미 고른 것. `target` 을 주면(실험 탭의 추가 줄과 `+`)
+ * 열린 노트가 아니라 그 실험에 만든다. 없으면 열린 노트의 실험이다.
+ */
+export async function createWorkflow(ctx: CommandContext, chosen?: WorkflowItem, target?: WorkflowTarget): Promise<void> {
+  const labnoteDir = target ? target.experimentDir : resolveLabnoteDir(ctx.host, ctx.activePath());
   if (!labnoteDir) return;
   await createWorkflowIn(ctx, labnoteDir, chosen);
+}
+
+/**
+ * README "Related Workflows" 체크리스트에서 그 워크플로 노트(`fileName`, 대소문자 무시)의 항목을 체크하거나 푼다
+ * (실험 탭의 상태 아이콘). 열린 README 면 그 버퍼에 적용하고 last_updated_date 를 찍는다. 항목이 없으면 알리고 아무것도 쓰지 않는다.
+ * 돌려주는 값은 바뀐 뒤의 체크 상태(항목이 없으면 undefined).
+ */
+export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: string, fileName: string): Promise<boolean | undefined> {
+  const { host } = ctx;
+  const readmePath = posix.join(experimentDir, README);
+  if (!(await host.fs.exists(readmePath))) {
+    host.notify('warn', host.t('This experiment has no README.labnote.md, so the workflow was not added to a checklist.'));
+    return undefined;
+  }
+  const stamp = readmeStamp(ctx.settings);
+  const want = fileName.toLowerCase();
+  let after: boolean | undefined;
+  await processNote(host.fs, readmePath, (text) => {
+    const range = workflowChecklistSectionRange(text);
+    if (!range) return text;
+    const lines = text.split('\n');
+    for (let i = range.header + 1; i < range.end; i++) {
+      const link = workflowChecklistEntryLink(lines[i].replace(/\r$/, ''));
+      if (!link || posix.basename(link).toLowerCase() !== want) continue;
+      const box = /\[( |x|X)\]/.exec(lines[i]);
+      if (!box) continue;
+      after = box[1] === ' ';
+      lines[i] = lines[i].slice(0, box.index) + (after ? '[x]' : '[ ]') + lines[i].slice(box.index + box[0].length);
+      return stamp(lines.join('\n'));
+    }
+    return text;
+  });
+  if (after === undefined) host.notify('warn', t('experiments.notInChecklist', fileName, host.t('Sync workflow checklist with folder')));
+  return after;
 }
 
 /** 그 실험 폴더에 카탈로그 워크플로를 만들고 연다(파일 트리 메뉴: 열린 노트가 아니라 누른 폴더의 실험). */
