@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from 'react';
+import { useLayoutEffect, type MouseEvent, type RefObject } from 'react';
 import { useLang } from '../../i18n/useLang';
 import { AliasDialog } from './AliasDialog';
 import { ChoiceDialog } from './ChoiceDialog';
@@ -63,7 +63,7 @@ function Body({ entry }: { entry: DialogEntry }) {
 /**
  * 저장소(dialogStore)의 지금 대화상자를 그린다. .shell 밖에 그려야 한다: 대화상자가 열려 있는 동안 `blockRef`(.shell)에
  * inert 를 걸어 편집기·트리·상단 바가 초점도 클릭도 받지 않게 한다. 마지막 대화상자가 닫히면 inert 를 푼 뒤 열기 전 초점 자리
- * (편집기의 그림자 루트 안 포함)로 초점을 돌려준다. 언어를 바꾸면 열린 채로 글자만 바뀐다.
+ * (편집기의 그림자 루트 안 포함)로 초점을 돌려준다. 언어를 바꾸면 열린 채로 글자만 바뀐다. 하나 고르기는 배경을 눌러도 닫힌다.
  */
 export function DialogLayer({ blockRef }: { blockRef?: RefObject<HTMLElement> }) {
   useLang();
@@ -82,9 +82,16 @@ export function DialogLayer({ blockRef }: { blockRef?: RefObject<HTMLElement> })
   }, [open, blockRef]);
 
   if (!current) return null;
+  // 하나 고르기(팔레트, 빠른 이동, 카탈로그 …)는 바깥(배경)을 누르면 닫힌다: 잃을 입력이 없다. 입력·확인 창은 Esc 나 단추로만 닫는다.
+  const dismissOutside = current.spec.kind === 'pick';
+  const onBackdrop = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || e.target !== e.currentTarget) return;
+    e.preventDefault();
+    settleDialog(current.id, current.cancelValue);
+  };
   return (
     <div className="dialog-layer">
-      <div className="dialog-backdrop" />
+      <div className="dialog-backdrop" onMouseDown={dismissOutside ? onBackdrop : undefined} />
       <Body key={current.id} entry={current} />
     </div>
   );

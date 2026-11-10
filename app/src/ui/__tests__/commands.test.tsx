@@ -3,7 +3,7 @@
  * UI 재설계 Task 12: 모든 동작은 등록된 명령이다(명세 §5.5). 리본·머리 단추의 명령 id, 새 명령의 이름, 팔레트의 kbd 칩과
  * 최근 명령, Ctrl+O 빠른 이동(UO 로 가기, 첨부 열기).
  */
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,7 +16,8 @@ import { clearCommandsForTest, commandById } from '../../labnote/commands/regist
 import { registerAllCommands } from '../../labnote/commands/registerAll';
 import { createAppHost } from '../../labnote/host/createAppHost';
 import { DialogLayer } from '../../labnote/host/DialogLayer';
-import { closeAllDialogs, currentDialog } from '../../labnote/host/dialogStore';
+import { closeAllDialogs, currentDialog, openDialog, pickDialog } from '../../labnote/host/dialogStore';
+import { publishExperimentTree } from '../../labnote/panel/experimentTreeSnapshot';
 import { clearToasts } from '../../labnote/host/toastStore';
 import { EditorActions, NoteQrButton } from '../../labnote/ui/EditorActions';
 import { openPalette } from '../../labnote/ui/CommandPalette';
@@ -113,6 +114,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   act(() => closeAllDialogs());
+  publishExperimentTree(undefined);
   cleanup();
   clearCommandsForTest();
   clearAppCommandsForTest();
@@ -151,6 +153,9 @@ describe('everything is a command (Task 12)', () => {
         <NoteQrButton ctx={ctx} path={WF} disabled={false} />
       </>,
     );
+    // 단추마다 명령 id 가 있다: 속성 없이 새로 단 단추도 여기서 걸린다
+    const bare = [...document.querySelectorAll('button')].filter((b) => !b.hasAttribute('data-command-id'));
+    expect(bare.map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual([]);
     const rendered = [...document.querySelectorAll('[data-command-id]')].map((el) => el.getAttribute('data-command-id')!);
     expect(rendered.length).toBeGreaterThanOrEqual(13);
     const ids = [...new Set([...rendered, ...sourceCommandIds()])];
@@ -232,6 +237,10 @@ describe('everything is a command (Task 12)', () => {
     await screen.findByRole('dialog');
     expect(labelOf(options()[0])).toBe(catalogs.ko['cmd.showSystemFiles']);
     expect(screen.getByText('최근')).toBeTruthy();
+    // 최근 다음의 나머지 줄에도 머리가 있다: 경계가 보인다
+    const groups = screen.getAllByRole('group');
+    expect(groups.map((g) => g.querySelector('.picker-group')?.textContent)).toEqual(['최근', '모든 명령']);
+    expect(within(groups[1]).getAllByRole('option').length).toBeGreaterThan(5);
     // 언어를 바꿔도 같은 명령이 맨 위다(이름이 아니라 id 로 기억한다)
     act(() => closeAllDialogs());
     act(() => setLang('en'));
@@ -241,7 +250,80 @@ describe('everything is a command (Task 12)', () => {
   });
 });
 
+describe('pickers close on an outside click', () => {
+  it('a mousedown on the backdrop cancels the palette and the quick switcher, not a click inside', async () => {
+    render(<Layer />);
+    const ctx = makeCtx();
+    let done: Promise<void> = Promise.resolve();
+    act(() => void (done = openPalette(ctx)));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    fireEvent.mouseDown(dialog);
+    expect(currentDialog()).not.toBeNull();
+    fireEvent.mouseDown(document.querySelector('.dialog-backdrop')!);
+    await waitFor(() => expect(currentDialog()).toBeNull());
+    await done;
+
+    done = runQuickSwitcher(ctx, { tree: async () => TREE });
+    await screen.findByRole('dialog', { name: '빠른 이동' });
+    fireEvent.mouseDown(document.querySelector('.dialog-backdrop')!, { button: 2 });
+    expect(currentDialog()).not.toBeNull();
+    fireEvent.mouseDown(document.querySelector('.dialog-backdrop')!);
+    await done;
+    expect(currentDialog()).toBeNull();
+    expect(ctx.openFile).not.toHaveBeenCalled();
+  });
+
+  it('any single picker resolves undefined on an outside click; a confirm dialog stays open', async () => {
+    render(<Layer />);
+    let picked: Promise<string | undefined> = Promise.resolve('x');
+    act(() => void (picked = pickDialog([{ label: 'A', value: 'a' }])));
+    await screen.findByRole('dialog');
+    fireEvent.mouseDown(document.querySelector('.dialog-backdrop')!);
+    expect(await picked).toBeUndefined();
+
+    act(() => void openDialog({ kind: 'confirm', message: '지울까요?' }, false));
+    await screen.findByRole('alertdialog');
+    fireEvent.mouseDown(document.querySelector('.dialog-backdrop')!);
+    expect(currentDialog()?.spec.kind).toBe('confirm');
+  });
+});
+
 describe('quick switcher (Ctrl+O)', () => {
+  it('opens at once with notes and attachments, says it is reading UOs, then adds the UO rows', async () => {
+    const user = userEvent.setup();
+    render(<Layer />);
+    const ctx = makeCtx();
+    let finish: (tree: readonly ExpNode[]) => void = () => undefined;
+    const done = runQuickSwitcher(ctx, { tree: () => new Promise((resolve) => (finish = resolve)) });
+    const dialog = await screen.findByRole('dialog', { name: '빠른 이동' });
+    expect(options().map(labelOf)).toEqual(expect.arrayContaining(['Inbox', 'plate.csv']));
+    expect(within(dialog).getByRole('status').textContent).toBe('UO 목록을 읽는 중…');
+    await user.type(screen.getByRole('combobox'), 'UHW100');
+    expect(options().map(labelOf)).not.toContain('WB030 pUC19 조립 › UHW100 벡터 증폭');
+    act(() => finish(TREE));
+    await waitFor(() => expect(labelOf(options()[0])).toBe('WB030 pUC19 조립 › UHW100 벡터 증폭'));
+    expect(within(dialog).queryByRole('status')).toBeNull();
+    // 받은 검색어는 그대로다
+    expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('UHW100');
+    act(() => closeAllDialogs());
+    await done;
+  });
+
+  it("uses the experiment tab's tree when it is open: UO rows are there at once, nothing is read", async () => {
+    render(<Layer />);
+    const read = vi.fn(async () => '');
+    const ctx = makeCtx({ host: createAppHost({ fs: { read, list: read } as unknown as AppFs, editTarget: () => undefined, openFile: async () => undefined }) });
+    publishExperimentTree(TREE);
+    const done = runQuickSwitcher(ctx);
+    const dialog = await screen.findByRole('dialog', { name: '빠른 이동' });
+    expect(options().map(labelOf)).toContain('WB030 pUC19 조립 › UHW100 벡터 증폭');
+    expect(within(dialog).queryByRole('status')).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    act(() => closeAllDialogs());
+    await done;
+  });
+
   it('Ctrl+O (also on a Korean layout) is the quick switcher command; it opens the switcher', async () => {
     const e = new KeyboardEvent('keydown', { key: 'ㅐ', code: 'KeyO', ctrlKey: true });
     expect(shellShortcut(e)).toBe('app.quickSwitcher');

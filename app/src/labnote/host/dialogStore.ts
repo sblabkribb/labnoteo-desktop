@@ -87,6 +87,14 @@ export interface PickExtras {
   /** 최근 목록에 적을 열쇠(기본: 카탈로그 코드, 없으면 이름). 명령은 id 로 적는다: 이름은 언어를 따라 바뀐다. */
   recentId?: (item: PickItem<unknown>) => string;
   groupOf?: (item: PickItem<unknown>) => string | undefined;
+  /** 머리 있는 묶음(최근 등) 뒤에 오는 이름 없는 묶음의 머리. 없으면 "그 밖"(picker.rest). 팔레트는 "모든 명령". */
+  restHead?: string;
+  /**
+   * 뒤에서 읽는 전체 목록(빠른 이동의 UO): 고르기는 `items` 로 바로 열리고, 이것이 끝나면 그 목록으로 바뀐다. 실패하면 `items` 그대로.
+   * 읽는 동안 목록 아래에 `pendingNote` 를 보인다.
+   */
+  pending?: Promise<readonly PickItem<unknown>[]>;
+  pendingNote?: string;
   recentKey?: string;
   query?: string;
   onQuery?: (query: string) => void;

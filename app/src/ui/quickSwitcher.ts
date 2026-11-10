@@ -2,6 +2,7 @@ import type { PickItem } from '@labnoteo/core';
 import type { CommandContext } from '../labnote/commands/context';
 import { ExperimentEntryCache } from '../labnote/panel/experimentEntries';
 import { buildExperimentTree, type ExpNode } from '../labnote/panel/experimentTree';
+import { latestExperimentTree } from '../labnote/panel/experimentTreeSnapshot';
 import { fileKind, isNotePath, treeIcon } from '../labnote/panel/treeIcons';
 import { linkIndex } from '../links/linkIndex';
 import { t } from '../i18n/t';
@@ -76,12 +77,15 @@ async function vaultTree(ctx: CommandContext): Promise<ExpNode[]> {
 /**
  * 빠른 이동(리본의 찾기 단추, Ctrl+O, 명세 §5.5): 노트, UO, 첨부를 이름으로 골라 연다. 팔레트와 같은 꼴이다.
  * UO 를 고르면 그 워크플로 노트를 열고 UO 제목 줄로 간다. 첨부를 고르면 보기(그림, 표, 파일 카드)로 연다.
+ * 바로 연다: 실험 탭이 그린 트리가 있으면 그 UO 를 쓰고, 없으면 노트와 첨부로 먼저 열고 UO 는 워크플로 노트를 다 읽은 뒤 더한다.
  */
 export async function runQuickSwitcher(ctx: CommandContext, deps: { tree?: () => Promise<readonly ExpNode[]> } = {}): Promise<void> {
   const files = ctx.treeFiles?.() ?? linkIndex.files();
-  const tree = await (deps.tree ?? (() => vaultTree(ctx)))();
-  const items = switcherItems(files, tree);
+  const ready = deps.tree ? undefined : latestExperimentTree();
+  const items = switcherItems(files, ready ?? []);
+  const pending = ready ? undefined : (deps.tree ?? (() => vaultTree(ctx)))().then((tree) => switcherItems(files, tree));
   if (items.length === 0) {
+    // 파일 목록이 비었으면 UO 도 없다(UO 는 워크플로 노트 안에 있다)
     ctx.host.notify('info', t('quickSwitcher.empty'));
     return;
   }
@@ -89,6 +93,8 @@ export async function runQuickSwitcher(ctx: CommandContext, deps: { tree?: () =>
     title: t('quickSwitcher.title'),
     placeholder: t('quickSwitcher.placeholder'),
     palette: { iconOf: (item) => switcherIcon(item.value as SwitcherTarget), hint: t('quickSwitcher.hint') },
+    pending,
+    pendingNote: t('quickSwitcher.loadingUos'),
   });
   if (chosen === undefined) return;
   await ctx.openFile(chosen.path, chosen.type === 'uo' ? { line: chosen.line } : undefined);

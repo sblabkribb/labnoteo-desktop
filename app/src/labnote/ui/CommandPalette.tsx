@@ -57,6 +57,7 @@ export async function openPalette(ctx: CommandContext): Promise<void> {
     placeholder: t('palette.placeholder'),
     palette: { iconOf: (item) => entry(item).icon, kbdOf: (item) => entry(item).kbd, hint: t('palette.hint') },
     recentKey: PALETTE_RECENT_KEY,
+    restHead: t('palette.all'),
     recentId: (item) => entry(item).command.id,
   });
   if (chosen) await runCommand(ctx, chosen.command);

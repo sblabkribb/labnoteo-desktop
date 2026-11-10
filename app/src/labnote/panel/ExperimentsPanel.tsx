@@ -23,6 +23,7 @@ import { discussWords, showMarkers, treeLabels } from '../port/workflowView';
 import { statusLabel, statusShape } from '../statusLabels';
 import { openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
 import { ExperimentEntryCache, type PanelEntry } from './experimentEntries';
+import { publishExperimentTree } from './experimentTreeSnapshot';
 import {
   coreEntryMatcher,
   experimentLabel,
@@ -48,6 +49,8 @@ export interface ExperimentsPanelProps {
   ctx: CommandContext;
   /** 편집기에 열린 노트: 그 노트의 갈래를 펼치고 보이게 한다. */
   activePath?: string;
+  /** 본문이 첨부 보기(그림, 표, 파일 카드)라 열린 노트가 가려져 있다: 그 노트와 커서 UO 를 강조하지 않는다. */
+  noteHidden?: boolean;
 }
 
 interface Catalog {
@@ -154,7 +157,7 @@ function useCursorLine(path: string | undefined): number | undefined {
  * - 첫 그리기는 README 와 폴더 목록만 읽고, 워크플로 본문(UO)과 `@issue` 마커 수는 뒤에서 채운다. 보관함 변경과
  *   vaultRefresh 에 바뀐 것만 버리고 다시 읽는다. 새 줄이 올 때까지 옛 줄을 둔다.
  */
-export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
+export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: ExperimentsPanelProps) {
   const lang = useLang();
   const { host } = ctx;
   const cache = useMemo(() => new ExperimentEntryCache(host.fs), [host]);
@@ -273,6 +276,13 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, textsVersion, activePath, liveText, wfCache]);
 
+  // 빠른 이동이 다시 읽지 않고 쓰게 다 읽은 트리를 내놓는다(UO 본문이 아직 오는 중이면 내놓지 않는다). 패널이 닫히면 거둔다.
+  const complete = entries !== undefined && entries.every((e) => e.workflowFiles.every((w) => texts.current.has(w.path)));
+  useEffect(() => {
+    publishExperimentTree(complete ? nodes : undefined);
+  }, [nodes, complete]);
+  useEffect(() => () => publishExperimentTree(undefined), []);
+
   // 찾기는 플러그인처럼 날짜(`2026-11`), 논의 낱말, 폴더·노트 이름도 본다(코어 filterExperiments)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const matcher = useMemo(() => coreEntryMatcher(discussWords(host), statusNames(host)), [host, lang]);
@@ -374,7 +384,7 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
   });
 
   // 커서가 든 UO: 열린 워크플로에서 커서 줄보다 앞에 있는 마지막 UO 제목
-  const currentUo = activeWf && cursorLine !== undefined ? [...activeWf.uos].reverse().find((u) => u.line <= cursorLine - 1) : undefined;
+  const currentUo = !noteHidden && activeWf !== undefined && cursorLine !== undefined ? [...activeWf.uos].reverse().find((u) => u.line <= cursorLine - 1) : undefined;
 
   const shownExpanded = searching ? new Set([...expanded, ...treeNodes.map((g) => g.id), ...found.expanded]) : expanded;
 
@@ -473,7 +483,7 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
 
   const isCurrent = (node: TreeNode) => {
     const item = items.get(node.id);
-    if (!activePath || !item) return false;
+    if (!activePath || !item || noteHidden) return false;
     if (item.kind === 'workflow') return samePath(item.wf.path, activePath);
     if (item.kind === 'readme') return samePath(item.exp.readme, activePath);
     return false;

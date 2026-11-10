@@ -110,14 +110,16 @@ function PaletteText(p: { item: PickItem<unknown>; query: string; palette: NonNu
 
 /**
  * 보이는 차례와 묶음 머리. 검색어가 있으면 순위 그대로(머리 없음). 없으면 최근 고른 것을 맨 위 "최근" 묶음에, 나머지는
- * groupOf 의 묶음(처음 나온 차례)으로 모은다.
+ * groupOf 의 묶음(처음 나온 차례)으로 모은다. 머리 있는 묶음 뒤에 오는 이름 없는 묶음은 `restHead`(기본 "그 밖")를 머리로 단다:
+ * "최근" 다음 줄들이 머리 없이 이어지면 경계가 안 보인다.
  */
-function arrange(
+export function arrange(
   ranked: PickItem<unknown>[],
   query: string,
   recent: readonly string[],
   groupOf: ((item: PickItem<unknown>) => string | undefined) | undefined,
   keyOf: (item: PickItem<unknown>) => string = itemKey,
+  restHead: string = t('picker.rest'),
 ): { items: PickItem<unknown>[]; heads: Map<number, string> } {
   const heads = new Map<number, string>();
   if (query.trim() || (!groupOf && recent.length === 0)) return { items: ranked, heads };
@@ -137,6 +139,7 @@ function arrange(
   if (recentItems.length > 0) heads.set(0, t('picker.recent'));
   for (const g of order) {
     if (g) heads.set(items.length, g);
+    else if (heads.size > 0) heads.set(items.length, restHead);
     items.push(...byGroup.get(g)!);
   }
   return { items, heads };
@@ -168,12 +171,26 @@ export function Picker(props: {
   const [active, setActive] = useState(0);
   // 연 순간의 최근 목록: 고르는 동안 바뀌지 않는다
   const [recent] = useState(() => (spec.recentKey ? readRecent(spec.recentKey) : []));
+  // 뒤에서 채우는 목록(spec.pending): 먼저 spec.items 로 열고, 다 읽으면 그 목록으로 바꾼다. 실패하면 처음 목록 그대로.
+  const [items, setItems] = useState(spec.items);
+  const [loading, setLoading] = useState(spec.pending !== undefined);
+  useEffect(() => {
+    if (!spec.pending) return;
+    let live = true;
+    spec.pending
+      .then((next) => live && setItems(next))
+      .catch(() => undefined)
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [spec.pending]);
   const input = useRef<HTMLInputElement>(null);
   const optionEls = useRef<(HTMLLIElement | null)[]>([]);
   const id = useId();
   const { items: ranked, heads } = useMemo(
-    () => arrange(withSelectedFirst(rankPickItems(spec.items, query), query, spec.selected), query, recent, spec.groupOf, spec.recentId),
-    [spec.items, spec.selected, spec.groupOf, spec.recentId, query, recent],
+    () => arrange(withSelectedFirst(rankPickItems(items, query), query, spec.selected), query, recent, spec.groupOf, spec.recentId, spec.restHead),
+    [items, spec.selected, spec.groupOf, spec.recentId, spec.restHead, query, recent],
   );
   const shown = ranked.slice(0, PICKER_MAX_ROWS);
   const current = Math.min(active, shown.length - 1);
@@ -269,7 +286,13 @@ export function Picker(props: {
           );
         })}
       </ul>
-      <MoreOrEmpty shown={shown.length} total={ranked.length} />
+      {loading && spec.pendingNote ? (
+        <p className="picker-note" role="status">
+          {spec.pendingNote}
+        </p>
+      ) : (
+        <MoreOrEmpty shown={shown.length} total={ranked.length} />
+      )}
       {spec.palette?.hint ? (
         <p className="picker-hint" aria-hidden="true">
           {spec.palette.hint}

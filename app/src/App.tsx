@@ -710,7 +710,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           </div>
           {tab === 'experiments' && (
             <div role="tabpanel" id="sidebar-panel-experiments" className="sidebar-panel" aria-labelledby="sidebar-tab-experiments">
-              {ctx ? <ExperimentsPanel ctx={ctx} activePath={selected} /> : <p>{t('workflows.loading')}</p>}
+              {/* 첨부를 보는 동안은 열린 노트가 가려져 있다: 실험 트리도 앞 노트를 강조하지 않는다 */}
+              {ctx ? <ExperimentsPanel ctx={ctx} activePath={selected} noteHidden={viewing !== undefined} /> : <p>{t('workflows.loading')}</p>}
             </div>
           )}
           {tab === 'samples' && (
@@ -770,7 +771,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           links={<LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />}
         />
         <StatusBar
-          path={selected}
+          path={viewing ? undefined : selected}
           onReveal={() => showLeft('experiments')}
           notes={
             <>

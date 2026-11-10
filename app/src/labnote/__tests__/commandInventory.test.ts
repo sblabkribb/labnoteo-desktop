@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { clearCommandsForTest, commands } from '../commands/registry';
 import { registerAllCommands } from '../commands/registerAll';
+import { appCommands, clearAppCommandsForTest, registerAllAppCommands } from '../../editor/commands/appCommands';
 
 const VENDOR_SRC = 'vendor/labnoteo/src';
 const SOURCES = ['main.ts', 'barcode/barcodeFeature.ts'];
@@ -66,7 +67,36 @@ function vendorIds(): Set<string> {
   return ids;
 }
 
-afterEach(() => clearCommandsForTest());
+/** 앱 자신의 명령(UI 재설계 Task 12): 플러그인에 없는 id 라 `app.` / `editor.` 로 시작한다. 플러그인 id 와 겹치지 않는다. 새 실험은 플러그인 명령 create-experiment 그대로다. */
+const APP_IDS = [
+  'app.toggleLeft',
+  'app.toggleRight',
+  'app.quickSwitcher',
+  'app.palette',
+  'app.settings',
+  'app.appearance',
+  'app.theme.system',
+  'app.theme.light',
+  'app.theme.dark',
+  'app.lang.ko',
+  'app.lang.en',
+  'app.switchVault',
+  'app.newNote',
+  'app.back',
+  'app.forward',
+  'app.showSystemFiles',
+  'app.revealInTree',
+  'editor.insert.table',
+  'editor.insert.callout',
+  'editor.insert.codeBlock',
+  'editor.insert.hr',
+  'editor.insert.mathBlock',
+] as const;
+
+afterEach(() => {
+  clearCommandsForTest();
+  clearAppCommandsForTest();
+});
 
 describe('명령 목록(플러그인과 맞춰 보기)', () => {
   it('every SP2 command id is registered after registerAllCommands()', () => {
@@ -97,6 +127,16 @@ describe('명령 목록(플러그인과 맞춰 보기)', () => {
     const registered = new Set(commands().map((c) => c.id));
     expect(Object.keys(DEFERRED).filter((id) => !ids.has(id) || registered.has(id))).toEqual([]);
     expect(Object.values(DEFERRED).every((s) => s.trim() !== '')).toBe(true);
+  });
+
+  it('the app commands of UI redesign Task 12 are registered and do not reuse a vendor command id', () => {
+    registerAllCommands();
+    registerAllAppCommands();
+    const app = new Set(appCommands().map((c) => c.id));
+    expect(APP_IDS.filter((id) => !app.has(id))).toEqual([]);
+    const vendor = vendorIds();
+    const plugin = new Set(commands().map((c) => c.id));
+    expect([...app].filter((id) => vendor.has(id) || plugin.has(id))).toEqual([]);
   });
 
   it('the renumber-workflows note names the sample source hook it must call (SP5 D2, #149)', async () => {
