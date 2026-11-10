@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../../i18n/t';
 import { coreT } from '../../labnote/i18n';
-import { isMcpServerUrl, isServiceUrl } from '../../labnote/settings';
+import { isMcpName, isMcpServerUrl, isServiceUrl, MCP_CLIENT_MAX_SERVERS } from '../../labnote/settings';
 import type { IntegrationDeps } from '../IntegrationSettingsDialog';
 import {
   isSecretLookingUrl,
@@ -19,7 +19,8 @@ import {
 import { AllowHttpBox, cleartextOrigin, UrlField } from '../UrlField';
 import { McpKeyField } from './McpKeyField';
 import { MCP_PRESETS, type McpPresetDef } from './presets';
-import type { McpAuth, McpSecretFlag, McpServerInfo, McpServerSetting } from './types';
+import { setToolEnabled, toolEnabled } from './toolDefaults';
+import type { McpAuth, McpSecretFlag, McpServerInfo, McpServerSetting, McpToolInfo } from './types';
 
 /** 이 묶음이 Rust 에 바라는 것. 토큰은 `secretSet` 으로 나가기만 하고 돌아오지 않는다. 주소는 넘기지 않는다(id 로만). */
 export interface McpClientDeps {
@@ -60,6 +61,17 @@ interface Row {
 }
 
 type Result = 'checking' | { info: McpServerInfo } | { error: string };
+
+/** "MCP 서버 추가" 칸. 이름과 주소는 비밀이 아니다(토큰은 줄이 생긴 뒤 토큰 칸에 넣는다). */
+interface AddDraft {
+  name: string;
+  url: string;
+  auth: McpAuth;
+}
+interface AddNotes {
+  name?: string;
+  url?: { warning?: string; cleartext?: string };
+}
 
 /** "연결 확인" 이 거절된 까닭을 §9 의 한 줄로. Rust 의 글과 `Status` 의 body 는 보이지 않는다. */
 function connectErrorLine(e: unknown, auth: McpAuth): { text: string; focusToken: boolean } {
@@ -136,6 +148,11 @@ export function McpClientSection(p: {
   const [drafts, setDraftsState] = useState<Record<string, string>>({});
   const [urlNotes, setUrlNotes] = useState<Record<string, { warning?: string; cleartext?: string }>>({});
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [adding, setAdding] = useState<AddDraft | undefined>(undefined);
+  const [addNotes, setAddNotes] = useState<AddNotes>({});
+  /** 다음 그리기 뒤에 토큰 칸에 포커스를 줄 줄. */
+  const [focusKey, setFocusKey] = useState<string | undefined>(undefined);
 
   const rows: Row[] = [
     ...MCP_PRESETS.map((preset) => ({ key: preset.preset, preset, server: servers.find((s) => s.preset === preset.preset) })),
@@ -197,6 +214,12 @@ export function McpClientSection(p: {
     const row = rowsRef.current.find((r) => r.server?.id === p.focusServer);
     if (row) inputs.current[row.key]?.focus();
   }, [p.focusServer]);
+
+  useEffect(() => {
+    if (!focusKey) return;
+    inputs.current[focusKey]?.focus();
+    setFocusKey(undefined);
+  }, [focusKey]);
 
   const commitServers = async (next: McpServerSetting[]) => {
     serversRef.current = next;
@@ -317,6 +340,78 @@ export function McpClientSection(p: {
     }
   };
 
+  const toggleTool = async (server: McpServerSetting, tool: McpToolInfo) => {
+    const latest = serversRef.current.find((s) => s.id === server.id);
+    if (!latest || tool.tooLarge) return;
+    try {
+      await commitServers(serversRef.current.map((s) => (s.id === latest.id ? setToolEnabled(latest, tool.name, !toolEnabled(latest, tool)) : s)));
+    } catch {
+      // 앱의 설정 저장이 실패를 따로 알린다.
+    }
+  };
+
+  /** 직접 넣은 서버를 지운다: 먼저 Rust 가 토큰, 캐시, 세션을 지우고, 그다음에 설정에서 뺀다. 못 지우면 그대로 둔다. */
+  const removeServer = async (row: Row) => {
+    const server = row.server;
+    if (!server || server.preset) return;
+    setRowErrors((e) => {
+      const next = { ...e };
+      delete next[row.key];
+      return next;
+    });
+    try {
+      await mc.forget(server.id);
+      await commitServers(serversRef.current.filter((s) => s.id !== server.id));
+    } catch {
+      setRowErrors((e) => ({ ...e, [row.key]: t('mcpClient.err.remove') }));
+      return;
+    }
+    setResult(row.key, undefined);
+    const nextDrafts = { ...draftsRef.current };
+    delete nextDrafts[row.key];
+    setDrafts(nextDrafts);
+  };
+
+  const openAdd = () => {
+    setAdding({ name: '', url: '', auth: 'bearer' });
+    setAddNotes({});
+  };
+
+  /** 새 서버를 저장한다(spec §6.1). 아무 곳에도 연결하지 않는다: "연결 확인"을 눌러야 한다. */
+  const saveAdd = async () => {
+    if (!adding) return;
+    const name = adding.name.trim();
+    const notes: AddNotes = {};
+    if (!isMcpName(name)) notes.name = t('mcpClient.err.name');
+    const urlNote = urlProblem(adding.url, allowHttp());
+    if (urlNote.warning || urlNote.cleartext) notes.url = urlNote;
+    setAddNotes(notes);
+    if (notes.name || notes.url) return;
+    if (serversRef.current.length >= MCP_CLIENT_MAX_SERVERS) return;
+    let newId = newServerId();
+    while (serversRef.current.some((s) => s.id === newId)) newId = newServerId();
+    const server: McpServerSetting = { id: newId, name, url: adding.url.trim(), auth: adding.auth, enabled: true, tools: {} };
+    try {
+      await commitServers([...serversRef.current, server]);
+    } catch {
+      return;
+    }
+    setAdding(undefined);
+    setAddNotes({});
+    if (server.auth === 'bearer') setFocusKey(server.id);
+  };
+
+  const toggleAddAllow = async (origin: string) => {
+    const list = allowHttp();
+    const next = list.includes(origin) ? list.filter((o) => o !== origin) : [...list, origin];
+    try {
+      await deps.commit({ allowHttpOrigins: next });
+    } catch {
+      return;
+    }
+    if (adding) setAddNotes((n) => ({ ...n, url: urlProblem(adding.url, next) }));
+  };
+
   const startEditUrl = (row: Row) => {
     setDrafts({ ...draftsRef.current, [row.key]: row.server?.url ?? row.preset?.url ?? '' });
   };
@@ -348,12 +443,38 @@ export function McpClientSection(p: {
           <p className="prompt-hint">{t('mcpClient.noTools')}</p>
         ) : (
           <ul className="mcp-client-tools">
-            {info.tools.map((tool) => (
-              <li key={tool.name}>
-                <span className="mcp-client-tool-name">{cap(tool.title || tool.name, CAP_NAME)}</span>
-                {tool.description ? <span className="prompt-hint">{cap(tool.description, CAP_DESCRIPTION)}</span> : null}
-              </li>
-            ))}
+            {info.tools.map((tool, i) => {
+              const toolNameId = `${id}-${row.key}-tool-${i}`;
+              const server = row.server;
+              return (
+                <li key={tool.name}>
+                  <div className="mcp-client-tool-head">
+                    {server ? (
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        className="switch"
+                        aria-labelledby={toolNameId}
+                        checked={toolEnabled(server, tool)}
+                        disabled={tool.tooLarge}
+                        onChange={() => void toggleTool(server, tool)}
+                      />
+                    ) : null}
+                    <span id={toolNameId} className="mcp-client-tool-name">
+                      {cap(tool.title || tool.name, CAP_NAME)}
+                    </span>
+                    <span className="mcp-client-tool-tag">
+                      {tool.tooLarge
+                        ? t('mcpClient.tool.tooLarge')
+                        : tool.readOnly && !tool.destructive
+                          ? t('mcpClient.tool.readOnly')
+                          : t('mcpClient.tool.asks')}
+                    </span>
+                  </div>
+                  {tool.description ? <span className="prompt-hint">{cap(tool.description, CAP_DESCRIPTION)}</span> : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -425,8 +546,91 @@ export function McpClientSection(p: {
           <button type="button" disabled={results[row.key] === 'checking'} onClick={() => void connect(row)}>
             {t('mcpClient.connect')}
           </button>
+          {server && !server.preset ? (
+            <button type="button" onClick={() => void removeServer(row)}>
+              {t('mcpClient.remove')}
+            </button>
+          ) : null}
         </div>
+        {rowErrors[row.key] ? (
+          <p role="alert" className="prompt-hint warn">
+            {rowErrors[row.key]}
+          </p>
+        ) : null}
         {renderResult(row)}
+      </div>
+    );
+  };
+
+  const renderAddForm = (draft: AddDraft) => {
+    const formId = `${id}-add`;
+    const nameInputId = `${formId}-name`;
+    const urlNote = addNotes.url ?? {};
+    return (
+      <div role="group" aria-label={t('mcpClient.add')} className="integration-group mcp-client-server mcp-client-add">
+        <div className="integration-field">
+          <label className="prompt-question" htmlFor={nameInputId}>
+            {t('mcpClient.name')}
+          </label>
+          <input
+            id={nameInputId}
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={80}
+            value={draft.name}
+            onChange={(e) => {
+              setAdding({ ...draft, name: e.target.value });
+              setAddNotes((n) => ({ ...n, name: undefined }));
+            }}
+          />
+          {addNotes.name ? (
+            <p role="alert" className="prompt-hint warn">
+              {addNotes.name}
+            </p>
+          ) : null}
+        </div>
+        <UrlField
+          label={t('mcpClient.url')}
+          placeholder="https://"
+          value={draft.url}
+          onChange={(v) => {
+            setAdding({ ...draft, url: v });
+            setAddNotes((n) => ({ ...n, url: undefined }));
+          }}
+          onCommit={() => undefined}
+          warnings={[
+            ...(urlNote.warning ? [urlNote.warning] : []),
+            ...(urlNote.cleartext ? [coreT('This address is not encrypted, so the API key is sent in the clear.')] : []),
+          ]}
+        >
+          {urlNote.cleartext ? (
+            <AllowHttpBox checked={allowHttp().includes(urlNote.cleartext)} onToggle={() => void toggleAddAllow(urlNote.cleartext!)} />
+          ) : null}
+        </UrlField>
+        <fieldset className="integration-field mcp-client-auth">
+          <legend className="prompt-question">{t('mcpClient.auth')}</legend>
+          {(['bearer', 'none'] as const).map((a) => (
+            <label key={a} className="integration-allow">
+              <input type="radio" name={`${formId}-auth`} checked={draft.auth === a} onChange={() => setAdding({ ...draft, auth: a })} />{' '}
+              {a === 'bearer' ? t('mcpClient.auth.bearer') : t('mcpClient.auth.none')}
+            </label>
+          ))}
+        </fieldset>
+        <div className="integration-test">
+          <button type="button" onClick={() => void saveAdd()}>
+            {t('mcpClient.addSave')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAdding(undefined);
+              setAddNotes({});
+            }}
+          >
+            {t('integrations.cancel')}
+          </button>
+        </div>
       </div>
     );
   };
@@ -436,6 +640,15 @@ export function McpClientSection(p: {
       <h3>{t('mcpClient.title')}</h3>
       <p className="prompt-hint">{t('mcpClient.help')}</p>
       {rows.map(renderRow)}
+      {adding ? (
+        renderAddForm(adding)
+      ) : servers.length < MCP_CLIENT_MAX_SERVERS ? (
+        <div className="integration-test">
+          <button type="button" onClick={openAdd}>
+            {t('mcpClient.add')}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

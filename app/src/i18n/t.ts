@@ -843,6 +843,18 @@ const ko: Record<string, string> = {
   'mcpClient.err.keychain': '토큰을 저장하지 못했어요.',
   'mcpClient.err.offline': '서버에 연결하지 못했어요.',
   'mcpClient.err.status': '서버가 오류로 답했어요(오류 코드 {0}).',
+  'mcpClient.err.name': '이름은 1-40자로 써 주세요.',
+  'mcpClient.err.remove': '지우지 못했어요. 다시 해 보세요.',
+  'mcpClient.add': 'MCP 서버 추가',
+  'mcpClient.addSave': '추가',
+  'mcpClient.name': '이름',
+  'mcpClient.auth': '인증',
+  'mcpClient.auth.bearer': 'Bearer 토큰',
+  'mcpClient.auth.none': '인증 없음',
+  'mcpClient.remove': '삭제',
+  'mcpClient.tool.readOnly': '읽기만',
+  'mcpClient.tool.asks': '쓸 때마다 물어봐요',
+  'mcpClient.tool.tooLarge': '설명이 너무 커서 쓸 수 없어요',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -1685,6 +1697,18 @@ const en: Record<string, string> = {
   'mcpClient.err.keychain': 'The token could not be saved.',
   'mcpClient.err.offline': 'Could not reach the server.',
   'mcpClient.err.status': 'The server answered with an error (HTTP {0}).',
+  'mcpClient.err.name': 'Use a name of 1 to 40 characters.',
+  'mcpClient.err.remove': 'Could not remove it. Try again.',
+  'mcpClient.add': 'Add MCP server',
+  'mcpClient.addSave': 'Add',
+  'mcpClient.name': 'Name',
+  'mcpClient.auth': 'Authentication',
+  'mcpClient.auth.bearer': 'Bearer token',
+  'mcpClient.auth.none': 'No auth',
+  'mcpClient.remove': 'Remove',
+  'mcpClient.tool.readOnly': 'Read-only',
+  'mcpClient.tool.asks': 'Asks each time',
+  'mcpClient.tool.tooLarge': 'Too large to use',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

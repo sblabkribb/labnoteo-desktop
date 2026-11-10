@@ -173,7 +173,7 @@ export function isMcpServerUrl(v: unknown, allowHttp: readonly string[]): v is s
 }
 
 /** 서버 이름: 1-40자(코드 포인트), 빈칸만은 안 되고, 제어 문자(C0, DEL, C1)가 없다. */
-function isMcpName(v: unknown): v is string {
+export function isMcpName(v: unknown): v is string {
   if (typeof v !== 'string') return false;
   const n = [...v].length;
   // eslint-disable-next-line no-control-regex
