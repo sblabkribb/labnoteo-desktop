@@ -17,7 +17,13 @@ describe('externalApprovalMessage', () => {
   it('webAfterTaint shows why and the exact query', () => {
     const msg = externalApprovalMessage(search('PCR 정제 실험 노트 내용'), WEB, false, { tainted: true, reason: 'webAfterTaint' });
     expect(msg).toContain(t('web.confirm.afterTaint', 'PCR 정제 실험 노트 내용'));
-    expect(msg).toContain(t('mcpClient.confirm.title', 'web', 'web_search'));
+    // Task 22: the web is named in words ("웹의 'web_search'"), not by its kind id ("web의").
+    expect(msg).toContain("AI가 웹의 'web_search' 도구를 쓰려고 해요.");
+    setLang('en');
+    expect(externalApprovalMessage(search('q'), WEB, false, { tainted: true, reason: 'webAfterTaint' })).toContain(
+      'The AI wants to use the tool "web_search" on the web.',
+    );
+    setLang('ko');
     expect(msg).not.toContain(t('ai.confirm.tainted'));
     expect(msg).not.toContain(t('web.tainted'));
   });

@@ -104,7 +104,8 @@ function queryLine(args: Record<string, unknown>): string {
  * 닿은 실행이면 웹 줄(`web.tainted`)을 덧붙인다(assistant spec §7.3).
  */
 export function externalApprovalMessage(call: ToolCall, meta: ExternalToolMeta, mutates: boolean, note?: ConfirmNote): string {
-  const server = meta.serverName ?? meta.serverId ?? meta.kind;
+  // 웹 도구에는 서버가 없다: 종류 id('web') 대신 말로 부른다(Task 22).
+  const server = meta.kind === 'web' ? t('web.serverName') : (meta.serverName ?? meta.serverId ?? meta.kind);
   const tool = meta.toolTitle ?? call.name;
   const parts = [t('mcpClient.confirm.title', server, tool)];
   if (mutates) parts.push(t('mcpClient.confirm.writes'));
