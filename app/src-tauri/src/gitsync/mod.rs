@@ -4,6 +4,8 @@
 //! `github_*` commands, never through `integration_state_*`.
 
 pub mod exif;
+#[cfg(test)]
+pub mod fixture_tools;
 pub mod journal;
 pub mod links;
 pub mod overlay;
