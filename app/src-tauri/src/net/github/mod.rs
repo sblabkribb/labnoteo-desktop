@@ -52,9 +52,15 @@ pub fn endpoints() -> GithubEndpoints {
     {
         let base = std::env::var(TEST_BASE_ENV).ok();
         let git = std::env::var(TEST_GIT_BASE_ENV).ok();
-        return with_overrides(GithubEndpoints::production(), base.as_deref(), git.as_deref());
+        return with_overrides(endpoints_release(), base.as_deref(), git.as_deref());
     }
     #[cfg(not(any(test, feature = "github-test-endpoints")))]
+    endpoints_release()
+}
+
+/// The release path of `endpoints()`: the constants, never an env var. A
+/// release build calls only this; the test wrapper above starts from it.
+pub fn endpoints_release() -> GithubEndpoints {
     GithubEndpoints::production()
 }
 
@@ -137,9 +143,12 @@ mod tests {
         assert_eq!(ep.git.as_str(), "http://127.0.0.1:9/git/");
     }
 
+    /// The tests that set the override env vars hold this, so they never race.
+    pub(super) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn endpoints_reads_the_env_but_only_for_loopback() {
-        // The only test that touches these env vars (no race with another).
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(TEST_BASE_ENV, "https://example.com");
         std::env::set_var(TEST_GIT_BASE_ENV, "https://example.com/git/");
         assert_eq!(endpoints(), GithubEndpoints::production());
@@ -148,5 +157,127 @@ mod tests {
         assert_eq!(endpoints().api.as_str(), "http://127.0.0.1:4000/");
         std::env::remove_var(TEST_BASE_ENV);
         assert_eq!(endpoints(), GithubEndpoints::production());
+    }
+}
+
+/// Plan Task 15: a release build cannot be pointed at another GitHub, and the
+/// GitHub token keeps to its own lane. Runs in the default feature set (CI).
+#[cfg(all(test, not(feature = "github-test-endpoints")))]
+mod release_inert {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn release_ignores_test_base() {
+        let _env = tests::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var(TEST_BASE_ENV, "http://127.0.0.1:1");
+        std::env::set_var(TEST_GIT_BASE_ENV, "file:///C:/x/");
+        // `endpoints()` itself reads the env under `cfg(test)`; the release
+        // build runs `endpoints_release()` alone.
+        let ep = endpoints_release();
+        std::env::remove_var(TEST_BASE_ENV);
+        std::env::remove_var(TEST_GIT_BASE_ENV);
+        assert_eq!(ep.api.as_str(), GITHUB_API);
+        assert_eq!(ep.web.as_str(), GITHUB_WEB);
+        assert_eq!(ep.git.as_str(), GITHUB_GIT);
+    }
+
+    fn src() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+    }
+
+    fn read(rel: &str) -> String {
+        std::fs::read_to_string(src().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}")).replace("\r\n", "\n")
+    }
+
+    /// The body of `enum <name> { … }` in `text` (no nested braces inside).
+    fn enum_body<'a>(text: &'a str, name: &str) -> &'a str {
+        let at = text.find(&format!("enum {name} {{")).unwrap_or_else(|| panic!("enum {name}"));
+        let rest = &text[at..];
+        let open = rest.find('{').unwrap() + 1;
+        let mut depth = 1;
+        for (i, c) in rest[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &rest[open..open + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("enum {name} is not closed")
+    }
+
+    /// Every variant name in an enum body (lines that start with an
+    /// uppercase identifier, doc comments and attributes skipped).
+    fn variants(body: &str) -> Vec<String> {
+        body.lines()
+            .map(str::trim)
+            .filter(|l| l.chars().next().is_some_and(|c| c.is_ascii_uppercase()))
+            .map(|l| l.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect())
+            .collect()
+    }
+
+    /// The body of `fn <name>(` up to its closing brace at column 0.
+    fn fn_body<'a>(text: &'a str, name: &str) -> &'a str {
+        let at = text.find(&format!("fn {name}(")).unwrap_or_else(|| panic!("fn {name}"));
+        let rest = &text[at..];
+        &rest[..rest.find("\n}\n").unwrap_or_else(|| panic!("fn {name} is not closed"))]
+    }
+
+    #[test]
+    fn state_name_has_no_github_variant() {
+        let names = variants(enum_body(&read("net/store.rs"), "StateName"));
+        assert!(!names.is_empty());
+        assert!(names.iter().all(|v| !v.to_ascii_lowercase().contains("github")), "{names:?}");
+    }
+
+    #[test]
+    fn secret_set_and_clear_refuse_the_github_slots() {
+        let text = read("net/secrets.rs");
+        for f in ["secret_set", "secret_clear"] {
+            assert!(fn_body(&text, f).contains("refuse_github(slot)?"), "{f}");
+        }
+        assert!(fn_body(&text, "refuse_github").contains("slot.is_github()"));
+    }
+
+    #[test]
+    fn github_call_cannot_delete_or_patch() {
+        let names = variants(enum_body(&read("net/github/api.rs"), "GithubCall"));
+        assert!(names.contains(&"CreateUserRepo".to_string()), "{names:?}");
+        for v in &names {
+            let l = v.to_ascii_lowercase();
+            assert!(!l.contains("delete") && !l.contains("patch"), "{v}");
+        }
+    }
+
+    /// Every `.rs` file under `dir`.
+    fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                rust_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    #[test]
+    fn no_force_refspec_literal() {
+        // Built at run time so this file does not match itself.
+        let needle = format!("\"{}refs", '+');
+        let mut files = Vec::new();
+        rust_files(&src(), &mut files);
+        assert!(files.len() > 10);
+        let hits: Vec<_> = files
+            .iter()
+            .filter(|p| std::fs::read_to_string(p).unwrap().contains(&needle))
+            .map(|p| p.display().to_string())
+            .collect();
+        assert!(hits.is_empty(), "force refspec in {hits:?}");
     }
 }

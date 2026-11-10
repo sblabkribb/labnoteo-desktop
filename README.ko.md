@@ -113,6 +113,12 @@ PartBank에서 부품을 찾아 바로 샘플로 등록하면 보관 위치도 �
 
 ![설정에서 MCP 서버를 켜고 클라이언트 설정을 복사하는 모습](docs/images/ko/labnoteo-mcp.gif)
 
+### GitHub에 올리기
+
+짧은 코드로 GitHub에 한 번 로그인하면, 실험 폴더 하나가 내 계정이나 연구실 조직 아래의 비공개 저장소 하나가
+됩니다. 보내기 전에 올라갈 파일 목록을 먼저 확인하고, 앱의 접근 권한은 github.com에서 언제든 거둘 수
+있습니다.
+
 ### 밝게 · 어둡게 · 한국어 · English
 
 밝은 테마와 어두운 테마 중에 고르거나 Windows 설정을 따릅니다. 화면 언어는 언제든 한국어와 영어 사이에서
@@ -168,9 +174,9 @@ labnoteO Desktop은 labnoteO의 기능을 모두 옮겨, 누구도 Obsidian 없�
 | [bfworkflow](https://github.com/sblabkribb/bfworkflow) 연동: 카탈로그 동기화, 설계에서 노트 만들기 | 사용 가능 |
 | LLM 보조(로컬 모델을 포함한 OpenAI 호환 엔드포인트)와 MCP 서버 | 사용 가능 |
 | 실험 표 CSV 내보내기 | 예정 |
-| 연구 저장소용 git 자동화 | 예정 |
+| 실험 폴더를 GitHub에 올리기(기본 비공개) | 사용 가능 |
 
-API 키(PartBank, bfworkflow, LLM, Slack)는 보관함이 아니라 Windows 자격 증명 관리자에 보관합니다.
+API 키(PartBank, bfworkflow, LLM, Slack, GitHub)는 보관함이 아니라 Windows 자격 증명 관리자에 보관합니다.
 
 ## 라이선스
 
