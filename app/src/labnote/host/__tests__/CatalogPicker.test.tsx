@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import type { PickItem } from '@labnoteo/core';
@@ -66,6 +66,10 @@ describe('catalog picker rows', () => {
     renderLayer();
     openIn(() => pickDialog(ITEMS, opts));
     expect(groups()).toEqual(['Design', 'Build', 'Test']);
+    // each group is a role="group" named by its header, so assistive technology hears it
+    const list = screen.getByRole('listbox');
+    expect(within(list).getAllByRole('group').map((g) => g.getAttribute('aria-label') ?? document.getElementById(g.getAttribute('aria-labelledby')!)?.textContent)).toEqual(['Design', 'Build', 'Test']);
+    expect(within(within(list).getByRole('group', { name: 'Build' })).getAllByRole('option').map((o) => o.querySelector('.picker-code')?.textContent)).toEqual(['WB010', 'WB030']);
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '조립' } });
     expect(groups()).toEqual([]);
     expect(options()[0].querySelector('.picker-code')?.textContent).toBe('WB030');

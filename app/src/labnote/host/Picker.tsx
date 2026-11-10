@@ -92,6 +92,15 @@ function arrange(
   return { items, heads };
 }
 
+/** 보이는 줄 [0, count) 을 묶음 머리 자리에서 나눈다. 머리 앞의 줄(머리 없는 묶음)은 head 가 없다. */
+function sections(count: number, heads: Map<number, string>): { start: number; end: number; head?: string }[] {
+  const starts = [...heads.keys()].filter((i) => i < count).sort((a, b) => a - b);
+  if (starts[0] !== 0) starts.unshift(0);
+  return starts
+    .map((start, k) => ({ start, end: starts[k + 1] ?? count, head: heads.get(start) }))
+    .filter((sec) => sec.end > sec.start);
+}
+
 function MoreOrEmpty({ shown, total }: { shown: number; total: number }) {
   if (total === 0) return <p className="picker-note">{t('picker.empty')}</p>;
   if (total > shown) return <p className="picker-note">{t('picker.more', total - shown)}</p>;
@@ -143,6 +152,24 @@ export function Picker(props: {
     }
   };
 
+  const renderOption = (item: PickItem<unknown>, i: number) => (
+    <li
+      key={i}
+      ref={(el) => {
+        optionEls.current[i] = el;
+      }}
+      id={optionId(i)}
+      role="option"
+      aria-selected={i === current}
+      className={item.dimmed ? 'picker-option dimmed' : 'picker-option'}
+      onMouseDown={(e) => e.preventDefault()}
+      onMouseMove={() => i !== current && setActive(i)}
+      onClick={() => choose(item)}
+    >
+      {spec.catalog ? <CatalogText item={item} active={i === current} /> : <ItemText item={item} />}
+    </li>
+  );
+
   return (
     <DialogFrame title={spec.title} className={spec.catalog ? 'picker catalog' : 'picker'} onCancel={props.onCancel} unsolicited={spec.unsolicited}>
       <input
@@ -164,29 +191,22 @@ export function Picker(props: {
         onKeyDown={onKeyDown}
       />
       <ul id={`${id}-list`} role="listbox" aria-label={spec.title ?? t('picker.list')} className="picker-list">
-        {shown.map((item, i) => (
-          <Fragment key={i}>
-            {heads.has(i) ? (
-              <li role="presentation" aria-hidden="true" className="picker-group">
-                {heads.get(i)}
-              </li>
-            ) : null}
-            <li
-              ref={(el) => {
-                optionEls.current[i] = el;
-              }}
-              id={optionId(i)}
-              role="option"
-              aria-selected={i === current}
-              className={item.dimmed ? 'picker-option dimmed' : 'picker-option'}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseMove={() => i !== current && setActive(i)}
-              onClick={() => choose(item)}
-            >
-              {spec.catalog ? <CatalogText item={item} active={i === current} /> : <ItemText item={item} />}
+        {sections(shown.length, heads).map(({ start, end, head }) => {
+          const rows = shown.slice(start, end).map((item, k) => renderOption(item, start + k));
+          if (head === undefined) return <Fragment key={start}>{rows}</Fragment>;
+          // 묶음은 role="group" 으로 묶고 머리를 이름으로 건다: 화면 낭독기도 "최근", "Build" 같은 묶음을 듣는다
+          const headId = `${id}-group-${start}`;
+          return (
+            <li key={start} role="group" aria-labelledby={headId} className="picker-section">
+              <div id={headId} className="picker-group">
+                {head}
+              </div>
+              <ul role="presentation" className="picker-section-list">
+                {rows}
+              </ul>
             </li>
-          </Fragment>
-        ))}
+          );
+        })}
       </ul>
       <MoreOrEmpty shown={shown.length} total={ranked.length} />
     </DialogFrame>

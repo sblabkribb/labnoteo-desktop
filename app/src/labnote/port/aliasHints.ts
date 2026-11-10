@@ -3,6 +3,7 @@
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: catalogDescription(id, description) -> catalogDescription(id, description, locale); `getObsidianLanguage()` -> the `locale` parameter.
 // Changes: catalogKoFields is exported and takes a `locale` parameter instead of reading `getObsidianLanguage()`.
+// Changes: catalogKoFields adds the Korean name and search words as keywords in every locale, not only in Korean (UI redesign spec §5.3).
 // Changes: readChecklistLabels takes `LabnoteFs`; README is imported from ../paths; the imports below replace the top of commands.ts.
 
 import type { LabnoteFs, LabnoteHost, PromptHint, UnitOpBlock } from '@labnoteo/core';
@@ -128,7 +129,7 @@ export function catalogDescription(id: string, description: string, locale: stri
 
 /**
  * A catalog item's picker lines: in the Korean UI its Korean name before the
- * category, with its search words (#163), and its description translated
+ * category; its Korean name and search words (#163) are keywords in any UI language; its description translated
  * (#213). The English description then stays searchable as a keyword.
  * Nothing Korean for items a lab added or descriptions a lab edited.
  */
@@ -138,11 +139,14 @@ export function catalogKoFields(
   description: string,
   locale: string
 ): { description: string; detail: string; keywords?: readonly string[] } {
-  const ko = locale.toLowerCase().startsWith('ko') ? catalogKoEntry(id) : undefined;
+  const korean = locale.toLowerCase().startsWith('ko');
+  // The Korean name and search words stay searchable in either UI language (UI redesign spec §5.3);
+  // only the Korean UI shows the name.
+  const ko = catalogKoEntry(id);
   const detail = catalogDescription(id, description, locale);
   const keywords = [...(ko ? [ko.name, ...(ko.keywords ?? [])] : []), ...(detail !== description ? [description] : [])];
   return {
-    description: ko ? `${ko.name} · ${category}` : category,
+    description: ko && korean ? `${ko.name} · ${category}` : category,
     detail,
     ...(keywords.length > 0 ? { keywords } : {}),
   };

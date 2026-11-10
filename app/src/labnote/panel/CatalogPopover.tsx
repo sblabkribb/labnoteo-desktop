@@ -19,7 +19,8 @@ export interface CatalogTarget {
 /**
  * 실험 탭 카탈로그 항목의 작은 창(UI 재설계 Task 11): 코드, 영어 이름, 설명(한국어 화면이면 한국어와 영어), 장비·소프트웨어,
  * 그리고 주 동작 하나. 워크플로는 "현재 실험에 추가 (003 · …)", UO 는 "현재 워크플로에 삽입 (WB030 …)".
- * 대상이 없으면(실험·워크플로 노트가 열려 있지 않다) 단추는 꺼지고 까닭을 보인다. 카탈로그 이름은 영어 그대로다.
+ * 대상이 없으면(실험·워크플로 노트가 열려 있지 않다) 단추는 꺼지고 까닭을 보인다. 꺼진 단추도 aria-disabled 로만 꺼서
+ * 초점을 받는다(명세 §5.2): 키보드로 연 창이 초점을 받아 Esc 로 닫히고, 화면 낭독기가 까닭을 읽는다. 카탈로그 이름은 영어 그대로다.
  */
 export function CatalogPopover(p: {
   anchor: HTMLElement;
@@ -66,8 +67,9 @@ export function CatalogPopover(p: {
         <button
           type="button"
           className="primary"
-          disabled={!target}
+          aria-disabled={target ? undefined : true}
           aria-describedby={target ? undefined : reasonId}
+          title={target ? undefined : reason}
           onClick={() => {
             if (!target) return;
             p.onClose({ restoreFocus: false });

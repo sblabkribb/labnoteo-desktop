@@ -326,6 +326,9 @@ button.sample-def-link:hover { text-decoration: underline; }
   font-size: var(--font-size-label);
   font-weight: 600;
 }
-.picker-group:first-child { padding-top: var(--space-1); }
+.picker-section:first-child > .picker-group { padding-top: var(--space-1); }
+.picker-section-list { margin: 0; padding: 0; list-style: none; }
+/* 명세 §5.3: 고르기 창은 860px 틀(좁은 창에서는 화면 폭) */
+.dialog.picker.catalog { width: min(860px, 100%); }
 /* 별칭 단계의 "← 다시 고르기": 왼쪽 끝 */
 .alias-back { margin-right: auto; }

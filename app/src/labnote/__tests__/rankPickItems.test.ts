@@ -136,4 +136,16 @@ describe('rankPickItems: catalog ranking (UI redesign Task 11)', () => {
   it('every token must match somewhere', () => {
     expect(ids(hwItems, 'plate zzzz')).toEqual([]);
   });
+
+  it('the Korean name is searchable in the English UI too, but only the Korean UI shows it', () => {
+    const enItems = (workflows as { workflows: { id: string; name: string; description: string; category: string }[] }).workflows.map(
+      (wf): PickItem<string> => ({ label: `${wf.id}: ${wf.name}`, ...catalogKoFields(wf.id, wf.category, wf.description, 'en'), value: wf.id }),
+    );
+    const found = ids(enItems, '조립');
+    expect(found.indexOf('WB030')).toBeGreaterThanOrEqual(0);
+    expect(found.indexOf('WB030')).toBeLessThan(found.indexOf('WB010'));
+    const wb030 = enItems.find((i) => i.value === 'WB030')!;
+    expect(wb030.description).toBe('Build');
+    expect(wfItems.find((i) => i.value === 'WB030')!.description).toBe('DNA 조립 · Build');
+  });
 });

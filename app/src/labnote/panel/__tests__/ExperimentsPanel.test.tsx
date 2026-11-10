@@ -357,9 +357,35 @@ describe('ExperimentsPanel', () => {
     mount();
     const pop = await openCatalogEntry(user, /^워크플로/, [/^Build/], 'WB030');
     const add = within(pop).getByRole('button', { name: '현재 실험에 추가' }) as HTMLButtonElement;
-    expect(add.disabled).toBe(true);
+    // aria-disabled, not disabled: the button keeps focus so Esc works and a screen reader reads the reason
+    expect(add.disabled).toBe(false);
+    expect(add.getAttribute('aria-disabled')).toBe('true');
     expect(pop.textContent).toContain('먼저 실험 노트를 여세요.');
-    expect(add.getAttribute('aria-describedby')).toBeTruthy();
+    expect(document.getElementById(add.getAttribute('aria-describedby')!)?.textContent).toBe('먼저 실험 노트를 여세요.');
+    expect(add.title).toBe('먼저 실험 노트를 여세요.');
+    await user.click(add);
+    expect(createWorkflow).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: /^WB030 / })).toBeTruthy();
+  });
+
+  it('with no experiment open, Enter on a catalog row opens the popover with focus inside; Esc closes it and returns focus to the row', async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole('button', { name: /^카탈로그/ }));
+    const catalog = await screen.findByRole('tree', { name: '카탈로그' });
+    await user.click(within(catalog).getByRole('treeitem', { name: /^워크플로/ }));
+    await user.click(within(catalog).getByRole('treeitem', { name: /^Build/ }));
+    const row = within(catalog)
+      .getAllByRole('treeitem')
+      .find((li) => li.querySelector('.meta.code')?.textContent === 'WB030')!;
+    act(() => row.focus());
+    await user.keyboard('{Enter}');
+    const pop = await screen.findByRole('dialog', { name: /^WB030 / });
+    const add = within(pop).getByRole('button', { name: '현재 실험에 추가' });
+    expect(document.activeElement).toBe(add);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(row);
   });
 
   it('a catalog UO with a workflow note open: the popover inserts into that workflow; Esc closes it', async () => {
@@ -380,7 +406,7 @@ describe('ExperimentsPanel', () => {
     const user = userEvent.setup();
     mount({ active: `${EXP}/README.labnote.md` });
     const pop = await openCatalogEntry(user, /^HW UO/, [], 'UHW380');
-    expect((within(pop).getByRole('button', { name: '현재 워크플로에 삽입' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(pop).getByRole('button', { name: '현재 워크플로에 삽입' }).getAttribute('aria-disabled')).toBe('true');
     expect(pop.textContent).toContain('먼저 워크플로 노트를 여세요.');
   });
 });
