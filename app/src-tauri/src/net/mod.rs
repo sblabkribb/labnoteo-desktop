@@ -35,7 +35,7 @@ pub struct NetState {
     pending: Mutex<HashMap<String, Arc<Notify>>>,
     cancelled_early: Mutex<VecDeque<String>>,
     web_gate: tokio::sync::Mutex<Option<Instant>>,
-    /// The connection file last imported (`import::integration_import_file`):
+    /// The connection file last imported (`import::integration_import_pick`):
     /// the only file `integration_import_delete` may delete.
     pub(crate) last_import: Mutex<Option<std::path::PathBuf>>,
 }

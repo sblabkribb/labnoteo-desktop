@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useId, useRef, useState, type DragEvent, type MutableRefObject } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
 import { coreT, overrideOr } from '../labnote/i18n';
@@ -12,10 +12,12 @@ import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus,
 import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
 import { ScanSettingsSection } from '../labnote/scan/ScanSettingsSection';
+import type { RawInvoke } from '../fs/vaultImage';
 import {
+  checkDroppedFiles,
   deleteImportedFile,
+  importConnectionsBytes,
   importConnectionsFile,
-  pickConnectionsFile,
   type DeleteOutcome,
   type ImportOutcome,
   type ImportPart,
@@ -37,12 +39,13 @@ export interface IntegrationDeps {
   /** MCP 묶음(SP7 Part C)이 알림을 띄우고 Rust 를 부를 때. 없으면 MCP 묶음을 그리지 않는다. */
   mcp?: { notify: Notify; invoke?: InvokeFn };
   /**
-   * "파일에서 가져오기". 경로를 고르고(`pick`), Rust 가 읽고 키를 저장한 뒤 요약과 설정을 돌려준다(`run`).
-   * `remove` 는 Rust 가 기억한 마지막 가져온 파일만 지운다. 없으면 단추를 그리지 않는다.
+   * "파일에서 가져오기". `run` 은 Rust 가 고르기 창을 띄우고 읽고 키를 저장한 뒤 요약과 설정을 돌려준다(취소하면 null).
+   * `runBytes` 는 끌어 놓은 파일의 바이트를 같은 검사와 해석으로 가져온다. `remove` 는 Rust 가 기억한 마지막으로 고른
+   * 파일만 지운다. 없으면 가져오기 묶음을 그리지 않는다.
    */
   importFile?: {
-    pick(): Promise<string | null>;
-    run(path: string): Promise<ImportOutcome>;
+    run(): Promise<ImportOutcome | null>;
+    runBytes(name: string, bytes: Uint8Array): Promise<ImportOutcome>;
     remove(permanent: boolean): Promise<DeleteOutcome>;
   };
 }
@@ -90,8 +93,8 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
     clearSecret: (slot) => clearSecret(slot, invoke),
     mcp: { notify: (kind, message) => ctx.host.notify(kind, message), invoke },
     importFile: {
-      pick: () => pickConnectionsFile(t('integrations.import.pickTitle')),
-      run: (path) => importConnectionsFile(path, invoke),
+      run: () => importConnectionsFile(t('integrations.import.pickTitle'), invoke),
+      runBytes: (name, bytes) => importConnectionsBytes(name, bytes, invoke as unknown as RawInvoke),
       remove: (permanent) => deleteImportedFile(permanent, invoke),
     },
   };
@@ -136,7 +139,26 @@ const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
   unreadable: () => t('integrations.import.refused.unreadable'),
   notText: () => t('integrations.import.refused.notText'),
   unrecognized: () => t('integrations.import.refused.unrecognized'),
+  wrongType: () => t('integrations.import.refused.wrongType'),
 };
+
+/** 끌어 놓은 파일을 Rust 에 보내기 전에 거절한 까닭. */
+const DROP_REFUSAL_TEXT: Record<'oneFile' | 'tooLarge' | 'wrongType', () => string> = {
+  oneFile: () => t('integrations.import.dropOneFile'),
+  tooLarge: () => t('integrations.import.refused.tooLarge'),
+  wrongType: () => t('integrations.import.refused.wrongType'),
+};
+
+/** 파일의 바이트. `File.arrayBuffer` 가 없는 환경에서는 FileReader 로 읽는다. */
+function fileBytes(file: File): Promise<Uint8Array> {
+  if (typeof file.arrayBuffer === 'function') return file.arrayBuffer().then((b) => new Uint8Array(b));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
 
 const PROBLEM_TEXT: Record<ImportProblem, () => string> = {
   badUrl: () => t('integrations.import.reason.badUrl'),
@@ -257,6 +279,8 @@ export function IntegrationSettingsPage(props: {
   const [importLines, setImportLines] = useState<ImportLine[]>([]);
   /** 가져온 파일 지우기를 묻는 중: 휴지통으로(trash), 휴지통이 안 되면 영구히(permanent). */
   const [deleteAsk, setDeleteAsk] = useState<'trash' | 'permanent' | undefined>(undefined);
+  /** 연결 파일을 끌고 가져오기 칸 위에 있는 중. */
+  const [dropOver, setDropOver] = useState(false);
   /** 섹션이 맡긴, 아직 떠나지 않은 칸의 저장(플러그인 ctx.onHide). 닫기 전에 부른다. */
   const hideCommits = useRef<Array<() => Promise<void>>>([]);
 
@@ -277,21 +301,27 @@ export function IntegrationSettingsPage(props: {
     setDraftState(draftRef.current);
   };
 
-  const save = async (patch: Partial<IntegrationSettingsValue>) => {
+  /** 설정을 저장한다. 저장하지 못했으면 false(앱의 설정 저장이 따로 알린다. 대화상자는 열린 채로 둔다). */
+  const save = async (patch: Partial<IntegrationSettingsValue>): Promise<boolean> => {
     valRef.current = { ...valRef.current, ...patch };
     setVal(valRef.current);
     try {
       await deps.commit(patch);
-      // Rust 는 키를 주소(origin)에 묶는다(D6). 주소가 바뀌면 칸의 '설정됨' 여부도 바뀌므로 다시 읽어
-      // 배지와 구독자(partbank 기능, bfworkflow 준비 상태)를 새 주소에 맞춘다.
-      if (KEYED_ADDRESS_KEYS.some((k) => k in patch)) {
+    } catch {
+      return false;
+    }
+    // Rust 는 키를 주소(origin)에 묶는다(D6). 주소가 바뀌면 칸의 '설정됨' 여부도 바뀌므로 다시 읽어
+    // 배지와 구독자(partbank 기능, bfworkflow 준비 상태)를 새 주소에 맞춘다.
+    if (KEYED_ADDRESS_KEYS.some((k) => k in patch)) {
+      try {
         const s = await deps.status();
         setStatus(s);
         notifySecretsChange(s);
+      } catch {
+        // 상태를 읽지 못해도 설정은 저장됐다. 다음에 열면 새 상태를 읽는다.
       }
-    } catch {
-      // 저장 실패는 앱의 설정 저장이 따로 다룬다. 대화상자는 열린 채로 둔다.
     }
+    return true;
   };
 
   /** 주소(origin) 칸을 저장한다. 올바르지 않으면 저장하지 않고 false(경고는 칸 밑에 이미 보인다). */
@@ -354,39 +384,94 @@ export function IntegrationSettingsPage(props: {
     return keyed ? cleartext(originOf(raw)) : { warnings: [] as string[], box: null };
   };
 
-  /** 파일에서 가져오기: 고르기 → Rust 가 읽고 키 저장 → 설정 저장(늘 쓰는 흐름) → 키 상태 다시 읽기 → 지우기 제안. */
+  /**
+   * 가져온 결과를 반영한다: 요약 → 설정 저장(늘 쓰는 흐름) → 키 상태 다시 읽기 → 고른 파일이면 지우기 제안, 끌어 놓은
+   * 파일이면 "직접 지우세요". 설정을 저장하지 못하면 경고하고 지우기를 제안하지 않는다(파일이 유일한 원본일 수 있다).
+   */
+  const applyImport = async (out: ImportOutcome, source: 'picked' | 'dropped') => {
+    const lines = summaryLines(out);
+    setImportLines(lines);
+    if (out.status !== 'done') return;
+    const patch = out.settings;
+    for (const [k, v] of Object.entries(patch)) {
+      if (k in draftRef.current && typeof v === 'string') setDraft(k as DraftKey, v);
+    }
+    setNotice({});
+    const saved = Object.keys(patch).length === 0 || (await save(patch));
+    // Rust 가 키를 저장했다: 주소가 그대로여도 '설정됨'과 epoch 가 바뀌었을 수 있다.
+    try {
+      const s = await deps.status();
+      setStatus(s);
+      notifySecretsChange(s);
+    } catch {
+      // 상태를 읽지 못해도 가져오기는 끝났다. 다음에 열면 새 상태를 읽는다.
+    }
+    if (!saved) {
+      setImportLines([...lines, { text: t('integrations.import.saveFailed'), warn: true }]);
+      return;
+    }
+    if (out.imported.length === 0) return;
+    if (source === 'picked') setDeleteAsk('trash');
+    else setImportLines([...lines, { text: t('integrations.import.dropDeleteYourself'), warn: true }]);
+  };
+
+  /** 파일에서 가져오기: Rust 가 고르기 창을 띄우고 읽고 키를 저장한다. 취소하면 아무것도 하지 않는다. */
   const runImport = async () => {
     const io = deps.importFile;
     if (!io || importBusy) return;
     setImportBusy(true);
     try {
-      const path = await io.pick();
-      if (!path) return;
-      setDeleteAsk(undefined);
-      let out: ImportOutcome;
+      let out: ImportOutcome | null;
       try {
-        out = await io.run(path);
+        out = await io.run();
       } catch {
+        setDeleteAsk(undefined);
         setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
         return;
       }
-      setImportLines(summaryLines(out));
-      if (out.status !== 'done') return;
-      const patch = out.settings;
-      for (const [k, v] of Object.entries(patch)) {
-        if (k in draftRef.current && typeof v === 'string') setDraft(k as DraftKey, v);
-      }
-      setNotice({});
-      if (Object.keys(patch).length > 0) await save(patch);
-      // Rust 가 키를 저장했다: 주소가 그대로여도 '설정됨'과 epoch 가 바뀌었을 수 있다.
+      if (!out) return;
+      setDeleteAsk(undefined);
+      await applyImport(out, 'picked');
+    } catch {
+      setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const onDropOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    setDropOver(true);
+  };
+
+  /** 끌어 놓은 연결 파일: 하나, 64 KiB 이하, 받는 확장자일 때만 바이트를 한 번 Rust 에 보낸다. */
+  const onDrop = async (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDropOver(false);
+    const io = deps.importFile;
+    if (!io || importBusy) return;
+    const checked = checkDroppedFiles(e.dataTransfer?.files ?? []);
+    setDeleteAsk(undefined);
+    if ('refused' in checked) {
+      setImportLines([{ text: DROP_REFUSAL_TEXT[checked.refused](), warn: true }]);
+      return;
+    }
+    setImportBusy(true);
+    try {
+      let out: ImportOutcome;
+      let bytes: Uint8Array | undefined;
       try {
-        const s = await deps.status();
-        setStatus(s);
-        notifySecretsChange(s);
+        bytes = await fileBytes(checked.file);
+        out = await io.runBytes(checked.file.name, bytes);
       } catch {
-        // 상태를 읽지 못해도 가져오기는 끝났다. 다음에 열면 새 상태를 읽는다.
+        setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
+        return;
+      } finally {
+        // 키가 든 바이트를 쥐고 있지 않는다(보낸 쪽도 지우지만 여기서 한 번 더).
+        bytes?.fill(0);
       }
-      if (out.imported.length > 0) setDeleteAsk('trash');
+      await applyImport(out, 'dropped');
     } catch {
       setImportLines([{ text: t('integrations.import.failed'), warn: true }]);
     } finally {
@@ -496,6 +581,15 @@ export function IntegrationSettingsPage(props: {
               </button>
             </div>
             <p className="prompt-hint">{t('integrations.import.hint')}</p>
+            <div
+              className={dropOver ? 'integration-drop over' : 'integration-drop'}
+              onDragOver={onDropOver}
+              onDragEnter={onDropOver}
+              onDragLeave={() => setDropOver(false)}
+              onDrop={(e) => void onDrop(e)}
+            >
+              {t('integrations.import.dropHere')}
+            </div>
             {importLines.length > 0 ? (
               <div role="status" className="integration-field">
                 {importLines.map((line, i) => (
@@ -697,7 +791,9 @@ export function IntegrationSettingsPage(props: {
           <McpSection
             enabled={val.mcpEnabled}
             port={val.mcpPort}
-            commit={(patch) => save(patch)}
+            commit={async (patch) => {
+              await save(patch);
+            }}
             notify={deps.mcp.notify}
             invoke={deps.mcp.invoke}
           />

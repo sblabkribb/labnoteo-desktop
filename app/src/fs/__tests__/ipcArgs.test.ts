@@ -10,7 +10,7 @@ import { openWithDefaultApp, revealInFolder } from '../vaultOpen';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
-import { deleteImportedFile, importConnectionsFile } from '../../integrations/importFile';
+import { deleteImportedFile, importConnectionsBytes, importConnectionsFile } from '../../integrations/importFile';
 import { openInBrowser } from '../../labnote/print/openInBrowser';
 import * as scan from '../../labnote/scan/scanIpc';
 import * as mcp from '../../labnote/mcp/mcpIpc';
@@ -57,7 +57,8 @@ function recorder() {
     if (cmd === 'vault_exists') return true;
     if (cmd === 'settings_import_plugin') return '{}';
     if (cmd === 'settings_plugin_llm_key') return true;
-    if (cmd === 'integration_import_file') return { status: 'refused', reason: 'insideVault' };
+    if (cmd === 'integration_import_pick') return null;
+    if (cmd === 'integration_import_bytes') return { status: 'refused', reason: 'wrongType' };
     if (cmd === 'integration_import_delete') return 'gone';
     if (cmd === 'vault_read_image' || cmd === 'vault_read_bytes') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
@@ -122,7 +123,8 @@ describe('IPC 인자 이름 계약', () => {
     await net.secretStatus(r.invoke);
     await net.setSecret('partbankWeb', 'v', r.invoke);
     await net.clearSecret('partbankWeb', r.invoke);
-    await importConnectionsFile('D:/conn.json', r.invoke);
+    expect(await importConnectionsFile('Choose', r.invoke)).toBeNull();
+    await importConnectionsBytes('conn.env', new Uint8Array([1]), r.invoke);
     await deleteImportedFile(false, r.invoke);
     await net.partbankRequest({ connection: 'web', method: 'GET', path: '/auth/me' }, r.invoke);
     await net.partbankProbe({ connection: 'desktop', url: 'http://127.0.0.1:47830' }, r.invoke);

@@ -1,9 +1,14 @@
 //! "Import from file…" in the Integration settings dialog: LLM, PartBank and
 //! bfworkflow connection settings and keys, read from one file the user picks.
 //!
-//! The webview only names the path. Rust reads the file (at most
-//! `MAX_IMPORT_BYTES`, UTF-8 with or without a BOM), refuses one inside the open
-//! vault (a vault may be synced or shared), parses it as JSON
+//! The webview never names a path: Rust shows the file picker itself
+//! (`integration_import_pick`), so a compromised webview cannot make it read an
+//! arbitrary file. A file dropped on the dialog arrives as raw bytes with its
+//! name (`integration_import_bytes`) and goes through the same checks and
+//! parser. Rust reads at most `MAX_IMPORT_BYTES` (UTF-8 with or without a BOM),
+//! refuses a picked file inside the open vault (a vault may be synced or
+//! shared), takes only `.env`, `.json`, `.txt` or no extension (the name picks
+//! the format; `.txt` and none are guessed), and parses it as JSON
 //!
 //! ```json
 //! {"llm": {"provider": "openai", "baseUrl": "…", "model": "…", "apiKey": "…"},
@@ -13,7 +18,8 @@
 //!
 //! or as `.env` lines (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_PROVIDER`,
 //! `PARTBANK_URL`, `PARTBANK_API_KEY`, `PARTBANK_CONNECTION`, `BFWORKFLOW_URL`,
-//! `BFWORKFLOW_API_KEY`), and checks every field with the same parsers and key
+//! `BFWORKFLOW_API_KEY`; a ` # comment` after an unquoted value is dropped), and
+//! checks every field with the same parsers and key
 //! rules the dialog uses. Unknown keys are ignored.
 //!
 //! Each part is all or nothing: one invalid field skips the whole part, so a
@@ -23,7 +29,8 @@
 //! non-secret fields go back to the webview, which saves them through the
 //! dialog's own settings flow (the one source of truth for settings). The
 //! answer is a summary of codes: it never holds a key, and nothing in it is
-//! copied from the file.
+//! copied from the file. A file that names no LLM provider leaves the stored
+//! provider as it is, and its LLM fields fill that provider's settings.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -32,7 +39,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use tauri::State;
 
-use super::config::{parse_llm_endpoint, parse_origin_url, ServiceConfig, Url};
+use super::config::{parse_llm_endpoint, parse_origin_url, LlmKind, ServiceConfig, Url};
 use super::error::{NetError, NetErrorKind};
 use super::secrets::{store_secret_at_url, validate_secret_for, SecretStore, Secrets, Slot};
 use super::NetState;
@@ -58,6 +65,8 @@ pub enum Refusal {
     NotText,
     /// Neither JSON nor `.env` with any known setting.
     Unrecognized,
+    /// Not a `.env`, `.json` or `.txt` file (or a name with no extension).
+    WrongType,
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,10 +192,43 @@ impl Parsed {
     }
 }
 
+/// How the text is read, from the file name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Json,
+    Env,
+    /// `.txt` or no extension: JSON when it starts with `{`, else `.env`.
+    Guess,
+}
+
+/// The format for a file name, or `None` for any other extension (or a name
+/// that is not a single file name).
+fn format_for(name: &str) -> Option<Format> {
+    if name.is_empty() || name.contains(['/', '\\']) || name.chars().all(|c| c == '.') {
+        return None;
+    }
+    let lower = name.to_ascii_lowercase();
+    if lower == ".env" {
+        return Some(Format::Env);
+    }
+    match lower.rsplit_once('.').map(|(_, ext)| ext) {
+        None => Some(Format::Guess),
+        Some("env") => Some(Format::Env),
+        Some("json") => Some(Format::Json),
+        Some("txt") => Some(Format::Guess),
+        Some(_) => None,
+    }
+}
+
 /// JSON text (an object) or `.env` lines. `None` when it is neither, or holds
 /// no known setting. Never keeps an error that could quote the text.
-fn parse(text: &str) -> Option<Parsed> {
-    let parsed = if text.trim_start().starts_with('{') { parse_json(text)? } else { parse_env(text) };
+fn parse(text: &str, format: Format) -> Option<Parsed> {
+    let json = match format {
+        Format::Json => true,
+        Format::Env => false,
+        Format::Guess => text.trim_start().starts_with('{'),
+    };
+    let parsed = if json { parse_json(text)? } else { parse_env(text) };
     (!parsed.is_empty()).then_some(parsed)
 }
 
@@ -216,8 +258,29 @@ fn parse_json(text: &str) -> Option<Parsed> {
     Some(p)
 }
 
+/// One `.env` value (the text after `=`): inside a pair of matching quotes
+/// (anything after the closing quote is dropped), or else up to a `#` that
+/// follows whitespace (`abc # note` is `abc`, `abc#x` stays whole, `= # x` is
+/// blank).
+fn env_value(raw: &str) -> &str {
+    let value = raw.trim_start();
+    for q in ['"', '\''] {
+        if let Some(rest) = value.strip_prefix(q) {
+            if let Some(end) = rest.find(q) {
+                return &rest[..end];
+            }
+        }
+    }
+    let cut = value
+        .char_indices()
+        .find(|&(i, c)| c == '#' && (i == 0 && raw.len() > value.len() || value[..i].ends_with(char::is_whitespace)))
+        .map_or(value.len(), |(i, _)| i);
+    value[..cut].trim()
+}
+
 /// `KEY=VALUE` lines; blank lines, `#` comments and unknown keys are skipped,
-/// an `export ` prefix is allowed, and one pair of matching quotes is removed.
+/// an `export ` prefix is allowed, one pair of matching quotes is removed, and
+/// a ` # comment` after an unquoted value is dropped.
 fn parse_env(text: &str) -> Parsed {
     let mut p = Parsed::default();
     for line in text.lines() {
@@ -227,12 +290,7 @@ fn parse_env(text: &str) -> Parsed {
         }
         let line = line.strip_prefix("export ").map_or(line, str::trim_start);
         let Some((key, value)) = line.split_once('=') else { continue };
-        let value = value.trim();
-        let value = ['"', '\'']
-            .iter()
-            .find_map(|q| value.strip_prefix(*q).and_then(|v| v.strip_suffix(*q)))
-            .unwrap_or(value);
-        let field = Field::of_text(value);
+        let field = Field::of_text(env_value(value));
         match key.trim() {
             "LLM_PROVIDER" => p.llm.provider = field,
             "LLM_BASE_URL" => p.llm.base_url = field,
@@ -287,8 +345,10 @@ struct Plan {
 fn plan_llm(f: &LlmFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Option<Plan> {
     let part = Part::Llm;
     let before = bad.len();
-    let ollama = match text_of(&f.provider, part, "provider", bad).map(str::to_ascii_lowercase).as_deref() {
-        None => false,
+    let named = text_of(&f.provider, part, "provider", bad).map(str::to_ascii_lowercase);
+    let ollama = match named.as_deref() {
+        // No provider in the file: the stored one stays, and the fields are its.
+        None => cfg.llm_provider == LlmKind::Ollama,
         Some("openai") => false,
         Some("ollama") => true,
         Some(_) => {
@@ -329,7 +389,10 @@ fn plan_llm(f: &LlmFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
         },
         None => None,
     };
-    let mut settings = vec![("llmProvider", Value::from(if ollama { "ollama" } else { "openai" }))];
+    let mut settings = Vec::new();
+    if named.is_some() {
+        settings.push(("llmProvider", Value::from(if ollama { "ollama" } else { "openai" })));
+    }
     if let Some(u) = &url {
         settings.push((if ollama { "llmEndpointOllama" } else { "llmEndpointOpenai" }, Value::from(url_setting(u))));
     }
@@ -420,7 +483,11 @@ fn plan_bfw(f: &BfwFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
 /// is the open vault's stored config: the address a key binds to when the
 /// file names none.
 pub fn apply_import(store: &dyn SecretStore, text: &str, cfg: &ServiceConfig) -> ImportOutcome {
-    let Some(parsed) = parse(text) else {
+    apply_import_as(store, text, Format::Guess, cfg)
+}
+
+fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &ServiceConfig) -> ImportOutcome {
+    let Some(parsed) = parse(text, format) else {
         return ImportOutcome::Refused { reason: Refusal::Unrecognized };
     };
     let mut imported = Vec::new();
@@ -460,11 +527,29 @@ pub fn apply_import(store: &dyn SecretStore, text: &str, cfg: &ServiceConfig) ->
     ImportOutcome::Done { imported, invalid, settings }
 }
 
+/// The text of an import file's bytes: at most `MAX_IMPORT_BYTES`, UTF-8 with
+/// an optional BOM (dropped).
+fn import_text(bytes: &[u8]) -> Result<&str, Refusal> {
+    if bytes.len() as u64 > MAX_IMPORT_BYTES {
+        return Err(Refusal::TooLarge);
+    }
+    let body = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    std::str::from_utf8(body).map_err(|_| Refusal::NotText)
+}
+
 /// Reads the file at `path` for the import: a regular file outside `vault_root`
 /// (both canonicalized, so a link into the vault counts as inside), at most
 /// `MAX_IMPORT_BYTES`, UTF-8 with an optional BOM. Returns the canonical path
 /// and the text without the BOM.
 pub fn read_import_file(path: &Path, vault_root: &Path) -> Result<(PathBuf, String), Refusal> {
+    let (file, bytes) = read_import_bytes(path, vault_root)?;
+    let text = import_text(&bytes)?.to_string();
+    Ok((file, text))
+}
+
+/// The checks of `read_import_file`, returning the raw bytes (at most
+/// `MAX_IMPORT_BYTES`).
+fn read_import_bytes(path: &Path, vault_root: &Path) -> Result<(PathBuf, Vec<u8>), Refusal> {
     let file = std::fs::canonicalize(path).map_err(|_| Refusal::Unreadable)?;
     let root = std::fs::canonicalize(vault_root).unwrap_or_else(|_| vault_root.to_path_buf());
     if file.starts_with(&root) {
@@ -484,43 +569,120 @@ pub fn read_import_file(path: &Path, vault_root: &Path) -> Result<(PathBuf, Stri
     if bytes.len() as u64 > MAX_IMPORT_BYTES {
         return Err(Refusal::TooLarge);
     }
-    let body = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
-    let text = std::str::from_utf8(body).map_err(|_| Refusal::NotText)?;
-    Ok((file, text.to_string()))
+    Ok((file, bytes))
 }
 
-/// Reads, checks and imports the file; see the module doc.
+/// Checks and imports one file's bytes; `name` is its file name (no folder),
+/// which picks the format. The one path for a picked and a dropped file.
+pub fn import_bytes(store: &dyn SecretStore, name: &str, bytes: &[u8], cfg: &ServiceConfig) -> ImportOutcome {
+    let Some(format) = format_for(name) else {
+        return ImportOutcome::Refused { reason: Refusal::WrongType };
+    };
+    match import_text(bytes) {
+        Err(reason) => ImportOutcome::Refused { reason },
+        Ok(text) => apply_import_as(store, text, format, cfg),
+    }
+}
+
+/// Reads, checks and imports the file; see the module doc. Also returns the
+/// canonical path when something was imported (the file the user may then
+/// delete).
 pub fn import_file(
     store: &dyn SecretStore,
     path: &Path,
     vault_root: &Path,
     cfg: &ServiceConfig,
 ) -> (ImportOutcome, Option<PathBuf>) {
-    match read_import_file(path, vault_root) {
+    match read_import_bytes(path, vault_root) {
         Err(reason) => (ImportOutcome::Refused { reason }, None),
-        Ok((file, text)) => {
-            let outcome = apply_import(store, &text, cfg);
+        Ok((file, mut bytes)) => {
+            let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let outcome = import_bytes(store, &name, &bytes, cfg);
+            bytes.fill(0);
             let any = matches!(&outcome, ImportOutcome::Done { imported, .. } if !imported.is_empty());
             (outcome, any.then_some(file))
         }
     }
 }
 
-#[tauri::command]
-pub fn integration_import_file(
-    vault: State<'_, VaultState>,
-    settings: State<'_, SettingsFile>,
-    secrets: State<'_, Secrets>,
-    net: State<'_, NetState>,
-    path: String,
-) -> Result<ImportOutcome, NetError> {
-    let root = vault.root().map_err(|_| NetError::new(NetErrorKind::NotConfigured, "no vault is open"))?;
-    let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
-    let (outcome, file) = import_file(secrets.0.as_ref(), Path::new(&path), &root, &cfg);
+/// Imports a file the picker returned, and remembers it for
+/// `integration_import_delete` when something was imported.
+pub fn import_picked(net: &NetState, store: &dyn SecretStore, path: &Path, vault_root: &Path, cfg: &ServiceConfig) -> ImportOutcome {
+    let (outcome, file) = import_file(store, path, vault_root, cfg);
     if let Some(file) = file {
         *net.last_import.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
     }
-    Ok(outcome)
+    outcome
+}
+
+fn no_vault() -> NetError {
+    NetError::new(NetErrorKind::NotConfigured, "no vault is open")
+}
+
+/// Longest picker title taken from the webview, in chars.
+const MAX_TITLE: usize = 200;
+
+/// "Import from file…": Rust shows the file picker (modal to the main window)
+/// and imports the chosen file. `None` when the picker was cancelled. The
+/// webview sends only the localised title and never names a path. A pick made
+/// after another vault was opened is dropped.
+#[tauri::command]
+pub async fn integration_import_pick<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    vault: State<'_, VaultState>,
+    settings: State<'_, SettingsFile>,
+    secrets: State<'_, Secrets>,
+    title: String,
+) -> Result<Option<ImportOutcome>, NetError> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+    let root = vault.root().map_err(|_| no_vault())?;
+    let title: String = title.chars().filter(|c| !c.is_control()).take(MAX_TITLE).collect();
+    let dialog_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut builder = dialog_app.dialog().file().set_title(title).add_filter("JSON / .env", &["env", "json", "txt"]);
+        if let Some(window) = dialog_app.get_webview_window("main") {
+            builder = builder.set_parent(&window);
+        }
+        builder.blocking_pick_file()
+    })
+    .await
+    .map_err(|e| NetError::new(NetErrorKind::Io, format!("file picker failed: {e}")))?;
+    let Some(picked) = picked else { return Ok(None) };
+    if vault.root().ok().as_deref() != Some(root.as_path()) {
+        return Err(NetError::new(NetErrorKind::BadInput, "another vault was opened while the file picker was up"));
+    }
+    let path = picked
+        .into_path()
+        .map_err(|_| NetError::new(NetErrorKind::BadInput, "the chosen file is not a local path"))?;
+    let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
+    let store = secrets.0.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        import_picked(&app.state::<NetState>(), store.as_ref(), &path, &root, &cfg)
+    })
+    .await
+    .map_err(|e| NetError::new(NetErrorKind::Io, format!("import failed: {e}")))?;
+    Ok(Some(outcome))
+}
+
+/// A connection file dropped on the dialog: its bytes as the raw request body
+/// and its name in the percent-encoded `x-lno-name` header. The same checks and
+/// parser as a picked file; there is no path, so nothing is kept for deletion.
+#[tauri::command]
+pub fn integration_import_bytes(
+    vault: State<'_, VaultState>,
+    settings: State<'_, SettingsFile>,
+    secrets: State<'_, Secrets>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ImportOutcome, NetError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(NetError::new(NetErrorKind::BadInput, "the file must be sent as raw bytes"));
+    };
+    let name = crate::vault::fs::header(&request, "x-lno-name")
+        .map_err(|_| NetError::new(NetErrorKind::BadInput, "the file name is missing"))?;
+    let root = vault.root().map_err(|_| no_vault())?;
+    let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
+    Ok(import_bytes(secrets.0.as_ref(), &name, bytes, &cfg))
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -779,6 +941,99 @@ mod tests {
         let (out, kept) = import_file(&MemoryStore::default(), &file, &dir.join("vault"), &cfg("{}"));
         assert!(done(&out).0.is_empty());
         assert_eq!(kept, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_without_a_provider_keeps_the_stored_one() {
+        let store = MemoryStore::default();
+        let o = apply_import(&store, "LLM_BASE_URL=https://gw.lab.example/v1\nLLM_MODEL=m", &cfg(r#"{"llmProvider":"none"}"#));
+        let (imported, invalid, settings) = done(&o);
+        assert!(invalid.is_empty(), "{invalid:?}");
+        assert_eq!(imported.len(), 1);
+        assert!(!settings.contains_key("llmProvider"), "{settings:?}");
+        assert_eq!(settings["llmEndpointOpenai"], "https://gw.lab.example/v1");
+        // With Ollama stored, a file that names no provider fills the Ollama fields.
+        let o = apply_import(&store, r#"{"llm":{"baseUrl":"http://localhost:11434","model":"llama3"}}"#, &cfg(r#"{"llmProvider":"ollama"}"#));
+        let settings = done(&o).2;
+        assert!(!settings.contains_key("llmProvider"), "{settings:?}");
+        assert_eq!(settings["llmEndpointOllama"], "http://localhost:11434");
+        // An explicit provider is still written.
+        let o = apply_import(&store, "LLM_PROVIDER=ollama\nLLM_MODEL=m", &cfg(r#"{"llmProvider":"openai"}"#));
+        assert_eq!(done(&o).2["llmProvider"], "ollama");
+        let o = apply_import(&store, r#"{"llm":{"provider":"openai","model":"m"}}"#, &cfg(r#"{"llmProvider":"ollama"}"#));
+        assert_eq!(done(&o).2["llmProvider"], "openai");
+    }
+
+    #[test]
+    fn env_inline_comments_are_stripped_only_after_unquoted_values() {
+        let store = MemoryStore::default();
+        let model = |text: &str| -> Value {
+            let o = apply_import(&store, text, &cfg("{}"));
+            done(&o).2.get("llmModel").cloned().unwrap_or(Value::Null)
+        };
+        assert_eq!(model("LLM_MODEL=abc # note"), "abc");
+        assert_eq!(model("LLM_MODEL=abc\t# note"), "abc");
+        assert_eq!(model("LLM_MODEL=\"abc # x\""), "abc # x");
+        assert_eq!(model("LLM_MODEL='abc # x' # note"), "abc # x");
+        assert_eq!(model("LLM_MODEL=abc#x"), "abc#x");
+        // A value that is only a comment is blank, so absent.
+        let o = apply_import(&store, "LLM_MODEL= # none\nPARTBANK_URL=https://pb.lab.example # web", &cfg("{}"));
+        let (imported, _, settings) = done(&o);
+        assert_eq!(imported.iter().map(|i| i.part).collect::<Vec<_>>(), vec![Part::Partbank]);
+        assert_eq!(settings["partbankWebUrl"], "https://pb.lab.example");
+        // A key with a trailing comment is stored without it.
+        apply_import(&store, "BFWORKFLOW_URL=https://wf.lab.example\nBFWORKFLOW_API_KEY=bfw_c # mine", &cfg("{}"));
+        assert_eq!(store.get("bfwServer|https://wf.lab.example").unwrap().as_deref(), Some("bfw_c"));
+    }
+
+    #[test]
+    fn import_bytes_matches_import_file_and_checks_name_and_size() {
+        let dir = scratch_dir("import-bytes");
+        std::fs::create_dir_all(dir.join("vault")).unwrap();
+        let env = "LLM_BASE_URL=https://gw.lab.example/v1 # gw\nLLM_API_KEY=sk-bytes\nPARTBANK_URL=https://pb.lab.example\n";
+        for (name, text) in [("conn.env", env), (".env", env), ("conn.json", FULL_JSON), ("conn.txt", FULL_JSON), ("conn", env)] {
+            let file = dir.join(if name == ".env" { "dot.env" } else { name });
+            std::fs::write(&file, text).unwrap();
+            let (a, b) = (MemoryStore::default(), MemoryStore::default());
+            let (from_file, _) = import_file(&a, &file, &dir.join("vault"), &cfg("{}"));
+            let from_bytes = import_bytes(&b, name, text.as_bytes(), &cfg("{}"));
+            assert_eq!(from_file, from_bytes, "{name}");
+            assert!(!done(&from_bytes).0.is_empty(), "{name}");
+            assert_eq!(a.get("llmOpenai|https://gw.lab.example").unwrap(), b.get("llmOpenai|https://gw.lab.example").unwrap());
+            assert!(b.get("llmOpenai|https://gw.lab.example").unwrap().is_some(), "{name}");
+        }
+        // The name picks the format: a .json file must be JSON.
+        let store = MemoryStore::default();
+        assert_eq!(import_bytes(&store, "conn.json", env.as_bytes(), &cfg("{}")), ImportOutcome::Refused { reason: Refusal::Unrecognized });
+        // Other extensions, oversize and non-text are refused before parsing.
+        for name in ["conn.exe", "conn.md", "conn.env.bak", "", "dir/"] {
+            assert_eq!(import_bytes(&store, name, env.as_bytes(), &cfg("{}")), ImportOutcome::Refused { reason: Refusal::WrongType }, "{name:?}");
+        }
+        let big = vec![b' '; MAX_IMPORT_BYTES as usize + 1];
+        assert_eq!(import_bytes(&store, "conn.env", &big, &cfg("{}")), ImportOutcome::Refused { reason: Refusal::TooLarge });
+        assert_eq!(import_bytes(&store, "conn.env", &[0xff, 0xfe, 0x41], &cfg("{}")), ImportOutcome::Refused { reason: Refusal::NotText });
+        let mut bom = b"\xEF\xBB\xBF".to_vec();
+        bom.extend_from_slice(env.as_bytes());
+        assert!(!done(&import_bytes(&store, "conn.env", &bom, &cfg("{}"))).0.is_empty());
+        assert_eq!(store.get("partbankWeb|https://pb.lab.example").unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_picked_file_is_remembered_for_deletion_only_when_something_was_imported() {
+        let dir = scratch_dir("import-picked");
+        std::fs::create_dir_all(dir.join("vault")).unwrap();
+        let net = NetState::default();
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, r#"{"partbank":{"url":"nope"}}"#).unwrap();
+        import_picked(&net, &MemoryStore::default(), &bad, &dir.join("vault"), &cfg("{}"));
+        assert_eq!(*net.last_import.lock().unwrap(), None);
+        let good = dir.join("good.json");
+        std::fs::write(&good, r#"{"partbank":{"url":"https://pb.lab.example"}}"#).unwrap();
+        let out = import_picked(&net, &MemoryStore::default(), &good, &dir.join("vault"), &cfg("{}"));
+        assert_eq!(done(&out).0.len(), 1);
+        assert_eq!(*net.last_import.lock().unwrap(), Some(std::fs::canonicalize(&good).unwrap()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

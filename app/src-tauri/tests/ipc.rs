@@ -123,9 +123,11 @@ fn ipc_argument_names_match_the_typescript_side() {
     // Integration keys need the open vault's settings to name their origin.
     assert_eq!(call("secret_status", args("secret_status", vec![])).unwrap_err()["kind"], "notConfigured");
     assert_eq!(
-        call("integration_import_file", args("integration_import_file", vec![json!("C:/x.json")])).unwrap_err()["kind"],
+        call("integration_import_pick", args("integration_import_pick", vec![json!("Pick")])).unwrap_err()["kind"],
         "notConfigured"
     );
+    // The webview cannot name a path: a `path` argument is refused, not ignored.
+    assert!(call("integration_import_pick", json!({"path": "C:/x.json"})).is_err());
     // PartBank: the webview names a connection and a path, never a host. With
     // no vault there is no saved URL or key; a probe of unsaved fields without
     // a typed key answers keyMissing and sends nothing.
@@ -257,36 +259,13 @@ fn ipc_argument_names_match_the_typescript_side() {
     }
     std::fs::remove_dir_all(dir.join("vault").join(".obsidian")).unwrap();
 
-    // Connection-file import: Rust reads the file the webview names, stores the
-    // keys bound to the file's URLs, and answers a summary with no key in it.
-    // A file inside the vault is refused; only the imported file can be deleted.
-    let first = responses.borrow().len();
+    // Connection-file import: Rust shows the picker itself (not testable here;
+    // `import::tests` cover the import of a picked file). Nothing was picked,
+    // so there is no file to delete.
     assert_eq!(
         call("integration_import_delete", args("integration_import_delete", vec![json!(true)])).unwrap_err()["kind"],
         "badInput"
     );
-    let inside = dir.join("vault").join("conn.json");
-    std::fs::write(&inside, r#"{"partbank":{"url":"https://pb.ipc.example","apiKey":"pbk_t_file"}}"#).unwrap();
-    let refused = ok("integration_import_file", args("integration_import_file", vec![json!(inside.to_string_lossy())]));
-    assert_eq!(refused, json!({"status": "refused", "reason": "insideVault"}));
-    std::fs::remove_file(&inside).unwrap();
-    let outside = dir.join("conn.json");
-    std::fs::write(&outside, r#"{"partbank":{"url":"https://pb.ipc.example","apiKey":"pbk_t_file"}}"#).unwrap();
-    let done = ok("integration_import_file", args("integration_import_file", vec![json!(outside.to_string_lossy())]));
-    assert_eq!(
-        done,
-        json!({"status": "done", "imported": [{"part": "partbank", "keySaved": true}], "invalid": [],
-               "settings": {"partbankWebUrl": "https://pb.ipc.example"}})
-    );
-    // The webview saves the settings it got back; the key then reads "set".
-    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"partbankWebUrl":"https://pb.ipc.example"}"#)]));
-    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["partbankWeb"], true);
-    assert_eq!(ok("integration_import_delete", args("integration_import_delete", vec![json!(true)])), json!("deleted"));
-    assert!(!outside.exists());
-    for r in responses.borrow()[first..].iter() {
-        assert!(!r.contains("pbk_t_file"), "{r}");
-    }
-    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
 
     // Cancelling an id that is not in flight answers false (it is remembered,
     // so a request registered later with it answers `cancelled` unsent).
@@ -641,6 +620,36 @@ title: 실험
     );
     assert!(call("vault_write_attachment", json!({"dir": "exp/resources", "name": "q.csv"})).is_err());
     std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
+
+    // A dropped connection file: raw bytes and a percent-encoded name, the same
+    // checks and parser as a picked file. The keys are bound to the file's URLs
+    // and the summary carries no key. A dropped file has no path, so nothing
+    // can be deleted afterwards.
+    let conn = br#"{"partbank":{"url":"https://pb.ipc.example","apiKey":"pbk_t_file"}}"#.to_vec();
+    let done = raw_call("integration_import_bytes", vec!["%EC%97%B0%EA%B2%B0.json"], conn).unwrap();
+    assert_eq!(
+        done,
+        json!({"status": "done", "imported": [{"part": "partbank", "keySaved": true}], "invalid": [],
+               "settings": {"partbankWebUrl": "https://pb.ipc.example"}})
+    );
+    assert!(!done.to_string().contains("pbk_t"), "{done}");
+    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"partbankWebUrl":"https://pb.ipc.example"}"#)]));
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["partbankWeb"], true);
+    assert_eq!(
+        call("integration_import_delete", args("integration_import_delete", vec![json!(true)])).unwrap_err()["kind"],
+        "badInput"
+    );
+    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
+    assert_eq!(
+        raw_call("integration_import_bytes", vec!["conn.exe"], b"PARTBANK_URL=https://x.example".to_vec()).unwrap(),
+        json!({"status": "refused", "reason": "wrongType"})
+    );
+    assert_eq!(
+        raw_call("integration_import_bytes", vec!["conn.env"], vec![b'#'; 64 * 1024 + 1]).unwrap(),
+        json!({"status": "refused", "reason": "tooLarge"})
+    );
+    // A JSON body is refused: the bytes must come raw.
+    assert!(call("integration_import_bytes", json!({"name": "conn.env"})).is_err());
 
     // The MCP token (Credential Manager; here the memory store): the webview
     // learns a flag and an epoch, and the copy goes to the clipboard from Rust.

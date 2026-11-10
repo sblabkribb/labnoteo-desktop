@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
@@ -53,15 +55,21 @@ const DONE: ImportOutcome = {
   settings: { llmProvider: 'openai', llmEndpointOpenai: 'https://gw.lab.example/v1', llmModel: 'gpt-x', bfwUrl: 'https://wf.lab.example' },
 };
 
-function importDeps(opts: { outcome?: ImportOutcome; path?: string | null; removes?: DeleteOutcome[] } = {}) {
+function importDeps(
+  opts: { outcome?: ImportOutcome | null; removes?: DeleteOutcome[]; commitFails?: boolean } = {},
+) {
   let current: IntegrationSettingsValue = { ...BASE };
   const keys: Partial<Record<Slot, boolean>> = {};
   const removes = [...(opts.removes ?? ['trashed'])];
   const status = vi.fn(async () => secretStatusOf(keys));
   const io = {
-    pick: vi.fn(async () => (opts.path === undefined ? 'C:\\Users\\me\\Downloads\\conn.json' : opts.path)),
-    run: vi.fn(async (_path: string) => {
+    run: vi.fn(async (): Promise<ImportOutcome | null> => {
+      if (opts.outcome === null) return null; // 고르기 취소
       keys.llmOpenai = true; // Rust 가 키를 저장했다(값은 오지 않는다)
+      return opts.outcome ?? DONE;
+    }),
+    runBytes: vi.fn(async (_name: string, _bytes: Uint8Array): Promise<ImportOutcome> => {
+      keys.llmOpenai = true;
       return opts.outcome ?? DONE;
     }),
     remove: vi.fn(async (_permanent: boolean) => removes.shift() ?? 'gone'),
@@ -69,6 +77,7 @@ function importDeps(opts: { outcome?: ImportOutcome; path?: string | null; remov
   const deps: IntegrationDeps = {
     value: () => current,
     commit: vi.fn(async (patch: Partial<IntegrationSettingsValue>) => {
+      if (opts.commitFails) throw new Error('disk full');
       current = { ...current, ...patch };
     }),
     status,
@@ -93,7 +102,8 @@ describe('Integration settings: Import from file…', () => {
     show(f.deps);
     await waitFor(() => expect(f.status).toHaveBeenCalledTimes(1));
     await userEvent.click(await importButton());
-    await waitFor(() => expect(f.io.run).toHaveBeenCalledWith('C:\\Users\\me\\Downloads\\conn.json'));
+    // Rust 가 고르기 창을 띄운다: 웹뷰는 경로를 보내지 않는다.
+    await waitFor(() => expect(f.io.run).toHaveBeenCalledWith());
     // 설정은 대화상자의 저장 흐름으로 한 번에 저장된다.
     await waitFor(() => expect(f.commit).toHaveBeenCalledWith(DONE.status === 'done' ? DONE.settings : {}));
     // 요약: 가져온 부분, 건너뛴 부분과 까닭.
@@ -161,36 +171,150 @@ describe('Integration settings: Import from file…', () => {
   });
 
   it('a cancelled picker does nothing; a failed import shows an app sentence, not the raw error', async () => {
-    const f = importDeps({ path: null });
+    const f = importDeps({ outcome: null });
     show(f.deps);
     await userEvent.click(await importButton());
-    await waitFor(() => expect(f.io.pick).toHaveBeenCalled());
-    expect(f.io.run).not.toHaveBeenCalled();
-    f.io.pick.mockResolvedValue('D:\\conn.env');
+    await waitFor(() => expect(f.io.run).toHaveBeenCalledTimes(1));
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
     f.io.run.mockRejectedValue({ kind: 'keychain', message: 'raw-rust-text' });
     await userEvent.click(await importButton());
     expect(await screen.findByText(t('integrations.import.failed'))).toBeTruthy();
     expect(document.body.textContent).not.toContain('raw-rust-text');
   });
 
-  it('integrationDepsFor sends only the path and the permanent flag, and keeps only connection settings', async () => {
-    const f = fakeInvoke({
-      integration_import_file: () => ({
-        status: 'done',
-        imported: [{ part: 'llm', keySaved: true }],
-        invalid: [],
-        settings: { llmModel: 'm', mcpEnabled: true, apiKey: 'x' },
-      }),
-      integration_import_delete: () => 'trashed',
-    });
+  it('when saving the imported settings fails, it warns and does not offer to delete the file', async () => {
+    const f = importDeps({ commitFails: true });
+    show(f.deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.saveFailed'))).toBeTruthy();
+    expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
+    expect(screen.queryByRole('button', { name: t('integrations.import.deleteYes') })).toBeNull();
+  });
+
+  it('integrationDepsFor asks Rust to pick (title only), drops non-connection settings, and passes a cancel through', async () => {
+    let answer: unknown = {
+      status: 'done',
+      imported: [{ part: 'llm', keySaved: true }],
+      invalid: [],
+      settings: { llmModel: 'm', mcpEnabled: true, apiKey: 'x' },
+    };
+    const f = fakeInvoke({ integration_import_pick: () => answer, integration_import_delete: () => 'trashed' });
     const ctx = { settings: fromPluginData(undefined), updateSettings: () => {}, host: { notify: () => {} } } as unknown as CommandContext;
     const deps = integrationDepsFor(ctx, f.invoke);
-    const out = await deps.importFile!.run('D:\\conn.json');
-    expect(out.status === 'done' && out.settings).toEqual({ llmModel: 'm' });
+    const out = await deps.importFile!.run();
+    expect(out?.status === 'done' && out.settings).toEqual({ llmModel: 'm' });
+    answer = null;
+    expect(await deps.importFile!.run()).toBeNull();
     expect(await deps.importFile!.remove(false)).toBe('trashed');
     expect(f.calls).toEqual([
-      ['integration_import_file', { path: 'D:\\conn.json' }],
+      ['integration_import_pick', { title: t('integrations.import.pickTitle') }],
+      ['integration_import_pick', { title: t('integrations.import.pickTitle') }],
       ['integration_import_delete', { permanent: false }],
     ]);
+  });
+
+  it('no source file invokes the old path-taking command', () => {
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) {
+          if (name !== '__tests__') walk(p);
+        } else if (/\.(ts|tsx)$/.test(name) && readFileSync(p, 'utf-8').includes('integration_import_file')) hits.push(p);
+      }
+    };
+    walk('src');
+    expect(hits).toEqual([]);
+  });
+});
+
+/** 끌어 놓은 파일 하나(또는 여럿)를 실은 drop 사건. */
+function dropFiles(target: Element, files: File[]) {
+  const dataTransfer = { files, types: ['Files'], dropEffect: 'none' };
+  fireEvent.dragOver(target, { dataTransfer });
+  fireEvent.drop(target, { dataTransfer });
+}
+
+const dropZone = () => screen.getByText(t('integrations.import.dropHere')).closest('.integration-drop')!;
+
+describe('Integration settings: drop a connections file', () => {
+  it('sends the bytes and name once, saves the settings, and asks the user to delete the original themselves', async () => {
+    const f = importDeps();
+    show(f.deps);
+    await importButton();
+    const text = 'LLM_BASE_URL=https://gw.lab.example/v1\nLLM_API_KEY=sk-dropped-secret\n';
+    dropFiles(dropZone(), [new File([text], 'conn.env')]);
+    await waitFor(() => expect(f.io.runBytes).toHaveBeenCalledTimes(1));
+    const [name, bytes] = f.io.runBytes.mock.calls[0]!;
+    expect(name).toBe('conn.env');
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBe(new TextEncoder().encode(text).length);
+    // 보낸 뒤 버퍼를 0 으로 지운다.
+    await waitFor(() => expect(Array.from(bytes).every((b) => b === 0)).toBe(true));
+    await waitFor(() => expect(f.commit).toHaveBeenCalledWith(DONE.status === 'done' ? DONE.settings : {}));
+    expect(await screen.findByText(t('integrations.import.dropDeleteYourself'))).toBeTruthy();
+    // 경로가 없으니 지우기 제안은 없다. 키는 화면 어디에도 없다.
+    expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
+    expect(document.body.innerHTML).not.toContain('sk-dropped-secret');
+    expect(f.io.run).not.toHaveBeenCalled();
+    expect(styleAttributes()).toEqual([]);
+  });
+
+  it('highlights on dragover and clears on dragleave', async () => {
+    const f = importDeps();
+    show(f.deps);
+    await importButton();
+    const zone = dropZone();
+    fireEvent.dragOver(zone, { dataTransfer: { files: [], types: ['Files'] } });
+    expect(zone.classList.contains('over')).toBe(true);
+    fireEvent.dragLeave(zone);
+    expect(zone.classList.contains('over')).toBe(false);
+  });
+
+  it('refuses several files, a file over 64 KiB and another file type, without calling Rust', async () => {
+    const f = importDeps();
+    show(f.deps);
+    await importButton();
+    dropFiles(dropZone(), [new File(['a'], 'a.env'), new File(['b'], 'b.env')]);
+    expect(await screen.findByText(t('integrations.import.dropOneFile'))).toBeTruthy();
+    dropFiles(dropZone(), [new File([new Uint8Array(64 * 1024 + 1)], 'big.json')]);
+    expect(await screen.findByText(t('integrations.import.refused.tooLarge'))).toBeTruthy();
+    dropFiles(dropZone(), [new File(['x'], 'conn.exe')]);
+    expect(await screen.findByText(t('integrations.import.refused.wrongType'))).toBeTruthy();
+    expect(f.io.runBytes).not.toHaveBeenCalled();
+    expect(f.commit).not.toHaveBeenCalled();
+  });
+
+  it('accepts .env, .json, .txt and no extension', async () => {
+    const { checkDroppedFiles } = await import('../importFile');
+    for (const name of ['.env', 'conn.env', 'CONN.JSON', 'notes.txt', 'connections']) {
+      expect(checkDroppedFiles([new File(['x'], name)])).toEqual({ file: expect.any(File) });
+    }
+    for (const name of ['conn.env.bak', 'a.md', 'run.exe']) {
+      expect(checkDroppedFiles([new File(['x'], name)])).toEqual({ refused: 'wrongType' });
+    }
+    expect(checkDroppedFiles([])).toEqual({ refused: 'oneFile' });
+  });
+
+  it('importConnectionsBytes sends a raw body with the encoded name and zeroes the buffer even on failure', async () => {
+    const { importConnectionsBytes } = await import('../importFile');
+    const seen: unknown[] = [];
+    const invoke = (async (cmd: string, body: unknown, options: unknown) => {
+      seen.push([cmd, Array.from(body as Uint8Array), options]);
+      return { status: 'done', imported: [], invalid: [], settings: { llmModel: 'm', apiKey: 'x' } };
+    }) as never;
+    const bytes = new Uint8Array([65, 66]);
+    const out = await importConnectionsBytes('연결.env', bytes, invoke);
+    expect(out.status === 'done' && out.settings).toEqual({ llmModel: 'm' });
+    expect(seen).toEqual([['integration_import_bytes', [65, 66], { headers: { 'x-lno-name': '%EC%97%B0%EA%B2%B0.env' } }]]);
+    expect(Array.from(bytes)).toEqual([0, 0]);
+    const failing = (async () => {
+      throw { kind: 'notConfigured', message: 'raw-rust-text' };
+    }) as never;
+    const again = new Uint8Array([1, 2]);
+    await expect(importConnectionsBytes('c.env', again, failing)).rejects.toBeTruthy();
+    expect(Array.from(again)).toEqual([0, 0]);
   });
 });
