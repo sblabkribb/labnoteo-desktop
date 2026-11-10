@@ -12,6 +12,7 @@ import type { BarcodePrintActions } from '../port/barcodeDialog';
 import type { ResultActions } from '../port/scanFeatureRuns';
 import type { ScanPipeline, ScanResult } from '../port/scanPipeline';
 import type { UnmatchedIo } from '../scan/UnmatchedDialog';
+import type { BuiltContext } from '../context/contextBuilder';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -62,7 +63,9 @@ export type DialogSpec =
   // 미분류 스캔 대기열(Task 26): 끝나면 손으로 넣을 페이지, 닫으면 undefined
   | { kind: 'scanUnmatched'; io: UnmatchedIo }
   // 새 노트(UI 재설계 Task 5): 리본·Ctrl+N·팔레트. 끝나면 만든 노트의 경로, 닫으면 undefined
-  | { kind: 'newNote'; flush: () => Promise<boolean>; invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
+  | { kind: 'newNote'; flush: () => Promise<boolean>; invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> }
+  // feat/ai-context: context sources before AI drafting. Send resolves { sources, window }, closing resolves null
+  | { kind: 'aiContextSources'; built: BuiltContext; window: number; providerLabel: string; model: string };
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {

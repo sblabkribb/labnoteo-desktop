@@ -305,3 +305,9 @@ button.sample-def-link:hover { text-decoration: underline; }
   .settings-nav { flex-direction: row; width: auto; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
   .setting-row { flex-wrap: wrap; }
 }
+
+/* ai-context (feat/ai-context) */
+/* Context sources before AI drafting: a budget bar whose fill width is set through CSSOM (--ai-ctx-fill) */
+.ai-ctx-bar { height: var(--space-2); background: var(--bg-hover); border-radius: var(--radius-s); overflow: hidden; }
+.ai-ctx-bar-fill { width: var(--ai-ctx-fill, 0%); height: 100%; background: var(--accent); }
+.ai-ctx-issues ul { margin: 0; padding-left: var(--space-7); }
