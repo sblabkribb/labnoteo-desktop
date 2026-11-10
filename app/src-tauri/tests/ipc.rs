@@ -355,6 +355,33 @@ fn ipc_argument_names_match_the_typescript_side() {
     );
     assert!(call("github_owners", json!({})).is_err());
     assert!(call("github_name_check", json!({"owner": "kim-lab"})).is_err());
+    // The upload plan is local only: a folder that is not an experiment
+    // answers `notExperiment`, `update` of an unlinked one `notLinked`, and a
+    // bad repo name is refused, all offline and with nothing written.
+    for folder in ["notes", "labnote/001_missing", "../x"] {
+        assert_eq!(
+            ok(
+                "github_plan",
+                args("github_plan", vec![json!(folder), json!({"kind": "create", "owner": "kim-lab", "name": "exp", "private": true}), json!([]), json!([])])
+            ),
+            json!({"outcome": "notExperiment"})
+        );
+    }
+    std::fs::create_dir_all(dir.join("vault").join("labnote").join("001_ipc")).unwrap();
+    assert_eq!(
+        ok("github_plan", args("github_plan", vec![json!("labnote/001_ipc"), json!({"kind": "update"}), json!([]), json!([])])),
+        json!({"outcome": "notLinked"})
+    );
+    assert_eq!(
+        call(
+            "github_plan",
+            args("github_plan", vec![json!("labnote/001_ipc"), json!({"kind": "link", "owner": "kim-lab", "name": "x.git"}), json!([]), json!([])])
+        )
+        .unwrap_err()["kind"],
+        "badInput"
+    );
+    assert!(call("github_plan", json!({"folder": "labnote/001_ipc"})).is_err());
+    std::fs::remove_dir_all(dir.join("vault").join("labnote")).unwrap();
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["github"], &status["set"]["githubRefresh"]), (&json!(false), &json!(false)));
     for r in responses.borrow()[first_github..].iter() {

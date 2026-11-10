@@ -78,6 +78,9 @@ pub struct GithubState {
     device: Mutex<Option<DeviceSession>>,
     memory_token: Mutex<Option<Zeroizing<String>>>,
     memory_refresh: Mutex<Option<Zeroizing<String>>>,
+    /// Upload plans (`github_plan`); they hold no token and no file bytes
+    /// beyond a capped cache.
+    pub(crate) plans: crate::gitsync::plan::PlanStore,
 }
 
 impl std::fmt::Debug for GithubState {
@@ -87,6 +90,7 @@ impl std::fmt::Debug for GithubState {
             .field("device", &shown(lock(&self.device).is_some()))
             .field("memory_token", &shown(lock(&self.memory_token).is_some()))
             .field("memory_refresh", &shown(lock(&self.memory_refresh).is_some()))
+            .field("plans", &self.plans.len())
             .finish()
     }
 }

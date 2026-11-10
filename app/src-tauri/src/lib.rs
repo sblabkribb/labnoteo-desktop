@@ -128,6 +128,8 @@ macro_rules! register_commands {
             $crate::net::github::repos::github_owners,
             $crate::net::github::repos::github_name_check,
             $crate::net::github::repos::github_resolve_repo,
+            // GitHub upload plan (walk and scan and compare; local only and no network).
+            $crate::gitsync::plan::github_plan,
         ])
     };
 }

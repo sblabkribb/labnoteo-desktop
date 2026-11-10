@@ -59,8 +59,9 @@ git2 = { version = "=0.21.0", default-features = false, features = ["https", "ve
 github-test-endpoints = []
 
 [target.'cfg(windows)'.dependencies]
-# SO_EXCLUSIVEADDRUSE on the MCP listener (C2); 0.61.2 is already in the lock.
-windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+# SO_EXCLUSIVEADDRUSE on the MCP listener (C2); GetLocalTime for the GitHub commit
+# message. 0.61.2 is already in the lock.
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_Foundation", "Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

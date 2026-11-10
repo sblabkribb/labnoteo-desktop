@@ -133,8 +133,16 @@ impl std::fmt::Display for WalkError {
 
 impl std::error::Error for WalkError {}
 
+/// Hard-excluded exact names (compared lower-case, as on NTFS).
+const HARD_NAMES: [&str; 2] = ["Thumbs.db", "desktop.ini"];
+/// Hard-excluded name endings (compared lower-case).
+const HARD_SUFFIXES: [&str; 10] =
+    [".labnote-tmp", ".draft.md", ".lnk", ".pem", ".key", ".p12", ".pfx", ".ppk", ".kdbx", ".keystore"];
+/// Hard-excluded name beginnings (compared lower-case).
+const HARD_PREFIXES: [&str; 3] = ["~$", "id_rsa", "id_ed25519"];
+
 /// The §6.1 hard excludes, by name (case-insensitive, as on NTFS). Shared
-/// with the overlay `.gitignore` generator.
+/// with the overlay `.gitignore` generator (`gitignore_patterns`).
 pub fn hard_excluded(name: &str, is_dir: bool) -> bool {
     if name.starts_with('.') {
         return true;
@@ -143,14 +151,23 @@ pub fn hard_excluded(name: &str, is_dir: bool) -> bool {
     if is_dir && n == "node_modules" {
         return true;
     }
-    const SUFFIXES: [&str; 10] =
-        [".labnote-tmp", ".draft.md", ".lnk", ".pem", ".key", ".p12", ".pfx", ".ppk", ".kdbx", ".keystore"];
-    const PREFIXES: [&str; 3] = ["~$", "id_rsa", "id_ed25519"];
-    n == "thumbs.db"
-        || n == "desktop.ini"
-        || SUFFIXES.iter().any(|s| n.ends_with(s))
-        || PREFIXES.iter().any(|p| n.starts_with(p))
+    HARD_NAMES.iter().any(|h| n == h.to_lowercase())
+        || HARD_SUFFIXES.iter().any(|s| n.ends_with(s))
+        || HARD_PREFIXES.iter().any(|p| n.starts_with(p))
         || (n.starts_with("credentials") && n.ends_with(".json"))
+}
+
+/// The generic `.gitignore` lines for the hard excludes, built from the same
+/// lists as `hard_excluded`. They name patterns only, never a file of the
+/// folder (user-excluded names are never written anywhere).
+pub fn gitignore_patterns() -> Vec<String> {
+    let mut out: Vec<String> =
+        [".env*", ".*", "!/.gitignore", "!/.gitattributes", "node_modules/"].iter().map(|s| s.to_string()).collect();
+    out.extend(HARD_NAMES.iter().map(|n| n.to_string()));
+    out.extend(HARD_SUFFIXES.iter().map(|s| format!("*{s}")));
+    out.extend(HARD_PREFIXES.iter().map(|p| format!("{p}*")));
+    out.push("credentials*.json".to_string());
+    out
 }
 
 /// True when `name` holds conjoining Hangul jamo, i.e. Hangul in NFD

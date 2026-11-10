@@ -95,5 +95,6 @@
   "github_set_token": ["value"],
   "github_owners": ["requestId"],
   "github_name_check": ["owner", "name"],
-  "github_resolve_repo": ["url"]
+  "github_resolve_repo": ["url"],
+  "github_plan": ["folder", "target", "sampleIds", "infoFindings"]
 }

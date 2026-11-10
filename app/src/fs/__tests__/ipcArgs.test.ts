@@ -43,6 +43,8 @@ const PENDING_TS_WRAPPERS: readonly string[] = [
   'github_owners',
   'github_name_check',
   'github_resolve_repo',
+  // Task 7: 올릴 파일 확인(계획). 네트워크를 쓰지 않는다.
+  'github_plan',
 ];
 
 /**

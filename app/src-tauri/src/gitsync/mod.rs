@@ -4,6 +4,9 @@
 //! `github_*` commands, never through `integration_state_*`.
 
 pub mod exif;
+pub mod links;
+pub mod overlay;
+pub mod plan;
 pub mod scan;
 pub mod state;
 pub mod walk;
