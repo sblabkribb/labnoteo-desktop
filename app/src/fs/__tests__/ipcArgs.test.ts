@@ -3,7 +3,7 @@ import { TauriLabnoteFs } from '../tauriLabnoteFs';
 import { createVault, openVault, restoreVault } from '../../vault/useVault';
 import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
-import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
+import { indexBodies, rebuildIndex, removeNote, searchNotes, searchNotesIn, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
 import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultImage } from '../vaultImage';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
@@ -94,6 +94,7 @@ describe('IPC 인자 이름 계약', () => {
     await upsertNote('a.md', r.invoke);
     await removeNote('a.md', r.invoke);
     await searchNotes('q', 10, r.invoke);
+    await searchNotesIn('q', 'labnote/001_A', 10, r.invoke);
     await indexBodies(null, 1, r.invoke);
     await openVault(r.invoke, 'D:\\lab');
     await createVault(r.invoke, 'D:\\lab');

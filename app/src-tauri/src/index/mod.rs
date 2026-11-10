@@ -400,6 +400,14 @@ impl Index {
         search::search(&lock(&self.conn), query, limit).map_err(db_err)
     }
 
+    /// `search` limited to the notes inside the vault-relative folder `prefix`
+    /// (`labnote/001_A`: never `labnote/001_AB`). A bad prefix (empty, leading
+    /// `/`, `..`, a backslash or a drive) is `badInput` and runs no query.
+    pub fn search_in(&self, query: &str, prefix: &str, limit: usize) -> Result<SearchResults, FsError> {
+        search::scope_like(prefix).map_err(|e| FsError::BadInput(e.0))?;
+        search::search_in(&lock(&self.conn), query, prefix, limit).map_err(db_err)
+    }
+
     /// One page of note bodies in key order, starting after the key `after`
     /// (the link index loads the vault this way). `next` is the last item's
     /// key, given only when the page is full: the page after it may be empty.
@@ -504,6 +512,21 @@ pub async fn search(
     let root = vault.root()?;
     let ix = state.get(&root)?;
     blocking(move || ix.search(&query, limit as usize)).await
+}
+
+/// Full-text search inside one vault-relative folder (an experiment). Same
+/// ranking and limit clamp as `search`; a bad `prefix` is `badInput`.
+#[tauri::command]
+pub async fn index_search_in(
+    vault: tauri::State<'_, crate::vault::VaultState>,
+    state: tauri::State<'_, IndexState>,
+    query: String,
+    prefix: String,
+    limit: u32,
+) -> Result<SearchResults, FsError> {
+    let root = vault.root()?;
+    let ix = state.get(&root)?;
+    blocking(move || ix.search_in(&query, &prefix, limit as usize)).await
 }
 
 /// Most note bodies one `index_bodies` call returns.
@@ -724,6 +747,20 @@ mod tests {
         let r = ix.apply(&s.vault(), &[("../x.md".into(), false), ("late.md".into(), false)]);
         assert!(r.is_err());
         assert_eq!(found(&ix, "late"), ["late.md"]);
+    }
+
+    #[test]
+    fn search_in_keeps_to_one_folder_and_refuses_bad_prefixes() {
+        let s = Scratch::new();
+        s.note("labnote/001_A/README.md", "agarose gel");
+        s.note("labnote/001_AB/README.md", "agarose gel");
+        let ix = s.index();
+        ix.rebuild(&s.vault()).unwrap();
+        let hits: Vec<String> = ix.search_in("agarose", "labnote/001_A", 10).unwrap().hits.into_iter().map(|h| h.path).collect();
+        assert_eq!(hits, ["labnote/001_A/README.md"]);
+        for bad in ["", "/labnote", "labnote/../x", "labnote\\001_A"] {
+            assert!(matches!(ix.search_in("agarose", bad, 10), Err(FsError::BadInput(_))), "{bad:?}");
+        }
     }
 
     #[test]

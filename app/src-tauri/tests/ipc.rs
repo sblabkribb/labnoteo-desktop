@@ -104,6 +104,10 @@ fn ipc_argument_names_match_the_typescript_side() {
     // error reaches JS as {kind, message}.
     assert_eq!(call("vault_exists", args("vault_exists", vec![json!("a.md")])).unwrap_err()["kind"], "noVault");
     assert_eq!(call("vault_tree", args("vault_tree", vec![])).unwrap_err()["kind"], "noVault");
+    assert_eq!(
+        call("index_search_in", args("index_search_in", vec![json!("x"), json!("notes"), json!(10)])).unwrap_err()["kind"],
+        "noVault"
+    );
     assert_eq!(ok("vault_current", args("vault_current", vec![])), Value::Null);
     assert_eq!(call("link_journal_read", args("link_journal_read", vec![])).unwrap_err()["kind"], "noVault");
 
@@ -449,6 +453,19 @@ title: 실험
     assert_eq!(hits[0]["path"], "notes/k.md");
     assert_eq!(hits[0]["title"], "실험");
     assert!(hits[0]["snippet"].as_str().unwrap().contains("형질전환"));
+    // The folder-scoped search: `prefix` reaches Rust, other folders are not searched.
+    assert_eq!(
+        ok("index_search_in", args("index_search_in", vec![json!("형질전환"), json!("notes"), json!(10)]))["hits"][0]["path"],
+        "notes/k.md"
+    );
+    assert_eq!(
+        ok("index_search_in", args("index_search_in", vec![json!("형질전환"), json!("note"), json!(10)])),
+        json!({"hits": [], "truncated": false})
+    );
+    assert_eq!(
+        call("index_search_in", args("index_search_in", vec![json!("x"), json!("../notes"), json!(10)])).unwrap_err()["kind"],
+        "badInput"
+    );
     ok("vault_write", args("vault_write", vec![json!("notes/k.md"), json!("agarose")]));
     ok("index_upsert", args("index_upsert", vec![json!("notes/k.md")]));
     assert_eq!(ok("search", args("search", vec![json!("agarose"), json!(10)]))["hits"][0]["path"], "notes/k.md");
