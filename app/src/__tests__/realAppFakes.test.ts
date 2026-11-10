@@ -268,3 +268,43 @@ describe('fake LLM streaming (--stream)', () => {
     await expect(start('fakeLlm.mjs', '--stream', 'websocket')).rejects.toThrow(/exited/);
   });
 });
+
+describe('fake SearXNG (plan Task 12)', () => {
+  type Answer = { query: string; results: Array<{ url: string; title: string; content: string; engine: string }>; unresponsive_engines: unknown[] };
+
+  it('answers format=json in the SearXNG shape, echoes a Korean query and carries an injection snippet', async () => {
+    const base = await start('fakeSearxng.mjs', '--web-base', 'http://127.0.0.1:1');
+    const r = await fetch(`${base}/searxng/search?q=${encodeURIComponent('대장균 형질전환')}&format=json&language=ko&safesearch=1&pageno=1`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toContain('application/json');
+    const a = (await r.json()) as Answer;
+    expect(a.query).toBe('대장균 형질전환');
+    expect(a.results.length).toBeGreaterThanOrEqual(3);
+    expect(a.results[0].url).toBe('http://127.0.0.1:1/article');
+    expect(a.results.some((x) => x.content.includes('IGNORE ALL PREVIOUS INSTRUCTIONS') && x.content.includes('</untrusted-data>'))).toBe(true);
+    expect(a.unresponsive_engines).toEqual([]);
+    // Without format=json, like a stock SearXNG: 403.
+    expect((await fetch(`${base}/searxng/search?q=x`)).status).toBe(403);
+    const log = (await (await fetch(`${base}/__log`)).json()) as Array<{ host: string; path: string; q: string; format: string }>;
+    expect(log[0]).toMatchObject({ path: '/searxng/search', q: '대장균 형질전환', format: 'json' });
+    expect(log.every((e) => e.host.startsWith('127.0.0.1:'))).toBe(true);
+  });
+
+  it('--mode forbidden is a plain 403, ratelimit a 429, down an empty answer with unresponsive engines', async () => {
+    const q = 'search?q=x&format=json';
+    const forbidden = await start('fakeSearxng.mjs', '--mode', 'forbidden');
+    const f = await fetch(`${forbidden}/${q}`);
+    expect(f.status).toBe(403);
+    expect(await f.text()).toContain('Forbidden');
+    const limited = await start('fakeSearxng.mjs', '--mode', 'ratelimit');
+    expect((await fetch(`${limited}/${q}`)).status).toBe(429);
+    const down = await start('fakeSearxng.mjs', '--mode', 'down');
+    const d = (await (await fetch(`${down}/${q}`)).json()) as Answer;
+    expect(d.results).toEqual([]);
+    expect(d.unresponsive_engines.length).toBeGreaterThan(0);
+  });
+
+  it('refuses an unknown --mode', async () => {
+    await expect(start('fakeSearxng.mjs', '--mode', 'weird')).rejects.toThrow(/exited/);
+  });
+});

@@ -13,7 +13,7 @@ import type { StoredMessage } from './runtime';
 import type { Source } from './sources';
 
 /** Rust `AssistantErrorKind` (`src-tauri/tests/ipc-assistant-errors.json`). */
-export type AssistantHistoryErrorKind = 'noVault' | 'badFolder' | 'tooLarge' | 'vaultChanged' | 'io';
+export type AssistantHistoryErrorKind = 'noVault' | 'badFolder' | 'tooLarge' | 'vaultChanged' | 'io' | 'badUrl';
 
 export const ASSISTANT_HISTORY_ERROR_KINDS: readonly AssistantHistoryErrorKind[] = [
   'noVault',
@@ -21,6 +21,7 @@ export const ASSISTANT_HISTORY_ERROR_KINDS: readonly AssistantHistoryErrorKind[]
   'tooLarge',
   'vaultChanged',
   'io',
+  'badUrl',
 ];
 
 export class AssistantHistoryError extends Error {

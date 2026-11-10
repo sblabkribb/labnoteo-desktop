@@ -3,5 +3,6 @@
   "badFolder": "badFolder",
   "tooLarge": "tooLarge",
   "vaultChanged": "vaultChanged",
-  "io": "io"
+  "io": "io",
+  "badUrl": "badUrl"
 }

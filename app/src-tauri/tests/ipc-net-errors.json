@@ -20,5 +20,8 @@
   "mcpAuth": "mcpAuth",
   "mcpProtocol": "mcpProtocol",
   "mcpModernOnly": "mcpModernOnly",
-  "mcpToolError": "mcpToolError"
+  "mcpToolError": "mcpToolError",
+  "jsonDisabled": "jsonDisabled",
+  "rateLimited": "rateLimited",
+  "enginesDown": "enginesDown"
 }

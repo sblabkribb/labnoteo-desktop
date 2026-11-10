@@ -15,6 +15,7 @@ pub mod slack;
 pub mod sse;
 pub mod stream;
 pub mod store;
+pub mod web_search;
 pub use store::IntegrationDirs;
 pub use error::*;
 

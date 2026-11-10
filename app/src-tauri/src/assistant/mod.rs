@@ -1,9 +1,11 @@
 //! The floating assistant's Rust side (assistant spec §6.1).
 //!
 //! Everything here lives under `<app_local_data_dir>/assistant/`, never in a
-//! vault: chat history per experiment folder (`history`). Later tasks add the
-//! per-PC `assistant.json` (search and gallery URLs).
+//! vault: chat history per experiment folder (`history`). The per-PC
+//! `assistant.json` (search and gallery URLs, `config`) lives next to
+//! `settings.json` in the app config dir.
 
+pub mod config;
 pub mod history;
 
 use std::path::PathBuf;
@@ -27,6 +29,8 @@ pub enum AssistantErrorKind {
     VaultChanged,
     /// Disk errors, a malformed document, a store inside the vault.
     Io,
+    /// An `assistant.json` URL that is not valid (scheme, credentials, query, clear text).
+    BadUrl,
 }
 
 /// `{kind, message}`, the same shape as the other error types.

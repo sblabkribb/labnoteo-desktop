@@ -32,9 +32,9 @@ describe('netIpc', () => {
     expect(toNetError('plain').kind).toBe('badInput');
   });
 
-  it('NET_ERROR_KINDS lists the 22 kinds Rust serializes', () => {
+  it('NET_ERROR_KINDS lists the 25 kinds Rust serializes', () => {
     const pinned = JSON.parse(readFileSync('src-tauri/tests/ipc-net-errors.json', 'utf-8')) as Record<string, string>;
-    expect(NET_ERROR_KINDS).toHaveLength(22);
+    expect(NET_ERROR_KINDS).toHaveLength(25);
     expect([...NET_ERROR_KINDS].sort()).toEqual(Object.values(pinned).sort());
   });
 

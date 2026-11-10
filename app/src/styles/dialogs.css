@@ -293,6 +293,7 @@ fieldset.mcp-client-auth legend { padding: 0; }
 .setting-desc { margin-top: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; }
 .setting-control { flex: none; display: flex; align-items: center; gap: var(--space-4); }
 .setting-text { width: 14rem; }
+.setting-status { max-width: 16rem; color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; }
 
 /* Switch: a 36×20 track with a knob. On is the accent fill */
 .toggle {

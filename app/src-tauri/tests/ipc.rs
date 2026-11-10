@@ -225,6 +225,31 @@ fn ipc_argument_names_match_the_typescript_side() {
         "noVault"
     );
 
+    // The per-PC assistant.json (no vault needed): nothing set at first, so
+    // web_search is notConfigured and sends nothing; the webview never passes
+    // a base URL. A bad URL is badUrl; the probe takes an unsaved URL.
+    assert_eq!(ok("assistant_config_read", args("assistant_config_read", vec![])), json!({}));
+    assert_eq!(
+        call("web_search", args("web_search", vec![json!("ws1"), json!("대장균"), json!({"language": "ko"})])).unwrap_err()["kind"],
+        "notConfigured"
+    );
+    assert_eq!(
+        call("assistant_config_write", args("assistant_config_write", vec![json!({"searxngUrl": "http://search.lab"})]))
+            .unwrap_err()["kind"],
+        "badUrl"
+    );
+    assert!(call("assistant_config_write", json!({"cfg": {"searxngUrl": "https://s.example", "junk": 1}})).is_err());
+    assert_eq!(
+        ok("assistant_config_write", args("assistant_config_write", vec![json!({"searxngUrl": "https://search.example/searxng/"})])),
+        json!({"searxngUrl": "https://search.example/searxng"})
+    );
+    assert!(dir.join("config").join("assistant.json").is_file());
+    assert_eq!(
+        call("web_search_probe", args("web_search_probe", vec![json!("not a url")])).unwrap_err()["kind"],
+        "invalidUrl"
+    );
+    assert!(call("web_search", json!({"requestId": "ws2", "query": "x", "baseUrl": "https://evil.example"})).is_err(), "no base URL argument");
+
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
     assert_eq!(info["hasObsidianConfig"], false);
@@ -895,6 +920,14 @@ title: 실험
         assert!(call("assistant_history_read", json!({"path": "001_Exp"})).is_err(), "folder is required");
     }
 
+    // assistant.json survived the vault switches above and never went into a vault.
+    assert_eq!(
+        ok("assistant_config_read", args("assistant_config_read", vec![])),
+        json!({"searxngUrl": "https://search.example/searxng"})
+    );
+    assert!(!dir.join("vault").join("assistant.json").exists());
+    assert!(!dir.join("fresh").join("assistant.json").exists());
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
@@ -996,12 +1029,12 @@ fn error_kinds_match_the_typescript_side() {
 fn net_error_kinds_match_the_fixture() {
     use labnoteo_app_lib::net::NetErrorKind as K;
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(NET_ERRORS).unwrap();
-    assert_eq!(fixture.len(), 22, "ipc-net-errors.json lists every kind");
+    assert_eq!(fixture.len(), 25, "ipc-net-errors.json lists every kind");
     let all = [
         K::NotConfigured, K::KeyMissing, K::InvalidUrl, K::ForbiddenPath, K::Offline, K::Timeout,
         K::Tls, K::Redirect, K::Status, K::NotJson, K::TooLarge, K::Cancelled, K::Keychain,
         K::BadInput, K::Remote, K::NoResult, K::Insecure, K::Io, K::McpAuth, K::McpProtocol,
-        K::McpModernOnly, K::McpToolError,
+        K::McpModernOnly, K::McpToolError, K::JsonDisabled, K::RateLimited, K::EnginesDown,
     ];
     // Exhaustive on purpose: a new variant stops compiling here until it is
     // given a name (and an entry in the fixture).
@@ -1028,13 +1061,16 @@ fn net_error_kinds_match_the_fixture() {
         K::McpProtocol => "mcpProtocol",
         K::McpModernOnly => "mcpModernOnly",
         K::McpToolError => "mcpToolError",
+        K::JsonDisabled => "jsonDisabled",
+        K::RateLimited => "rateLimited",
+        K::EnginesDown => "enginesDown",
     };
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-net-errors.json", name(k)));
         assert_eq!(serde_json::to_value(k).unwrap(), Value::String(expected.clone()), "kind {}", name(k));
     }
     let named: std::collections::BTreeSet<&str> = all.iter().map(name).collect();
-    assert_eq!(named.len(), 22);
+    assert_eq!(named.len(), 25);
 }
 
 /// What `McpError` puts in `kind`, one entry per `McpErrorKind`.
@@ -1096,8 +1132,9 @@ fn assistant_error_kinds_match_the_fixture() {
         K::TooLarge => "tooLarge",
         K::VaultChanged => "vaultChanged",
         K::Io => "io",
+        K::BadUrl => "badUrl",
     };
-    let all = [K::NoVault, K::BadFolder, K::TooLarge, K::VaultChanged, K::Io];
+    let all = [K::NoVault, K::BadFolder, K::TooLarge, K::VaultChanged, K::Io, K::BadUrl];
     assert_eq!(fixture.len(), all.len(), "ipc-assistant-errors.json lists every kind");
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-assistant-errors.json", name(k)));

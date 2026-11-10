@@ -134,6 +134,11 @@ macro_rules! register_commands {
             $crate::assistant::history::assistant_history_clear,
             $crate::assistant::history::assistant_history_clear_all,
             $crate::assistant::history::assistant_history_stats,
+            // The per-PC assistant.json and SearXNG web search (assistant Task 12).
+            $crate::assistant::config::assistant_config_read,
+            $crate::assistant::config::assistant_config_write,
+            $crate::net::web_search::web_search,
+            $crate::net::web_search::web_search_probe,
         ])
     };
 }

@@ -316,6 +316,10 @@ describe('failures', () => {
     mcpProtocol: 'badRequest',
     mcpModernOnly: 'badRequest',
     mcpToolError: 'badRequest',
+    // SearXNG web-search kinds (assistant Task 12); partbank never sees one, so they are app bugs like badInput.
+    jsonDisabled: 'badRequest',
+    rateLimited: 'badRequest',
+    enginesDown: 'badRequest',
   };
 
   it.each(NET_ERROR_KINDS.filter((k) => k !== 'cancelled'))('NetError %s maps to a named PartbankErrorKind', (kind) => {

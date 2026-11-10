@@ -19,6 +19,8 @@ import { DEFAULT_PREFS, readUiPrefs, writeUiPrefs } from '../../ui/layoutStore';
 import { skillInstall, skillSaveAs, skillStatus } from '../../labnote/skill/skillIpc';
 import { scholarIpcFor } from '../../integrations/scholar/ipc';
 import * as history from '../../assistant/history';
+import * as assistantConfig from '../../assistant/config';
+import { webIpcFor } from '../../assistant/web/ipc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -200,6 +202,11 @@ describe('IPC 인자 이름 계약', () => {
     await history.clearHistory('001_Exp', r.invoke);
     await history.clearAllHistory(r.invoke);
     await history.historyStats(r.invoke);
+    // 이 PC 의 assistant.json 과 웹 검색(assistant Task 12): 검색 주소는 보내지 않는다(Rust 가 읽는다).
+    await assistantConfig.readAssistantConfig(r.invoke);
+    await assistantConfig.writeAssistantConfig({ searxngUrl: 'https://s.example' }, r.invoke);
+    await assistantConfig.probeWebSearch('https://s.example', r.invoke);
+    await webIpcFor(r.invoke).search('대장균', { language: 'ko' });
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

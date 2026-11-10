@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
+import type { WebSearchResult } from '../../assistant/web/ipc';
 import { assistantSession } from '../../assistant/useAssistantSession';
 import { t } from '../../i18n/t';
 import { useLang } from '../../i18n/useLang';
@@ -11,7 +13,7 @@ import { SettingRow, Toggle } from './SettingRow';
 
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
- * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 대화 기록(Task 10).
+ * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 웹 검색 주소(Task 12, 이 PC 의 assistant.json), 대화 기록(Task 10).
  */
 export function AssistantPage() {
   useLang();
@@ -38,8 +40,134 @@ export function AssistantPage() {
           />
         }
       />
+      <WebSearchRow />
       <HistoryRow />
     </>
+  );
+}
+
+export interface WebSearchRowDeps {
+  read?: () => Promise<AssistantConfig>;
+  /** 웹 검색 주소만 바꾼다(빈 글은 지우기). Rust 가 정리해 저장한 설정을 돌려준다. */
+  save?: (url: string) => Promise<AssistantConfig>;
+  /** 저장하지 않은 주소로 시험 검색. */
+  probe?: (url: string) => Promise<WebSearchResult>;
+}
+
+/** 시험 검색이나 저장의 거절을 짧은 안내로. `message` 는 Rust 글이라 보이지 않는다. */
+function searchErrorText(e: unknown): string {
+  const kind = (e as { kind?: unknown } | null)?.kind;
+  switch (kind) {
+    case 'badUrl':
+    case 'invalidUrl':
+      return t('settings.assistant.search.badUrl');
+    case 'insecure':
+      return t('settings.assistant.search.insecure');
+    case 'jsonDisabled':
+      return t('settings.assistant.search.jsonDisabled');
+    case 'rateLimited':
+      return t('settings.assistant.search.rateLimited');
+    case 'enginesDown':
+      return t('settings.assistant.search.enginesDown');
+    default:
+      return t('settings.assistant.search.failed');
+  }
+}
+
+/**
+ * 웹 검색 주소 줄(assistant 명세 §7.1, plan Task 12): 이 PC 의 `assistant.json` 에 SearXNG 주소를 둔다. 보관함에는 두지 않는다.
+ * Enter 나 칸을 떠나면 저장하고(Rust 가 검사), "확인"은 칸에 적힌 주소(저장 전)로 시험 검색을 한 번 한다.
+ * 결과와 거절은 `role=status` 한 줄로 알린다. 한글 입력 중의 Enter 는 저장하지 않는다.
+ */
+export function WebSearchRow(deps: WebSearchRowDeps = {}) {
+  useLang();
+  const read = deps.read ?? (() => readAssistantConfig());
+  const save = deps.save ?? ((url: string) => updateAssistantConfig({ searxngUrl: url || undefined }));
+  const probe = deps.probe ?? ((url: string) => probeWebSearch(url));
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState('');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    read().then(
+      (cfg) => {
+        if (!live) return;
+        setValue(cfg.searxngUrl ?? '');
+        setSaved(cfg.searxngUrl ?? '');
+      },
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+    // Read once when the pane opens.
+  }, []);
+
+  const commit = async () => {
+    const next = value.trim();
+    if (next === saved) return;
+    try {
+      const stored = await save(next);
+      const url = stored.searxngUrl ?? '';
+      setSaved(url);
+      setValue(url);
+      setStatus(t(url ? 'settings.assistant.search.saved' : 'settings.assistant.search.cleared'));
+    } catch (e) {
+      const kind = (e as { kind?: unknown } | null)?.kind;
+      setStatus(kind === 'badUrl' ? searchErrorText(e) : t('settings.assistant.search.saveFailed'));
+    }
+  };
+
+  const check = async () => {
+    const url = value.trim();
+    if (!url) return;
+    setBusy(true);
+    try {
+      const r = await probe(url);
+      setStatus(t('settings.assistant.search.ok', r.hits.length));
+    } catch (e) {
+      setStatus(searchErrorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const label = t('settings.assistant.search');
+  return (
+    <SettingRow
+      label={label}
+      description={t('settings.assistant.search.desc')}
+      control={
+        <>
+          <input
+            type="text"
+            className="setting-text"
+            aria-label={label}
+            autoComplete="off"
+            spellCheck={false}
+            inputMode="url"
+            maxLength={2048}
+            placeholder={t('settings.assistant.search.placeholder')}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+              e.preventDefault();
+              void commit();
+            }}
+          />
+          <button type="button" className="btn" disabled={busy || value.trim() === ''} onClick={() => void check()}>
+            {t('settings.assistant.search.check')}
+          </button>
+          <span role="status" className="setting-status">
+            {status}
+          </span>
+        </>
+      }
+    />
   );
 }
 

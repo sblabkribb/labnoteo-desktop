@@ -48,6 +48,12 @@ pub enum NetErrorKind {
     McpModernOnly,
     /// A JSON-RPC error answer to `tools/call`; the message is server text (redacted, capped).
     McpToolError,
+    /// A SearXNG instance answered 403: its `search.formats` does not list `json`.
+    JsonDisabled,
+    /// A SearXNG instance answered 429.
+    RateLimited,
+    /// A SearXNG search came back empty because its engines did not answer.
+    EnginesDown,
 }
 
 /// `Debug` is safe: every constructor that takes response text also takes the
