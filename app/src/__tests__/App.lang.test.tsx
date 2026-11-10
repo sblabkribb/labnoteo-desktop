@@ -72,7 +72,9 @@ function hangulIn(root: Element | ShadowRoot): string[] {
   return out;
 }
 
-const languageSelect = (scope: HTMLElement, name: string) => within(scope).getByRole<HTMLSelectElement>('combobox', { name });
+/** 첫 화면의 언어 고르기 메뉴 단추(네이티브 select 가 아니다): 이름은 "언어: 한국어" 꼴이다. */
+const languageMenu = (scope: HTMLElement, label: string) =>
+  within(scope).getByRole<HTMLButtonElement>('button', { name: new RegExp(`^${label}: `) });
 
 /** 보관함 화면에서 언어 바꾸기: 창 틀의 고르기 상자는 빠졌고(Task 5), 팔레트의 언어 명령으로 바꾼다. */
 async function langFromPalette(user: ReturnType<typeof userEvent.setup>, paletteName: string, command: string) {
@@ -115,9 +117,10 @@ describe('영어 화면', () => {
     expect(screen.getByRole('button', { name: 'Create new vault' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open folder' })).toBeTruthy();
     const main = screen.getByRole('main');
-    expect(languageSelect(main, 'Language').value).toBe('en');
-    expect(within(main).getByRole('combobox', { name: 'Theme' })).toBeTruthy();
-    expect(within(main).getByRole('option', { name: 'Match system' })).toBeTruthy();
+    expect(languageMenu(main, 'Language').getAttribute('aria-label')).toBe('Language: English');
+    expect(within(main).queryByRole('combobox')).toBeNull(); // 네이티브 select 는 없다
+    const theme = within(main).getByRole('radiogroup', { name: 'Theme' });
+    expect(within(theme).getByRole('radio', { name: 'System' }).getAttribute('aria-checked')).toBe('true');
     expect(document.documentElement.lang).toBe('en');
   });
 
@@ -165,14 +168,16 @@ describe('영어 화면', () => {
 
 describe('언어 선택', () => {
   it('선택지는 자기 언어로 적힌 이름이고, 각 선택지에 그 언어의 lang 이 붙는다 (보관함을 고르는 첫 화면)', async () => {
+    const user = userEvent.setup();
     picker();
     render(<App />);
     await screen.findByText('노트를 둘 곳을 정하세요');
-    const select = languageSelect(screen.getByRole('main'), '언어');
-    const options = within(select).getAllByRole<HTMLOptionElement>('option');
-    expect(options.map((o) => [o.value, o.textContent, o.lang])).toEqual([
-      ['ko', '한국어', 'ko'],
-      ['en', 'English', 'en'],
+    await user.click(languageMenu(screen.getByRole('main'), '언어'));
+    const list = within(screen.getByRole('main')).getByRole('listbox', { name: '언어' });
+    const options = within(list).getAllByRole('option');
+    expect(options.map((o) => [o.textContent, o.lang, o.getAttribute('aria-selected')])).toEqual([
+      ['한국어', 'ko', 'true'],
+      ['English', 'en', 'false'],
     ]);
   });
 
@@ -205,7 +210,8 @@ describe('언어 선택', () => {
     await user.click(screen.getByRole('button', { name: '기존 폴더 열기' }));
     expect((await screen.findByRole('alert')).textContent).toBe('폴더를 찾을 수 없습니다. 다시 선택해 주세요.');
 
-    await user.selectOptions(languageSelect(screen.getByRole('main'), '언어'), 'en');
+    await user.click(languageMenu(screen.getByRole('main'), '언어'));
+    await user.click(within(screen.getByRole('listbox', { name: '언어' })).getByRole('option', { name: 'English' }));
     expect(screen.getByText('Choose where to keep your notes')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe("Can't find this folder. Choose it again.");
   });

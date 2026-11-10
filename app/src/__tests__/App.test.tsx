@@ -214,7 +214,11 @@ describe('앱', () => {
     });
     render(<App />);
     await screen.findByText('노트를 둘 곳을 정하세요');
-    expect(within(screen.getByRole('main')).getByRole('combobox', { name: '테마' })).toBeTruthy();
+    const user = userEvent.setup();
+    const theme = within(screen.getByRole('main')).getByRole('radiogroup', { name: '테마' });
+    await user.click(within(theme).getByRole('radio', { name: '어둡게' }));
+    expect(within(theme).getByRole('radio', { name: '어둡게' }).getAttribute('aria-checked')).toBe('true');
+    expect(within(screen.getByRole('main')).queryByRole('combobox')).toBeNull();
   });
   it('the app follows watcher events into the link index', async () => {
     const vault = installFakeVault({ 'n.md': '[[New]]' });

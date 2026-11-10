@@ -240,7 +240,19 @@ jobs:
             echo "::error::The draft release for $TAG is not ready to publish (state '$state'; $(grep '^missing=' <<<"$out" || true)); it stays unpublished and the next run builds it again"
             exit 1
           fi
-          gh release edit "$TAG" --draft=false
+          # A retried or by-hand release of an older tag must not take "latest" from a newer one:
+          # installed apps read latest.json from releases/latest.
+          if ! git fetch --force --tags origin; then
+            echo "::error::Could not fetch the tags to tell whether $TAG is the newest release; $TAG stays a draft"
+            exit 1
+          fi
+          NEWEST=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          latest=
+          if [ "$TAG" != "$NEWEST" ]; then
+            latest=--latest=false
+            echo "$TAG is older than $NEWEST; publishing it without marking it latest"
+          fi
+          gh release edit "$TAG" --draft=false $latest
           out=$(bash .github/scripts/release-state.sh "$TAG")
           state=$(sed -n 's/^state=//p' <<<"$out")
           if [ "$state" != complete ]; then

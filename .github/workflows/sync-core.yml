@@ -414,6 +414,6 @@ jobs:
 
           Log: $RUN_URL
 
-          sync-core retries this tag automatically on its next run (daily, or on the next labnoteO release), without a new version, as long as $TAG has no GitHub Release (a missing or wrong signing key fails before the build; fix the secret and wait, or re-run). This issue closes once $TAG is released."
+          sync-core retries this tag automatically on its next run (daily, or on the next labnoteO release), without a new version, as long as $TAG has no complete GitHub Release (a missing or wrong signing key fails before the build; fix the secret and wait, or re-run). This issue closes once $TAG is released."
           fi
           exit 1

@@ -147,6 +147,20 @@ describe('release.yml', () => {
     expect(s).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/);
   });
 
+  it('never marks an older tag as the latest release when it publishes', () => {
+    const s = STEPS[idx(/gh release edit/)];
+    const fetch = s.indexOf('git fetch --force --tags origin');
+    const newest = s.indexOf(
+      String.raw`NEWEST=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)`,
+    );
+    const edit = s.indexOf('gh release edit "$TAG" --draft=false');
+    expect(fetch).toBeGreaterThan(0);
+    expect(newest).toBeGreaterThan(fetch);
+    expect(edit).toBeGreaterThan(newest);
+    expect(s).toMatch(/if \[ "\$TAG" != "\$NEWEST" \]; then\n\s*latest=--latest=false/);
+    expect(s).toMatch(/gh release edit "\$TAG" --draft=false \$latest/);
+  });
+
   it('checks out the input commit (or the dispatched tag) without keeping credentials', () => {
     const s = STEPS[idx(/uses: actions\/checkout@/)];
     expect(s).toContain(

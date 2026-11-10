@@ -191,6 +191,8 @@ describe('sync-core.yml', () => {
     expect(r).toMatch(/permissions:\n {6}issues: write/);
     expect(r).toMatch(/needs\.release\.result/);
     expect(r).toMatch(/Release \$TAG failed/);
+    expect(r).toContain('as long as $TAG has no complete GitHub Release');
+    expect(r).not.toMatch(/has no GitHub Release/);
     expect(r).toMatch(/gh issue create --label core-sync/);
     expect(r).toMatch(/gh issue close/);
     // The sync job also closes stale "Release vX failed" issues once that tag has a complete release (fixed by hand, say).
