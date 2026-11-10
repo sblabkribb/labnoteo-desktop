@@ -418,6 +418,29 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-private { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text); }
 .github-private > .icon { flex: none; margin-top: 0.2em; }
 .github-public > p { display: flex; gap: var(--space-2); }
+.dialog.github-preview { width: min(44rem, 100%); }
+.github-files { display: flex; flex-direction: column; gap: var(--space-3); max-height: 40vh; overflow: auto; }
+.github-folder { margin: 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-m); }
+.github-folder legend { padding: 0 var(--space-2); color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+.github-file { display: flex; align-items: center; gap: var(--space-3); min-height: 1.8em; }
+.github-file-pad { display: inline-block; width: 1em; }
+.github-file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.github-file-size { color: var(--text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
+.github-badge { padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-s); color: var(--text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
+.github-badge.new { color: var(--success); }
+.github-badge.deleted { color: var(--danger); }
+.github-excluded summary { cursor: pointer; color: var(--text-muted); }
+.github-excluded ul, .github-red ul, .github-yellow ul, .github-samples ul, .github-diverged-files { margin: var(--space-2) 0 0; padding-left: var(--space-6); }
+.github-excluded li { color: var(--text-muted); }
+.github-red h3, .github-yellow h3 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: 1em; }
+.github-red h3 { color: var(--danger); }
+.github-yellow h3 { color: var(--warning); }
+.github-finding { margin: 0 0 var(--space-3); }
+.github-finding p { margin: 0; }
+.github-finding.done { color: var(--text-muted); text-decoration: line-through; }
+.github-finding .github-actions { margin-top: var(--space-2); }
+.github-names { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+.github-ack { display: flex; align-items: flex-start; gap: var(--space-2); overflow-wrap: anywhere; }
 
 /* Shortcuts: a read-only table */
 .shortcut-table { width: 100%; border-collapse: collapse; }

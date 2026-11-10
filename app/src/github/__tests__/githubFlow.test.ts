@@ -12,6 +12,8 @@ import type {
 import type { CommandContext } from '../../labnote/commands/context';
 import { fitsQuick, uploadExperiment, type FlowDeps, type FlowUi, type ReadyPlan } from '../githubFlow';
 import type { Destination, DestinationInit } from '../UploadDialog';
+import { LinkIndex } from '../../links/linkIndex';
+import { collectInfoWith } from '../collectInfo';
 
 const FOLDER = 'labnote/001_단백질_발현';
 const ME: Account = { login: 'parkyaeseong', id: 1, avatarUrl: '' };
@@ -373,5 +375,60 @@ describe('uploadExperiment', () => {
     const again = harness({ info, status: LINKED, plans: [ready({ mode: 'update', quickOk: true })] });
     await uploadExperiment(ctx, FOLDER, again.deps);
     expect(again.plans[0].infoFindings).toEqual([]);
+  });
+});
+
+describe('collectInfo', () => {
+  const README = [
+    '---',
+    'title: 단백질 발현',
+    'author: 홍길동',
+    '---',
+    '# 실험',
+    '![[plasmid_map.png]]',
+    '[[002_다른실험/README.labnote]]',
+    '![[gel.png]]',
+    '',
+  ].join('\n');
+
+  function index(): LinkIndex {
+    const ix = new LinkIndex();
+    ix.setFiles([
+      `${FOLDER}/README.labnote.md`,
+      `${FOLDER}/images/gel.png`,
+      `${FOLDER}/images/unused.png`,
+      'resources/plasmid_map.png',
+      'labnote/002_다른실험/README.labnote.md',
+    ]);
+    ix.setNote(`${FOLDER}/README.labnote.md`, README);
+    ix.markReady();
+    return ix;
+  }
+
+  it('finds an image embedded from vault-level resources/ as outside, plus links, unused pictures, title and author', async () => {
+    const ix = index();
+    const info = await collectInfoWith(FOLDER, {
+      files: ix.files(),
+      read: async (p) => (p === `${FOLDER}/README.labnote.md` ? README : ''),
+      resolved: (p) => ix.resolved(p),
+      sampleTypes: [],
+    });
+    expect(info.title).toBe('단백질 발현');
+    expect(info.infoFindings).toEqual([
+      { kind: 'author', names: ['홍길동'] },
+      { kind: 'crossLinks', count: 1 },
+      { kind: 'wikiLinks', count: 3 },
+      { kind: 'outside', count: 1, paths: ['resources/plasmid_map.png'] },
+      { kind: 'unused', count: 1, paths: [`${FOLDER}/images/unused.png`] },
+    ]);
+  });
+
+  it('the outside paths reach githubPlan as an outside info finding', async () => {
+    const ix = index();
+    const h = harness({});
+    h.deps.collectInfo = (folder) =>
+      collectInfoWith(folder, { files: ix.files(), read: async () => README, resolved: (p) => ix.resolved(p), sampleTypes: [] });
+    await uploadExperiment(ctx, FOLDER, h.deps);
+    expect(h.plans[0].infoFindings).toContainEqual({ kind: 'outside', count: 1, paths: ['resources/plasmid_map.png'] });
   });
 });

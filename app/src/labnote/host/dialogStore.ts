@@ -16,6 +16,10 @@ import type { UnmatchedIo } from '../scan/UnmatchedDialog';
 import type { BuiltContext } from '../context/contextBuilder';
 import type { SignInResult, SignInSpec } from '../../github/SignInDialog';
 import type { Destination, DestinationDeps, DestinationInit, DestinationSpec } from '../../github/UploadDialog';
+import type { PreviewDeps, PreviewSpec, QuickAnswer, QuickSpec } from '../../github/PreviewDialog';
+import type { DivergedSpec } from '../../github/DivergedDialog';
+import type { DivergedAnswer, PreviewHead, ReadyPlan } from '../../github/githubFlow';
+import type { DivergedFile, UploadChoices } from '../../integrations/githubIpc';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -71,9 +75,13 @@ export type DialogSpec =
   | { kind: 'newExperiment'; opts: NewExperimentOpts }
   // feat/ai-context: context sources before AI drafting. Send resolves { sources, window }, closing resolves null
   | { kind: 'aiContextSources'; built: BuiltContext; window: number; providerLabel: string; model: string }
-  // GitHub 올리기(spec §5): 로그인(화면 A), 올릴 곳(화면 B). 흐름이 하나씩 차례로 연다(겹치지 않는다).
+  // GitHub 올리기(spec §5): 로그인(화면 A), 올릴 곳(화면 B), 파일 확인(화면 C), 짧은 확인, GitHub 에서 바뀐 내용.
+  // 흐름이 하나씩 차례로 연다(겹치지 않는다). 끝 화면은 단추 셋의 choice 다.
   | SignInSpec
-  | DestinationSpec;
+  | DestinationSpec
+  | PreviewSpec
+  | QuickSpec
+  | DivergedSpec;
 
 
 /**
@@ -326,4 +334,19 @@ export function githubSignInDialog(deps: SignInSpec['deps'], opts: { doneDelayMs
 /** GitHub 올릴 곳 대화상자(spec §5.3). 닫으면 'cancel'. */
 export function githubDestinationDialog(init: DestinationInit, deps: DestinationDeps): Promise<Destination | 'cancel'> {
   return openDialog<Destination | 'cancel'>({ kind: 'githubDestination', init, deps }, 'cancel');
+}
+
+/** GitHub 파일 확인(spec §5.4). 닫으면 'cancel'. */
+export function githubPreviewDialog(plan: ReadyPlan, head: PreviewHead, deps: PreviewDeps): Promise<UploadChoices | 'cancel'> {
+  return openDialog<UploadChoices | 'cancel'>({ kind: 'githubPreview', plan, head, deps }, 'cancel');
+}
+
+/** 다시 올리기의 짧은 확인(spec §5.4). 닫으면 'cancel'. */
+export function githubQuickDialog(plan: ReadyPlan): Promise<QuickAnswer> {
+  return openDialog<QuickAnswer>({ kind: 'githubQuick', plan }, 'cancel');
+}
+
+/** GitHub 에서 바뀐 내용(spec §8.3). 닫으면 'cancel'. */
+export function githubDivergedDialog(files: DivergedFile[]): Promise<DivergedAnswer | 'cancel'> {
+  return openDialog<DivergedAnswer | 'cancel'>({ kind: 'githubDiverged', files }, 'cancel');
 }

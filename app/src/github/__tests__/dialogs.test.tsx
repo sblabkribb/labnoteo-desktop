@@ -4,13 +4,18 @@ import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import {
+  choiceDialog,
   currentDialog,
   githubDestinationDialog,
+  githubDivergedDialog,
+  githubPreviewDialog,
+  githubQuickDialog,
   githubSignInDialog,
   openDialog,
 } from '../../labnote/host/dialogStore';
 import { cleanupDialogs, openIn, renderLayer, styleAttributes } from '../../labnote/host/__tests__/harness';
-import type { Account, NameCheck, OwnersOutcome, ResolveOutcome } from '../../integrations/githubIpc';
+import type { Account, NameCheck, OwnersOutcome, ResolveOutcome, UploadChoices } from '../../integrations/githubIpc';
+import { showDone, type ReadyPlan } from '../githubFlow';
 import type { SettingsDeps } from '../../ui/SettingsModal';
 import type { DestinationDeps, DestinationInit } from '../UploadDialog';
 
@@ -213,5 +218,193 @@ describe('the dialog queue', () => {
     cleanupDialogs();
     await expect(settings).resolves.toBeUndefined();
     await expect(dest).resolves.toBe('cancel');
+  });
+});
+
+function plan(over: Partial<ReadyPlan> = {}): ReadyPlan {
+  return {
+    outcome: 'ready',
+    planId: 'p1',
+    mode: 'first',
+    files: [
+      { path: 'README.labnote.md', size: 1200, change: 'new' },
+      { path: 'images/bench.jpg', size: 4096, change: 'new' },
+      { path: 'README.md', size: 300, change: 'new', generated: true },
+    ],
+    excluded: [{ path: '.env', reason: 'hard' }],
+    red: [],
+    yellow: [],
+    samples: [],
+    totals: { files: 3, generated: 1, bytes: 5596, excluded: 1, new: 3, changed: 0, deleted: 0 },
+    quickOk: false,
+    ...over,
+  };
+}
+
+const HEAD = { folder: 'labnote/001_단백질_발현', title: '단백질 발현', fullName: 'parkyaeseong/001_danbaekjil_balhyeon', private: true };
+
+describe('preview dialog', () => {
+  it('lists files grouped by folder with only checkboxes that leave files out; nothing adds a path', async () => {
+    renderLayer();
+    const p = openIn(() => githubPreviewDialog(plan(), HEAD, { openFile: () => undefined }));
+    const dialog = screen.getByRole('dialog', { name: t('github.preview.title') });
+    expect(dialog.querySelectorAll('fieldset legend')).toHaveLength(2);
+    const inputs = [...dialog.querySelectorAll('input')];
+    expect(inputs.every((i) => i.type === 'checkbox')).toBe(true);
+    // the generated README cannot be left out: only the two real files have a checkbox
+    expect(inputs).toHaveLength(2);
+    expect(dialog.querySelector('input[type=file], textarea')).toBeNull();
+    expect(FORBIDDEN.filter((w) => koText().includes(w))).toEqual([]);
+    expect(styleAttributes()).toEqual([]);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'bench.jpg' }));
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.upload') }));
+    await expect(p).resolves.toEqual({ untick: ['images/bench.jpg'], allowHits: [], includeSamples: false });
+  });
+
+  it('a red item disables Upload until the file is left out', async () => {
+    renderLayer();
+    const p = openIn(() =>
+      githubPreviewDialog(
+        plan({ red: [{ kind: 'tooLarge', path: 'raw/gel_raw.czi', size: 312 * 1024 * 1024 }], excluded: [{ path: 'raw/gel_raw.czi', reason: 'tooLarge' }] }),
+        HEAD,
+        { openFile: () => undefined },
+      ),
+    );
+    const upload = screen.getByRole('button', { name: t('github.preview.upload') }) as HTMLButtonElement;
+    expect(upload.disabled).toBe(true);
+    expect(screen.getAllByText(t('github.preview.mustFix')).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.leaveOut') }));
+    expect(upload.disabled).toBe(false);
+    await userEvent.click(upload);
+    const choices = (await p) as UploadChoices;
+    expect(choices.untick).toEqual(['raw/gel_raw.czi']);
+  });
+
+  it('a secret hit can be opened, or marked "not a key" when overridable', async () => {
+    renderLayer();
+    const opened: string[] = [];
+    const hit = { kind: 'suspect' as const, path: 'notes.md', line: 14, masked: 'sk-…a9f1', lineHash: 'abc', overridable: true };
+    const p = openIn(() => githubPreviewDialog(plan({ red: [{ kind: 'secret', hit }] }), HEAD, { openFile: (path) => void opened.push(path) }));
+    expect(screen.getByText(t('github.preview.secret', 'notes.md', 14, t('github.preview.kind.suspect'), 'sk-…a9f1'))).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.openFile') }));
+    expect(opened).toEqual(['notes.md']);
+    const upload = screen.getByRole('button', { name: t('github.preview.upload') }) as HTMLButtonElement;
+    expect(upload.disabled).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.notAKey') }));
+    expect(upload.disabled).toBe(false);
+    await userEvent.click(upload);
+    await expect(p).resolves.toEqual({ untick: [], allowHits: [{ path: 'notes.md', lineHash: 'abc' }], includeSamples: false });
+  });
+
+  it('a private-key hit has no "not a key" button', () => {
+    renderLayer();
+    const hit = { kind: 'privateKey' as const, path: 'id_rsa.txt', line: 1, masked: '-----BEGIN…', lineHash: 'h', overridable: false };
+    void openIn(() => githubPreviewDialog(plan({ red: [{ kind: 'secret', hit }] }), HEAD, { openFile: () => undefined }));
+    expect(screen.queryByRole('button', { name: t('github.preview.notAKey') })).toBeNull();
+  });
+
+  it('yellow items are listed with file names, including files outside the folder', () => {
+    renderLayer();
+    void openIn(() =>
+      githubPreviewDialog(
+        plan({
+          yellow: [
+            { kind: 'info', info: 'outside', count: 1, paths: ['resources/plasmid_map.png'], names: [] },
+            { kind: 'gps', paths: ['images/bench.jpg'] },
+            { kind: 'excludedLink', path: 'shortcut.lnk' },
+          ],
+        }),
+        HEAD,
+        { openFile: () => undefined },
+      ),
+    );
+    expect(screen.getByText(t('github.preview.outside', 1))).toBeTruthy();
+    expect(screen.getByText('resources/plasmid_map.png')).toBeTruthy();
+    expect(screen.getByText(t('github.preview.gps', 1))).toBeTruthy();
+    expect(screen.getByText(t('github.preview.excludedLink'))).toBeTruthy();
+    expect((screen.getByRole('button', { name: t('github.preview.upload') }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('the shared-samples checkbox is off by default and lists each entry', async () => {
+    renderLayer();
+    const p = openIn(() => githubPreviewDialog(plan({ samples: [{ id: 'DNA-20250527-003', type: 'DNA', name: 'pUC19-GFP' }] }), HEAD, { openFile: () => undefined }));
+    const box = screen.getByRole('checkbox', { name: t('github.preview.samples', 1) }) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(screen.getByText('DNA-20250527-003 (DNA, "pUC19-GFP")')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.upload') }));
+    expect(((await p) as UploadChoices).includeSamples).toBe(false);
+  });
+});
+
+describe('quick confirm', () => {
+  it('names the new and removed files', async () => {
+    renderLayer();
+    const p = openIn(() =>
+      githubQuickDialog(
+        plan({
+          mode: 'update',
+          files: [
+            { path: 'images/gel2.png', size: 5, change: 'new' },
+            { path: 'old.csv', size: 0, change: 'deleted' },
+            { path: 'a.md', size: 1, change: 'same' },
+          ],
+        }),
+      ),
+    );
+    expect(screen.getByRole('dialog', { name: t('github.quick.title', 1, 1) })).toBeTruthy();
+    expect(koText()).toContain('gel2.png');
+    expect(koText()).toContain('old.csv');
+    expect(koText()).toContain(t('github.quick.historyKept'));
+    expect(FORBIDDEN.filter((w) => koText().includes(w))).toEqual([]);
+    expect(styleAttributes()).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: t('github.quick.details') }));
+    await expect(p).resolves.toBe('details');
+  });
+});
+
+describe('changes on GitHub', () => {
+  it('"upload my folder version" needs the acknowledgement', async () => {
+    renderLayer();
+    const p = openIn(() =>
+      githubDivergedDialog([
+        { path: 'README.labnote.md', change: 'changed', goneHere: false },
+        { path: 'notes.txt', change: 'new', goneHere: true },
+      ]),
+    );
+    expect(koText()).toContain(t('github.diverged.goneHere'));
+    expect(FORBIDDEN.filter((w) => koText().includes(w))).toEqual([]);
+    expect(styleAttributes()).toEqual([]);
+    const mine = screen.getByRole('button', { name: t('github.diverged.mine') }) as HTMLButtonElement;
+    expect(mine.disabled).toBe(true);
+    await userEvent.click(screen.getByRole('checkbox'));
+    expect(mine.disabled).toBe(false);
+    await userEvent.click(mine);
+    await expect(p).resolves.toEqual({ mode: 'mine', ack: ['README.labnote.md', 'notes.txt'] });
+  });
+
+  it('the advanced choice keeps the GitHub version', async () => {
+    renderLayer();
+    const p = openIn(() => githubDivergedDialog([{ path: 'a.md', change: 'changed', goneHere: false }]));
+    await userEvent.click(screen.getByRole('button', { name: t('github.settings.advanced') }));
+    await userEvent.click(screen.getByRole('button', { name: t('github.diverged.separate') }));
+    await expect(p).resolves.toEqual({ mode: 'separate', ack: [] });
+  });
+});
+
+describe('done', () => {
+  it('shows the title and repository with open, invite and close', async () => {
+    renderLayer();
+    const opened: string[] = [];
+    const r = { title: '단백질 발현', fullName: 'parkyaeseong/x', htmlUrl: 'https://github.com/parkyaeseong/x' };
+    let done!: Promise<void>;
+    act(() => {
+      done = showDone(r, (m, c, o) => choiceDialog(m, c, o), (u) => void opened.push(u));
+    });
+    expect(screen.getByText(t('github.done.title', '단백질 발현', 'parkyaeseong/x'))).toBeTruthy();
+    expect(screen.getByRole('button', { name: t('github.menu.open') })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: t('dialog.close') })).toHaveLength(2);
+    await userEvent.click(screen.getByRole('button', { name: t('github.done.invite') }));
+    await done;
+    expect(opened).toEqual(['https://github.com/parkyaeseong/x/settings/access']);
   });
 });

@@ -21,6 +21,8 @@ import { NewExperimentDialog } from '../ui/NewExperimentDialog';
 import { ContextSourcesDialog } from '../context/ContextSourcesDialog';
 import { SignInDialog } from '../../github/SignInDialog';
 import { UploadDialog } from '../../github/UploadDialog';
+import { PreviewDialog, QuickDialog } from '../../github/PreviewDialog';
+import { DivergedDialog } from '../../github/DivergedDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -69,6 +71,12 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <SignInDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'githubDestination':
       return <UploadDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubPreview':
+      return <PreviewDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubQuick':
+      return <QuickDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubDiverged':
+      return <DivergedDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

@@ -17,6 +17,35 @@ import type { CommandContext } from '../labnote/commands/context';
 import type { ChoiceItem } from '../labnote/host/dialogStore';
 import type { NotifyOpts } from '../labnote/host/toastStore';
 import { formatBytes } from '../viewers/viewerStatus';
+import {
+  githubAccount,
+  githubDefaultOwnerGet,
+  githubFolderStatus,
+  githubNameCheck,
+  githubOwners,
+  githubPlan,
+  githubResolveRepo,
+  githubSignInStart,
+  githubSignInWait,
+  githubSignOut,
+  githubUpload,
+  onGithubProgress,
+} from '../integrations/githubIpc';
+import { openProgress } from '../integrations/progressStore';
+import {
+  choiceDialog,
+  githubDestinationDialog,
+  githubDivergedDialog,
+  githubPreviewDialog,
+  githubQuickDialog,
+  githubSignInDialog,
+} from '../labnote/host/dialogStore';
+import { copyText } from '../links/clipboard';
+import { linkIndex } from '../links/linkIndex';
+import { openExternal, tauriExternalDeps } from '../links/openExternal';
+import { sampleTypesFor } from '../samples/types';
+import { openSettings } from '../ui/SettingsModal';
+import { collectInfoWith } from './collectInfo';
 import { minutesOf } from './outcomeText';
 import type { SignInResult } from './SignInDialog';
 import { slugify } from './slug';
@@ -27,6 +56,8 @@ export type ReadyPlan = Extract<PlanOutcome, { outcome: 'ready' }>;
 
 /** 미리보기 머리에 보일 것: 실험 제목, 올릴 저장소, 비공개인지. */
 export interface PreviewHead {
+  /** 실험 폴더(보관함 기준). 계획의 경로는 이 폴더 기준이다. */
+  folder: string;
   title: string;
   fullName?: string;
   private?: boolean;
@@ -205,7 +236,7 @@ async function runFlow(folder: string, deps: FlowDeps): Promise<void> {
   const first = !status.linked;
   let target: PlanTarget = { kind: 'update' };
   let publicConfirm: string | undefined;
-  let head: PreviewHead = { title: info.title, fullName: status.fullName, private: status.private };
+  let head: PreviewHead = { folder, title: info.title, fullName: status.fullName, private: status.private };
   let preset: Partial<Pick<DestinationInit, 'owner' | 'mode'>> = {};
 
   const chooseDestination = async (): Promise<boolean> => {
@@ -229,7 +260,7 @@ async function runFlow(folder: string, deps: FlowDeps): Promise<void> {
       }
       target = d.kind === 'create' ? { kind: 'create', owner: d.owner, name: d.name, private: d.private } : { kind: 'link', owner: d.owner, name: d.name };
       publicConfirm = d.publicConfirm;
-      head = { title: info.title, fullName: `${d.owner}/${d.name}`, private: d.kind === 'create' ? d.private : publicConfirm === undefined };
+      head = { folder, title: info.title, fullName: `${d.owner}/${d.name}`, private: d.kind === 'create' ? d.private : publicConfirm === undefined };
       return true;
     }
   };
@@ -425,4 +456,64 @@ async function upload(planId: string, choices: UploadChoices, title: string, dep
     unlisten();
     p.done();
   }
+}
+
+/** 첫 올리기의 끝 화면(spec §5.6): [GitHub에서 보기] [함께 볼 사람 초대 (GitHub)] [닫기]. */
+export async function showDone(
+  r: DoneResult,
+  choose: FlowUi['choose'],
+  open: (url: string) => Promise<unknown> | void,
+): Promise<void> {
+  const way = await choose(t('github.done.title', r.title, r.fullName), [
+    { label: t('github.menu.open'), value: 'open' as const },
+    { label: t('github.done.invite'), value: 'invite' as const },
+    { label: t('dialog.close'), value: 'close' as const },
+  ]);
+  if (way === 'open') await open(r.htmlUrl);
+  else if (way === 'invite') await open(`${r.htmlUrl}/settings/access`);
+}
+
+/**
+ * 앱의 흐름 부품: 대화상자 줄의 GitHub 대화상자, 진행 창, `ctx.host.notify`, 바깥 주소 열기, 설정 창.
+ * 노트에서 모으기는 앱의 링크 색인과 보관함 읽기를 쓴다.
+ */
+export function realFlowDeps(ctx: CommandContext): FlowDeps {
+  const notify = (kind: 'info' | 'warn', message: string) => ctx.host.notify(kind, message);
+  const external = tauriExternalDeps(notify);
+  const open = (url: string) => openExternal(url, external);
+  const choose: FlowUi['choose'] = (message, choices, opts) => choiceDialog(message, choices, opts);
+  return {
+    ipc: { githubAccount, githubSignOut, githubFolderStatus, githubDefaultOwnerGet, githubPlan, githubUpload, onGithubProgress },
+    collectInfo: (folder) =>
+      collectInfoWith(folder, {
+        files: linkIndex.files(),
+        read: (path) => ctx.host.fs.read(path),
+        resolved: (path) => linkIndex.resolved(path),
+        sampleTypes: sampleTypesFor(ctx.settings),
+      }),
+    ui: {
+      signIn: () =>
+        githubSignInDialog({
+          signInStart: () => githubSignInStart(),
+          signInWait: (signal) => githubSignInWait({ signal }),
+          openExternal: open,
+          copy: (text) => copyText(text, notify),
+        }),
+      destination: (init) =>
+        githubDestinationDialog(init, {
+          owners: (signal) => githubOwners({ signal }),
+          nameCheck: (owner, name) => githubNameCheck(owner, name),
+          resolveRepo: (url) => githubResolveRepo(url),
+        }),
+      preview: (plan, head) => githubPreviewDialog(plan, head, { openFile: (path) => ctx.openFile(`${head.folder}/${path}`) }),
+      quick: (plan) => githubQuickDialog(plan),
+      diverged: (files) => githubDivergedDialog(files),
+      progress: (title) => openProgress(title),
+      notify: (kind, message, opts) => ctx.host.notify(kind, message, opts),
+      choose,
+      done: (r) => showDone(r, choose, open),
+      openExternal: open,
+      openSettings: (page, opts) => openSettings(page, opts),
+    },
+  };
 }
