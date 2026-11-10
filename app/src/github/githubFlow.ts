@@ -418,7 +418,9 @@ async function runFlow(folder: string, deps: FlowDeps): Promise<void> {
         case 'needsPreview':
           // 저장소는 있다(끝나지 않은 올리기): 그 저장소로 다시 계획하고 미리보기를 보인다.
           if (replanned) {
-            ui.notify('error', t('github.err.planStale'));
+            ui.notify('info', t('github.err.planStale'), {
+              action: { label: t('github.err.checkAgain'), run: () => void runGuarded(folder, deps) },
+            });
             return 'stop';
           }
           replanned = true;
