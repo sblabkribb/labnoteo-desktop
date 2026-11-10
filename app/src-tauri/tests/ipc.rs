@@ -28,6 +28,7 @@ const EVENTS: &str = include_str!("ipc-events.json");
 const NET_ERRORS: &str = include_str!("ipc-net-errors.json");
 const MCP_ERRORS: &str = include_str!("ipc-mcp-errors.json");
 const SKILL_ERRORS: &str = include_str!("ipc-skill-errors.json");
+const ASSISTANT_ERRORS: &str = include_str!("ipc-assistant-errors.json");
 
 /// True when `s` holds a run of 48 or more hex chars: the shape of an MCP token.
 fn has_48_hex(s: &str) -> bool {
@@ -65,6 +66,8 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::mcp::ClipState(clip.clone()))
         // The skill installer: a temp home (never the real one) and a fake
         // save dialog that picks a temp path once, then cancels.
+        // The assistant's chat history: a temp app data dir, never the real one.
+        .manage(labnoteo_app_lib::assistant::AssistantDirs(dir.join("data").join("assistant")))
         .manage(labnoteo_app_lib::skill::SkillPaths { home: Some(dir.join("home")) })
         .manage(labnoteo_app_lib::skill::SkillPicker(std::sync::Arc::new({
             let picked = dir.join("saved").join("SKILL.md");
@@ -214,6 +217,12 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(
         call("scan_folder_move", args("scan_folder_move", vec![json!("a\\b.jpg"), json!("processed")])).unwrap_err()["kind"],
         "badInput"
+    );
+
+    // Chat history needs an open vault; the stats and clear-all do not.
+    assert_eq!(
+        call("assistant_history_read", args("assistant_history_read", vec![json!("001_Exp")])).unwrap_err()["kind"],
+        "noVault"
     );
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
@@ -846,6 +855,46 @@ title: 실험
         assert!(call("skill_install", json!({})).is_err(), "overwrite is required");
     }
 
+    // Chat history per experiment folder: Rust keys it from the open vault and
+    // the validated folder; the webview sends only the folder, the token it was
+    // given and the document. Nothing lands in the vault.
+    {
+        std::fs::create_dir_all(dir.join("vault").join("001_Exp")).unwrap();
+        let before: Vec<_> = std::fs::read_dir(dir.join("vault").join("001_Exp")).unwrap().collect();
+        assert!(before.is_empty());
+        let read = ok("assistant_history_read", args("assistant_history_read", vec![json!("001_Exp")]));
+        assert_eq!(read["doc"], json!({"version": 1, "folder": "001_Exp", "updated": 0.0, "messages": []}));
+        let token = read["token"].as_str().unwrap().to_string();
+        assert_eq!(token.len(), 32);
+        let doc = json!({"version": 1, "folder": "001_Exp", "updated": 2.0,
+            "messages": [{"id": "m1", "role": "user", "text": "PCR 조건", "ts": 1.0}]});
+        assert_eq!(
+            ok("assistant_history_write", args("assistant_history_write", vec![json!("001_Exp"), json!(token), doc])),
+            Value::Null
+        );
+        let again = ok("assistant_history_read", args("assistant_history_read", vec![json!("001_Exp")]));
+        assert_eq!(again["doc"]["messages"][0]["text"], "PCR 조건");
+        assert_eq!(ok("assistant_history_stats", args("assistant_history_stats", vec![]))["folders"], 1);
+        assert!(std::fs::read_dir(dir.join("vault").join("001_Exp")).unwrap().next().is_none());
+        assert!(dir.join("data").join("assistant").join("history").join(format!("{token}.json")).is_file());
+        assert_eq!(
+            call("assistant_history_read", args("assistant_history_read", vec![json!("../x")])).unwrap_err()["kind"],
+            "badFolder"
+        );
+        assert_eq!(
+            call(
+                "assistant_history_write",
+                args("assistant_history_write", vec![json!("001_Exp"), json!("0"), json!({"version": 1, "folder": "", "updated": 0, "messages": []})])
+            )
+            .unwrap_err()["kind"],
+            "vaultChanged"
+        );
+        assert_eq!(ok("assistant_history_clear", args("assistant_history_clear", vec![json!("001_Exp")])), Value::Null);
+        assert_eq!(ok("assistant_history_stats", args("assistant_history_stats", vec![])), json!({"folders": 0, "bytes": 0}));
+        assert_eq!(ok("assistant_history_clear_all", args("assistant_history_clear_all", vec![])), json!(0));
+        assert!(call("assistant_history_read", json!({"path": "001_Exp"})).is_err(), "folder is required");
+    }
+
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());
     assert!(call("vault_list", json!({"path": ""})).is_err());
@@ -1030,6 +1079,29 @@ fn skill_error_kinds_match_the_fixture() {
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-skill-errors.json", name(k)));
         let wire = serde_json::to_value(SkillError::new(*k, "m")).unwrap();
+        assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
+    }
+}
+
+/// What `AssistantError` puts in `kind`, one entry per `AssistantErrorKind`.
+#[test]
+fn assistant_error_kinds_match_the_fixture() {
+    use labnoteo_app_lib::assistant::{AssistantError, AssistantErrorKind as K};
+    let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(ASSISTANT_ERRORS).unwrap();
+    // Exhaustive on purpose: a new variant stops compiling here until it is
+    // given a name (and an entry in the fixture).
+    let name = |k: &K| match k {
+        K::NoVault => "noVault",
+        K::BadFolder => "badFolder",
+        K::TooLarge => "tooLarge",
+        K::VaultChanged => "vaultChanged",
+        K::Io => "io",
+    };
+    let all = [K::NoVault, K::BadFolder, K::TooLarge, K::VaultChanged, K::Io];
+    assert_eq!(fixture.len(), all.len(), "ipc-assistant-errors.json lists every kind");
+    for k in &all {
+        let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-assistant-errors.json", name(k)));
+        let wire = serde_json::to_value(AssistantError::new(*k, "m")).unwrap();
         assert_eq!(wire, json!({"kind": expected, "message": "m"}), "kind {}", name(k));
     }
 }

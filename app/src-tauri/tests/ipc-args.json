@@ -96,5 +96,10 @@
   "mcp_drain": [],
   "skill_status": [],
   "skill_install": ["overwrite"],
-  "skill_save_as": []
+  "skill_save_as": [],
+  "assistant_history_read": ["folder"],
+  "assistant_history_write": ["folder", "token", "doc"],
+  "assistant_history_clear": ["folder"],
+  "assistant_history_clear_all": [],
+  "assistant_history_stats": []
 }

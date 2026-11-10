@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+pub mod assistant;
 pub mod index;
 pub mod mcp;
 pub mod net;
@@ -127,6 +128,12 @@ macro_rules! register_commands {
             $crate::skill::skill_status,
             $crate::skill::skill_install,
             $crate::skill::skill_save_as,
+            // The assistant's chat history per experiment folder (app data dir).
+            $crate::assistant::history::assistant_history_read,
+            $crate::assistant::history::assistant_history_write,
+            $crate::assistant::history::assistant_history_clear,
+            $crate::assistant::history::assistant_history_clear_all,
+            $crate::assistant::history::assistant_history_stats,
         ])
     };
 }
@@ -194,6 +201,8 @@ pub fn run() {
             // Offline PartBank catalogs and integration state, per vault and
             // never in the vault (D13).
             app.manage(net::IntegrationDirs(data.join("integrations")));
+            // The assistant's chat history (and later its skins), never in a vault.
+            app.manage(assistant::AssistantDirs(data.join("assistant")));
             // Integration keys: Windows Credential Manager only, never a file (D6).
             app.manage(net::secrets::Secrets::keyring());
             // Save as... for SKILL.md: Rust's own save dialog, modal to the main window.
