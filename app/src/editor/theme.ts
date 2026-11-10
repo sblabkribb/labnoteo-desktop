@@ -211,6 +211,83 @@ export const editorThemeSpec = {
   '.lno-uo-uhw': { borderColor: 'var(--accent)' },
   '.lno-uo-usw': { borderColor: 'var(--success)' },
   '.lno-uo-wb': { borderColor: 'var(--warning)' },
+  // UO 카드(live/uoCards.ts): 구역의 줄마다 옅은 바탕과 좌우 선, 첫 줄·끝 줄에 위·아래 선과 둥근 모서리. 커서가 든 카드는 강조색 선.
+  // 줄 바깥 여백(margin)은 CodeMirror 의 높이 계산을 흐리므로 쓰지 않는다: 카드는 본문 폭을 채운다. 왼쪽 여백은 줄의 것
+  // (목록 깊이의 padding-left 와 textIndent)을 그대로 둔다.
+  '.cm-line.cm-uo-card': {
+    backgroundColor: 'var(--bg-side)',
+    borderLeft: '1px solid var(--border)',
+    borderRight: '1px solid var(--border)',
+  },
+  '.cm-line.cm-uo-card-first': {
+    borderTop: '1px solid var(--border)',
+    borderTopLeftRadius: 'var(--radius-l)',
+    borderTopRightRadius: 'var(--radius-l)',
+    paddingTop: 'var(--space-3)',
+  },
+  '.cm-line.cm-uo-card-last': {
+    borderBottom: '1px solid var(--border)',
+    borderBottomLeftRadius: 'var(--radius-l)',
+    borderBottomRightRadius: 'var(--radius-l)',
+    paddingBottom: 'var(--space-3)',
+  },
+  '.cm-line.cm-uo-card-active': { borderColor: 'var(--accent)' },
+  '.cm-line.cm-uo-card.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
+  // 카드 안의 `#### Meta` 등: 작은 대문자 흐린 이름표(파일의 제목 글은 그대로)
+  '.cm-line.cm-uo-label': { fontSize: '0.78em', fontWeight: '600', letterSpacing: '0.05em', textTransform: 'uppercase', paddingTop: 'var(--space-3)' },
+  '.cm-uo-label, .cm-uo-label *': { color: 'var(--text-muted)' },
+  // UO 상태 칩: 머리줄 끝, 강조색 옅은 바탕(완료는 성공색 글자)
+  '.lno-uo-status': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'var(--space-2)',
+    marginLeft: 'var(--space-4)',
+    fontSize: '0.6em',
+    fontWeight: '500',
+    color: 'var(--text)',
+    backgroundColor: 'var(--accent-soft)',
+    borderColor: 'var(--accent-soft)',
+    verticalAlign: 'middle',
+  },
+  '.lno-uo-status.lno-status-done': { color: 'var(--success)' },
+  // Meta 날짜 칩(live/dateChip.ts): 달력 아이콘 + 고정폭 값. 빈 값은 점선 테두리에 "날짜 고르기".
+  '.lno-date-chip': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'var(--space-2)',
+    font: 'inherit',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.85em',
+    color: 'var(--text)',
+    cursor: 'pointer',
+    verticalAlign: 'baseline',
+    '&:hover': { backgroundColor: 'var(--bg-selected)' },
+    '&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
+  },
+  '.lno-date-chip.lno-date-empty': { fontFamily: 'var(--font-ui)', color: 'var(--text-muted)', borderStyle: 'dashed' },
+  '.lno-date-chip.lno-date-icon': { marginLeft: 'var(--space-3)', padding: '0 var(--space-1)', color: 'var(--text-muted)' },
+  // 날짜 고르기 창: 고른 칩 아래(left/top 은 dateChip.ts 가 CSSOM 으로 적는다)
+  '.lno-date-pop': { top: '0', left: '0', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', padding: 'var(--space-4)' },
+  '.lno-date-input': {
+    font: 'inherit',
+    height: '28px',
+    padding: '0 var(--space-3)',
+    color: 'var(--text)',
+    backgroundColor: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    '&:focus': { outline: 'none', borderColor: 'var(--accent)', boxShadow: '0 0 0 2px var(--accent-soft)' },
+  },
+  '.lno-date-actions': { display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' },
+  '.lno-date-actions .lno-btn': { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', height: '28px' },
+  '.lno-btn.lno-btn-primary': {
+    color: 'var(--accent-text)',
+    backgroundColor: 'var(--accent-fill)',
+    borderColor: 'var(--accent-fill)',
+    '&:hover:not(:disabled)': { backgroundColor: 'var(--accent-fill)', borderColor: 'var(--accent-fill)', filter: 'brightness(0.95)' },
+  },
+  // 템플릿 자리 글(live/placeholders.ts): 흐린 기울임, 누르면 통째로 골라진다
+  '.lno-placeholder': { color: 'var(--text-faint)', fontStyle: 'italic', cursor: 'pointer' },
   // 샘플 ID(samples/typeClass.ts): 종류별 옅은 바탕. 레지스트리에 없는 ID 는 위험색 물결 밑줄, 낡은 별칭은 경고색 점선 밑줄,
   // 폐기된 샘플은 흐리고 취소선. 폐기 + 낡은 별칭은 두 줄을 함께 긋는다. 자동 완성의 샘플 행은 설명을 흐리게, 폐기 행은 흐리게.
   '.lno-sample-id': { borderRadius: '3px', padding: '0 2px' },
