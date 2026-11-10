@@ -11,6 +11,10 @@ import { petStore } from '../petStore';
 import { emptyHistory } from '../history';
 import type { AssistantRuntime } from '../runtime';
 import { assistantSession } from '../useAssistantSession';
+import { chipGate } from '../chips';
+import { openPalette } from '../../labnote/ui/CommandPalette';
+import { clearCommandsForTest, commands } from '../../labnote/commands/registry';
+import { registerAllCommands } from '../../labnote/commands/registerAll';
 
 vi.mock('../../ui/SettingsModal', () => ({ openSettings: vi.fn(async () => undefined) }));
 
@@ -219,5 +223,96 @@ describe('Ctrl+Shift+Y (assistant.open)', () => {
     const SHIFT_Y = /(?:Mod|Ctrl)-Shift-[yY]\b|Shift-(?:Mod|Ctrl)-[yY]\b/;
     const hits = sources('src/editor').filter((f) => SHIFT_Y.test(readFileSync(f, 'utf-8')));
     expect(hits).toEqual([]);
+  });
+});
+
+describe('command audit (Task 21, spec §10.2)', () => {
+  /** 팔레트가 보여 줄 줄의 명령 id(고르지 않고 닫는다). */
+  async function paletteIds(): Promise<string[]> {
+    let ids: string[] = [];
+    const c = {
+      host: {
+        notify: () => {},
+        pick: async (items: Array<{ value: { command: { id: string } } }>) => {
+          ids = items.map((i) => i.value.command.id);
+          return undefined;
+        },
+      },
+    } as unknown as CommandContext;
+    await openPalette(c);
+    return ids;
+  }
+
+  it('every assistant and skin command is in the palette; assistant.stop only while a reply runs', async () => {
+    const idle = await paletteIds();
+    for (const id of ASSISTANT_COMMAND_IDS) {
+      if (id === 'assistant.stop') expect(idle, id).not.toContain(id);
+      else expect(idle, id).toContain(id);
+    }
+    let release: () => void = () => {};
+    assistantSession.resetForTest({
+      runtime: () => ({
+        id: 'fake',
+        label: () => 'Fake',
+        available: async () => ({ ok: true }),
+        run: (_turn, _sink, signal) =>
+          new Promise((resolve) => {
+            release = () => resolve({ content: 'ok', sources: [], executed: [], tainted: false, cancelled: signal.aborted });
+            signal.addEventListener('abort', () => release());
+          }),
+      }),
+      history: { read: async (folder) => ({ doc: emptyHistory(folder), token: 't' }), write: async () => {}, clear: async () => {} },
+      confirm: async () => true,
+      setPetState: () => {},
+    });
+    const p = assistantSession.send('q');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await paletteIds()).toContain('assistant.stop');
+    release();
+    await p;
+  });
+
+  it('no assistant or skin id collides with a vendor (plugin) command id', () => {
+    clearAppCommandsForTest();
+    registerAllCommands();
+    try {
+      const vendor = new Set(commands().map((c) => c.id));
+      for (const id of ASSISTANT_COMMAND_IDS) expect(vendor.has(id), id).toBe(false);
+      expect(() => registerAllAppCommands()).not.toThrow();
+    } finally {
+      clearCommandsForTest();
+    }
+  });
+
+  it('every id is in the assistant. or skins. namespace and each nameKey is unique and Korean in ko', () => {
+    const keys = assistantCommands().map((c) => c.nameKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const c of assistantCommands()) {
+      expect(c.id).toMatch(/^(assistant|skins)\.[a-zA-Z]+$/);
+      expect(catalogs.ko[c.nameKey], c.nameKey).toMatch(/[가-힣]/);
+      expect(catalogs.ko[c.nameKey]).not.toBe(catalogs.en[c.nameKey]);
+    }
+  });
+
+  it('chip commands without an experiment or a provider still open and the bubble says why', async () => {
+    assistantSession.setActivePath('notes/free.md');
+    const cases = [
+      ['assistant.createSection', 'section'],
+      ['assistant.createUnitOperation', 'unitOp'],
+      ['assistant.createWorkflow', 'workflow'],
+    ] as const;
+    for (const [id, chip] of cases) {
+      petStore.setOpen(false);
+      await run(id);
+      expect(petStore.get().open, id).toBe(true);
+      const s = assistantSession.get();
+      expect(s.chip, id).toBe(chip);
+      expect(s.folder, id).toBeNull();
+      expect(chipGate(s.chip, { provider: true, folder: s.folder }), id).toBe('noScope');
+      expect(chipGate(s.chip, { provider: false, folder: s.folder }), id).toBe('noProvider');
+    }
+    // 사용법은 제공자도 실험도 없이 된다
+    await run('assistant.howTo');
+    expect(chipGate(assistantSession.get().chip, { provider: false, folder: null })).toBe('ok');
   });
 });

@@ -268,6 +268,37 @@ describe('Settings modal', () => {
     expect(layoutStore.get().pet.scale).toBe(3);
   });
 
+  it('Assistant pane (Task 21): rows in spec order, every control native and labelled; external assistants goes to the MCP server page', async () => {
+    install();
+    act(() => void openSettings('assistant'));
+    const panelEl = dialog().getByRole('tabpanel', { name: '어시스턴트' });
+    const panel = within(panelEl);
+    const rows = panel.getAllByRole('group').filter((g) => g.classList.contains('setting-row'));
+    const names = rows.map((g) => g.querySelector('.setting-name')?.textContent);
+    expect(names).toEqual(['어시스턴트 보이기', '크기', '스킨', '웹 검색 주소', '갤러리 주소', '대화 기록', '외부 도우미']);
+    for (const g of rows) expect(g.getAttribute('aria-labelledby'), String(g.textContent)).toBeTruthy();
+    const controls = panelEl.querySelectorAll<HTMLElement>('button, input, select, textarea, [role="switch"], [role="radio"]');
+    expect(controls.length).toBeGreaterThan(10);
+    for (const c of controls) {
+      expect(['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'], c.outerHTML).toContain(c.tagName);
+      const name = c.getAttribute('aria-label') ?? c.textContent?.trim() ?? '';
+      expect(name, c.outerHTML).not.toBe('');
+    }
+    const go = panel.getByRole('button', { name: 'MCP 서버 설정 열기' });
+    fireEvent.click(go);
+    const integrations = nav().getByRole('tab', { name: '연동' });
+    expect(integrations.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(integrations);
+    expect(dialog().getByRole('tabpanel', { name: '연동' })).toBeTruthy();
+  });
+
+  it('Shortcuts lists Ctrl+Shift+Y for opening the assistant (Task 21)', () => {
+    install();
+    act(() => void openSettings('shortcuts'));
+    const panel = within(dialog().getByRole('tabpanel', { name: '단축키' }));
+    expect(panel.getAllByRole('row').map((r) => r.textContent)).toContain('어시스턴트 열기Ctrl+Shift+Y');
+  });
+
   it('openSettings("assistant") opens the Assistant pane', () => {
     install();
     act(() => void openSettings('assistant'));

@@ -1095,6 +1095,11 @@ const ko: Record<string, string> = {
   'settings.assistant.search.rateLimited': '검색이 너무 잦아요. 잠시 뒤에 다시 해 보세요.',
   'settings.assistant.search.enginesDown': '검색 엔진이 답하지 않았어요. 잠시 뒤에 다시 해 보세요.',
   'settings.assistant.search.failed': '검색 주소에 연결하지 못했어요.',
+  'settings.assistant.search.credentials': '주소에 아이디나 비밀번호를 넣을 수 없어요.',
+  'settings.assistant.external': '외부 도우미',
+  'settings.assistant.external.desc':
+    'Claude Code나 DeepSeek Harness 같은 외부 도구는 labnoteO MCP 서버로 연결해요. 연동 설정에서 MCP 서버를 켜고 연결 설정을 복사하세요.',
+  'settings.assistant.external.open': 'MCP 서버 설정 열기',
   'pet.chips': '어시스턴트 할 일',
   'chip.howTo': '사용법',
   'chip.section': '섹션 만들기',
@@ -2219,6 +2224,11 @@ const en: Record<string, string> = {
   'settings.assistant.search.rateLimited': 'Too many searches. Try again in a moment.',
   'settings.assistant.search.enginesDown': 'The search engines did not answer. Try again in a moment.',
   'settings.assistant.search.failed': 'Could not reach the search address.',
+  'settings.assistant.search.credentials': 'The address cannot contain a user name or password.',
+  'settings.assistant.external': 'External assistants',
+  'settings.assistant.external.desc':
+    'Tools such as Claude Code or DeepSeek Harness connect through the labnoteO MCP server. Turn the MCP server on in Integrations and copy the connection settings.',
+  'settings.assistant.external.open': 'Open MCP server settings',
   'pet.chips': 'Assistant tasks',
   'chip.howTo': 'How to use',
   'chip.section': 'Create section',

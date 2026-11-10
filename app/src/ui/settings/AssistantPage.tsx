@@ -13,6 +13,7 @@ import { useLang } from '../../i18n/useLang';
 import { confirmDialog } from '../../labnote/host/dialogStore';
 import { notify as toast } from '../../labnote/host/toastStore';
 import { layoutStore, useLayout } from '../layoutStore';
+import { openSettings } from '../SettingsModal';
 import { Segmented } from '../Segmented';
 import { SelectField } from '../SelectField';
 import { SettingRow, Toggle } from './SettingRow';
@@ -20,9 +21,11 @@ import { SettingRow, Toggle } from './SettingRow';
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
  * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json),
- * 갤러리 주소(Task 19), 대화 기록(Task 10). 스킨 가져오기(Task 17), 내 스킨 만들기(Task 18), 갤러리(Task 19)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
+ * 갤러리 주소(Task 19), 대화 기록(Task 10), 외부 도우미(Task 21, MCP 서버가 있는 연동 쪽으로 가는 단추). 줄 차례는 명세 §10.1 과 같다. 스킨 가져오기(Task 17), 내 스킨 만들기(Task 18), 갤러리(Task 19)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
  */
-export function AssistantPage(props: { leave?: (after: () => Promise<void>) => void } = {}) {
+export function AssistantPage(
+  props: { leave?: (after: () => Promise<void>) => void; showPage?: (page: 'integrations') => void } = {},
+) {
   useLang();
   const { pet } = useLayout();
   return (
@@ -51,6 +54,7 @@ export function AssistantPage(props: { leave?: (after: () => Promise<void>) => v
       <WebSearchRow />
       <GalleryRow />
       <HistoryRow />
+      <ExternalAssistantsRow showPage={props.showPage} />
     </>
   );
 }
@@ -237,6 +241,16 @@ function searchErrorText(e: unknown): string {
   }
 }
 
+/** 주소에 아이디나 비밀번호(`user:pass@`)가 있는지. 그런 주소는 Rust 로 보내지도 않는다(저장·시험 검색 모두). 못 읽는 주소는 Rust 가 거절한다. */
+export function hasCredentials(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    return u.username !== '' || u.password !== '';
+  } catch {
+    return /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(raw.trim());
+  }
+}
+
 /**
  * 웹 검색 주소 줄(assistant 명세 §7.1, plan Task 12): 이 PC 의 `assistant.json` 에 SearXNG 주소를 둔다. 보관함에는 두지 않는다.
  * Enter 나 칸을 떠나면 저장하고(Rust 가 검사), "확인"은 칸에 적힌 주소(저장 전)로 시험 검색을 한 번 한다.
@@ -251,6 +265,15 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [invalid, setInvalid] = useState(false);
+
+  /** 아이디·비밀번호가 든 주소면 그 자리에서 거절한다(저장하지도, 시험하지도 않는다). */
+  const refuseCredentials = (url: string): boolean => {
+    if (!hasCredentials(url)) return false;
+    setInvalid(true);
+    setStatus(t('settings.assistant.search.credentials'));
+    return true;
+  };
 
   useEffect(() => {
     let live = true;
@@ -271,6 +294,8 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
   const commit = async () => {
     const next = value.trim();
     if (next === saved) return;
+    if (refuseCredentials(next)) return;
+    setInvalid(false);
     try {
       const stored = await save(next);
       const url = stored.searxngUrl ?? '';
@@ -286,6 +311,7 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
   const check = async () => {
     const url = value.trim();
     if (!url) return;
+    if (refuseCredentials(url)) return;
     setBusy(true);
     try {
       const r = await probe(url);
@@ -313,8 +339,12 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
             inputMode="url"
             maxLength={2048}
             placeholder={t('settings.assistant.search.placeholder')}
+            aria-invalid={invalid || undefined}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (invalid) setInvalid(false);
+            }}
             onBlur={() => void commit()}
             onKeyDown={(e) => {
               if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -490,6 +520,32 @@ export function HistoryRow(deps: HistoryRowDeps = {}) {
       control={
         <button type="button" className="btn danger" disabled={busy || folders === 0} onClick={() => void run()}>
           {t('settings.assistant.history.clearAll')}
+        </button>
+      }
+    />
+  );
+}
+
+export interface ExternalAssistantsRowDeps {
+  /** 설정 창 안에서 다른 쪽으로 옮긴다(초점은 그 탭으로). 없으면(설정 창 밖) 설정 창을 그 쪽으로 연다. */
+  showPage?: (page: 'integrations') => void;
+}
+
+/**
+ * 외부 도우미 줄(assistant 명세 §5, §10.1, plan Task 21): Claude Code·DeepSeek Harness 같은 외부 도구는 앱 안에 넣지 않고
+ * labnoteO MCP 서버(와 스킬)로 연결한다. 단추는 MCP 서버 스위치와 토큰이 있는 연동 쪽을 연다.
+ */
+export function ExternalAssistantsRow(deps: ExternalAssistantsRowDeps = {}) {
+  useLang();
+  // SettingsModal 과 서로 가져오지만 openSettings 는 누를 때만 부른다(모듈을 읽는 동안에는 부르지 않는다).
+  const show = deps.showPage ?? ((page: 'integrations') => void openSettings(page));
+  return (
+    <SettingRow
+      label={t('settings.assistant.external')}
+      description={t('settings.assistant.external.desc')}
+      control={
+        <button type="button" className="btn" onClick={() => show('integrations')}>
+          {t('settings.assistant.external.open')}
         </button>
       }
     />

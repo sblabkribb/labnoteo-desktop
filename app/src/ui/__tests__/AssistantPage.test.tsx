@@ -3,7 +3,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
-import { HistoryRow, SkinRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
+import { ExternalAssistantsRow, HistoryRow, SkinRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
 import type { SkinManifest } from '../../assistant/skins/types';
 import { BUILTIN_SKIN } from '../../assistant/skins/builtin';
 
@@ -136,6 +136,29 @@ describe('Assistant pane: web search address row (plan Task 12)', () => {
     expect(screen.getByRole('status').textContent).toBe(
       '이 검색 주소는 JSON 결과를 막아 두었어요. SearXNG settings.yml의 search.formats에 json을 추가하세요.'
     );
+  });
+
+  it('an address with a user name or password is refused inline: not saved, not probed (Task 21)', async () => {
+    const { deps } = await setupSearch();
+    const box = screen.getByRole('textbox', { name: '웹 검색 주소' });
+    await userEvent.type(box, 'https://me:secret@s.example{Enter}');
+    await settle();
+    expect(deps.save).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toBe('주소에 아이디나 비밀번호를 넣을 수 없어요.');
+    expect(box.getAttribute('aria-invalid')).toBe('true');
+    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await settle();
+    expect(deps.probe).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toBe('주소에 아이디나 비밀번호를 넣을 수 없어요.');
+    await userEvent.clear(box);
+    await userEvent.type(box, 'https://me@s.example{Enter}');
+    await settle();
+    expect(deps.save).not.toHaveBeenCalled();
+    await userEvent.clear(box);
+    await userEvent.type(box, 'https://s.example{Enter}');
+    await settle();
+    expect(deps.save).toHaveBeenCalledWith('https://s.example');
+    expect(box.getAttribute('aria-invalid')).toBeNull();
   });
 
   it('follows the language', async () => {
@@ -275,5 +298,27 @@ describe('Assistant pane: skin import and export (Task 17)', () => {
     expect(leave).toHaveBeenCalledTimes(1);
     await settle();
     expect(makeSkin).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Assistant pane: external assistants row (Task 21, spec §10.1)', () => {
+  it('says how outside tools connect and opens the page with the MCP server switch', async () => {
+    const showPage = vi.fn();
+    render(<ExternalAssistantsRow showPage={showPage} />);
+    const row = screen.getByRole('group', { name: '외부 도우미' });
+    expect(row.textContent).toContain('MCP 서버');
+    await userEvent.click(screen.getByRole('button', { name: 'MCP 서버 설정 열기' }));
+    expect(showPage).toHaveBeenCalledWith('integrations');
+  });
+
+  it('is keyboard-operable (a native button) and follows the language', async () => {
+    setLang('en');
+    const showPage = vi.fn();
+    render(<ExternalAssistantsRow showPage={showPage} />);
+    expect(screen.getByRole('group', { name: 'External assistants' }).textContent).toContain('MCP server');
+    const button = screen.getByRole('button', { name: 'Open MCP server settings' });
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(showPage).toHaveBeenCalledWith('integrations');
   });
 });

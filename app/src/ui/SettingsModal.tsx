@@ -158,6 +158,7 @@ export function SettingsModal(props: {
         // 스킨 가져오기: 설정 창을 닫고 가져온 뒤 어시스턴트 쪽으로 다시 연다
         return (
           <AssistantPage
+            showPage={(next) => go(next, true)}
             leave={(after) =>
               void finish(async () => {
                 await after();
