@@ -57,7 +57,22 @@ describe('Assistant pane: chat history row', () => {
     expect(deps.onCleared).toHaveBeenCalledTimes(1);
     expect(deps.notify).toHaveBeenCalledWith('info', '대화 기록을 모두 지웠어요.');
     expect(screen.getByRole('group', { name: '대화 기록' }).textContent).toContain('기록이 있는 실험: 0개');
-    expect((screen.getByRole('button', { name: '모든 기록 지우기' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: '모든 기록 지우기' }).getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('the button keeps keyboard focus after clearing (aria-disabled, not disabled) and then does nothing (Task 22)', async () => {
+    const deps = setup();
+    await settle();
+    const button = screen.getByRole('button', { name: '모든 기록 지우기' }) as HTMLButtonElement;
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await settle();
+    expect(deps.clearAll).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(false);
+    expect(document.activeElement).toBe(button);
+    await userEvent.keyboard('{Enter}');
+    await settle();
+    expect(deps.confirm).toHaveBeenCalledTimes(1);
   });
 
   it('follows the language', async () => {
@@ -115,12 +130,28 @@ describe('Assistant pane: web search address row (plan Task 12)', () => {
   it('Check probes the typed (unsaved) address and shows how many results came back', async () => {
     const { deps } = await setupSearch();
     const check = screen.getByRole('button', { name: '확인' }) as HTMLButtonElement;
-    expect(check.disabled).toBe(true);
+    expect(check.getAttribute('aria-disabled')).toBe('true');
     await userEvent.type(screen.getByRole('textbox', { name: '웹 검색 주소' }), 'https://s.example');
     await userEvent.click(check);
     await settle();
     expect(deps.probe).toHaveBeenCalledWith('https://s.example');
     expect(screen.getByRole('status').textContent).toBe('연결됐어요. 결과 1개');
+  });
+
+  it('Check keeps keyboard focus while it probes and ignores a second press (Task 22: a disabled button drops focus to the page)', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    const { deps } = await setupSearch({ probe: () => new Promise((r) => (finish = r)) });
+    await userEvent.type(screen.getByRole('textbox', { name: '웹 검색 주소' }), 'https://s.example');
+    const check = screen.getByRole('button', { name: '확인' }) as HTMLButtonElement;
+    check.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(check.disabled).toBe(false);
+    expect(check.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(check);
+    await userEvent.keyboard('{Enter}');
+    expect(deps.probe).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ hits: [], enginesDown: false }));
+    expect(check.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('a 403 from the server (JSON turned off) shows the plain settings.yml hint', async () => {
@@ -216,7 +247,7 @@ describe('Assistant pane: skin row (plan Task 16)', () => {
     skinSetup({ active: 'gone-skin' });
     await settle();
     expect((screen.getByRole('combobox', { name: '스킨' }) as HTMLSelectElement).value).toBe('flasko');
-    expect((screen.getByRole('button', { name: '삭제' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: '삭제' }).getAttribute('aria-disabled')).toBe('true');
   });
 
   it('delete asks first; refused removes nothing', async () => {

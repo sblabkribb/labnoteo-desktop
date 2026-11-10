@@ -44,6 +44,32 @@ export function DialogFrame(props: {
     return () => clearTimeout(timer);
   }, []);
   // 캡처 단계에서 막는다: 단추의 기본 동작(누르기)도, 안쪽 요소의 처리기(고르기의 Enter)도 받지 못한다.
+  // 초점이 본문으로 빠졌을 때(누른 단추가 바로 disabled 가 되면 브라우저가 초점을 <body> 로 옮긴다, Task 22 실앱 점검):
+  // 맨 위 대화상자가 Escape 와 Tab 을 대신 받아, 키보드만 쓰는 사람이 갇히지 않게 한다.
+  const root = useRef<HTMLDivElement>(null);
+  const cancel = useRef(props.onCancel);
+  cancel.current = props.onCancel;
+  useEffect(() => {
+    const onDocKey = (e: globalThis.KeyboardEvent) => {
+      const el = root.current;
+      const active = document.activeElement;
+      if (!el || (active && active !== document.body)) return;
+      const frames = document.querySelectorAll('.dialog[aria-modal="true"]');
+      if (frames[frames.length - 1] !== el) return;
+      if (e.key === 'Escape') {
+        if (e.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        cancel.current();
+      } else if (e.key === 'Tab') {
+        const focusable = focusableIn(el);
+        if (focusable.length === 0) return;
+        e.preventDefault();
+        (e.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+      }
+    };
+    document.addEventListener('keydown', onDocKey);
+    return () => document.removeEventListener('keydown', onDocKey);
+  }, []);
   const swallowArmed = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!armed.current || (e.key !== 'Enter' && e.key !== ' ')) return;
     e.preventDefault();
@@ -73,6 +99,7 @@ export function DialogFrame(props: {
   };
   return (
     <div
+      ref={root}
       role={props.role ?? 'dialog'}
       aria-modal="true"
       aria-label={props.title ? undefined : props.label}

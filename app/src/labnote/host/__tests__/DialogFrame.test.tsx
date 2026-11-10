@@ -34,6 +34,49 @@ function PagedDialog() {
   );
 }
 
+describe('DialogFrame when focus has fallen to the page (Task 22: a control that turned disabled drops focus to <body>)', () => {
+  it('Escape still cancels the top dialog and Tab brings focus back into it; a dialog underneath is left alone', async () => {
+    const under = vi.fn();
+    const top = vi.fn();
+    render(
+      <>
+        <DialogFrame title="아래" onCancel={under}>
+          <button type="button">under</button>
+        </DialogFrame>
+        <DialogFrame title="위" onCancel={top}>
+          <button type="button">first</button>
+          <button type="button">last</button>
+        </DialogFrame>
+      </>,
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    await userEvent.keyboard('{Tab}');
+    // The first control of the top dialog is its close button.
+    expect(screen.getByRole('dialog', { name: '위' }).contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole('dialog', { name: '위' }).querySelector('.dialog-close'));
+    (document.activeElement as HTMLElement).blur();
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'last' }));
+    (document.activeElement as HTMLElement).blur();
+    await userEvent.keyboard('{Escape}');
+    expect(top).toHaveBeenCalledTimes(1);
+    expect(under).not.toHaveBeenCalled();
+  });
+
+  it('does nothing while focus is somewhere else (the dialog handles its own keys)', async () => {
+    const cancel = vi.fn();
+    render(
+      <DialogFrame title="대화" onCancel={cancel}>
+        <button type="button">inside</button>
+      </DialogFrame>,
+    );
+    screen.getByRole('button', { name: 'inside' }).focus();
+    await userEvent.keyboard('{Escape}');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('DialogFrame Tab trap', () => {
   it('Tab from the last visible control wraps to the first visible one, skipping hidden pages', async () => {
     render(<PagedDialog />);

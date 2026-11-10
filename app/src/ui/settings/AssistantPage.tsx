@@ -59,6 +59,19 @@ export function AssistantPage(
   );
 }
 
+/**
+ * 지금 누를 수 없는 단추: `disabled` 대신 `aria-disabled` 로 끈다. `disabled` 가 된 단추는 키보드 초점을 본문으로
+ * 떨구어 Esc·Tab 이 설정 창에 닿지 않는다(Task 22 실앱 점검). 꺼진 동안 누르면 아무 일도 하지 않는다.
+ */
+function softOff(off: boolean, run: () => void) {
+  return {
+    'aria-disabled': off || undefined,
+    onClick: () => {
+      if (!off) run();
+    },
+  };
+}
+
 export interface SkinRowDeps {
   /** 지금 고른 스킨 id(기본: 이 PC 의 ui.json pet.skin). */
   active?: string;
@@ -189,22 +202,22 @@ export function SkinRow(deps: SkinRowDeps = {}) {
               </option>
             ))}
           </SelectField>
-          <button type="button" className="btn" disabled={busy} onClick={runImport}>
+          <button type="button" className="btn" {...softOff(busy, runImport)}>
             {t('settings.assistant.skin.import')}
           </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => void runExport()}>
+          <button type="button" className="btn" {...softOff(busy, () => void runExport())}>
             {t('settings.assistant.skin.export')}
           </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => runOutside(makeSkin)}>
+          <button type="button" className="btn" {...softOff(busy, () => runOutside(makeSkin))}>
             {t('settings.assistant.skin.make')}
           </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => runOutside(gallery)}>
+          <button type="button" className="btn" {...softOff(busy, () => runOutside(gallery))}>
             {t('settings.assistant.skin.gallery')}
           </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => void runSubmit()}>
+          <button type="button" className="btn" {...softOff(busy, () => void runSubmit())}>
             {t('settings.assistant.skin.submit')}
           </button>
-          <button type="button" className="btn danger" disabled={busy || current.builtin} onClick={() => void run()}>
+          <button type="button" className="btn danger" {...softOff(busy || current.builtin, () => void run())}>
             {t('settings.assistant.skin.remove')}
           </button>
         </>
@@ -352,7 +365,7 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
               void commit();
             }}
           />
-          <button type="button" className="btn" disabled={busy || value.trim() === ''} onClick={() => void check()}>
+          <button type="button" className="btn" {...softOff(busy || value.trim() === '', () => void check())}>
             {t('settings.assistant.search.check')}
           </button>
           <span role="status" className="setting-status">
@@ -443,7 +456,7 @@ export function GalleryRow(deps: GalleryRowDeps = {}) {
               void commit();
             }}
           />
-          <button type="button" className="btn" disabled={saved === '' && value.trim() === ''} onClick={() => void store('')}>
+          <button type="button" className="btn" {...softOff(saved === '' && value.trim() === '', () => void store(''))}>
             {t('settings.assistant.gallery.reset')}
           </button>
           <span role="status" className="setting-status">
@@ -518,7 +531,7 @@ export function HistoryRow(deps: HistoryRowDeps = {}) {
       label={t('settings.assistant.history')}
       description={folders === undefined ? desc : `${t('settings.assistant.history.count', folders)} ${desc}`}
       control={
-        <button type="button" className="btn danger" disabled={busy || folders === 0} onClick={() => void run()}>
+        <button type="button" className="btn danger" {...softOff(busy || folders === 0, () => void run())}>
           {t('settings.assistant.history.clearAll')}
         </button>
       }
