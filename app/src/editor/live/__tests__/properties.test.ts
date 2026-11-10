@@ -96,8 +96,8 @@ function press(v: EditorView, init: KeyboardEventInit) {
 describe('라이브 미리보기: 속성(front matter) 격자', () => {
   it('renders one row per key, in file order', () => {
     const v = view('---\ntitle: a\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx', 64);
-    expect(rows(v).map(([k]) => k)).toEqual(['title', 'status', 'last_updated_date']);
-    expect(rows(v)[1][1]).toBe('Planned');
+    expect(rows(v).map(([k]) => k)).toEqual(['title', '상태', '마지막 수정']);
+    expect(rows(v)[1][1]).toBe('계획'); // 저장 값 Planned 를 지역화해 보인다
   });
 
   it('renders Korean, spaced and quoted keys', () => {
@@ -137,9 +137,9 @@ describe('라이브 미리보기: 속성(front matter) 격자', () => {
     ]);
     const v = view(s.doc.toString(), s.doc.length);
     expect(rows(v)).toEqual([
-      ['tags', 'a, b'],
-      ['author', '이서연'],
-      ['last_updated_date', '2026-11-01'],
+      ['태그', 'a, b'],
+      ['실험자', '이서연'],
+      ['마지막 수정', '2026-11-01'],
     ]);
   });
 
@@ -332,7 +332,7 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
     input.value = '제목';
     enter(input);
     expect(v.state.doc.toString()).toBe(original.replace('title: a', '제목: a'));
-    expect(rows(v).map(([k]) => k)).toEqual(['제목', 'status', 'last_updated_date']);
+    expect(rows(v).map(([k]) => k)).toEqual(['제목', '상태', '마지막 수정']);
     const taken = keyInput(v, '제목');
     taken.value = 'status';
     enter(taken);
@@ -410,7 +410,7 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
     expect(valueInput(v, 'title')).toBe(input);
     expect(document.activeElement).toBe(input);
     expect(input.value).toBe('typing');
-    expect(rowEl(v, 'status').querySelector('.lno-chip')!.textContent).toBe('Done');
+    expect(rowEl(v, 'status').querySelector('.lno-chip')!.textContent).toBe('완료');
   });
 
   it('a composing Ctrl+B inside a grid input never formats the note body', () => {

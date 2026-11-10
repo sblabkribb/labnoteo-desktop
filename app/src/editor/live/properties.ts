@@ -28,6 +28,30 @@ import { splitLinktext } from '../../links/resolve';
 import { linkResolution, linkStateOf } from './linkResolution';
 import { imageLoader } from './imageWidget';
 import { targetOf, type OpenTarget } from './links';
+import { statusKind, statusLabel } from '../../labnote/statusLabels';
+
+/** Each known front-matter key's label (display only: the file keeps its keys). */
+const LABELS: Readonly<Record<string, () => string>> = {
+  author: () => t('props.experimenter'),
+  experimenter: () => t('props.experimenter'),
+  status: () => t('props.status'),
+  created: () => t('props.created'),
+  created_date: () => t('props.created'),
+  date: () => t('props.created'),
+  last_updated: () => t('props.lastUpdated'),
+  last_updated_date: () => t('props.lastUpdated'),
+  tags: () => t('props.tags'),
+  experiment: () => t('props.experiment'),
+  project: () => t('props.project'),
+};
+
+/**
+ * What the properties card shows for a front-matter key: 실험자 / Experimenter for `author` and `experimenter`,
+ * 상태, 만든 날, 마지막 수정, 태그, 실험, 프로젝트 for the plugin's keys, and any other key as written.
+ */
+export function propertyLabel(key: string): string {
+  return Object.prototype.hasOwnProperty.call(LABELS, key) ? LABELS[key]() : key;
+}
 
 /**
  * 라이브 미리보기의 속성(Properties) 격자(계획 D7: Task 24 보이기와 경계 지킴이, Task 25 고치기).
@@ -169,6 +193,10 @@ function cellText(e: FrontEntry): string {
   if (e.cell === 'nested') return JSON.stringify(e.value);
   return e.value === null || e.value === undefined ? '' : String(e.value);
 }
+
+/** The status chip's text (계획 / 진행 중 / 완료, other values as written) and its kind class. */
+const chipText = (e: FrontEntry) => statusLabel(cellText(e));
+const chipClass = (e: FrontEntry) => `lno-chip lno-props-value lno-props-status lno-status-${statusKind(cellText(e)) ?? 'other'}`;
 
 /** 이 블록을 원문(YAML)으로 보인다(true) / 격자로 돌린다(false). */
 export const editYaml: StateEffectType<boolean> = StateEffect.define<boolean>();
@@ -391,7 +419,7 @@ export class PropertiesWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     const box = document.createElement('div');
-    box.className = 'lno-widget lno-props';
+    box.className = 'lno-widget lno-props two-col';
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', t('props.label'));
     const head = document.createElement('div');
@@ -430,7 +458,10 @@ export class PropertiesWidget extends WidgetType {
     const editable = e.cell !== 'readOnly' && e.cell !== 'nested';
     // status 는 앱의 상태 명령으로만 고친다: 이름 바꾸기·지우기도 격자에서 하지 않는다
     const appKey = APP_KEYS.has(e.key);
-    const key = editable && !appKey
+    // 이름이 지역화된 키(author → 실험자 …)는 이름 칸이 글이다: 바꾸면 플러그인이 읽는 키를 잃는다(YAML로 편집에서는 된다)
+    const label = propertyLabel(e.key);
+    const named = label !== e.key;
+    const key = editable && !appKey && !named
       ? gridInput(view, {
           className: 'lno-props-key',
           value: e.key,
@@ -439,15 +470,16 @@ export class PropertiesWidget extends WidgetType {
           after: () => refocus(view, `.lno-props-row[data-key=${cssString(e.key)}] input.lno-props-key`),
         })
       : document.createElement('span');
-    if (!editable || appKey) {
+    if (!editable || appKey || named) {
       key.className = 'lno-props-key';
-      key.textContent = e.key;
+      key.textContent = label;
+      if (named) key.title = e.key;
     }
     row.append(key, this.value(e, view));
     const actions = document.createElement('span');
     actions.className = 'lno-props-actions';
     if (e.cell === 'nested') actions.append(editYamlButton(view));
-    if (e.cell !== 'readOnly' && !appKey) actions.append(removeButton(view, e.key));
+    if (e.cell !== 'readOnly' && !appKey) actions.append(removeButton(view, e.key, label));
     row.append(actions);
     return row;
   }
@@ -457,8 +489,8 @@ export class PropertiesWidget extends WidgetType {
       // 상태는 칩: 누르면 앱의 상태 바꾸기 명령(허용된 상태만 고르게 하고, 노트 목록·기록도 함께 맞춘다)
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = 'lno-chip lno-props-value lno-props-status';
-      chip.textContent = cellText(e);
+      chip.className = chipClass(e);
+      chip.textContent = chipText(e);
       chip.title = t('props.changeStatus');
       chip.addEventListener('click', (ev) => {
         ev.preventDefault();
@@ -477,7 +509,7 @@ export class PropertiesWidget extends WidgetType {
     return gridInput(view, {
       className: 'lno-props-value',
       value: cellText(e),
-      label: t('props.value', e.key),
+      label: t('props.value', propertyLabel(e.key)),
       edit: (state, raw) => editValue(state, e.key, raw),
     });
   }
@@ -497,6 +529,11 @@ export class PropertiesWidget extends WidgetType {
         return;
       }
       const v = r.querySelector<HTMLElement>('.lno-props-value');
+      if (v?.classList.contains('lno-props-status')) {
+        v.className = chipClass(entries[i]);
+        if (v.textContent !== chipText(entries[i])) v.textContent = chipText(entries[i]);
+        return;
+      }
       const text = cellText(entries[i]);
       if (v instanceof HTMLInputElement) {
         if (v.dataset[ORIG] === inputText(text)) return;
@@ -520,13 +557,13 @@ export class PropertiesWidget extends WidgetType {
   }
 }
 
-function removeButton(view: EditorView, key: string): HTMLButtonElement {
+function removeButton(view: EditorView, key: string, label: string): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'lno-btn lno-props-remove';
   b.textContent = '×'; // 기호(글자 아님): 읽어 주는 이름은 aria-label
   b.title = t('props.remove');
-  b.setAttribute('aria-label', t('props.removeKey', key));
+  b.setAttribute('aria-label', t('props.removeKey', label));
   b.addEventListener('click', (e) => {
     e.preventDefault();
     const spec = removeKey(view.state, key);
@@ -724,7 +761,7 @@ function editLinkCell(view: EditorView, holder: HTMLElement): void {
   const input = gridInput(view, {
     className: 'lno-props-value',
     value: cellText(cell.entry),
-    label: t('props.value', key),
+    label: t('props.value', propertyLabel(key)),
     edit: (state, raw) => editValue(state, key, raw),
   });
   let composing = false;

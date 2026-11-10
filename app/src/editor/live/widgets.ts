@@ -24,6 +24,27 @@ export class BulletWidget extends WidgetType {
 export const bulletWidget = new BulletWidget();
 
 /**
+ * A label drawn in place of the source word, display only: the UO Meta `- Experimenter:` reads 실험자 in Korean.
+ * The file keeps `Experimenter` (plugin compatibility); the line holding the cursor shows the source.
+ */
+export class LabelWidget extends WidgetType {
+  constructor(readonly text: string) {
+    super();
+  }
+
+  eq(o: LabelWidget): boolean {
+    return o.text === this.text;
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'lno-meta-label';
+    span.textContent = this.text;
+    return span;
+  }
+}
+
+/**
  * 할 일 표시 `[ ]`·`[x]` 대신 보이는 체크박스. 문서가 상태를 정한다: 체크 상태가 같으면(eq) 다시 그리지 않고,
  * 다르면 새로 그린다. 누름은 inline.ts 의 taskHandlers 가 받아 toggleTaskAt 으로 문서를 고친다.
  */

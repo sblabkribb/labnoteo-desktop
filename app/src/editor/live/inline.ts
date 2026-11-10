@@ -5,7 +5,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { isFenceMark, revealInline, revealLine, skipRanges, touchedLines } from './reveal';
 import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
-import { CheckboxWidget, bulletWidget, toggleTaskAt } from './widgets';
+import { CheckboxWidget, LabelWidget, bulletWidget, toggleTaskAt } from './widgets';
 import { isImageTarget, resolveImagePath, splitAltSize } from './imagePath';
 import { ImageWidget, imageLoader } from './imageWidget';
 import { linkResolution, linkStateOf } from './linkResolution';
@@ -34,6 +34,8 @@ import { linkResolution, linkStateOf } from './linkResolution';
  * - 링크 풀이(linkResolution.ts): 대상이 없는 위키링크·임베드는 lno-wikilink lno-unresolved(누르면 만든다는 제목),
  *   없는 노트로 가는 마크다운 링크는 lno-link lno-unresolved. 풀이가 아직 없으면(색인 준비 전) 아무것도 흐리게 그리지 않는다.
  * - 맨 주소(GFM 의 맨 URL, `<https://…>` 자동 링크)는 lno-link 표시를 단다(D4: 링크와 같은 누름 규칙).
+ *
+ * - UO Meta 의 `- Experimenter:`: 줄이 드러나지 않았으면 `Experimenter` 를 지역화한 이름(실험자)으로 보인다(파일은 그대로).
  *
  * 무엇을 원문으로 보일지는 reveal.ts 가 정한다. 표 구역과 머리말은 건너뛴다(skipRanges).
  * 한글 조합 중에는 다시 만들지 않고 바뀐 위치로 옮기기만 한다: 조합 중인 줄에 장식을 더하거나 빼면 IME 가 깨진다.
@@ -107,6 +109,9 @@ const fenceLine = Decoration.line({ class: 'lno-fence' });
 const hrLine = Decoration.line({ class: 'lno-hr' });
 const scanLine = Decoration.line({ class: 'lno-scan-meta' });
 const SCAN_COMMENT = /^<!-- labnoteo-scan /;
+
+/** UO Meta 의 실험자 키(`- Experimenter: 이름`, 플러그인 템플릿). */
+const META_EXPERIMENTER = 'Experimenter';
 
 const isBlank = (ch: string) => ch === ' ' || ch === '\t';
 
@@ -282,6 +287,12 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
     // 기호 뒤의 공백 한 칸까지 점이 대신한다
     const end = mark.to < line.to && isBlank(line.text[mark.to - line.from]) ? mark.to + 1 : mark.to;
     conceal(mark.from, end, bullet);
+    // UO Meta 의 실험자 줄: 이름만 지역화해 보인다(한 어휘: 실험자 / Experimenter)
+    if (line.text.startsWith(`${META_EXPERIMENTER}:`, end - line.from)) {
+      const label = t('props.experimenter');
+      if (label !== META_EXPERIMENTER)
+        conceal(end, end + META_EXPERIMENTER.length, Decoration.replace({ widget: new LabelWidget(label) }));
+    }
   };
 
   /** 인용 줄 클래스를 이미 단 줄: 겹친 인용은 바깥(먼저 들어온) 인용의 클래스만 단다. */

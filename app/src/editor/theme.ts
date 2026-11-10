@@ -234,14 +234,22 @@ export const editorThemeSpec = {
   // 바깥 틀은 넘침을 자르지 않는다: overflow-x 를 auto 로 두면 overflow-y 도 auto 가 되어 오른쪽 클릭 메뉴가 표 틀에 잘린다.
   // 넓은 표의 가로 스크롤은 표만 감싼 안쪽 틀(.lno-table-scroll)이 맡고, 메뉴는 바깥 틀의 자식으로 뜬다.
   // 틀은 표 폭만큼만 차지해 도구 줄이 표 오른쪽 끝에 붙는다. 넓은 표는 100% 에서 멈추고 안쪽 틀이 스크롤한다.
-  // 속성(머리말) 격자: 키와 값 두 칸. 값 칸의 글은 줄을 넘기면 감싼다.
-  '.lno-props-wrap': { padding: 'var(--space-4) var(--space-5)' },
+  // 속성(머리말) 카드: 키와 값 두 칸의 줄들이 두 단으로 흐르고(two-col), 편집기 폭 680px 아래에서는 한 단이다(컨테이너 질의).
+  // 값 칸의 글은 줄을 넘기면 감싼다. 이 규칙들은 그림자 루트 안이라 styles/*.css 가 아니라 여기 산다.
+  '.lno-props-wrap': { padding: 'var(--space-4) var(--space-5)', containerType: 'inline-size' },
   '.lno-props': {
     padding: 'var(--space-2) var(--space-4)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
     backgroundColor: 'var(--bg-elevated)',
   },
+  '.lno-props.two-col': {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    columnGap: 'var(--space-6)',
+    alignItems: 'start',
+  },
+  '.lno-props.two-col > .lno-props-head, .lno-props.two-col > .lno-props-add': { gridColumn: '1 / -1' },
   '.lno-props-head': { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-4)', padding: 'var(--space-2) 0' },
   '.lno-props-title': { fontWeight: '700', color: 'var(--text-muted)' },
   '.lno-props-row': {
@@ -253,8 +261,14 @@ export const editorThemeSpec = {
     borderTop: '1px solid var(--border)',
   },
   '.lno-props-key': { color: 'var(--text-muted)', overflowWrap: 'anywhere' },
+  // 글로 보이는 이름(지역화한 키)도 입력 칸과 같은 자리에 선다
+  'span.lno-props-key': { padding: '0 var(--space-2)', border: '1px solid var(--bg-elevated)' },
   '.lno-props-value': { color: 'var(--text)', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
-  '.lno-props-row[data-cell="readOnly"] .lno-props-value, .lno-props-row[data-cell="nested"] .lno-props-value': { color: 'var(--text-muted)' },
+  '.lno-props-row[data-cell="readOnly"] .lno-props-value, .lno-props-row[data-cell="nested"] .lno-props-value': {
+    color: 'var(--text-muted)',
+    padding: '0 var(--space-2)',
+    border: '1px solid var(--bg-elevated)', // 입력 칸의 글과 같은 자리
+  },
   // 위키링크 칸(SP4 Task 13): 평소에는 링크 줄(누르면 연다), 링크 옆을 누르거나 Enter·F2 로 입력이 된다
   '.lno-props-linkcell': { minWidth: '0' },
   '.lno-prop-links': {
@@ -283,7 +297,10 @@ export const editorThemeSpec = {
     '&[aria-invalid="true"]': { borderColor: 'var(--danger)' },
   },
   '.lno-props-input.lno-props-key': { color: 'var(--text-muted)' },
-  '.lno-props-status': { cursor: 'pointer', justifySelf: 'start' },
+  // 상태 칩: 지역화한 이름(계획 / 진행 중 / 완료), 강조색 옅은 바탕(머리줄의 상태 칩과 같다)
+  '.lno-props-status': { cursor: 'pointer', justifySelf: 'start', color: 'var(--text)', backgroundColor: 'var(--accent-soft)' },
+  '.lno-props-status.lno-status-done': { color: 'var(--success)' },
+  '.lno-props-status:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
   '.lno-props-actions': { display: 'inline-flex', gap: 'var(--space-2)' },
   '.lno-props-add': {
     display: 'grid',
@@ -292,6 +309,9 @@ export const editorThemeSpec = {
     gap: 'var(--space-4)',
     padding: 'var(--space-2) 0',
     borderTop: '1px solid var(--border)',
+  },
+  '@container (max-width: 680px)': {
+    '.lno-props.two-col': { gridTemplateColumns: '1fr' },
   },
   '.lno-table-wrap': { position: 'relative', padding: 'var(--space-4) var(--space-5)', width: 'fit-content', maxWidth: '100%', boxSizing: 'border-box' },
   '.lno-table-scroll': { overflowX: 'auto' },
