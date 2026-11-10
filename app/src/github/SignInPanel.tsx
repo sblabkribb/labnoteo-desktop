@@ -60,6 +60,8 @@ export function SignInPanel(props: {
   onUseToken?: () => void;
   doneDelayMs?: number;
   now?: () => number;
+  /** 대화상자 틀이 이미 제목을 그릴 때(올리기 흐름의 로그인 대화상자). */
+  hideTitle?: boolean;
 }) {
   useLang();
   const now = props.now ?? Date.now;
@@ -139,7 +141,7 @@ export function SignInPanel(props: {
 
   return (
     <div className="github-signin" aria-live="polite">
-      <p className="github-signin-title">{t('github.signin.title')}</p>
+      {props.hideTitle ? null : <p className="github-signin-title">{t('github.signin.title')}</p>}
       <p className="prompt-hint">{t('github.signin.what')}</p>
       {phase.kind === 'starting' ? <p className="prompt-hint">{t('github.progress.checking')}</p> : null}
       {phase.kind === 'code' ? (

@@ -6,7 +6,7 @@ import { cancelProgress, useProgress } from './progressStore';
 
 /**
  * 진행 창(SP6 Task 12): 제목과 진행 줄. 취소할 수 있는 창이면 취소 단추가 있다.
- * 취소 단추, 닫기 단추, Escape 는 신호를 끊고 창을 닫는다. Escape 는 한글 조합 중에는 무시한다(DialogFrame).
+ * 취소 단추, 닫기 단추, Escape 는 신호를 끊고 창을 닫는다(`setCancellable(false)` 뒤에는 아무것도 하지 않는다). Escape 는 한글 조합 중에는 무시한다(DialogFrame).
  */
 export function ProgressDialog(props: { spec: Extract<DialogSpec, { kind: 'progress' }>; onCancel: () => void }) {
   const { id } = props.spec;
@@ -14,6 +14,8 @@ export function ProgressDialog(props: { spec: Extract<DialogSpec, { kind: 'progr
   const list = useRef<HTMLUListElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const cancel = () => {
+    // setCancellable(false) 뒤(올리는 중)에는 닫기 단추와 Escape 가 신호를 끊지 않는다.
+    if (state?.locked) return;
     cancelProgress(id);
     props.onCancel();
   };

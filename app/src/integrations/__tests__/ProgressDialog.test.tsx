@@ -139,6 +139,26 @@ describe('progress dialog', () => {
     expect(currentDialog()).toBeNull();
   });
 
+  it('setCancellable(false) hides Cancel, and Escape and the close button no longer abort', async () => {
+    renderLayer();
+    const p = open('Uploading', { cancellable: true });
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    act(() => p.setCancellable(false));
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    const dialog = screen.getByRole('dialog');
+    act(() => {
+      dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(p.signal.aborted).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(p.signal.aborted).toBe(false);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    act(() => p.setCancellable(true));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    act(() => p.done());
+    expect(p.signal.aborted).toBe(false);
+  });
+
   it('uses Korean labels', () => {
     setLang('ko');
     renderLayer();

@@ -14,6 +14,8 @@ import type { ResultActions } from '../port/scanFeatureRuns';
 import type { ScanPipeline, ScanResult } from '../port/scanPipeline';
 import type { UnmatchedIo } from '../scan/UnmatchedDialog';
 import type { BuiltContext } from '../context/contextBuilder';
+import type { SignInResult, SignInSpec } from '../../github/SignInDialog';
+import type { Destination, DestinationDeps, DestinationInit, DestinationSpec } from '../../github/UploadDialog';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -68,7 +70,10 @@ export type DialogSpec =
   // 새 실험(UI 재설계 Task 19): 제목과 실험자. 끝나면 NewExperimentResult, 닫으면 undefined
   | { kind: 'newExperiment'; opts: NewExperimentOpts }
   // feat/ai-context: context sources before AI drafting. Send resolves { sources, window }, closing resolves null
-  | { kind: 'aiContextSources'; built: BuiltContext; window: number; providerLabel: string; model: string };
+  | { kind: 'aiContextSources'; built: BuiltContext; window: number; providerLabel: string; model: string }
+  // GitHub 올리기(spec §5): 로그인(화면 A), 올릴 곳(화면 B). 흐름이 하나씩 차례로 연다(겹치지 않는다).
+  | SignInSpec
+  | DestinationSpec;
 
 
 /**
@@ -311,4 +316,14 @@ export function openSampleDefinitionDialog(model: SampleDefinitionModel, usages:
 /** 실험 워크시트 창(SP7 Task 8): 찍을 유닛 오퍼레이션, 용지, 출력 또는 브라우저. 닫으면 undefined. */
 export function worksheetDialog(unitOps: readonly WorksheetUnitOp[], paper: WorksheetPaperSize): Promise<WorksheetChoice | undefined> {
   return openDialog<WorksheetChoice | undefined>({ kind: 'worksheet', unitOps, paper }, undefined);
+}
+
+/** GitHub 로그인 대화상자(spec §5.2). 닫으면 'cancel'. */
+export function githubSignInDialog(deps: SignInSpec['deps'], opts: { doneDelayMs?: number } = {}): Promise<SignInResult> {
+  return openDialog<SignInResult>({ kind: 'githubSignIn', deps, ...opts }, 'cancel');
+}
+
+/** GitHub 올릴 곳 대화상자(spec §5.3). 닫으면 'cancel'. */
+export function githubDestinationDialog(init: DestinationInit, deps: DestinationDeps): Promise<Destination | 'cancel'> {
+  return openDialog<Destination | 'cancel'>({ kind: 'githubDestination', init, deps }, 'cancel');
 }

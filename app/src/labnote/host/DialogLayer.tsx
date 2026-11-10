@@ -19,6 +19,8 @@ import { UnmatchedDialog } from '../scan/UnmatchedDialog';
 import { NewNoteDialog } from '../../tree/NewNoteDialog';
 import { NewExperimentDialog } from '../ui/NewExperimentDialog';
 import { ContextSourcesDialog } from '../context/ContextSourcesDialog';
+import { SignInDialog } from '../../github/SignInDialog';
+import { UploadDialog } from '../../github/UploadDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -63,6 +65,10 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <NewExperimentDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'aiContextSources':
       return <ContextSourcesDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubSignIn':
+      return <SignInDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubDestination':
+      return <UploadDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 
