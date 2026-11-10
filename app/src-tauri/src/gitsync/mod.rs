@@ -7,6 +7,8 @@ pub mod exif;
 pub mod links;
 pub mod overlay;
 pub mod plan;
+pub mod push;
+pub mod repo;
 pub mod scan;
 pub mod state;
 pub mod walk;
