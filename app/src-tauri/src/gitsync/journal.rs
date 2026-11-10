@@ -31,6 +31,17 @@ fn gone() -> NetError {
 /// never written under a name the folder has just left.
 pub(crate) fn begin_create(dirs: &Path, root: &Path, folder: &str, record: LinkRecord) -> Result<(), NetError> {
     debug_assert_eq!(record.state, LinkState::RepoCreating);
+    insert_new(dirs, root, folder, record)
+}
+
+/// `repoReady` for an existing repository the user linked (nothing is
+/// created), with the same refusals as `begin_create`.
+pub(crate) fn begin_link(dirs: &Path, root: &Path, folder: &str, record: LinkRecord) -> Result<(), NetError> {
+    debug_assert_eq!(record.state, LinkState::RepoReady);
+    insert_new(dirs, root, folder, record)
+}
+
+fn insert_new(dirs: &Path, root: &Path, folder: &str, record: LinkRecord) -> Result<(), NetError> {
     update_links(dirs, root, |doc| {
         if doc.links.contains_key(folder) {
             return Err(NetError::new(NetErrorKind::BadInput, "this folder is already linked to a repository"));

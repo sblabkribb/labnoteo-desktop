@@ -14,14 +14,20 @@
 //!   `intendedPrivate`).
 //! - One upload per link at a time (`busy`), in this process and across app
 //!   instances (P-R13).
+//! - A remote that moved since the last upload, or a non-empty repository
+//!   being linked, answers `diverged` with the files the upload would replace
+//!   or remove (P-R8); nothing is pulled into the vault and nothing is ever
+//!   forced. "mine" (every listed file ticked) commits on top of GitHub's tip,
+//!   a fast-forward; "separate" pushes to a new `labnoteo/<YYYYMMDD-HHMM>`
+//!   branch and leaves the link where it was.
 //! - Status, default owner and unlink never reach the network.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use git2::{ObjectType, Oid, Repository};
+use git2::{ObjectType, Oid, Repository, TreeWalkMode, TreeWalkResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Emitter, Manager, State};
@@ -32,7 +38,7 @@ use super::links::{
     bare_repo_path, lock_link, read_links, read_status_cache, update_links, update_status_cache, valid_id, AllowedHit,
     BusySet, LinkRecord, LinkState, LockKey,
 };
-use super::overlay::{folder_title, Counts, SAMPLES_DIR};
+use super::overlay::{folder_title, local_now, Counts, LocalTime, SAMPLES_DIR};
 use super::plan::{base_tree, new_id, Change, Plan, PlanEntry, PlanTarget, Red, COMMIT_MESSAGE_PATH};
 use super::push::{self as git_push, GitBase, Progress, PushResult, RejectKind};
 use super::repo::{branch_ref, commit_plan, open_or_init, signature, GitError};
@@ -93,11 +99,18 @@ pub enum UploadWarning {
     NowPublic,
 }
 
-/// One file that changed on GitHub (the divergence screen).
+/// One file that changed on GitHub and that the upload would replace or
+/// remove (the divergence screen, P-R8).
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct DivergedFile {
     pub path: String,
+    /// What happened to it on GitHub since the last upload (`new` for every
+    /// file of a repository being linked).
     pub change: Change,
+    /// Not in the folder: the upload removes it on GitHub
+    /// ("내 폴더에 없음 → GitHub에서 지워짐").
+    pub gone_here: bool,
 }
 
 /// `github_upload`.
@@ -185,16 +198,31 @@ pub trait Steps: Sync {
         git_push::fetch(repo, remote, branch, token, allowed)
     }
 
+    /// Pushes the bare repo's `branch` to the remote's `target` (never forced).
+    #[allow(clippy::too_many_arguments)]
     fn push(
+        &self,
+        repo: &Repository,
+        remote: &Url,
+        branch: &str,
+        target: &str,
+        token: &Zeroizing<String>,
+        allowed: &GitBase,
+        progress: &mut dyn FnMut(Progress) -> bool,
+    ) -> Result<PushResult, GitError> {
+        git_push::push(repo, remote, branch, target, token, allowed, progress, &[])
+    }
+
+    /// The remote's `refs/heads/<branch>`, without downloading anything.
+    fn remote_tip(
         &self,
         repo: &Repository,
         remote: &Url,
         branch: &str,
         token: &Zeroizing<String>,
         allowed: &GitBase,
-        progress: &mut dyn FnMut(Progress) -> bool,
-    ) -> Result<PushResult, GitError> {
-        git_push::push(repo, remote, branch, branch, token, allowed, progress, &[])
+    ) -> Result<Option<Oid>, GitError> {
+        git_push::ls_remote_tip(repo, remote, branch, token, allowed)
     }
 }
 
@@ -214,6 +242,8 @@ pub struct UploadEnv<'a> {
     pub request_id: Option<&'a str>,
     pub steps: &'a dyn Steps,
     pub progress: &'a (dyn Fn(Stage, u64, u64) + Sync),
+    /// The local time that names a separate upload's branch.
+    pub now: LocalTime,
 }
 
 fn bad_input(msg: &str) -> NetError {
@@ -279,7 +309,73 @@ fn api_outcome(dirs: &Path, o: ApiOutcome, reply: &ApiReply) -> Result<UploadOut
 /// Where the upload goes, decided under the lock.
 enum Dest {
     Create { owner: String, name: String, private: bool },
+    Link { owner: String, name: String },
     Update(LinkRecord),
+}
+
+/// Every file (non-tree entry) of `commit`'s tree by path. Names that are not
+/// UTF-8 are kept (lossily) so that they are still listed.
+fn tree_files(repo: &Repository, commit: Oid) -> Result<BTreeMap<String, Oid>, GitError> {
+    let tree = repo.find_commit(commit)?.tree()?;
+    let mut map = BTreeMap::new();
+    tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+        if entry.kind() != Some(ObjectType::Tree) {
+            map.insert(format!("{dir}{}", String::from_utf8_lossy(entry.name_bytes())), entry.id());
+        }
+        TreeWalkResult::Ok
+    })?;
+    Ok(map)
+}
+
+/// The divergence list (P-R8): the files that changed on GitHub between
+/// `base` (the last pushed commit; the empty tree when linking) and `tip`,
+/// and whose content the upload would replace or remove. A base the bare repo
+/// cannot read counts as empty, which only lists more.
+fn diverged_files(repo: &Repository, base: Option<Oid>, tip: Option<Oid>, sel: &Selection<'_>) -> Result<Vec<DivergedFile>, GitError> {
+    let base = base.and_then(|b| tree_files(repo, b).ok()).unwrap_or_default();
+    let theirs = match tip {
+        Some(t) => tree_files(repo, t)?,
+        None => BTreeMap::new(),
+    };
+    let mine: BTreeMap<&str, Oid> = sel
+        .entries
+        .iter()
+        .map(|e| (e.rel.as_str(), e.oid))
+        .chain(
+            sel.overlays
+                .iter()
+                .map(|(p, b)| (p.as_str(), Oid::hash_object(ObjectType::Blob, b).unwrap_or(Oid::ZERO_SHA1))),
+        )
+        .collect();
+    let paths: BTreeSet<&String> = base.keys().chain(theirs.keys()).collect();
+    let mut files = Vec::new();
+    for path in paths {
+        let (was, now) = (base.get(path), theirs.get(path));
+        if was == now || mine.get(path.as_str()) == now {
+            continue;
+        }
+        let change = match (was, now) {
+            (None, _) => Change::New,
+            (_, None) => Change::Deleted,
+            _ => Change::Changed,
+        };
+        files.push(DivergedFile { path: path.clone(), change, gone_here: now.is_some() && !mine.contains_key(path.as_str()) });
+    }
+    Ok(files)
+}
+
+/// `labnoteo/<YYYYMMDD-HHMM>` for the separate upload.
+fn separate_branch(now: &LocalTime) -> String {
+    format!("labnoteo/{:04}{:02}{:02}-{:02}{:02}", now.year, now.month, now.day, now.hour, now.minute)
+}
+
+/// The most `-N` suffixes tried for a separate branch.
+const MAX_SEPARATE: u32 = 50;
+
+/// "GitHub에서 두 내용을 비교하려면 [열기]".
+fn compare_url(html_url: &str, owner: &str, name: &str, branch: &str, separate: &str) -> String {
+    let web = if html_url.is_empty() { format!("{GITHUB_WEB}{owner}/{name}") } else { html_url.trim_end_matches('/').to_string() };
+    format!("{web}/compare/{branch}...{separate}")
 }
 
 /// The plan narrowed by the user's choices.
@@ -323,7 +419,7 @@ fn remaining_red(plan: &Plan, sel: &Selection<'_>, choices: &UploadChoices) -> V
             Red::TooLarge { path, .. } | Red::Unreadable { path } => !sel.unticked.contains(path.as_str()),
             Red::UploadTooLarge { limit, .. } => bytes > *limit,
             Red::NfdCollision { paths } => paths.iter().filter(|p| going.contains(p.as_str())).count() > 1,
-            Red::PublicNotConfirmed => true,
+            Red::PublicNotConfirmed | Red::DivergedNotAcknowledged { .. } => true,
         })
         .cloned()
         .collect()
@@ -380,9 +476,19 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         (PlanTarget::Create { owner, name, private }, None) => {
             Dest::Create { owner: owner.clone(), name: name.clone(), private: *private }
         }
-        // Linking an existing repository always goes through the divergence
-        // screen (Task 9B).
-        (PlanTarget::Link { .. }, _) => return Err(bad_input("linking an existing repository is not available yet")),
+        (PlanTarget::Link { owner, name }, None) => Dest::Link { owner: owner.clone(), name: name.clone() },
+        // The link this plan (or an earlier one) made, still with nothing
+        // pushed: the answer to the divergence screen continues it.
+        (PlanTarget::Link { owner, name }, Some(l)) => {
+            let same = l.owner.eq_ignore_ascii_case(owner) && l.name.eq_ignore_ascii_case(name);
+            if !same || l.state != LinkState::RepoReady || l.last_pushed_commit.is_some() || !valid_id(&l.link_id) {
+                return Err(bad_input("this folder is already linked to a repository"));
+            }
+            if guard.add(env.dirs, env.root, LockKey::Link(l.link_id.clone())).is_err() {
+                return Ok(UploadOutcome::Busy);
+            }
+            Dest::Update(l)
+        }
         (PlanTarget::Update, None) => return Err(bad_input("this folder is not linked to a repository")),
         (PlanTarget::Update, Some(l)) => {
             let last = l.last_pushed_commit.as_deref().and_then(|c| Oid::from_str(c).ok());
@@ -482,6 +588,43 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
             }
             (link_id, f.owner, f.name, f.html_url, NEW_BRANCH.to_string(), None)
         }
+        // An existing repository: writable, and public only with the typed
+        // name. Nothing is created; the link starts at `repoReady`.
+        Dest::Link { owner, name } => {
+            (env.progress)(Stage::Preparing, 0, 1);
+            let call = GithubCall::GetRepo { owner, name };
+            let reply = block_on(call_authed(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id, call.clone(), None))?;
+            match classify(&call, &reply) {
+                ApiOutcome::Ok | ApiOutcome::Moved { .. } => {}
+                other => return api_outcome(env.dirs, other, &reply),
+            }
+            let f = repo_facts(&reply.json).ok_or_else(unexpected)?;
+            if !f.can_push {
+                return Ok(UploadOutcome::ReadOnly);
+            }
+            if !f.private && choices.public_confirm.as_deref() != Some(f.name.as_str()) {
+                return Ok(UploadOutcome::Blocked { red: vec![Red::PublicNotConfirmed] });
+            }
+            branch_ref(&f.default_branch).map_err(|_| bad_input("the repository's branch name cannot be used"))?;
+            let link_id = new_id();
+            if guard.add(env.dirs, env.root, LockKey::Link(link_id.clone())).is_err() {
+                return Ok(UploadOutcome::Busy);
+            }
+            let record = LinkRecord {
+                link_id: link_id.clone(),
+                repo_id: f.id,
+                owner: f.owner.clone(),
+                name: f.name.clone(),
+                html_url: f.html_url.clone(),
+                branch: f.default_branch.clone(),
+                private: f.private,
+                intended_private: Some(f.private),
+                state: LinkState::RepoReady,
+                ..LinkRecord::default()
+            };
+            journal::begin_link(env.dirs, env.root, &plan.folder, record)?;
+            (link_id, f.owner, f.name, f.html_url, f.default_branch, None)
+        }
         // The linked repository: still there, still writable, still private?
         Dest::Update(l) => {
             (env.progress)(Stage::Preparing, 0, 1);
@@ -530,16 +673,56 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         Err(GitError::AuthRejected) => return Ok(UploadOutcome::NeedsSignIn),
         Err(e) => return Err(git_error(e)),
     };
+    // The remote moved (or a non-empty repository is being linked): list
+    // what the upload would replace, and go on only with the user's answer.
+    // The plan is given back, so the answer reuses it.
+    let mut parent = parent;
+    let mut separate: Option<String> = None;
     if tip != parent {
-        // Task 9B lists the files (P-R8) and offers "mine" / "separate".
-        return Ok(UploadOutcome::Diverged { files: Vec::new() });
+        let files = diverged_files(&repo, parent, tip, &sel).map_err(git_error)?;
+        match choices.diverged {
+            None => {
+                env.gh.plans.put_back(plan);
+                return Ok(UploadOutcome::Diverged { files });
+            }
+            Some(DivergedChoice::Mine) => {
+                let acked: HashSet<&str> = choices.ack_files.iter().map(String::as_str).collect();
+                let paths: Vec<String> =
+                    files.iter().filter(|f| !acked.contains(f.path.as_str())).map(|f| f.path.clone()).collect();
+                if !paths.is_empty() {
+                    env.gh.plans.put_back(plan);
+                    return Ok(UploadOutcome::Blocked { red: vec![Red::DivergedNotAcknowledged { paths }] });
+                }
+            }
+            Some(DivergedChoice::Separate) => {
+                let first = separate_branch(&env.now);
+                let mut free = None;
+                for n in 1..=MAX_SEPARATE {
+                    let candidate = if n == 1 { first.clone() } else { format!("{first}-{n}") };
+                    match env.steps.remote_tip(&repo, &remote, &candidate, &tok, &allowed) {
+                        Ok(None) => {
+                            free = Some(candidate);
+                            break;
+                        }
+                        Ok(Some(_)) => {}
+                        Err(GitError::AuthRejected) => return Ok(UploadOutcome::NeedsSignIn),
+                        Err(e) => return Err(git_error(e)),
+                    }
+                }
+                separate = Some(free.ok_or_else(|| bad_input("too many separate uploads this minute; try again later"))?);
+            }
+        }
+        // Built on GitHub's tip: a fast-forward, and nothing leaves the history.
+        parent = tip;
     }
+    // The bare repo's branch that is built and pushed.
+    let local = separate.clone().unwrap_or_else(|| branch.clone());
 
     // 9. Commit from the plan, every blob re-hashed as it is written.
     let ids: Vec<(String, Oid)> = sel.entries.iter().map(|e| (e.rel.clone(), e.oid)).collect();
     env.steps.reached(Point::BeforeCommit);
     let read = |rel: &str| File::open(file_path(&folder_abs, rel));
-    let commit = match commit_plan(&repo, &branch, &ids, read, &sel.overlays, parent, &sig, &plan.message) {
+    let commit = match commit_plan(&repo, &local, &ids, read, &sel.overlays, parent, &sig, &plan.message) {
         Ok(c) => c,
         Err(GitError::PlanStale { .. }) => return Ok(UploadOutcome::PlanStale),
         Err(e) => return Err(git_error(e)),
@@ -547,17 +730,31 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
     if let Some(p) = parent {
         let same = |a: Oid| repo.find_commit(a).map(|c| c.tree_id());
         if same(commit).map_err(|e| git_error(e.into()))? == same(p).map_err(|e| git_error(e.into()))? {
-            // Nothing to send: the bare repo's branch goes back to the pushed commit.
-            let refname = branch_ref(&branch).map_err(git_error)?;
+            // Nothing to send: the bare repo's branch goes back to `p`.
+            let refname = branch_ref(&local).map_err(git_error)?;
             repo.reference(&refname, p, true, "labnoteO: nothing changed").map_err(|e| git_error(e.into()))?;
-            journal::advance(env.dirs, env.root, &link_id, |r| remember(r, &plan, &sel, &choices))?;
+            if separate.is_none() {
+                // GitHub already has exactly this (also when it was GitHub's own tip).
+                journal::advance(env.dirs, env.root, &link_id, |r| {
+                    remember(r, &plan, &sel, &choices);
+                    if r.last_pushed_commit.as_deref() != Some(p.to_string().as_str()) {
+                        r.last_pushed_commit = Some(p.to_string());
+                        r.pending_commit = None;
+                        r.state = LinkState::Pushed;
+                    }
+                })?;
+            }
             return Ok(UploadOutcome::NothingChanged);
         }
     }
-    journal::advance(env.dirs, env.root, &link_id, |r| {
-        r.state = LinkState::Committed;
-        r.pending_commit = Some(commit.to_string());
-    })?;
+    // A separate upload is not journaled: `lastPushedCommit` and the link
+    // stay where they were, and "마저 하기" never pushes it to `branch`.
+    if separate.is_none() {
+        journal::advance(env.dirs, env.root, &link_id, |r| {
+            r.state = LinkState::Committed;
+            r.pending_commit = Some(commit.to_string());
+        })?;
+    }
 
     // 10. Push (never forced), then record it.
     let total: u64 = sel.entries.iter().map(|e| e.size).sum::<u64>() + sel.overlays.iter().map(|(_, b)| b.len() as u64).sum::<u64>();
@@ -569,13 +766,17 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         }
         true
     };
-    match env.steps.push(&repo, &remote, &branch, &tok, &allowed, &mut on_progress).map_err(git_error)? {
+    match env.steps.push(&repo, &remote, &local, &local, &tok, &allowed, &mut on_progress).map_err(git_error)? {
         PushResult::Ok => {}
         PushResult::Rejected { kind, lines } => return Ok(UploadOutcome::Rejected { kind, lines }),
         PushResult::AuthRejected => return Ok(UploadOutcome::NeedsSignIn),
         PushResult::Cancelled => return Err(NetError::new(NetErrorKind::Cancelled, "the upload was cancelled")),
     }
     (env.progress)(Stage::Checking, 0, 1);
+    if let Some(sep) = separate {
+        drop(guard);
+        return Ok(UploadOutcome::PushedSeparately { compare_url: compare_url(&html_url, &owner, &name, &branch, &sep) });
+    }
     let pushed_owner = owner.clone();
     update_links(env.dirs, env.root, |doc| {
         let rec = doc.links.values_mut().find(|r| r.link_id == link_id).ok_or_else(|| bad_input("the link is gone"))?;
@@ -636,6 +837,7 @@ pub async fn github_upload<R: tauri::Runtime>(
             request_id: Some(&request_id),
             steps: &RealSteps,
             progress: &emit,
+            now: local_now(),
         };
         upload_at(&env, &plan_id, choices)
     })

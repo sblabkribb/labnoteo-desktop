@@ -140,6 +140,9 @@ pub enum Red {
     Unreadable { path: String },
     /// A public repository without the typed name (the upload's own check).
     PublicNotConfirmed,
+    /// "내 폴더 내용으로 올리기" with files changed on GitHub that were not
+    /// ticked on the divergence screen (the upload's own check).
+    DivergedNotAcknowledged { paths: Vec<String> },
 }
 
 /// The kinds of findings the webview may pass in (P-R4).
@@ -352,6 +355,18 @@ impl PlanStore {
     /// taking the plan).
     pub fn folder_of(&self, id: &str) -> Option<String> {
         self.lock().iter().find(|p| p.id == id).map(|p| p.folder.clone())
+    }
+
+    /// Gives back a plan an upload stopped on before any side effect (the
+    /// divergence screen), so the answer can reuse it. Its age is kept, and
+    /// its byte cache is dropped (the cap was settled without it).
+    pub fn put_back(&self, mut plan: Plan) {
+        let mut plans = self.lock();
+        while plans.len() >= MAX_PLANS {
+            plans.remove(0);
+        }
+        plan.cache.clear();
+        plans.push(plan);
     }
 
     /// Hands the plan over to the upload (it is used once).

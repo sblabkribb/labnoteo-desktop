@@ -49,12 +49,13 @@ impl Steps for TestSteps {
         repo: &Repository,
         remote: &Url,
         branch: &str,
+        target: &str,
         token: &Zeroizing<String>,
         allowed: &GitBase,
         progress: &mut dyn FnMut(Progress) -> bool,
     ) -> Result<PushResult, GitError> {
         self.pushes.fetch_add(1, Ordering::SeqCst);
-        git_push::push(repo, remote, branch, branch, token, allowed, progress, &[])
+        git_push::push(repo, remote, branch, target, token, allowed, progress, &[])
     }
 }
 
@@ -141,6 +142,7 @@ impl Fx {
             request_id: Some("up-1"),
             steps,
             progress: &progress,
+            now: NOW,
         };
         upload_at(&env, id, choices).unwrap()
     }
@@ -604,4 +606,261 @@ fn the_wire_shapes() {
     assert!(serde_json::from_value::<UploadChoices>(json!({"add": ["x"]})).is_err());
     let c: UploadChoices = serde_json::from_value(json!({"diverged": "mine", "ackFiles": ["a"]})).unwrap();
     assert_eq!(c.diverged, Some(DivergedChoice::Mine));
+    let v = serde_json::to_value(UploadOutcome::Diverged {
+        files: vec![DivergedFile { path: "notes.txt".into(), change: Change::New, gone_here: true }],
+    })
+    .unwrap();
+    assert_eq!(v, json!({"outcome": "diverged", "files": [{"path": "notes.txt", "change": "new", "goneHere": true}]}));
+    let v = serde_json::to_value(UploadOutcome::PushedSeparately { compare_url: "c".into() }).unwrap();
+    assert_eq!(v, json!({"outcome": "pushedSeparately", "compareUrl": "c"}));
+    let v = serde_json::to_value(Red::DivergedNotAcknowledged { paths: vec!["a".into()] }).unwrap();
+    assert_eq!(v, json!({"kind": "divergedNotAcknowledged", "paths": ["a"]}));
+}
+
+// ---------------------------------------------------------------------------
+// Divergence and linking an existing repository (Task 9B).
+
+/// A labmate's commit on the remote's `main` (what a second clone pushes):
+/// `Some(bytes)` writes a file, `None` removes it. Answers the new tip.
+fn advance_remote(remote: &Repository, changes: &[(&str, Option<&[u8]>)]) -> Oid {
+    let parent = remote.refname_to_id("refs/heads/main").ok().map(|id| remote.find_commit(id).unwrap());
+    let base = match &parent {
+        Some(c) => c.tree().unwrap(),
+        None => remote.find_tree(remote.treebuilder(None).unwrap().write().unwrap()).unwrap(),
+    };
+    let mut b = git2::build::TreeUpdateBuilder::new();
+    for (path, bytes) in changes {
+        match bytes {
+            Some(bytes) => {
+                let id = remote.blob(bytes).unwrap();
+                b.upsert(*path, id, git2::FileMode::Blob);
+            }
+            None => {
+                b.remove(*path);
+            }
+        }
+    }
+    let tree = remote.find_tree(b.create_updated(remote, &base).unwrap()).unwrap();
+    let sig = git2::Signature::now("labmate", "labmate@example.com").unwrap();
+    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+    remote.commit(Some("refs/heads/main"), &sig, &sig, "edited on GitHub", &tree, &parents).unwrap()
+}
+
+fn main_tip(remote: &Repository) -> Oid {
+    remote.refname_to_id("refs/heads/main").unwrap()
+}
+
+fn diverged_file(path: &str, change: Change, gone_here: bool) -> DivergedFile {
+    DivergedFile { path: path.into(), change, gone_here }
+}
+
+#[test]
+fn a_remote_that_moved_is_diverged_and_mine_fast_forwards() {
+    let fx = Fx::new("gh-up-div-mine");
+    let remote = first_upload(&fx);
+    let first = fx.link().last_pushed_commit.unwrap();
+    let theirs = advance_remote(
+        &remote,
+        &[
+            ("README.labnote.md", Some("# GitHub에서 고침\n".as_bytes())),
+            ("notes.txt", Some(b"labmate\n")),
+            // The same edit was made here too: nothing of theirs is lost, so it is not listed.
+            ("data/plate.csv", Some(b"well,od\r\nA1,0.9\r\n")),
+        ],
+    );
+    fx.put("data/plate.csv", b"well,od\r\nA1,0.9\r\n");
+    fx.put("workflows/002_PCR.labnote.md", b"PCR v2\n");
+    let before = snapshot(&fx.root);
+    let id = fx.plan(PlanTarget::Update);
+    let steps = TestSteps::default();
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload_with(&s, &steps, &id, UploadChoices::default());
+    assert_eq!(
+        out,
+        UploadOutcome::Diverged {
+            files: vec![diverged_file("README.labnote.md", Change::Changed, false), diverged_file("notes.txt", Change::New, true)]
+        }
+    );
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    assert_eq!(main_tip(&remote), theirs);
+    assert_eq!(fx.link().last_pushed_commit.as_deref(), Some(first.as_str()));
+    assert_eq!(fx.link().state, LinkState::Pushed, "no journal step was taken");
+
+    // The same plan answers the screen; a file left unticked blocks.
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload_with(&s, &steps, &id, choices(json!({"diverged": "mine", "ackFiles": ["README.labnote.md"]})));
+    assert_eq!(out, UploadOutcome::Blocked { red: vec![Red::DivergedNotAcknowledged { paths: vec!["notes.txt".into()] }] });
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    assert_eq!(main_tip(&remote), theirs);
+
+    // Every file ticked: a fast-forward on top of GitHub's commit.
+    let s = serve(vec![got(NAME, true)]);
+    let c = choices(json!({"diverged": "mine", "ackFiles": ["README.labnote.md", "notes.txt", "unrelated.md"]}));
+    let out = fx.upload_with(&s, &steps, &id, c);
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 1);
+    let tip = main_tip(&remote);
+    assert_eq!(remote.find_commit(tip).unwrap().parent_ids().collect::<Vec<_>>(), [theirs], "parent = GitHub's tip");
+    assert!(remote.graph_descendant_of(tip, Oid::from_str(&first).unwrap()).unwrap());
+    let link = fx.link();
+    assert_eq!((link.state, link.last_pushed_commit.as_deref()), (LinkState::Pushed, Some(&*tip.to_string())));
+    assert_eq!(blob_at(&remote, tip, "README.labnote.md").as_deref(), Some("# 개요\n".as_bytes()));
+    assert_eq!(blob_at(&remote, tip, "workflows/002_PCR.labnote.md").as_deref(), Some(&b"PCR v2\n"[..]));
+    assert!(blob_at(&remote, tip, "notes.txt").is_none());
+    // GitHub's version stays in the history.
+    assert_eq!(blob_at(&remote, theirs, "notes.txt").as_deref(), Some(&b"labmate\n"[..]));
+    assert_eq!(snapshot(&fx.root), before, "the vault is untouched");
+    // The plan was used.
+    assert_eq!(fx.upload(&s, &id, UploadChoices::default()), UploadOutcome::PlanExpired);
+
+    // The next upload is ordinary again.
+    fx.put("data/plate.csv", b"v3\n");
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload(&s, &fx.plan(PlanTarget::Update), UploadChoices::default());
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    assert_eq!(remote.find_commit(main_tip(&remote)).unwrap().parent_id(0).unwrap(), tip);
+    fx.no_token();
+}
+
+#[test]
+fn separate_leaves_github_and_the_link_where_they_were() {
+    let fx = Fx::new("gh-up-div-sep");
+    let remote = first_upload(&fx);
+    let first = fx.link().last_pushed_commit.unwrap();
+    let theirs = advance_remote(&remote, &[("notes.txt", Some(b"labmate\n"))]);
+    fx.put("data/plate.csv", b"mine\n");
+    let before = snapshot(&fx.root);
+    let sep = "labnoteo/20261110-1432";
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload(&s, &fx.plan(PlanTarget::Update), choices(json!({"diverged": "separate"})));
+    assert_eq!(
+        out,
+        UploadOutcome::PushedSeparately { compare_url: format!("https://github.com/kim-lab/{NAME}/compare/main...{sep}") }
+    );
+    assert_eq!(main_tip(&remote), theirs, "GitHub's main is untouched");
+    let pushed = remote.refname_to_id(&format!("refs/heads/{sep}")).unwrap();
+    assert_eq!(remote.find_commit(pushed).unwrap().parent_ids().collect::<Vec<_>>(), [theirs]);
+    assert_eq!(blob_at(&remote, pushed, "data/plate.csv").as_deref(), Some(&b"mine\n"[..]));
+    let link = fx.link();
+    assert_eq!((link.state, link.last_pushed_commit.as_deref()), (LinkState::Pushed, Some(first.as_str())));
+    assert!(link.pending_commit.is_none());
+
+    // The name is taken now: the next one gets "-2", then "-3".
+    for n in 2..=3 {
+        let s = serve(vec![got(NAME, true)]);
+        let out = fx.upload(&s, &fx.plan(PlanTarget::Update), choices(json!({"diverged": "separate"})));
+        assert_eq!(
+            out,
+            UploadOutcome::PushedSeparately { compare_url: format!("https://github.com/kim-lab/{NAME}/compare/main...{sep}-{n}") }
+        );
+        assert!(remote.refname_to_id(&format!("refs/heads/{sep}-{n}")).is_ok());
+    }
+    assert_eq!(main_tip(&remote), theirs);
+    assert_eq!(fx.link().last_pushed_commit.as_deref(), Some(first.as_str()));
+    // Still diverged: the next plain upload asks again.
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload(&s, &fx.plan(PlanTarget::Update), UploadChoices::default());
+    assert!(matches!(out, UploadOutcome::Diverged { .. }), "{out:?}");
+    assert_eq!(snapshot(&fx.root), before);
+    fx.no_token();
+}
+
+fn link_target() -> PlanTarget {
+    PlanTarget::Link { owner: "kim-lab".into(), name: NAME.into() }
+}
+
+#[test]
+fn linking_a_non_empty_repo_lists_every_file_the_upload_would_change() {
+    let fx = Fx::new("gh-up-link");
+    let remote = fx.remote("kim-lab", NAME);
+    let theirs = advance_remote(
+        &remote,
+        &[
+            // Identical to the folder: not listed.
+            ("README.labnote.md", Some("# 개요\n".as_bytes())),
+            ("data/plate.csv", Some(b"other\n")),
+            ("notes.txt", Some(b"x\n")),
+            ("docs/a.md", Some(b"a\n")),
+        ],
+    );
+    let before = snapshot(&fx.root);
+    let steps = TestSteps::default();
+    let id = fx.plan(link_target());
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload_with(&s, &steps, &id, UploadChoices::default());
+    assert_eq!(
+        out,
+        UploadOutcome::Diverged {
+            files: vec![
+                diverged_file("data/plate.csv", Change::New, false),
+                diverged_file("docs/a.md", Change::New, true),
+                diverged_file("notes.txt", Change::New, true),
+            ]
+        }
+    );
+    let reqs = s.requests.lock().unwrap().clone();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!((reqs[0].method.as_str(), reqs[0].path.as_str()), ("GET", &*format!("/repos/kim-lab/{NAME}")));
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    let link = fx.link();
+    assert_eq!((link.state, link.repo_id, link.intended_private), (LinkState::RepoReady, 99, Some(true)));
+    assert!(link.last_pushed_commit.is_none() && link.requested_at.is_none());
+    assert_eq!(main_tip(&remote), theirs);
+
+    // The answer, with the same plan.
+    let s = serve(vec![got(NAME, true)]);
+    let c = choices(json!({"diverged": "mine", "ackFiles": ["data/plate.csv", "docs/a.md", "notes.txt"]}));
+    let out = fx.upload_with(&s, &steps, &id, c);
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    assert_eq!(quiet_count(&s), 1, "never a POST");
+    let tip = main_tip(&remote);
+    assert_eq!(remote.find_commit(tip).unwrap().parent_ids().collect::<Vec<_>>(), [theirs]);
+    let link = fx.link();
+    assert_eq!((link.state, link.last_pushed_commit.as_deref()), (LinkState::Pushed, Some(&*tip.to_string())));
+    assert_eq!(blob_at(&remote, tip, "data/plate.csv").as_deref(), Some(&b"well,od\r\nA1,0.5\r\n"[..]));
+    assert!(blob_at(&remote, tip, "notes.txt").is_none());
+    assert_eq!(snapshot(&fx.root), before);
+    fx.no_token();
+}
+
+#[test]
+fn linking_checks_access_and_visibility_before_anything_is_recorded() {
+    let fx = Fx::new("gh-up-link-checks");
+    let mut ro: Value = serde_json::from_str(&repo_json(NAME, true)).unwrap();
+    ro["permissions"]["push"] = json!(false);
+    let s = serve(vec![Canned::ok(&ro.to_string())]);
+    assert_eq!(fx.upload(&s, &fx.plan(link_target()), UploadChoices::default()), UploadOutcome::ReadOnly);
+    assert!(fx.links().links.is_empty());
+    // A public repository needs the typed name.
+    let s = serve(vec![got(NAME, false)]);
+    let out = fx.upload(&s, &fx.plan(link_target()), choices(json!({"publicConfirm": "wrong"})));
+    assert_eq!(out, UploadOutcome::Blocked { red: vec![Red::PublicNotConfirmed] });
+    assert!(fx.links().links.is_empty());
+    // An empty repository: nothing on GitHub to replace, so it goes straight up.
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![got(NAME, false)]);
+    let out = fx.upload(&s, &fx.plan(link_target()), choices(json!({"publicConfirm": NAME})));
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    let link = fx.link();
+    assert_eq!((link.state, link.private, link.intended_private), (LinkState::Pushed, false, Some(false)));
+    assert_eq!(main_tip(&remote).to_string(), link.last_pushed_commit.unwrap());
+    // A folder that is linked already cannot be linked to another repository.
+    let s = serve(vec![got(NAME, true)]);
+    let id = fx.plan(PlanTarget::Link { owner: "kim-lab".into(), name: "another".into() });
+    let ep = fx.ep(&s);
+    let progress = |_: Stage, _: u64, _: u64| {};
+    let env = UploadEnv {
+        ep: &ep,
+        dirs: &fx.dirs,
+        root: &fx.root,
+        store: &fx.store,
+        net: &fx.net,
+        gh: &fx.gh,
+        request_id: None,
+        steps: &RealSteps,
+        progress: &progress,
+        now: NOW,
+    };
+    assert_eq!(upload_at(&env, &id, UploadChoices::default()).unwrap_err().kind, NetErrorKind::BadInput);
+    assert_eq!(quiet_count(&s), 0);
 }
