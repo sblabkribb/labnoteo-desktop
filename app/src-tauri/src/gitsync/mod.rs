@@ -3,5 +3,7 @@
 //! Everything here is Rust-only state: the webview reaches it through the
 //! `github_*` commands, never through `integration_state_*`.
 
+pub mod exif;
+pub mod scan;
 pub mod state;
 pub mod walk;

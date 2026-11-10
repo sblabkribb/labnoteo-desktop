@@ -107,6 +107,12 @@ impl GithubState {
         lock(&self.memory_token).is_some()
     }
 
+    /// Copies of the in-memory tokens (access, then refresh), for the
+    /// exact-match secret scan only. Zeroized when dropped.
+    pub(crate) fn memory_secrets(&self) -> Vec<Zeroizing<String>> {
+        [lock(&self.memory_token).clone(), lock(&self.memory_refresh).clone()].into_iter().flatten().collect()
+    }
+
     fn set_memory(&self, token: Zeroizing<String>, refresh: Option<Zeroizing<String>>) {
         *lock(&self.memory_token) = Some(token);
         *lock(&self.memory_refresh) = refresh;
