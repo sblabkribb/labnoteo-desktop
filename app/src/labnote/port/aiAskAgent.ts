@@ -1,12 +1,17 @@
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:1005-1115 sha256:81a212c99e6b324c
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); createLlmProvider(plugin.settings) → env.provider; plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); new Notice(m, ms) → env.host.notify ('info' for 'Open a lab note first.' and the end notice, 'warn' for the 10 s notices); 'Configure an AI provider in settings first.' → notify('info', overrideOr('ai.configureFirst')) (D21). promptModal → env.host.prompt with the same title, prompt and placeholder. The persistent 'Contacting {0}…' Notice → a cancellable progress dialog (withProgress) around each model turn, so it is closed while an approval is asked (D18: the dialog queue shows one at a time) and reopens for the next turn; Cancel in it aborts the whole run. A vaultGuard() is taken before the goal prompt (D11): its signal is linked into the one signal passed to runAgent (so a vault switch ends the run before the next model turn and before any tool runs), and every write of the tools (writeNote through toolContext's beforeWrite, and fs write, modify, mkdir, remove and rmdir) awaits guard.check() first; a failed check also aborts the run. Sample registries a tool wrote are announced through env.sampleEnv().changed (vendor: the tool's own refresh through Obsidian's vault events), but not after a switch. aiAnswerModal(plugin.app, …) → aiAnswerDialog, not awaited; insertBlock takes env. plugin.markUserEdit is removed (the editor stamps on user edits). A cancelled run (describeLlmError gives '') shows nothing. The user message joins the vendor's template parts with '\n' (src/__tests__/escapes.test.ts reads "note:" followed by an escape as a drive path); the string is the same. The system prompt, the 6000-char cap and the notice texts are the vendor's.
+// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); createLlmProvider(plugin.settings) → env.provider; plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); new Notice(m, ms) → env.host.notify ('info' for 'Open a lab note first.' and the end notice, 'warn' for the 10 s notices); 'Configure an AI provider in settings first.' → notify('info', overrideOr('ai.configureFirst')) (D21). promptModal → env.host.prompt with the same title, prompt and placeholder. The persistent 'Contacting {0}…' Notice → a cancellable progress dialog (withProgress) around each model turn, so it is closed while an approval is asked (D18: the dialog queue shows one at a time) and reopens for the next turn; Cancel in it aborts the whole run. A vaultGuard() is taken before the goal prompt (D11): its signal is linked into the one signal passed to runAgent (so a vault switch ends the run before the next model turn and before any tool runs), and every write of the tools (writeNote through toolContext's beforeWrite, and fs write, modify, mkdir, remove and rmdir) awaits guard.check() first; a failed check also aborts the run. Sample registries a tool wrote are announced through env.sampleEnv().changed (vendor: the tool's own refresh through Obsidian's vault events), but not after a switch. aiAnswerModal(plugin.app, …) → aiAnswerDialog, not awaited; insertBlock takes env. plugin.markUserEdit is removed (the editor stamps on user edits). A cancelled run (describeLlmError gives '') shows nothing. The user message joins the vendor's template parts with '\n' (src/__tests__/escapes.test.ts reads "note:" followed by an escape as a drive path); the string is the same. The system prompt, the 6000-char cap and the notice texts are the vendor's. feat/ai-context (spec §9): after the goal prompt the experiment scope is resolved from the active note (resolveScope over experimentReadmes) and scopeGate(goal, experiments) gives the folders the request names; inside an experiment runAgent gets deps.tools = appTools({ scope, allowedFolders }) (core tools with a documentPath limited to the experiment, plus list_experiment, search_experiment and read_note), outside one the core tools plus the unscoped list_experiment; the tool context carries scope, allowedFolders, experiments and searchIn (searchNotesIn); the system prompt lists those tools instead of createLabnoteTools() and names the experiment folder.
 import { caretBeforeModal } from '@labnoteo/core/lib/caret';
-import { createLabnoteTools, type ToolContext } from '@labnoteo/core';
+import { createLabnoteTools, type ToolDef } from '@labnoteo/core';
 import type { AiEnv } from '../../ai/aiEnv';
 import { vaultGuard } from '../../integrations/netIpc';
 import { withProgress } from '../../integrations/progressStore';
+import { searchNotesIn } from '../../search/indexApi';
+import { appTools } from '../context/appTools';
+import { contextTools, type ScopedToolContext } from '../context/contextTools';
+import { resolveScope, scopeGate, type ExperimentRef, type Scope } from '../context/scope';
 import { overrideOr } from '../i18n';
+import { experimentReadmes } from './experiments';
 import { aiAnswerDialog } from './aiAnswerDialog';
 import { insertBlock, noAnswerMessage, toolContext, toolRunNotice } from './aiCommon';
 import { buildApprovalMessage, erasesRecordedLines } from './approvalMessage';
@@ -52,6 +57,24 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
   });
   if (!goal?.trim()) return;
 
+  // The experiment the run reads in, and the other ones the request names (spec §9, §13).
+  let experiments: ExperimentRef[] = [];
+  try {
+    experiments = (await experimentReadmes(env.host)).map(e => ({ folder: e.folder, title: e.title }));
+  } catch {
+    // No experiment list: only the active note's own folder can be the scope.
+  }
+  let scope: Scope | undefined;
+  try {
+    scope = resolveScope({ activePath: target.path }, experiments);
+  } catch {
+    scope = undefined;
+  }
+  const allowedFolders = scopeGate(goal, experiments);
+  const tools: ToolDef[] = scope
+    ? appTools({ scope, allowedFolders })
+    : [...createLabnoteTools(), ...contextTools().filter(t => t.name === 'list_experiment')];
+
   // One signal for the whole run: Cancel in a turn's progress dialog, a vault switch, or a failed guard check ends it.
   const run$ = new AbortController();
   const stop = () => run$.abort();
@@ -86,13 +109,19 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
       throw err;
     }
   };
-  const base = toolContext(env, { beforeWrite: check });
+  const base = toolContext(env, {
+    beforeWrite: check,
+    scope,
+    allowedFolders,
+    experiments: async () => experiments,
+    searchIn: (query, prefix, limit) => searchNotesIn(query, prefix, limit, env.invoke),
+  });
   // Registries a tool wrote, announced once the run ends (the index, completion and the Samples panel).
   const written = new Set<string>();
   const wrote = (p: string) => {
     if (p.toLowerCase().endsWith('.json')) written.add(p);
   };
-  const ctx: ToolContext = {
+  const ctx: ScopedToolContext = {
     ...base,
     fs: {
       ...base.fs,
@@ -134,7 +163,11 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
             'Prefer reading before writing, and answer briefly in Markdown when done. ' +
             'Your final answer is shown to the user in a dialog and is not written to the note; ' +
             'to change the note, use the tools. ' +
-            `Your tools are: ${createLabnoteTools().map(t => t.name).join(', ')}. ` +
+            `Your tools are: ${tools.map(t => t.name).join(', ')}. ` +
+            (scope
+              ? `The current experiment folder is "${scope.folder}": list_experiment, search_experiment and read_note read only inside it. ` +
+                'Use another experiment only when the request names it. '
+              : '') +
             'If the request needs something these tools cannot do (for example changing the experiment status), ' +
             'do not pretend: answer that you cannot do it and which Labnote command the user can run instead.',
         },
@@ -143,6 +176,7 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
       ],
       {
         provider: turns,
+        tools,
         ctx,
         temperature: 0.2,
         signal: run$.signal,

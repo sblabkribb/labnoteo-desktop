@@ -578,6 +578,12 @@ const ko: Record<string, string> = {
   'settings.about.notices': '제3자 고지',
   'settings.about.lucide': 'Lucide 아이콘(lucide-react) — ISC 라이선스, Copyright (c) Lucide Icons and Contributors',
   'settings.about.noticesFile': '라이선스 전문은 labnoteO 저장소의 THIRD_PARTY_NOTICES.md 에 있습니다.',
+  // ai-context (feat/ai-context)
+  'aiCtx.err.outOfScope': '"{0}" 은(는) 지금 실험({1}) 밖에 있습니다. 다른 실험은 요청에 그 실험을 적었을 때만 씁니다.',
+  'aiCtx.err.scopeRequired': '실험을 지정하세요 ({0}).',
+  'aiCtx.err.noExperiment': '열린 노트가 실험 폴더(labnote/###_이름) 안에 있지 않습니다.',
+  'aiCtx.err.unknownExperiment': '"{0}" 에 맞는 실험이 없습니다.',
+  'aiCtx.err.ambiguousExperiment': '"{0}" 에 맞는 실험이 여럿입니다: {1}.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -1155,6 +1161,12 @@ const en: Record<string, string> = {
   'settings.about.notices': 'Third-party notices',
   'settings.about.lucide': 'Lucide icons (lucide-react) — ISC License, Copyright (c) Lucide Icons and Contributors',
   'settings.about.noticesFile': 'The full licence texts are in THIRD_PARTY_NOTICES.md in the labnoteO repository.',
+  // ai-context (feat/ai-context)
+  'aiCtx.err.outOfScope': '"{0}" is outside the current experiment ({1}). Another experiment is used only when your request names it.',
+  'aiCtx.err.scopeRequired': 'Name an experiment ({0}).',
+  'aiCtx.err.noExperiment': 'The open note is not in an experiment folder (labnote/###_Name).',
+  'aiCtx.err.unknownExperiment': 'No experiment matches "{0}".',
+  'aiCtx.err.ambiguousExperiment': '"{0}" matches several experiments: {1}.',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };
