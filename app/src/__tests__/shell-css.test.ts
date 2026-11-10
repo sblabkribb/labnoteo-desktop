@@ -161,4 +161,11 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.editor-frame:focus-within')!.decls.outline).toBe('none');
     expect(ruleFor('.editor-frame')!.decls.isolation).toBe('isolate');
   });
+
+  it('GitHub 창의 본문은 창 높이(76vh) 안에서 스크롤한다: 찾은 것이 많아도 단추가 창 밖으로 나가지 않는다', () => {
+    expect(ruleFor('.dialog')!.decls['max-height']).toBe('76vh');
+    const body = ruleFor('.dialog.github-dialog .github-form')!;
+    expect(body.decls['min-height']).toBe('0');
+    expect(body.decls['overflow-y']).toBe('auto');
+  });
 });

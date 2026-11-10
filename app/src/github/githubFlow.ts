@@ -261,6 +261,10 @@ type Next = 'stop' | 'plan' | 'destination';
  */
 export async function uploadExperiment(ctx: CommandContext, folder: string, deps: FlowDeps): Promise<void> {
   void ctx;
+  await runGuarded(folder, deps);
+}
+
+async function runGuarded(folder: string, deps: FlowDeps): Promise<void> {
   try {
     await runFlow(folder, deps);
   } catch (e) {
@@ -389,7 +393,11 @@ async function runFlow(folder: string, deps: FlowDeps): Promise<void> {
         case 'planStale':
         case 'planExpired':
           if (replanned) {
-            ui.notify('error', outcome.outcome === 'planExpired' ? t('github.err.planExpired') : t('github.err.planStale'));
+            // 두 번째로 바뀌었으면 멈춘다(아무것도 올리지 않았다). 닫을 때까지 남는 오류 대신 저절로 사라지는 알림과
+            // [다시 확인] 단추를 보인다: 다음 확인 창 위에 지난 알림이 남아 헷갈리지 않게.
+            ui.notify('info', outcome.outcome === 'planExpired' ? t('github.err.planExpired') : t('github.err.planStale'), {
+              action: { label: t('github.err.checkAgain'), run: () => void runGuarded(folder, deps) },
+            });
             return 'stop';
           }
           replanned = true;

@@ -410,6 +410,8 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .dialog.github-dialog { width: min(38rem, 100%); }
 .dialog.github-dialog .github-signin { border-top: 0; padding-top: 0; }
 .github-form { display: flex; flex-direction: column; gap: var(--space-4); }
+/* 본문이 창(76vh)보다 길면 본문만 스크롤한다. 파일 확인 창은 단추 줄이 본문 밖이라 늘 보인다(.integration-body 와 같은 방식) */
+.dialog.github-dialog .github-form { min-height: 0; overflow-y: auto; }
 .github-form p { margin: 0; }
 .github-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 .github-check { display: flex; align-items: center; gap: var(--space-2); min-height: 1.4em; color: var(--text-muted); font-size: var(--font-size-sm); }

@@ -261,6 +261,19 @@ describe('preview dialog', () => {
     await expect(p).resolves.toEqual({ untick: ['images/bench.jpg'], allowHits: [], includeSamples: false });
   });
 
+  it('many findings scroll inside the body while the Cancel / Upload row stays outside it', () => {
+    renderLayer();
+    const hits = Array.from({ length: 7 }, (_, i) => ({ kind: 'tooLarge' as const, path: `raw/big_${i}.czi`, size: 101 * 1024 * 1024 }));
+    void openIn(() => githubPreviewDialog(plan({ red: hits, excluded: hits.map((h) => ({ path: h.path, reason: 'tooLarge' as const })) }), HEAD, { openFile: () => undefined }));
+    const dialog = screen.getByRole('dialog', { name: t('github.preview.title') });
+    const body = dialog.querySelector('.github-form')!;
+    const actions = screen.getByRole('button', { name: t('github.preview.upload') }).closest('.dialog-actions')!;
+    expect(body).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(body.contains(actions)).toBe(false);
+    expect(body.querySelector('.github-red')).not.toBeNull();
+  });
+
   it('a red item disables Upload until the file is left out', async () => {
     renderLayer();
     const p = openIn(() =>

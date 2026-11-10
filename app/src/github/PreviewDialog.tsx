@@ -369,14 +369,15 @@ export function PreviewDialog(props: {
             </ul>
           </div>
         ) : null}
-        <div className="dialog-actions">
-          <button type="button" onClick={props.onCancel}>
-            {t('dialog.cancel')}
-          </button>
-          <button type="button" className="primary" disabled={blocking.length > 0} onClick={upload}>
-            {t('github.preview.upload')}
-          </button>
-        </div>
+      </div>
+      {/* 단추 줄은 스크롤하는 본문 밖에 둔다: 찾은 것이 많아도 [취소] [올리기] 가 창 안에 남는다 */}
+      <div className="dialog-actions">
+        <button type="button" onClick={props.onCancel}>
+          {t('dialog.cancel')}
+        </button>
+        <button type="button" className="primary" disabled={blocking.length > 0} onClick={upload}>
+          {t('github.preview.upload')}
+        </button>
       </div>
     </DialogFrame>
   );

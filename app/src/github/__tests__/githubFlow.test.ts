@@ -340,12 +340,15 @@ describe('uploadExperiment', () => {
     expect(h.calls.filter((c) => c === 'upload')).toHaveLength(1);
   });
 
-  it('planStale re-plans once with a notice; a second planStale stops', async () => {
+  it('planStale re-plans once with a notice; a second planStale stops with a fading notice, not a sticky error', async () => {
     const h = harness({ outcomes: [{ outcome: 'planStale' }, { outcome: 'planStale' }], preview: [{}, {}] });
     await uploadExperiment(ctx, FOLDER, h.deps);
     expect(h.calls).toEqual(['destination', 'plan', 'preview', 'upload', 'plan', 'preview', 'upload']);
-    expect(h.notes.map((n) => n.kind)).toEqual(['info', 'error']);
+    // info fades by itself (warn and error stay until closed), so it does not sit over the next file check
+    expect(h.notes.map((n) => n.kind)).toEqual(['info', 'info']);
     expect(h.plans[1].target).toEqual(h.plans[0].target);
+    const action = (h.notes[1].opts as { action: { label: string } }).action;
+    expect(action.label).toBe(t('github.err.checkAgain'));
   });
 
   it('the progress window is locked and shows the steps once each', async () => {
