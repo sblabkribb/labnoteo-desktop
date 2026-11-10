@@ -63,6 +63,11 @@ pub struct LinkRecord {
     /// until it is private, however often the upload is retried.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intended_private: Option<bool>,
+    /// The repository turned public and the "now public" warning has not
+    /// reached the user yet: an upload that stopped before it finished
+    /// (`diverged`, `nothingChanged`, a failed push) keeps it for the next one.
+    #[serde(skip_serializing_if = "is_false")]
+    pub public_unwarned: bool,
     pub state: LinkState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_commit: Option<String>,
@@ -79,6 +84,10 @@ pub struct LinkRecord {
     pub requested_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_description: Option<String>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// The whole `GithubDoc::Links` document of one vault.

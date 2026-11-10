@@ -19,7 +19,10 @@
 //!   or remove (P-R8); nothing is pulled into the vault and nothing is ever
 //!   forced. "mine" (every listed file ticked) commits on top of GitHub's tip,
 //!   a fast-forward; "separate" pushes to a new `labnoteo/<YYYYMMDD-HHMM>`
-//!   branch and leaves the link where it was.
+//!   branch and leaves the link where it was. An empty list asks nothing.
+//! - The plan is given back when the answer may reuse it: `diverged`,
+//!   `divergedNotAcknowledged` and `publicNotConfirmed`. Every other answer
+//!   (`readOnly`, other red items, errors) used it up: plan again.
 //! - Status, default owner and unlink never reach the network.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -95,7 +98,9 @@ pub enum DivergedChoice {
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum UploadWarning {
-    /// The repository became public since the last upload (said once).
+    /// The repository became public since the last upload. Said on the
+    /// first upload that sends something after that (`done` or
+    /// `pushedSeparately`); until then the link keeps `publicUnwarned`.
     NowPublic,
 }
 
@@ -124,9 +129,11 @@ pub enum UploadOutcome {
     Blocked { red: Vec<Red> },
     PlanStale,
     PlanExpired,
-    Diverged { files: Vec<DivergedFile> },
+    /// `warnings` says now what a later `done` will say again (the
+    /// divergence screen is where the user decides to push).
+    Diverged { files: Vec<DivergedFile>, warnings: Vec<UploadWarning> },
     #[serde(rename_all = "camelCase")]
-    PushedSeparately { compare_url: String },
+    PushedSeparately { compare_url: String, warnings: Vec<UploadWarning> },
     #[serde(rename_all = "camelCase")]
     OrgRestricted { org: String, approve_url: String },
     SsoRequired { url: String },
@@ -310,7 +317,11 @@ fn api_outcome(dirs: &Path, o: ApiOutcome, reply: &ApiReply) -> Result<UploadOut
 enum Dest {
     Create { owner: String, name: String, private: bool },
     Link { owner: String, name: String },
-    Update(LinkRecord),
+    /// The linked repository. With `Some(owner, name)`, a link plan answering
+    /// the divergence screen whose typed name GitHub redirected (a renamed or
+    /// transferred repository): that name is asked for, and it must be the
+    /// linked repository (same id).
+    Update(LinkRecord, Option<(String, String)>),
 }
 
 /// Every file (non-tree entry) of `commit`'s tree by path. Names that are not
@@ -479,15 +490,21 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         (PlanTarget::Link { owner, name }, None) => Dest::Link { owner: owner.clone(), name: name.clone() },
         // The link this plan (or an earlier one) made, still with nothing
         // pushed: the answer to the divergence screen continues it.
+        // A typed name that differs from the link's is checked by repository
+        // id once GitHub answers (it may have been redirected to the link's).
         (PlanTarget::Link { owner, name }, Some(l)) => {
             let same = l.owner.eq_ignore_ascii_case(owner) && l.name.eq_ignore_ascii_case(name);
-            if !same || l.state != LinkState::RepoReady || l.last_pushed_commit.is_some() || !valid_id(&l.link_id) {
+            if l.state != LinkState::RepoReady
+                || l.last_pushed_commit.is_some()
+                || !valid_id(&l.link_id)
+                || (!same && l.repo_id == 0)
+            {
                 return Err(bad_input("this folder is already linked to a repository"));
             }
             if guard.add(env.dirs, env.root, LockKey::Link(l.link_id.clone())).is_err() {
                 return Ok(UploadOutcome::Busy);
             }
-            Dest::Update(l)
+            Dest::Update(l, (!same).then(|| (owner.clone(), name.clone())))
         }
         (PlanTarget::Update, None) => return Err(bad_input("this folder is not linked to a repository")),
         (PlanTarget::Update, Some(l)) => {
@@ -501,7 +518,7 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
             if guard.add(env.dirs, env.root, LockKey::Link(l.link_id.clone())).is_err() {
                 return Ok(UploadOutcome::Busy);
             }
-            Dest::Update(l)
+            Dest::Update(l, None)
         }
     };
 
@@ -522,6 +539,8 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
     // 5. A public repository needs the typed name.
     if let Dest::Create { name, private: false, .. } = &dest {
         if choices.public_confirm.as_deref() != Some(name.as_str()) {
+            // Nothing was sent: a corrected name reuses the plan.
+            env.gh.plans.put_back(plan);
             return Ok(UploadOutcome::Blocked { red: vec![Red::PublicNotConfirmed] });
         }
     }
@@ -603,6 +622,8 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
                 return Ok(UploadOutcome::ReadOnly);
             }
             if !f.private && choices.public_confirm.as_deref() != Some(f.name.as_str()) {
+                // Nothing was recorded: a corrected name reuses the plan.
+                env.gh.plans.put_back(plan);
                 return Ok(UploadOutcome::Blocked { red: vec![Red::PublicNotConfirmed] });
             }
             branch_ref(&f.default_branch).map_err(|_| bad_input("the repository's branch name cannot be used"))?;
@@ -626,15 +647,19 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
             (link_id, f.owner, f.name, f.html_url, f.default_branch, None)
         }
         // The linked repository: still there, still writable, still private?
-        Dest::Update(l) => {
+        Dest::Update(l, typed) => {
             (env.progress)(Stage::Preparing, 0, 1);
-            let call = GithubCall::GetRepo { owner: l.owner.clone(), name: l.name.clone() };
+            let (ask_owner, ask_name) = typed.clone().unwrap_or_else(|| (l.owner.clone(), l.name.clone()));
+            let call = GithubCall::GetRepo { owner: ask_owner, name: ask_name };
             let reply = block_on(call_authed(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id, call.clone(), None))?;
             match classify(&call, &reply) {
                 ApiOutcome::Ok | ApiOutcome::Moved { .. } => {}
                 other => return api_outcome(env.dirs, other, &reply),
             }
             let f = repo_facts(&reply.json).ok_or_else(unexpected)?;
+            if typed.is_some() && f.id != l.repo_id {
+                return Err(bad_input("this folder is already linked to a repository"));
+            }
             if !f.can_push {
                 return Ok(UploadOutcome::ReadOnly);
             }
@@ -645,15 +670,20 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
             if l.last_pushed_commit.is_none() && l.intended_private == Some(true) && !f.private {
                 return Ok(UploadOutcome::VisibilityMismatch { html_url });
             }
-            if l.private && !f.private {
+            // Public now and not said yet: the link keeps that until an
+            // upload that sends something has said it.
+            let unwarned = !f.private && (l.private || l.public_unwarned);
+            if unwarned {
                 warnings.push(UploadWarning::NowPublic);
             }
-            if (f.owner.as_str(), f.name.as_str(), f.private, html_url.as_str()) != (l.owner.as_str(), l.name.as_str(), l.private, l.html_url.as_str()) {
+            let now = (f.owner.as_str(), f.name.as_str(), f.private, html_url.as_str(), unwarned);
+            if now != (l.owner.as_str(), l.name.as_str(), l.private, l.html_url.as_str(), l.public_unwarned) {
                 journal::advance(env.dirs, env.root, &l.link_id, |r| {
                     r.owner = f.owner.clone();
                     r.name = f.name.clone();
                     r.private = f.private;
                     r.html_url = html_url.clone();
+                    r.public_unwarned = unwarned;
                 })?;
             }
             let parent = l.last_pushed_commit.as_deref().and_then(|c| Oid::from_str(c).ok());
@@ -680,10 +710,16 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
     let mut separate: Option<String> = None;
     if tip != parent {
         let files = diverged_files(&repo, parent, tip, &sel).map_err(git_error)?;
-        match choices.diverged {
+        // Nothing of GitHub's would be replaced or removed (every change
+        // there is in the folder already): nothing to ask, so "mine".
+        let answer = match choices.diverged {
+            None if files.is_empty() => Some(DivergedChoice::Mine),
+            a => a,
+        };
+        match answer {
             None => {
                 env.gh.plans.put_back(plan);
-                return Ok(UploadOutcome::Diverged { files });
+                return Ok(UploadOutcome::Diverged { files, warnings });
             }
             Some(DivergedChoice::Mine) => {
                 let acked: HashSet<&str> = choices.ack_files.iter().map(String::as_str).collect();
@@ -774,8 +810,12 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
     }
     (env.progress)(Stage::Checking, 0, 1);
     if let Some(sep) = separate {
+        if !warnings.is_empty() {
+            journal::advance(env.dirs, env.root, &link_id, |r| r.public_unwarned = false)?;
+        }
         drop(guard);
-        return Ok(UploadOutcome::PushedSeparately { compare_url: compare_url(&html_url, &owner, &name, &branch, &sep) });
+        let compare_url = compare_url(&html_url, &owner, &name, &branch, &sep);
+        return Ok(UploadOutcome::PushedSeparately { compare_url, warnings });
     }
     let pushed_owner = owner.clone();
     update_links(env.dirs, env.root, |doc| {
@@ -784,6 +824,7 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         rec.last_pushed_commit = Some(commit.to_string());
         rec.pending_commit = None;
         rec.last_pushed_at = Some(now_ms());
+        rec.public_unwarned = false;
         remember(rec, &plan, &sel, &choices);
         doc.default_owner = Some(pushed_owner);
         Ok(())
