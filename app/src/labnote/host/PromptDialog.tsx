@@ -55,7 +55,7 @@ export function PromptDialog(props: {
 
   const describedBy = [opts.hint ? `${id}-hint` : '', error ? `${id}-error` : ''].filter(Boolean).join(' ') || undefined;
   return (
-    <DialogFrame title={opts.title} className="prompt" onCancel={props.onCancel}>
+    <DialogFrame title={opts.title} label={opts.prompt ?? t('prompt.label')} className="prompt" onCancel={props.onCancel}>
       {opts.prompt ? (
         <label className="prompt-question" htmlFor={`${id}-input`}>
           {opts.prompt}

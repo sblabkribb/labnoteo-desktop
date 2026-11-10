@@ -52,4 +52,20 @@ describe('이어 연 대화상자의 초점 복귀', () => {
     root.appendChild(inner);
     await chain(inner, () => root.activeElement === inner);
   });
+
+  it('confirm then prompt: focus returns to a button in #pet-layer, which is not inert between or after', async () => {
+    const { petLayer, petButton } = renderLayer({ pet: true });
+    let inertAtFocus: boolean | undefined;
+    petButton!.addEventListener('focus', () => (inertAtFocus = petLayer!.hasAttribute('inert')));
+    let inertMidChain = false;
+    const seen = new MutationObserver(() => {
+      if (document.querySelector('.dialog-layer')) inertMidChain ||= petLayer!.hasAttribute('inert');
+    });
+    seen.observe(document.body, { subtree: true, childList: true, attributes: true });
+    await chain(petButton!, () => document.activeElement === petButton);
+    seen.disconnect();
+    expect(inertMidChain).toBe(true);
+    expect(petLayer!.hasAttribute('inert')).toBe(false);
+    expect(inertAtFocus).toBe(false);
+  });
 });

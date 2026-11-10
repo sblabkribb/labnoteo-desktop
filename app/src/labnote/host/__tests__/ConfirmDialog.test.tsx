@@ -32,6 +32,17 @@ describe('확인 대화상자', () => {
     await expect(p).resolves.toBe(false);
   });
 
+  it('has an accessible name (and the message as its description)', () => {
+    renderLayer();
+    void openIn(() => confirmDialog('지울까요?', { destructive: true }));
+    const dialog = screen.getByRole('alertdialog', { name: '확인 요청' });
+    const described = document.getElementById(dialog.getAttribute('aria-describedby')!);
+    expect(described?.textContent).toBe('지울까요?');
+    act(() => setLang('en'));
+    expect(screen.getByRole('alertdialog', { name: 'Please confirm' })).toBeTruthy();
+    act(() => setLang('ko'));
+  });
+
   it('Escape 는 false', async () => {
     renderLayer();
     const p = openIn(() => confirmDialog('?'));

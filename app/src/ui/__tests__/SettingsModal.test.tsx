@@ -14,6 +14,7 @@ import { clearAppCommandsForTest, registerAllAppCommands } from '../../editor/co
 import { getMode, setMode } from '../../editor/live/mode';
 import type { Theme } from '../../theme/useTheme';
 import { DEFAULT_PREFS, layoutStore } from '../layoutStore';
+import { focusableIn } from '../focusable';
 import { SETTINGS_PAGES, openSettings, setSettingsSource, type SettingsDeps } from '../SettingsModal';
 
 function memoryStorage(): Storage {
@@ -261,6 +262,26 @@ describe('Settings modal', () => {
     const panel = within(dialog().getByRole('tabpanel', { name: '정보' }));
     expect(panel.getByText('버전 9.8.7')).toBeTruthy();
     expect(panel.getByText(/Lucide/).textContent).toContain('ISC');
+  });
+
+  it('Tab from the last visible control wraps to the first, past controls on hidden pages; Shift+Tab the reverse', async () => {
+    install();
+    // 연동 페이지를 먼저 열고 일반으로 옮긴다: 입력란이 있는 숨은 연동 페이지가 일반 뒤에 남는다
+    act(() => void openSettings('integrations'));
+    await userEvent.click(nav().getByRole('tab', { name: '일반' }));
+    const root = screen.getByRole('dialog', { name: '설정' });
+    const hiddenPage = root.querySelector<HTMLElement>('.settings-page-integrations')!;
+    expect(hiddenPage.hidden).toBe(true);
+    const visible = focusableIn(root);
+    expect(visible.some((el) => hiddenPage.contains(el))).toBe(false);
+    expect(hiddenPage.querySelector('button, a[href], input, select, textarea')).not.toBeNull();
+    const first = visible[0];
+    const last = visible[visible.length - 1];
+    last.focus();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(first);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(last);
   });
 
   it('Esc closes and focus returns to where it was', async () => {

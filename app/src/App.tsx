@@ -45,7 +45,7 @@ import { samplesSync, setSampleSyncEnv } from './samples/sync';
 import { noteSyncEnv, startPartbank } from './partbank/partbankApp';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
-import { DialogLayer } from './labnote/host/DialogLayer';
+import { DialogLayer, PET_LAYER_ID } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
 import { clearToasts } from './labnote/host/toastStore';
@@ -873,6 +873,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       {/* .shell 밖: 대화상자가 열려 있는 동안 .shell 은 inert 다. 알림과 메뉴는 그 위에 뜬다 */}
       <DialogLayer blockRef={shell} />
       <Toaster />
+      {/* 떠 있는 도우미 층(아직 비어 있다). 대화상자가 열려 있는 동안 DialogLayer 가 inert 로 막는다 */}
+      <div id={PET_LAYER_ID} />
       <ContextMenu />
     </>
   );

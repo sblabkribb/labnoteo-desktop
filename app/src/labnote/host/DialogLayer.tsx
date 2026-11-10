@@ -20,6 +20,9 @@ import { NewNoteDialog } from '../../tree/NewNoteDialog';
 import { NewExperimentDialog } from '../ui/NewExperimentDialog';
 import { ContextSourcesDialog } from '../context/ContextSourcesDialog';
 
+/** App.tsx 가 .shell 밖, 알림 층 뒤에 그리는 도우미 층의 id. */
+export const PET_LAYER_ID = 'pet-layer';
+
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
   const onCancel = () => settleDialog(entry.id, entry.cancelValue);
@@ -69,7 +72,7 @@ function Body({ entry }: { entry: DialogEntry }) {
 /**
  * 저장소(dialogStore)의 지금 대화상자를 그린다. .shell 밖에 그려야 한다: 대화상자가 열려 있는 동안 `blockRef`(.shell)에
  * inert 를 걸어 편집기·트리·상단 바가 초점도 클릭도 받지 않게 한다. 마지막 대화상자가 닫히면 inert 를 푼 뒤 열기 전 초점 자리
- * (편집기의 그림자 루트 안 포함)로 초점을 돌려준다. 언어를 바꾸면 열린 채로 글자만 바뀐다. 하나 고르기는 배경을 눌러도 닫힌다.
+ * (편집기의 그림자 루트 안 포함)로 초점을 돌려준다. #pet-layer 도 같이 inert 다(알림 층은 아니다). 언어를 바꾸면 열린 채로 글자만 바뀐다. 하나 고르기는 배경을 눌러도 닫힌다.
  */
 export function DialogLayer({ blockRef }: { blockRef?: RefObject<HTMLElement> }) {
   useLang();
@@ -79,9 +82,14 @@ export function DialogLayer({ blockRef }: { blockRef?: RefObject<HTMLElement> })
   useLayoutEffect(() => {
     if (!open) return;
     const shell = blockRef?.current;
+    // 떠 있는 도우미(#pet-layer)도 막는다. 알림 층(Toaster)은 막지 않는다: inert 는 live region 을 접근성 트리에서 지운다.
+    const pet = document.getElementById(PET_LAYER_ID);
     shell?.setAttribute('inert', '');
+    pet?.setAttribute('inert', '');
     return () => {
+      // 초점을 돌려주기 전에 푼다: 열기 전 초점이 도우미 안에 있었을 수 있다.
       shell?.removeAttribute('inert');
+      pet?.removeAttribute('inert');
       const el = takeReturnFocus();
       if (el?.isConnected) el.focus();
     };

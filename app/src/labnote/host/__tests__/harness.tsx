@@ -3,8 +3,11 @@ import { useRef } from 'react';
 import { DialogLayer } from '../DialogLayer';
 import { closeAllDialogs } from '../dialogStore';
 
-/** 앱처럼 .shell 과 그 밖의 DialogLayer 를 그린다. .shell 안에는 대화상자가 열리기 전 초점을 가질 단추가 있다. */
-function Harness() {
+/**
+ * 앱처럼 .shell 과 그 밖의 DialogLayer 를 그린다. .shell 안에는 대화상자가 열리기 전 초점을 가질 단추가 있다.
+ * `pet` 이면 App.tsx 처럼 .shell 밖에 #pet-layer(단추 하나)도 그린다.
+ */
+function Harness({ pet }: { pet?: boolean }) {
   const shell = useRef<HTMLDivElement>(null);
   return (
     <>
@@ -12,15 +15,22 @@ function Harness() {
         <button type="button">outside</button>
       </div>
       <DialogLayer blockRef={shell} />
+      {pet ? (
+        <div id="pet-layer">
+          <button type="button">pet</button>
+        </div>
+      ) : null}
     </>
   );
 }
 
-export function renderLayer() {
-  const view = render(<Harness />);
+export function renderLayer(opts: { pet?: boolean } = {}) {
+  const view = render(<Harness pet={opts.pet} />);
   const shell = view.container.querySelector('.shell') as HTMLElement;
   const outside = view.container.querySelector('.shell button') as HTMLButtonElement;
-  return { ...view, shell, outside };
+  const petLayer = document.getElementById('pet-layer');
+  const petButton = petLayer?.querySelector('button') ?? null;
+  return { ...view, shell, outside, petLayer, petButton };
 }
 
 /** 대화상자를 연다: 저장소 변경이 React 갱신이므로 act 안에서. */

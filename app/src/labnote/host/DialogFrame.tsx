@@ -2,21 +2,24 @@ import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 're
 import { UNSOLICITED_ARM_MS } from './whenNotComposing';
 import { t } from '../../i18n/t';
 import { Icon } from '../../ui/Icon';
+import { focusableIn } from '../../ui/focusable';
 
 /** 한글 조합 중의 키(조합을 끝내는 Enter, 조합을 취소하는 Escape): 대화상자가 처리하지 않는다. */
 export function isComposing(e: KeyboardEvent): boolean {
   return e.nativeEvent.isComposing || e.keyCode === 229;
 }
 
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-
 /**
- * 모든 대화상자의 틀: 제목, 닫기 단추, Escape 로 취소, Tab 가두기(처음과 끝이 이어진다).
- * 대화상자 밖(.shell)은 DialogLayer 가 inert 로 막는다.
+ * 모든 대화상자의 틀: 제목, 닫기 단추, Escape 로 취소, Tab 가두기(처음과 끝이 이어진다; 숨은 페이지는 건너뛴다).
+ * 대화상자 밖(.shell, #pet-layer)은 DialogLayer 가 inert 로 막는다.
+ * 이름: `title` 이 있으면 제목이, 없으면 `label`(aria-label)이, 그것도 없으면 `describedBy` 의 글이 이름이 된다.
+ * 셋 다 없으면 개발 빌드에서 경고한다.
  */
 export function DialogFrame(props: {
   role?: 'dialog' | 'alertdialog';
   title?: string;
+  /** 제목이 없을 때의 이름(aria-label). */
+  label?: string;
   className?: string;
   describedBy?: string;
   onCancel: () => void;
@@ -27,6 +30,10 @@ export function DialogFrame(props: {
   children: ReactNode;
 }) {
   const titleId = useId();
+  const unnamed = !props.title && !props.label && !props.describedBy;
+  useEffect(() => {
+    if (import.meta.env.DEV && unnamed) console.warn('DialogFrame: dialog has no accessible name (title, label or describedBy)');
+  }, [unnamed]);
   // 처음 그릴 때의 값으로 정한다: 열린 뒤에 바뀌지 않는다.
   const armed = useRef(!!props.unsolicited);
   useEffect(() => {
@@ -51,7 +58,7 @@ export function DialogFrame(props: {
       return;
     }
     if (e.key !== 'Tab') return;
-    const focusable = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    const focusable = focusableIn(e.currentTarget);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -68,7 +75,8 @@ export function DialogFrame(props: {
     <div
       role={props.role ?? 'dialog'}
       aria-modal="true"
-      aria-labelledby={props.title ? titleId : undefined}
+      aria-label={props.title ? undefined : props.label}
+      aria-labelledby={props.title ? titleId : props.label ? undefined : props.describedBy}
       aria-describedby={props.describedBy}
       className={props.className ? `dialog ${props.className}` : 'dialog'}
       onKeyDown={onKeyDown}

@@ -247,6 +247,7 @@ export function Picker(props: {
   return (
     <DialogFrame
       title={spec.title}
+      label={spec.placeholder ?? t('picker.label')}
       className={spec.palette ? 'picker palette' : spec.catalog ? 'picker catalog' : 'picker'}
       onCancel={props.onCancel}
       unsolicited={spec.unsolicited}
@@ -354,7 +355,7 @@ export function PickManyDialog(props: {
   };
 
   return (
-    <DialogFrame title={spec.title} className="picker" onCancel={props.onCancel}>
+    <DialogFrame title={spec.title} label={spec.placeholder ?? t('picker.label')} className="picker" onCancel={props.onCancel}>
       <div className="picker-body" onKeyDown={onKeyDown}>
         <input
           ref={input}
