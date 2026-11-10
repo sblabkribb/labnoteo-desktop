@@ -311,3 +311,5 @@ button.sample-def-link:hover { text-decoration: underline; }
 .ai-ctx-bar { height: var(--space-2); background: var(--bg-hover); border-radius: var(--radius-s); overflow: hidden; }
 .ai-ctx-bar-fill { width: var(--ai-ctx-fill, 0%); height: 100%; background: var(--accent); }
 .ai-ctx-issues ul { margin: 0; padding-left: var(--space-7); }
+/* SKILL.md preview in Integration settings: a read-only, scrollable copy of the text */
+.skill-preview { max-height: 16em; overflow: auto; }

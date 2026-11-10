@@ -5,7 +5,9 @@ import { coreT, overrideOr } from '../labnote/i18n';
 import type { CommandContext } from '../labnote/commands/context';
 import type { Notify } from '../labnote/mcp/commands';
 import { McpSection } from '../labnote/mcp/McpSection';
-import { BFW_DEFAULT_URL, fromPluginData, isOriginUrl, type AppSettings } from '../labnote/settings';
+import { SkillSection } from '../labnote/skill/SkillSection';
+import { ContextWindowField } from '../labnote/context/ContextWindowField';
+import { BFW_DEFAULT_URL, LLM_CONTEXT_WINDOW_DEFAULT, fromPluginData, isOriginUrl, type AppSettings } from '../labnote/settings';
 import { KeyField } from './KeyField';
 import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
@@ -57,6 +59,7 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     llmEndpointOllama: s.llmEndpointOllama,
     llmEndpointOpenai: s.llmEndpointOpenai,
     llmModel: s.llmModel,
+    llmContextWindow: s.llmContextWindow,
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: [...s.allowHttpOrigins],
@@ -608,6 +611,7 @@ export function IntegrationSettingsPage(props: {
                   onBlur={() => void commitModel()}
                 />
               </div>
+              <ContextWindowField value={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT} commit={(patch) => save(patch)} />
               {provider === 'openai' ? (
                 <KeyField
                   deps={deps}
@@ -702,6 +706,7 @@ export function IntegrationSettingsPage(props: {
             invoke={deps.mcp.invoke}
           />
         ) : null}
+        {deps.mcp ? <SkillSection notify={deps.mcp.notify} invoke={deps.mcp.invoke} /> : null}
       </div>
   );
 }

@@ -33,7 +33,9 @@ export type IntegrationSettingsValue = Pick<
   // SP7 Part C: MCP 서버 스위치와 포트(McpSection)
   | 'mcpEnabled'
   | 'mcpPort'
->;
+> &
+  // feat/ai-context: the context-window field (ContextWindowField). Optional so older values still type-check.
+  Partial<Pick<AppSettings, 'llmContextWindow'>>;
 
 export type ProbeId = 'partbankDesktop' | 'partbankWeb' | 'llm' | 'bfw';
 
