@@ -28,8 +28,18 @@ const fixture: Record<string, string[]> = JSON.parse(
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
  * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
  * SP7 Part C 의 mcp_* 커맨드 아홉은 Task 36 의 mcpIpc.ts 래퍼로 비웠다.
+ * MCP 클라이언트 커맨드 여덟 개(Task 5a, Rust)는 Task 5b 의 netIpc.ts 래퍼가 비운다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [];
+const PENDING_TS_WRAPPERS: readonly string[] = [
+  'mcp_client_secret_set',
+  'mcp_client_secret_clear',
+  'mcp_client_secret_status',
+  'mcp_client_connect',
+  'mcp_client_call',
+  'mcp_client_disconnect',
+  'mcp_client_forget',
+  'mcp_client_tools_cached',
+];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.

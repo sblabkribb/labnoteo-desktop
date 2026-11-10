@@ -76,20 +76,43 @@ impl SecretStore for KeyringStore {
 
 /// An in-memory store for tests (never the real Credential Manager).
 #[derive(Default)]
-pub struct MemoryStore(Mutex<HashMap<String, String>>);
+pub struct MemoryStore {
+    map: Mutex<HashMap<String, String>>,
+    /// When set, a value longer than this many chars is refused like the
+    /// Credential Manager refuses one (1,280 chars through `keyring`).
+    limit: Option<usize>,
+}
+
+impl MemoryStore {
+    /// A store that refuses values over `chars` chars, so the tests exercise
+    /// the chunking of long tokens.
+    pub fn with_entry_limit(chars: usize) -> Self {
+        MemoryStore { map: Mutex::default(), limit: Some(chars) }
+    }
+
+    /// The accounts stored, sorted (tests check what is left behind).
+    pub fn accounts(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.map.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+}
 
 impl SecretStore for MemoryStore {
     fn get(&self, account: &str) -> Result<Option<String>, NetError> {
-        Ok(self.0.lock().unwrap_or_else(|e| e.into_inner()).get(account).cloned())
+        Ok(self.map.lock().unwrap_or_else(|e| e.into_inner()).get(account).cloned())
     }
 
     fn set(&self, account: &str, value: &str) -> Result<(), NetError> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(account.to_string(), value.to_string());
+        if self.limit.is_some_and(|max| value.chars().count() > max) {
+            return Err(keychain_error());
+        }
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).insert(account.to_string(), value.to_string());
         Ok(())
     }
 
     fn delete(&self, account: &str) -> Result<(), NetError> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(account);
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).remove(account);
         Ok(())
     }
 }
@@ -289,6 +312,105 @@ pub fn status_of(store: &dyn SecretStore, cfg: &ServiceConfig) -> SecretStatus {
     }
 }
 
+// ---------------------------------------------------------------------------
+// MCP client tokens (spec §5.2): long values, stored in chunks.
+// ---------------------------------------------------------------------------
+
+/// Longest MCP token accepted, in chars.
+pub const MAX_LONG_SECRET: usize = 8192;
+/// Chars per keychain entry of a long token (one entry holds at most 1,280).
+pub const LONG_CHUNK: usize = 1200;
+/// Most entries one long token can take (8,192 / 1,200, rounded up).
+pub const MAX_LONG_CHUNKS: usize = MAX_LONG_SECRET.div_ceil(LONG_CHUNK);
+
+/// `"mcpClient:<id>|<origin>"`: the account an MCP server's token is kept
+/// under, bound to the origin it was saved for.
+pub fn mcp_account(id: &str, origin: &str) -> String {
+    format!("mcpClient:{id}|{origin}")
+}
+
+/// The epoch counter of any account (`0` when none is stored).
+pub fn epoch_of(store: &dyn SecretStore, account: &str) -> u64 {
+    read_epoch(store, &format!("epoch|{account}"))
+}
+
+fn bump_epoch_at(store: &dyn SecretStore, account: &str) -> Result<(), NetError> {
+    let acc = format!("epoch|{account}");
+    let next = read_epoch(store, &acc).saturating_add(1);
+    store.set(&acc, &next.to_string())
+}
+
+/// The token as it will be stored: blanks and a leading `Bearer ` (any case)
+/// stripped, 1..=8,192 chars, no control chars, not a placeholder. No error
+/// message ever contains the value.
+pub fn validate_long(value: &str) -> Result<String, NetError> {
+    use super::mcp_client::placeholder::{is_placeholder, strip_bearer};
+    let t = strip_bearer(value);
+    if t.chars().count() > MAX_LONG_SECRET {
+        return Err(NetError::new(NetErrorKind::BadInput, "the token is too long (at most 8192 characters)"));
+    }
+    if t.is_empty() || t.chars().any(char::is_control) {
+        return Err(NetError::new(NetErrorKind::BadInput, "the token must be 1 to 8192 characters with no control characters"));
+    }
+    if is_placeholder(t) {
+        return Err(NetError::new(NetErrorKind::BadInput, "this is a placeholder, not a token"));
+    }
+    Ok(t.to_string())
+}
+
+fn chunk_account(account: &str, n: usize) -> String {
+    format!("{account}#{n}")
+}
+
+/// Validates the token (`validate_long`) and stores it in chunks of at most
+/// 1,200 chars: the first at `account` as `c<n>:<chunk>`, the rest at
+/// `account#2` … `#n`; then the epoch is bumped. The header is written last,
+/// so a save cut short reads as "not set" rather than as a mixed token.
+pub fn store_long(store: &dyn SecretStore, account: &str, value: &str) -> Result<(), NetError> {
+    let token = validate_long(value)?;
+    let chars: Vec<char> = token.chars().collect();
+    let chunks: Vec<String> = chars.chunks(LONG_CHUNK).map(|c| c.iter().collect()).collect();
+    store.delete(account)?;
+    for (i, chunk) in chunks.iter().enumerate().skip(1) {
+        store.set(&chunk_account(account, i + 1), chunk)?;
+    }
+    for n in chunks.len() + 1..=MAX_LONG_CHUNKS {
+        store.delete(&chunk_account(account, n))?;
+    }
+    store.set(account, &format!("c{}:{}", chunks.len(), chunks[0]))?;
+    bump_epoch_at(store, account)
+}
+
+/// The stored token, or `None` when it is missing, malformed, or any chunk
+/// is missing.
+pub fn get_long(store: &dyn SecretStore, account: &str) -> Result<Option<String>, NetError> {
+    let Some(head) = store.get(account)? else { return Ok(None) };
+    let Some((count, first)) = head.strip_prefix('c').and_then(|h| h.split_once(':')) else {
+        return Ok(None);
+    };
+    let Ok(n) = count.parse::<usize>() else { return Ok(None) };
+    if !(1..=MAX_LONG_CHUNKS).contains(&n) {
+        return Ok(None);
+    }
+    let mut token = first.to_string();
+    for i in 2..=n {
+        match store.get(&chunk_account(account, i))? {
+            Some(chunk) => token.push_str(&chunk),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(token))
+}
+
+/// Deletes every chunk of the token (whatever is stored), then bumps the epoch.
+pub fn delete_long(store: &dyn SecretStore, account: &str) -> Result<(), NetError> {
+    store.delete(account)?;
+    for n in 2..=MAX_LONG_CHUNKS {
+        store.delete(&chunk_account(account, n))?;
+    }
+    bump_epoch_at(store, account)
+}
+
 /// The open vault's service config, or `notConfigured` with no vault open.
 fn current_config(vault: &VaultState, settings: &SettingsFile) -> Result<ServiceConfig, NetError> {
     ServiceConfig::load(&settings.0, vault.root().ok().as_deref())
@@ -405,6 +527,71 @@ mod tests {
         assert_eq!(store.get("epoch|partbankWeb|https://pb.example").unwrap().as_deref(), Some("1"));
         assert_eq!(store_secret_at_url(&store, Slot::SlackBot, &url, "xoxb-1").unwrap_err().kind, NetErrorKind::BadInput);
         assert_eq!(store_secret_at_url(&store, Slot::PartbankWeb, &url, "").unwrap_err().kind, NetErrorKind::BadInput);
+    }
+    const ACC: &str = "mcpClient:0a1b2c3d|https://rapid.kbiofoundry.kr";
+
+    #[test] fn mcp_account_names_id_and_origin() {
+        assert_eq!(mcp_account("0a1b2c3d", "https://rapid.kbiofoundry.kr"), ACC);
+        assert_eq!(MAX_LONG_CHUNKS, 7);
+    }
+    #[test] fn memory_store_limit_refuses_long_entries() {
+        let s = MemoryStore::with_entry_limit(1280);
+        assert!(s.set("a", &"x".repeat(1280)).is_ok());
+        assert_eq!(s.set("b", &"x".repeat(1281)).unwrap_err().kind, NetErrorKind::Keychain);
+    }
+    #[test] fn long_token_strips_bearer_and_round_trips() {
+        let s = MemoryStore::with_entry_limit(1280);
+        store_long(&s, ACC, "  Bearer test-token-123 ").unwrap();
+        assert_eq!(get_long(&s, ACC).unwrap().as_deref(), Some("test-token-123"));
+        assert_eq!(epoch_of(&s, ACC), 1);
+        assert_eq!(s.get(ACC).unwrap().as_deref(), Some("c1:test-token-123"));
+    }
+    #[test] fn a_3000_char_token_takes_three_chunks() {
+        let s = MemoryStore::with_entry_limit(1280);
+        let token: String = (0..3000).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+        store_long(&s, ACC, &token).unwrap();
+        assert_eq!(get_long(&s, ACC).unwrap().as_deref(), Some(token.as_str()));
+        assert_eq!(s.accounts(), vec![format!("epoch|{ACC}"), ACC.to_string(), format!("{ACC}#2"), format!("{ACC}#3")]);
+        // A shorter token later leaves no stale chunk behind.
+        store_long(&s, ACC, "test-token-123").unwrap();
+        assert_eq!(s.accounts(), vec![format!("epoch|{ACC}"), ACC.to_string()]);
+        assert_eq!(get_long(&s, ACC).unwrap().as_deref(), Some("test-token-123"));
+        assert_eq!(epoch_of(&s, ACC), 2);
+    }
+    #[test] fn a_missing_chunk_reads_as_not_set() {
+        let s = MemoryStore::with_entry_limit(1280);
+        store_long(&s, ACC, &"k1".repeat(1500)).unwrap();
+        s.delete(&format!("{ACC}#2")).unwrap();
+        assert_eq!(get_long(&s, ACC).unwrap(), None);
+        s.set(ACC, "garbage").unwrap();
+        assert_eq!(get_long(&s, ACC).unwrap(), None);
+        s.set(ACC, "c9:x").unwrap();
+        assert_eq!(get_long(&s, ACC).unwrap(), None);
+    }
+    #[test] fn delete_removes_every_chunk_and_bumps_the_epoch() {
+        let s = MemoryStore::with_entry_limit(1280);
+        store_long(&s, ACC, &"k2".repeat(4000)).unwrap();
+        assert_eq!(s.accounts().len(), 8, "7 chunks and the epoch");
+        delete_long(&s, ACC).unwrap();
+        assert_eq!(s.accounts(), vec![format!("epoch|{ACC}")]);
+        assert_eq!(get_long(&s, ACC).unwrap(), None);
+        assert_eq!(epoch_of(&s, ACC), 2);
+    }
+    #[test] fn too_long_bad_and_placeholder_tokens_are_refused_without_echo() {
+        let s = MemoryStore::with_entry_limit(1280);
+        let long = "t".repeat(8193);
+        let e = store_long(&s, ACC, &long).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::BadInput);
+        assert!(!e.message.contains("tttttttt"));
+        assert!(store_long(&s, ACC, &"t".repeat(8192)).is_ok());
+        for bad in ["", "Bearer ", "<YOUR_TOKEN>", "<KBF_SSO_ACCESS_TOKEN>", "test\u{7}token"] {
+            let e = store_long(&s, ACC, bad).unwrap_err();
+            assert_eq!(e.kind, NetErrorKind::BadInput, "{bad:?}");
+            if !bad.is_empty() {
+                assert!(!e.message.contains(bad.trim()), "{bad:?}");
+            }
+        }
+        assert_eq!(epoch_of(&s, ACC), 1, "a refused token stores nothing");
     }
     #[test] #[ignore = "touches the real Credential Manager; run by hand"] fn keyring_roundtrip() {
         let s = KeyringStore; let acc = "test|labnoteo-sp6";

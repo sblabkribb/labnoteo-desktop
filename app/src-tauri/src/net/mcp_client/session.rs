@@ -91,7 +91,35 @@ impl Session {
     pub fn permits(&self) -> Arc<Semaphore> {
         self.sem.clone()
     }
+
+    /// A handle for one call: the same session id, protocol and permits, and
+    /// a block of JSON-RPC ids of its own, so a call never holds a lock on the
+    /// shared session while it waits for the server (and two calls per server
+    /// can run, as the permits allow).
+    pub fn fork(&mut self) -> Session {
+        let first = self.next_id;
+        self.next_id += FORK_IDS;
+        Session {
+            ex: self.ex.clone(),
+            info: self.info.clone(),
+            sem: self.sem.clone(),
+            next_id: first,
+            client_version: self.client_version.clone(),
+        }
+    }
+
+    /// Takes over the session a fork re-initialized (after a `404`), so the
+    /// next call does not hit the dropped session again.
+    pub fn adopt(&mut self, fork: &Session) {
+        if fork.ex != self.ex {
+            self.ex = fork.ex.clone();
+            self.info = fork.info.clone();
+        }
+    }
 }
+
+/// JSON-RPC ids reserved per fork: a call uses one, or two after a re-initialize.
+const FORK_IDS: u64 = 8;
 
 fn protocol(message: &str) -> NetError {
     NetError::new(NetErrorKind::McpProtocol, message)

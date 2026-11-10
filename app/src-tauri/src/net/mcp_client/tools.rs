@@ -3,7 +3,7 @@
 //! string is capped, the schema is size-checked, and a result keeps only text
 //! (images, audio and blobs are replaced by a short marker).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The longest tool name kept (MCP 2025-11-25: 1 to 128 chars).
@@ -18,7 +18,7 @@ pub const MAX_SCHEMA: usize = 16 * 1024;
 pub const MAX_RESULT_CHARS: usize = 12_000;
 
 /// One tool as the app shows and uses it.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolInfo {
     pub name: String,

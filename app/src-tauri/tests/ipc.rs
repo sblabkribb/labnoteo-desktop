@@ -58,6 +58,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .manage(labnoteo_app_lib::net::NetState::default())
+        .manage(labnoteo_app_lib::net::mcp_client::McpClients::default())
         .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
         .manage(labnoteo_app_lib::scan::ScanFolderState::inert())
         .manage(labnoteo_app_lib::mcp::McpState::default())
@@ -684,6 +685,44 @@ title: 실험
     );
     // A JSON body is refused: the bytes must come raw.
     assert!(call("integration_import_bytes", json!({"name": "conn.env"})).is_err());
+
+    // The MCP client: the webview names a server id, never a URL. A token
+    // goes in once; only a flag and an epoch come back. Nothing here reaches
+    // a server: there is no stored token or no cached tool list each time.
+    let first = responses.borrow().len();
+    let sid = json!("0a1b2c3d");
+    assert_eq!(ok("mcp_client_secret_status", args("mcp_client_secret_status", vec![])), json!({}));
+    assert_eq!(ok("mcp_client_tools_cached", args("mcp_client_tools_cached", vec![])), json!({}));
+    assert_eq!(call("mcp_client_connect", args("mcp_client_connect", vec![sid.clone()])).unwrap_err()["kind"], "notConfigured");
+    ok(
+        "settings_vault_write",
+        args("settings_vault_write", vec![json!(r#"{"mcpClientServers":[{"id":"0a1b2c3d","name":"Test","url":"http://127.0.0.1:9/mcp","auth":"bearer","enabled":true}]}"#)]),
+    );
+    assert_eq!(
+        call("mcp_client_secret_set", args("mcp_client_secret_set", vec![sid.clone(), json!("<YOUR_TOKEN>")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(ok("mcp_client_secret_set", args("mcp_client_secret_set", vec![sid.clone(), json!("Bearer test-token-ipc-123")])), Value::Null);
+    assert_eq!(ok("mcp_client_secret_status", args("mcp_client_secret_status", vec![])), json!({"0a1b2c3d": {"set": true, "epoch": 1}}));
+    // No cached tool list yet: the call is refused before anything is sent.
+    assert_eq!(
+        call("mcp_client_call", args("mcp_client_call", vec![sid.clone(), json!("get_part"), json!({}), json!("mc1")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(ok("mcp_client_disconnect", args("mcp_client_disconnect", vec![sid.clone()])), Value::Null);
+    assert_eq!(ok("mcp_client_secret_clear", args("mcp_client_secret_clear", vec![sid.clone()])), Value::Null);
+    assert_eq!(ok("mcp_client_secret_status", args("mcp_client_secret_status", vec![])), json!({"0a1b2c3d": {"set": false, "epoch": 2}}));
+    // A bearer server without a token: keyMissing, nothing sent.
+    assert_eq!(call("mcp_client_connect", json!({"id": "0a1b2c3d"})).unwrap_err()["kind"], "keyMissing");
+    ok("mcp_client_secret_set", args("mcp_client_secret_set", vec![sid.clone(), json!("test-token-ipc-123")]));
+    assert_eq!(ok("mcp_client_forget", args("mcp_client_forget", vec![sid.clone()])), Value::Null);
+    assert_eq!(ok("mcp_client_secret_status", args("mcp_client_secret_status", vec![])), json!({"0a1b2c3d": {"set": false, "epoch": 4}}));
+    // The cached tool list is not a document the webview may write.
+    assert!(call("integration_state_write", json!({"name": "mcpClientTools", "content": "{}"})).is_err());
+    for r in responses.borrow()[first..].iter() {
+        assert!(!r.contains("test-token-ipc"), "{r}");
+    }
+    ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
 
     // The MCP token (Credential Manager; here the memory store): the webview
     // learns a flag and an epoch, and the copy goes to the clipboard from Rust.

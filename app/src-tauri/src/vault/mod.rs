@@ -160,11 +160,15 @@ pub fn vault_open(
     state: tauri::State<'_, VaultState>,
     settings: tauri::State<'_, SettingsFile>,
     watcher: tauri::State<'_, watcher::WatcherState>,
+    mcp_clients: tauri::State<'_, crate::net::mcp_client::McpClients>,
     path: String,
 ) -> Result<VaultInfo, fs::FsError> {
     let info = open_at(&state, &settings.0, &path)?;
     // The watched vault follows the open one (the same vault again keeps its watcher).
-    watcher.follow(&state.root()?);
+    let root = state.root()?;
+    watcher.follow(&root);
+    // MCP client settings are per vault: the sessions of another vault end.
+    mcp_clients.close_other_vaults(&root);
     Ok(info)
 }
 
@@ -173,10 +177,13 @@ pub fn vault_create(
     state: tauri::State<'_, VaultState>,
     settings: tauri::State<'_, SettingsFile>,
     watcher: tauri::State<'_, watcher::WatcherState>,
+    mcp_clients: tauri::State<'_, crate::net::mcp_client::McpClients>,
     path: String,
 ) -> Result<VaultInfo, fs::FsError> {
     let info = create_at(&state, &settings.0, &path)?;
-    watcher.follow(&state.root()?);
+    let root = state.root()?;
+    watcher.follow(&root);
+    mcp_clients.close_other_vaults(&root);
     Ok(info)
 }
 

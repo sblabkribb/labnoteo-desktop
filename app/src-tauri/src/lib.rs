@@ -83,6 +83,15 @@ macro_rules! register_commands {
             $crate::net::store::partbank_catalog_write,
             $crate::net::store::integration_state_read,
             $crate::net::store::integration_state_write,
+            // The MCP client: RAPID and BioModel Portal presets plus custom servers.
+            $crate::net::mcp_client::mcp_client_secret_set,
+            $crate::net::mcp_client::mcp_client_secret_clear,
+            $crate::net::mcp_client::mcp_client_secret_status,
+            $crate::net::mcp_client::mcp_client_connect,
+            $crate::net::mcp_client::mcp_client_call,
+            $crate::net::mcp_client::mcp_client_disconnect,
+            $crate::net::mcp_client::mcp_client_forget,
+            $crate::net::mcp_client::mcp_client_tools_cached,
             // SP7 Part A
             $crate::vault::fs::vault_created_times,
             $crate::print::print_open_in_browser,
@@ -118,6 +127,9 @@ macro_rules! register_commands {
     };
 }
 
+/// How long app exit waits for MCP client sessions to be ended.
+pub const MCP_CLOSE_ON_EXIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// How long `setup` waits before showing a main window the front end never showed.
 pub const SHOW_FALLBACK: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -139,6 +151,8 @@ pub fn run() {
         .manage(vault::VaultState::default())
         // Requests in flight (cancellable by id) and the PartBank web pacing gate.
         .manage(net::NetState::default())
+        // Open MCP client sessions, by server id (ended on vault switch and exit).
+        .manage(net::mcp_client::McpClients::default())
         // The scan folder's watcher (SP7 B4); started by `scan_folder_watch` / `scan_folder_choose`.
         .manage(scan::ScanFolderState::default())
         // SP7 Part C: the MCP server's state (the in-memory token copy) and
@@ -196,8 +210,17 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running labnoteO");
+        .build(tauri::generate_context!())
+        .expect("error while building labnoteO")
+        .run(|app, event| {
+            // End every MCP client session, best effort and briefly.
+            if let tauri::RunEvent::Exit = event {
+                let clients = app.state::<net::mcp_client::McpClients>();
+                tauri::async_runtime::block_on(async {
+                    let _ = tokio::time::timeout(MCP_CLOSE_ON_EXIT, clients.close_all()).await;
+                });
+            }
+        });
 }
 
 #[cfg(test)]

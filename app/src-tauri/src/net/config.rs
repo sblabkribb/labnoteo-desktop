@@ -59,6 +59,128 @@ pub struct ServiceConfig {
     pub bfw_connection: BfwConnection,
     /// `allowHttpOrigins` entries that are `http://` origins, normalized by `origin`.
     pub allow_http: Vec<String>,
+    /// MCP servers the app is a client of (spec §5.1), at most 16, each valid.
+    pub mcp_servers: Vec<McpServerCfg>,
+}
+
+/// Most MCP servers kept (spec §4.3).
+pub const MAX_MCP_SERVERS: usize = 16;
+/// Longest MCP server name, in chars.
+pub const MAX_MCP_NAME: usize = 40;
+
+/// How the app authenticates to an MCP server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpAuthKind {
+    Bearer,
+    None,
+}
+
+/// One entry of `mcpClientServers` (spec §5.1). The per-tool switches stay in
+/// the webview's settings: Rust checks a tool against its own cached list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct McpServerCfg {
+    /// 8 lowercase hex chars.
+    pub id: String,
+    pub name: String,
+    pub url: Url,
+    pub auth: McpAuthKind,
+    pub preset: Option<String>,
+    pub enabled: bool,
+}
+
+impl ServiceConfig {
+    /// The MCP server with this id, if the settings hold a valid one.
+    pub fn mcp_server(&self, id: &str) -> Option<&McpServerCfg> {
+        self.mcp_servers.iter().find(|s| s.id == id)
+    }
+
+    /// The vault allows clear-text `http://` to the URL's origin.
+    pub fn allows_http(&self, url: &Url) -> bool {
+        self.allow_http.contains(&origin(url))
+    }
+}
+
+/// A path segment that looks like it holds a secret: 24+ chars of
+/// `[A-Za-z0-9_-]` mixing letters and digits (spec §5.1). Such a URL is
+/// refused, so a key in a URL never lands in settings JSON or the DOM.
+pub fn is_secret_looking_url(url: &Url) -> bool {
+    url.path().split('/').any(|seg| {
+        seg.chars().count() >= 24
+            && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            && seg.chars().any(|c| c.is_ascii_alphabetic())
+            && seg.chars().any(|c| c.is_ascii_digit())
+    })
+}
+
+/// An MCP server URL: `parse_service_url` (a path allowed), not
+/// secret-looking, and clear text only to loopback or an allowed origin.
+pub fn parse_mcp_url(raw: &str, allow_http: &[String]) -> Option<Url> {
+    let url = parse_service_url(raw)?;
+    if is_secret_looking_url(&url) {
+        return None;
+    }
+    if url.scheme() == "http" && !is_loopback(&url) && !allow_http.contains(&origin(&url)) {
+        return None;
+    }
+    Some(url)
+}
+
+fn mcp_id_ok(id: &str) -> bool {
+    id.len() == 8 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn mcp_name_ok(name: &str) -> bool {
+    let n = name.chars().count();
+    (1..=MAX_MCP_NAME).contains(&n) && !name.trim().is_empty() && !name.chars().any(char::is_control)
+}
+
+/// One stored entry, or `None` when any field is invalid.
+fn parse_mcp_server(v: &Value, allow_http: &[String]) -> Option<McpServerCfg> {
+    let id = v.get("id")?.as_str()?;
+    let name = v.get("name")?.as_str()?;
+    if !mcp_id_ok(id) || !mcp_name_ok(name) {
+        return None;
+    }
+    let url = parse_mcp_url(v.get("url")?.as_str()?, allow_http)?;
+    let auth = match v.get("auth")?.as_str()? {
+        "bearer" => McpAuthKind::Bearer,
+        "none" => McpAuthKind::None,
+        _ => return None,
+    };
+    let preset = match v.get("preset") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(p)) if p == "rapid" || p == "biomodel" => Some(p.clone()),
+        Some(_) => return None,
+    };
+    let enabled = match v.get("enabled") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return None,
+    };
+    match v.get("tools") {
+        None | Some(Value::Object(_)) => {}
+        Some(_) => return None,
+    }
+    Some(McpServerCfg { id: id.to_string(), name: name.to_string(), url, auth, preset, enabled })
+}
+
+/// `mcpClientServers`: the valid entries in order, a repeated id dropped, at most 16.
+fn parse_mcp_servers(settings: &Value, allow_http: &[String]) -> Vec<McpServerCfg> {
+    let mut out: Vec<McpServerCfg> = Vec::new();
+    let Some(entries) = settings.get("mcpClientServers").and_then(Value::as_array) else {
+        return out;
+    };
+    for entry in entries {
+        if out.len() >= MAX_MCP_SERVERS {
+            break;
+        }
+        if let Some(s) = parse_mcp_server(entry, allow_http) {
+            if !out.iter().any(|o| o.id == s.id) {
+                out.push(s);
+            }
+        }
+    }
+    out
 }
 
 /// A string setting: missing or `null` gives `default`, anything else is
@@ -99,6 +221,7 @@ impl ServiceConfig {
                 }
             }
         }
+        let mcp_servers = parse_mcp_servers(&settings, &allow_http);
         ServiceConfig {
             partbank_desktop: url_setting(&settings, "partbankDesktopUrl", DEFAULT_PARTBANK_DESKTOP, parse_origin_url),
             partbank_web: url_setting(&settings, "partbankWebUrl", DEFAULT_PARTBANK_WEB, parse_origin_url),
@@ -108,6 +231,7 @@ impl ServiceConfig {
             bfw_url: url_setting(&settings, "bfwUrl", DEFAULT_BFW_URL, parse_origin_url),
             bfw_connection,
             allow_http,
+            mcp_servers,
         }
     }
 
@@ -419,6 +543,98 @@ pub mod tests {
         assert_eq!(base("not json"), None);
         assert_eq!(bfw_desktop_base(&dir.join("missing.json")), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn mcp(entries: Value) -> Vec<McpServerCfg> {
+        ServiceConfig::from_settings_json(&serde_json::json!({"mcpClientServers": entries}).to_string()).mcp_servers
+    }
+
+    fn server(id: &str, url: &str) -> Value {
+        serde_json::json!({"id": id, "name": "RAPID", "url": url, "auth": "bearer", "preset": "rapid",
+            "enabled": true, "tools": {"a": true}})
+    }
+
+    #[test]
+    fn mcp_servers_are_parsed() {
+        let got = mcp(serde_json::json!([
+            server("0a1b2c3d", "https://rapid.kbiofoundry.kr/mcp/"),
+            {"id": "deadbeef", "name": "Local", "url": "http://127.0.0.1:9000/mcp", "auth": "none", "enabled": false},
+        ]));
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].id, "0a1b2c3d");
+        assert_eq!(got[0].url.as_str(), "https://rapid.kbiofoundry.kr/mcp");
+        assert_eq!((got[0].auth, got[0].preset.as_deref(), got[0].enabled), (McpAuthKind::Bearer, Some("rapid"), true));
+        assert_eq!((got[1].auth, got[1].preset.as_deref(), got[1].enabled), (McpAuthKind::None, None, false));
+        assert!(ServiceConfig::from_settings_json("{}").mcp_servers.is_empty());
+        assert!(mcp(serde_json::json!("nope")).is_empty());
+    }
+
+    #[test]
+    fn invalid_mcp_servers_are_dropped() {
+        let ok = server("0a1b2c3d", "https://x.example/mcp");
+        let with = |k: &str, v: Value| {
+            let mut e = ok.clone();
+            e[k] = v;
+            e
+        };
+        for bad in [
+            with("id", serde_json::json!("0A1B2C3D")),
+            with("id", serde_json::json!("0a1b2c3")),
+            with("id", serde_json::json!("0a1b2c3g")),
+            with("name", serde_json::json!("a\u{0007}b")),
+            with("name", serde_json::json!("a\nb")),
+            with("name", serde_json::json!("")),
+            with("name", serde_json::json!("   ")),
+            with("name", serde_json::json!("n".repeat(41))),
+            with("url", serde_json::json!("https://x.example/mcp?key=1")),
+            with("url", serde_json::json!("https://u:p@x.example/mcp")),
+            with("url", serde_json::json!("https://x.example/mcp/a1B2c3D4e5F6g7H8i9J0k1L2")),
+            with("url", serde_json::json!("http://10.0.0.5:8000/mcp")),
+            with("url", serde_json::json!("ftp://x.example/mcp")),
+            with("auth", serde_json::json!("basic")),
+            with("preset", serde_json::json!("other")),
+            with("enabled", serde_json::json!("yes")),
+            with("tools", serde_json::json!([])),
+        ] {
+            assert!(mcp(serde_json::json!([bad])).is_empty(), "{bad}");
+        }
+        // A long segment of only letters (or only digits) is not secret-looking.
+        assert_eq!(mcp(serde_json::json!([with("url", serde_json::json!("https://x.example/mcp/abcdefghijklmnopqrstuvwxyz"))])).len(), 1);
+        assert_eq!(mcp(serde_json::json!([with("url", serde_json::json!("https://x.example/123456789012345678901234567"))])).len(), 1);
+        assert_eq!(mcp(serde_json::json!([with("url", serde_json::json!("https://x.example/v2/mcp"))])).len(), 1);
+    }
+
+    #[test]
+    fn cleartext_mcp_needs_loopback_or_an_allowed_origin() {
+        let settings = serde_json::json!({
+            "allowHttpOrigins": ["http://10.0.0.5:8000"],
+            "mcpClientServers": [server("0a1b2c3d", "http://10.0.0.5:8000/mcp"), server("0a1b2c3e", "http://10.0.0.6/mcp")],
+        });
+        let c = ServiceConfig::from_settings_json(&settings.to_string());
+        assert_eq!(c.mcp_servers.len(), 1);
+        assert_eq!(c.mcp_servers[0].id, "0a1b2c3d");
+        assert!(c.allows_http(&c.mcp_servers[0].url));
+        assert!(c.mcp_server("0a1b2c3d").is_some() && c.mcp_server("0a1b2c3e").is_none());
+    }
+
+    #[test]
+    fn at_most_16_mcp_servers_and_no_repeated_id() {
+        let many: Vec<Value> = (0..17).map(|i| server(&format!("{i:08x}"), "https://x.example/mcp")).collect();
+        let got = mcp(Value::Array(many));
+        assert_eq!(got.len(), MAX_MCP_SERVERS);
+        assert!(got.iter().all(|s| s.id != format!("{:08x}", 16)));
+        let got = mcp(serde_json::json!([server("0a1b2c3d", "https://a.example/mcp"), server("0a1b2c3d", "https://b.example/mcp")]));
+        assert_eq!(got.len(), 1);
+        assert_eq!(origin(&got[0].url), "https://a.example");
+    }
+
+    #[test]
+    fn secret_looking_paths() {
+        let u = |s: &str| parse_service_url(s).unwrap();
+        assert!(is_secret_looking_url(&u("https://x.example/mcp/a1B2c3D4e5F6g7H8i9J0k1L2")));
+        assert!(is_secret_looking_url(&u("https://x.example/sk_live_1234567890abcdefghij/mcp")));
+        assert!(!is_secret_looking_url(&u("https://x.example/mcp")));
+        assert!(!is_secret_looking_url(&u("https://x.example/a1B2c3D4e5F6g7H8i9J0k1L")));
     }
 
     #[test]
