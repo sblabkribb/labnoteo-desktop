@@ -1,7 +1,15 @@
-//! Built-in literature search (spec §8): PubMed now; Europe PMC, Crossref
-//! and bioRxiv follow (Task 12). Read-only lookups of public services, made
-//! from Rust so the only key involved (the optional NCBI API key) never
-//! reaches the webview.
+//! Built-in literature search (spec §8): PubMed, Europe PMC, Crossref and
+//! bioRxiv. Read-only lookups of public services, made from Rust so the only
+//! key involved (the optional NCBI API key) never reaches the webview.
+//!
+//! What `scholar_search` / `scholar_get` take per source:
+//! - `pubmed`: a search query; a PMID.
+//! - `europepmc`: a search query (`preprintsOnly` adds `AND SRC:PPR`); an id
+//!   as `MED:123`, `PMC:PMC123`, `PPR:PPR123`, or bare (`123` reads as MED).
+//! - `crossref`: a search query; a DOI (`10.…`, or `https://doi.org/10.…`).
+//! - `biorxiv`: the API has no keyword search, so the "query" is a date
+//!   range `YYYY-MM-DD YYYY-MM-DD` (at most 31 days) optionally followed by a
+//!   subject category (`cell biology` or `cell_biology`); a `10.1101/…` DOI.
 //!
 //! - Base URLs are constants (`ScholarBases::real`). The webview names a
 //!   source and a query or id, never a host.
@@ -16,6 +24,9 @@
 //!   "et al.", at most 10 hits, abstracts 3,000 chars. The text is the
 //!   services' own and is fenced as untrusted by the webview (spec §8.3).
 
+pub mod biorxiv;
+pub mod crossref;
+pub mod europepmc;
 pub mod limiter;
 pub mod pubmed;
 
@@ -72,6 +83,8 @@ pub struct ScholarBases {
     /// Whether the NCBI key from the keychain may be attached (the real
     /// bases and the unit tests' fake; never the debug env override).
     pub ncbi_key: bool,
+    /// Per-request timeout (`TIMEOUT`; the tests shorten it).
+    pub timeout: Duration,
 }
 
 /// One of the fixed real bases (constants that always parse).
@@ -88,6 +101,7 @@ impl ScholarBases {
             crossref: fixed("https://api.crossref.org/"),
             biorxiv: fixed("https://api.biorxiv.org/"),
             ncbi_key: true,
+            timeout: TIMEOUT,
         }
     }
 
@@ -96,7 +110,7 @@ impl ScholarBases {
     fn under(base: &Url, ncbi_key: bool) -> Option<Self> {
         let root = base.as_str().trim_end_matches('/');
         let at = |name: &str| Url::parse(&format!("{root}/{name}/")).ok();
-        Some(ScholarBases { pubmed: at("pubmed")?, europepmc: at("europepmc")?, crossref: at("crossref")?, biorxiv: at("biorxiv")?, ncbi_key })
+        Some(ScholarBases { pubmed: at("pubmed")?, europepmc: at("europepmc")?, crossref: at("crossref")?, biorxiv: at("biorxiv")?, ncbi_key, timeout: TIMEOUT })
     }
 
     /// The tests' fake server; anything but a loopback base is refused.
@@ -358,7 +372,7 @@ pub(crate) async fn get_text(
             url: url.clone(),
             headers: vec![("Accept", accept.to_string())],
             json: None,
-            timeout: Some(TIMEOUT),
+            timeout: Some(ctx.bases.timeout),
             max_body: MAX_BODY,
             secret: secret.map(str::to_string),
             allow_http: false,
@@ -403,17 +417,13 @@ fn check_source(cfg: &ServiceConfig, source: &str) -> Result<(), NetError> {
     Ok(())
 }
 
-fn not_yet() -> NetError {
-    bad_input("this literature source is not available yet")
-}
-
 /// A search of one source: at most `limit` (1..=10, default 5) compact hits.
 pub async fn search(
     ctx: &Ctx<'_>,
     source: &str,
     query: &str,
     limit: Option<u8>,
-    _preprints_only: bool,
+    preprints_only: bool,
     request_id: Option<&str>,
 ) -> Result<Vec<Hit>, NetError> {
     check_source(ctx.cfg, source)?;
@@ -421,7 +431,9 @@ pub async fn search(
     let limit = clamp_limit(limit);
     match source {
         "pubmed" => pubmed::search(ctx, &query, limit, request_id).await,
-        _ => Err(not_yet()),
+        "europepmc" => europepmc::search(ctx, &query, limit, preprints_only, request_id).await,
+        "crossref" => crossref::search(ctx, &query, limit, request_id).await,
+        _ => biorxiv::recent(ctx, &query, limit, request_id).await,
     }
 }
 
@@ -430,7 +442,9 @@ pub async fn get(ctx: &Ctx<'_>, source: &str, id: &str, request_id: Option<&str>
     check_source(ctx.cfg, source)?;
     match source {
         "pubmed" => pubmed::get(ctx, id.trim(), request_id).await,
-        _ => Err(not_yet()),
+        "europepmc" => europepmc::get(ctx, id.trim(), request_id).await,
+        "crossref" => crossref::get(ctx, id.trim(), request_id).await,
+        _ => biorxiv::get(ctx, id.trim(), request_id).await,
     }
 }
 
@@ -469,11 +483,113 @@ pub async fn scholar_get(
     get(&ctx, &source, &id, request_id.as_deref()).await
 }
 
+/// What the source tests share: a fake server's bases, a fresh limiter and
+/// keychain, and helpers to read the recorded requests.
+#[cfg(test)]
+pub(crate) mod rig {
+    use super::limiter::Limiter;
+    use super::{Ctx, ScholarBases};
+    use crate::net::config::{ServiceConfig, Url};
+    use crate::net::secrets::MemoryStore;
+    use crate::net::testserver::TestServer;
+    use crate::net::NetState;
+
+    pub struct Rig {
+        pub net: NetState,
+        pub limiter: Limiter,
+        pub bases: ScholarBases,
+        pub cfg: ServiceConfig,
+        pub store: MemoryStore,
+    }
+
+    impl Rig {
+        pub fn new(srv: &TestServer, settings: &str) -> Rig {
+            Rig {
+                net: NetState::default(),
+                limiter: Limiter::default(),
+                bases: ScholarBases::for_test(&srv.url).unwrap(),
+                cfg: ServiceConfig::from_settings_json(settings),
+                store: MemoryStore::default(),
+            }
+        }
+
+        pub fn ctx(&self) -> Ctx<'_> {
+            Ctx { net: &self.net, limiter: &self.limiter, bases: &self.bases, cfg: &self.cfg, store: &self.store }
+        }
+    }
+
+    /// The paths (with queries) the server was asked for, in order.
+    pub fn paths(srv: &TestServer) -> Vec<String> {
+        srv.requests.lock().unwrap().iter().map(|r| r.path.clone()).collect()
+    }
+
+    /// The query of a recorded path as decoded `(key, value)` pairs.
+    pub fn query(path: &str) -> Vec<(String, String)> {
+        Url::parse(&format!("http://x{path}")).unwrap().query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect()
+    }
+
+    /// One decoded query parameter of a recorded path.
+    pub fn param(path: &str, name: &str) -> Option<String> {
+        query(path).into_iter().find(|(k, _)| k == name).map(|(_, v)| v)
+    }
+
+    /// The part of a recorded path before its query.
+    pub fn route(path: &str) -> &str {
+        path.split('?').next().unwrap_or(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::net::config::origin;
     use crate::net::secrets::NCBI_EUTILS_ORIGIN;
+
+    /// One lookup per source, as `(source, is_search, query or id)`.
+    const EVERY_SOURCE: [(&str, bool, &str); 4] = [
+        ("pubmed", true, "crispr"),
+        ("europepmc", true, "crispr"),
+        ("crossref", true, "crispr"),
+        ("biorxiv", false, "10.1101/2024.01.02.123456"),
+    ];
+
+    async fn lookup(ctx: &Ctx<'_>, source: &str, is_search: bool, input: &str) -> Result<(), NetError> {
+        if is_search {
+            search(ctx, source, input, None, false, None).await.map(drop)
+        } else {
+            get(ctx, source, input, None).await.map(drop)
+        }
+    }
+
+    #[test]
+    fn every_source_refuses_a_body_over_2_mib() {
+        use crate::net::testserver::{serve, Canned};
+        for (source, is_search, input) in EVERY_SOURCE {
+            let srv = serve(vec![Canned::ok(&"x".repeat(MAX_BODY + 1))]);
+            let rig = rig::Rig::new(&srv, "{}");
+            let e = tauri::async_runtime::block_on(lookup(&rig.ctx(), source, is_search, input)).unwrap_err();
+            assert_eq!(e.kind, NetErrorKind::TooLarge, "{source}");
+        }
+    }
+
+    #[test]
+    fn every_source_times_out() {
+        use crate::net::testserver::silent;
+        for (source, is_search, input) in EVERY_SOURCE {
+            let srv = silent();
+            let mut rig = rig::Rig::new(&srv, "{}");
+            rig.bases.timeout = Duration::from_millis(300);
+            let e = tauri::async_runtime::block_on(lookup(&rig.ctx(), source, is_search, input)).unwrap_err();
+            assert_eq!(e.kind, NetErrorKind::Timeout, "{source}");
+            assert_eq!(srv.request_count(), 1, "{source}");
+        }
+    }
+
+    #[test]
+    fn every_source_has_its_own_pace() {
+        assert_eq!((europepmc::RATE, crossref::RATE, biorxiv::RATE), (5, 5, 1));
+        assert_eq!((europepmc::SOURCE, crossref::SOURCE, biorxiv::SOURCE, pubmed::SOURCE), ("europepmc", "crossref", "biorxiv", "pubmed"));
+    }
 
     #[test]
     fn real_bases_are_the_fixed_https_services() {
@@ -484,6 +600,7 @@ mod tests {
         assert_eq!(b.biorxiv.as_str(), "https://api.biorxiv.org/");
         assert_eq!(origin(&b.pubmed), NCBI_EUTILS_ORIGIN, "the NCBI key only goes to the origin it is bound to");
         assert!(b.ncbi_key);
+        assert_eq!(b.timeout, Duration::from_secs(20));
     }
 
     #[test]
