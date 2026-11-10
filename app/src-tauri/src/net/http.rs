@@ -87,8 +87,8 @@ pub struct Incoming {
     pub text: String,
 }
 
-/// A 2xx or 429 answer as raw bytes. `headers` holds only `content-type`,
-/// `retry-after` and `x-oauth-scopes` (names lower-cased), when present. The
+/// A 2xx or 429 answer as raw bytes. `headers` holds only the
+/// `KEPT_HEADERS` (names lower-cased), when present. The
 /// bytes are not redacted: callers that turn them into text redact it.
 #[derive(Debug, Clone)]
 pub struct IncomingRaw {
@@ -97,8 +97,9 @@ pub struct IncomingRaw {
     pub bytes: Vec<u8>,
 }
 
-/// The response headers `IncomingRaw` keeps.
-const KEPT_HEADERS: [&str; 3] = ["content-type", "retry-after", "x-oauth-scopes"];
+/// The response headers `IncomingRaw` keeps (`mcp-session-id` and
+/// `www-authenticate` for the MCP client).
+const KEPT_HEADERS: [&str; 5] = ["content-type", "retry-after", "x-oauth-scopes", "mcp-session-id", "www-authenticate"];
 
 /// Unregisters the request id when `send` ends, however it ends (the command
 /// future may also be dropped).
@@ -239,6 +240,35 @@ pub(crate) async fn read_capped(resp: reqwest::Response, max: usize) -> Result<V
         body.extend_from_slice(&chunk);
     }
     Ok(body)
+}
+
+/// Takes the longest valid UTF-8 text from the front of `buf`, leaving an
+/// unfinished multi-byte char for the next chunk. Invalid bytes read as U+FFFD.
+pub(crate) fn take_utf8(buf: &mut Vec<u8>) -> String {
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(buf) {
+            Ok(s) => {
+                out.push_str(s);
+                buf.clear();
+                return out;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                out.push_str(std::str::from_utf8(&buf[..valid]).unwrap_or_default());
+                match e.error_len() {
+                    None => {
+                        buf.drain(..valid);
+                        return out;
+                    }
+                    Some(n) => {
+                        out.push('\u{FFFD}');
+                        buf.drain(..valid + n);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The error kind of a failed request.

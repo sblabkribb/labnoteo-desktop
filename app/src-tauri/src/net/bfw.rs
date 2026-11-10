@@ -25,7 +25,7 @@ use tauri::{Emitter, State};
 use super::config::{bfw_desktop_base, bfw_runtime_path, join_path, origin, parse_origin_url, BfwConnection, ServiceConfig, Url};
 use super::error::{redact_text, NetError, NetErrorKind};
 use super::http::{
-    cancelled, client, header_map, net_error, parse_json, read_capped, redirect_error, refuse_insecure, send, too_large, Outgoing,
+    cancelled, client, header_map, net_error, parse_json, read_capped, redirect_error, refuse_insecure, send, take_utf8, too_large, Outgoing,
     Registration, MAX_BODY,
 };
 use super::secrets::{key_for, validate_secret, SecretStore, Secrets, Slot};
@@ -347,35 +347,6 @@ fn timed_out() -> NetError {
 /// `fut`, or `timeout` when it takes longer than `limit`.
 async fn within<T>(limit: Duration, fut: impl std::future::Future<Output = T>) -> Result<T, NetError> {
     tokio::time::timeout(limit, fut).await.map_err(|_| timed_out())
-}
-
-/// Takes the longest valid UTF-8 text from the front of `buf`, leaving an
-/// unfinished multi-byte char for the next chunk. Invalid bytes read as U+FFFD.
-fn take_utf8(buf: &mut Vec<u8>) -> String {
-    let mut out = String::new();
-    loop {
-        match std::str::from_utf8(buf) {
-            Ok(s) => {
-                out.push_str(s);
-                buf.clear();
-                return out;
-            }
-            Err(e) => {
-                let valid = e.valid_up_to();
-                out.push_str(std::str::from_utf8(&buf[..valid]).unwrap_or_default());
-                match e.error_len() {
-                    None => {
-                        buf.drain(..valid);
-                        return out;
-                    }
-                    Some(n) => {
-                        out.push('\u{FFFD}');
-                        buf.drain(..valid + n);
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn str_field(v: &Value, key: &str) -> String {

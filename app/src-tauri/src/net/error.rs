@@ -40,6 +40,14 @@ pub enum NetErrorKind {
     Insecure,
     /// A local file failure outside the vault (the scan folder, SP7 B4).
     Io,
+    /// An MCP server answered 401 or 403: the token is missing, wrong or expired.
+    McpAuth,
+    /// An MCP server broke the protocol (content type, session id, version, no answer with our id).
+    McpProtocol,
+    /// An MCP server speaks only a newer protocol than this client (`-32022` / `-32020` to a POST).
+    McpModernOnly,
+    /// A JSON-RPC error answer to `tools/call`; the message is server text (redacted, capped).
+    McpToolError,
 }
 
 /// `Debug` is safe: every constructor that takes response text also takes the

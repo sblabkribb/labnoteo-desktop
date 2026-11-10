@@ -16,5 +16,9 @@
   "remote": "remote",
   "noResult": "noResult",
   "insecure": "insecure",
-  "io": "io"
+  "io": "io",
+  "mcpAuth": "mcpAuth",
+  "mcpProtocol": "mcpProtocol",
+  "mcpModernOnly": "mcpModernOnly",
+  "mcpToolError": "mcpToolError"
 }

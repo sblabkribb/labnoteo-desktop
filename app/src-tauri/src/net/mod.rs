@@ -7,6 +7,7 @@ pub mod http;
 pub mod import;
 pub mod bfw;
 pub mod llm;
+pub mod mcp_client;
 pub mod partbank;
 pub mod secrets;
 pub mod slack;

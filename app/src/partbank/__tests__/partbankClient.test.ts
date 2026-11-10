@@ -311,6 +311,11 @@ describe('failures', () => {
     noResult: 'badRequest',
     // A scan-folder file failure (SP7 Part B); partbank never sees one, so it is an app bug like badInput.
     io: 'badRequest',
+    // MCP-client kinds; partbank never sees one, so they are app bugs like badInput.
+    mcpAuth: 'badRequest',
+    mcpProtocol: 'badRequest',
+    mcpModernOnly: 'badRequest',
+    mcpToolError: 'badRequest',
   };
 
   it.each(NET_ERROR_KINDS.filter((k) => k !== 'cancelled'))('NetError %s maps to a named PartbankErrorKind', (kind) => {

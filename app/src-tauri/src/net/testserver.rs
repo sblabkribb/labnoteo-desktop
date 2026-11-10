@@ -76,7 +76,7 @@ impl TestServer {
     }
 }
 
-fn bind() -> (TcpListener, String) {
+pub(crate) fn bind() -> (TcpListener, String) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let url = format!("http://{}", listener.local_addr().unwrap());
     (listener, url)
@@ -84,7 +84,7 @@ fn bind() -> (TcpListener, String) {
 
 /// Reads one request: the head up to the blank line, then `Content-Length`
 /// bytes of body. `None` when the client goes away before a full head.
-fn read_request(stream: &mut TcpStream) -> Option<Recorded> {
+pub(crate) fn read_request(stream: &mut TcpStream) -> Option<Recorded> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
@@ -143,7 +143,7 @@ fn reason(code: u16) -> &'static str {
     }
 }
 
-fn write_response(stream: &mut TcpStream, canned: &Canned) {
+pub(crate) fn write_response(stream: &mut TcpStream, canned: &Canned) {
     let mut head = format!("HTTP/1.1 {} {}\r\n", canned.status, reason(canned.status));
     for (k, v) in &canned.headers {
         if k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("connection") {
