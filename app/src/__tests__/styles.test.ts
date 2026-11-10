@@ -104,6 +104,9 @@ describe('styles/*.css', () => {
       '.ti-class::before',
       '.ti-method::before',
       '.ti-function::before',
+      // 알림(Task 13)이 일부러 없앤 것: 종류 클래스는 이제 .toast-warn, .toast-error (띠 색)
+      '.toast.warn',
+      '.toast.error',
     ];
     expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);

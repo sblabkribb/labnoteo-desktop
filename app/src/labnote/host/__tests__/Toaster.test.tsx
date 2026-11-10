@@ -12,17 +12,57 @@ afterEach(() => {
 });
 
 describe('알림(토스트)', () => {
-  it('notify info renders role=status and disappears after 6 s', () => {
+  it('notify info renders role=status and disappears after 4 s', () => {
     vi.useFakeTimers();
     render(<Toaster />);
     act(() => notify('info', '실험을 만들었습니다.'));
     const toast = screen.getByRole('status');
     expect(toast.textContent).toContain('실험을 만들었습니다.');
     expect(within(toast).queryByRole('button')).toBeNull();
-    act(() => vi.advanceTimersByTime(5999));
+    act(() => vi.advanceTimersByTime(3999));
     expect(screen.queryByRole('status')).toBeTruthy();
     act(() => vi.advanceTimersByTime(1));
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('success is a status toast with its own stripe and the same 4 s timer', () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    act(() => notify('success', '저장했습니다.'));
+    const toast = screen.getByRole('status');
+    expect(toast.classList.contains('toast')).toBe(true);
+    expect(toast.classList.contains('toast-success')).toBe(true);
+    act(() => vi.advanceTimersByTime(4000));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('hovering pauses the timer and leaving resumes it with the time that was left', () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    act(() => notify('info', '잠깐'));
+    act(() => vi.advanceTimersByTime(3000));
+    const toast = screen.getByRole('status');
+    fireEvent.mouseEnter(toast);
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    fireEvent.mouseLeave(toast);
+    act(() => vi.advanceTimersByTime(999));
+    expect(screen.queryByRole('status')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('the stripe class follows the kind', () => {
+    render(<Toaster />);
+    act(() => {
+      notify('info', 'i');
+      notify('warn', 'w');
+      notify('error', 'e');
+    });
+    const kinds = [...document.querySelectorAll('.toast')].map((el) =>
+      ['toast-info', 'toast-success', 'toast-warn', 'toast-error'].filter((c) => el.classList.contains(c)),
+    );
+    expect(kinds).toEqual([['toast-info'], ['toast-warn'], ['toast-error']]);
   });
 
   it('notify error renders role=alert with a close button', () => {
@@ -30,33 +70,61 @@ describe('알림(토스트)', () => {
     act(() => notify('error', '저장하지 못했습니다.'));
     const toast = screen.getByRole('alert');
     expect(toast.textContent).toContain('저장하지 못했습니다.');
-    expect(toast.classList.contains('error')).toBe(true);
+    expect(toast.classList.contains('toast-error')).toBe(true);
     fireEvent.click(within(toast).getByRole('button', { name: '알림 닫기' }));
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('warn and error stay 15 s', () => {
+  it('warn and error stay until closed, even with an old ms option', () => {
     vi.useFakeTimers();
     render(<Toaster />);
-    act(() => notify('warn', '경고'));
-    expect(screen.getByRole('alert').classList.contains('warn')).toBe(true);
-    act(() => vi.advanceTimersByTime(14999));
-    expect(screen.queryByRole('alert')).toBeTruthy();
-    act(() => vi.advanceTimersByTime(1));
-    expect(screen.queryByRole('alert')).toBeNull();
+    act(() => {
+      notify('warn', '경고', { ms: 15000 });
+      notify('error', '오류');
+    });
+    expect(screen.getAllByRole('alert')[0].classList.contains('toast-warn')).toBe(true);
+    act(() => vi.advanceTimersByTime(10 * 60_000));
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
   });
 
-  it('a sixth toast drops the oldest', () => {
+  it('shows at most 3; a 4th toast drops the oldest info toast, not a warning', () => {
     render(<Toaster />);
-    expect(MAX_TOASTS).toBe(5);
+    expect(MAX_TOASTS).toBe(3);
     act(() => {
-      for (let i = 1; i <= 6; i++) notify('info', `알림 ${i}`);
+      notify('error', '오류 1');
+      notify('info', '알림 1');
+      notify('info', '알림 2');
+      notify('warn', '경고 1');
     });
-    const texts = screen.getAllByRole('status').map((el) => el.textContent ?? '');
-    expect(texts).toHaveLength(5);
-    expect(texts.join('|')).not.toContain('알림 1');
-    expect(texts[4]).toContain('알림 6');
-    expect(currentToasts().map((x) => x.message)).toEqual(['알림 2', '알림 3', '알림 4', '알림 5', '알림 6']);
+    expect(currentToasts().map((x) => x.message)).toEqual(['오류 1', '알림 2', '경고 1']);
+    expect(document.querySelectorAll('.toast')).toHaveLength(3);
+  });
+
+  it('with only warnings and errors a 4th toast drops the oldest one', () => {
+    render(<Toaster />);
+    act(() => {
+      for (let i = 1; i <= 4; i++) notify('error', `오류 ${i}`);
+    });
+    expect(currentToasts().map((x) => x.message)).toEqual(['오류 2', '오류 3', '오류 4']);
+  });
+
+  it('a title is shown above the detail; without a detail the message is the detail', () => {
+    render(<Toaster />);
+    act(() => {
+      notify('success', '쓰지 않는 글', { title: '첨부했습니다', detail: 'resources/plot.csv' });
+      notify('info', '대신 보이는 글', { title: '제목만' });
+    });
+    const [first, second] = screen.getAllByRole('status');
+    expect(first.querySelector('.toast-title')?.textContent).toBe('첨부했습니다');
+    expect(first.querySelector('.toast-detail')?.textContent).toBe('resources/plot.csv');
+    expect(first.textContent).not.toContain('쓰지 않는 글');
+    expect(second.querySelector('.toast-title')?.textContent).toBe('제목만');
+    expect(second.querySelector('.toast-detail')?.textContent).toBe('대신 보이는 글');
+  });
+
+  it('the container sits bottom-left', () => {
+    render(<Toaster />);
+    expect(screen.getByRole('region', { name: '알림' }).classList.contains('toaster-bottom-left')).toBe(true);
   });
 
   it('the region and close button follow setLang', () => {
@@ -76,13 +144,14 @@ describe('알림(토스트)', () => {
     editor.focus();
     const run = vi.fn();
     act(() => notify('info', '스캔: 1쪽', { ms: 15000, action: { label: '자세히', run } }));
+    // 예전 (kind, msg, { ms, action }) 부름이 그대로 된다
     // 알림은 초점을 가져가지 않는다
     expect(document.activeElement).toBe(editor);
     const toast = screen.getByRole('status');
     const button = within(toast).getByRole('button', { name: '자세히' });
     expect(button.classList.contains('toast-action')).toBe(true);
     expect(button.getAttribute('type')).toBe('button');
-    // ms 가 기본 6 초를 바꾼다
+    // ms 가 기본 4 초를 바꾼다
     act(() => vi.advanceTimersByTime(14999));
     expect(screen.queryByRole('status')).toBeTruthy();
     fireEvent.click(button);
@@ -134,8 +203,8 @@ describe('알림(토스트)', () => {
     act(() => {
       notify('info', 'a');
       notify('warn', 'b');
-      notify('error', 'c');
-      notify('info', 'd', { action: { label: 'e', run: () => {} } });
+      notify('error', 'c', { title: 't', detail: 'd' });
+      notify('success', 'd', { action: { label: 'e', run: () => {} } });
       notifyStatus('f');
     });
     expect(styleAttributes()).toEqual([]);

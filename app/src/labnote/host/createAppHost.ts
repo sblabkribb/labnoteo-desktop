@@ -13,15 +13,15 @@ import {
   type ChoiceItem,
   type PickExtras,
 } from './dialogStore';
-import { notify } from './toastStore';
+import { notify, type NotifyOpts } from './toastStore';
 
 export type { AliasOpts } from './AliasDialog';
 
 /** 앱의 LabnoteHost: 코어 호스트에 이름 바꾸기·휴지통이 있는 fs 와 별칭 대화상자를 더한다. */
 export interface AppHost extends LabnoteHost {
   readonly fs: AppFs;
-  /** 코어의 알림에 `ms`(기본 시간 대신 사라질 때까지의 시간)를 더한다. 잠긴 파일 경고는 15 초 남는다. */
-  notify(kind: NotifyKind, message: string, opts?: { ms?: number }): void;
+  /** 코어의 알림에 `ms`(info 가 사라질 때까지의 시간), 제목·자세한 글·단추 하나를 더한다. warn·error 는 닫을 때까지 남는다. */
+  notify(kind: NotifyKind, message: string, opts?: NotifyOpts): void;
   /** '' = 빈 채로 냈다, undefined = 닫았다, ALIAS_BACK = 다시 고르기(opts.back 일 때만). */
   alias(opts: AliasOpts): Promise<string | undefined | AliasBack>;
   /** confirm 과 같지만 단추가 셋 이상이다. 고른 단추의 값, 닫으면 undefined. */
