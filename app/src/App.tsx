@@ -58,6 +58,7 @@ import { registerAllCommands } from './labnote/commands/registerAll';
 import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
 import { createWorkflow, isExperimentReadme } from './labnote/commands/workflow';
+import { createUpkeep, setAppUpkeep } from './labnote/commands/autoUpkeep';
 import { offerStatusNudge, type ChecklistCounts } from './labnote/commands/statusNudge';
 import { findCommand, registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
@@ -359,6 +360,33 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     treeFiles: () => shownEntries.filter((e) => !e.isDir).map((e) => e.path),
   });
   usePaletteHotkey(ctx);
+  // 쓰는 동안의 손질(Task 20): last_updated_date 찍기와 저장 때의 UO 목록 맞추기. 보관함마다 새로 만든다(손으로 정한 날짜도 보관함마다).
+  const upkeepSettings = useRef(settings);
+  upkeepSettings.current = settings;
+  const upkeep = useMemo(
+    () =>
+      createUpkeep({
+        fs: host.fs,
+        settings: () => ({
+          autoUpdateLastUpdated: upkeepSettings.current?.autoUpdateLastUpdated ?? false,
+          autoSyncUnitOpToc: upkeepSettings.current?.autoSyncUnitOpToc ?? false,
+        }),
+        notify: (message) => host.notify('info', message),
+      }),
+    [host, vault.root],
+  );
+  useEffect(() => {
+    setAppUpkeep(upkeep);
+    return () => {
+      upkeep.dispose();
+      setAppUpkeep(undefined);
+    };
+  }, [upkeep]);
+  // 설정을 다시 켜면 손으로 정한 날짜와 기다리던 편집을 잊는다(플러그인 resetLastUpdatedTracking, #202).
+  const stampOn = settings?.autoUpdateLastUpdated;
+  useEffect(() => {
+    if (stampOn) upkeep.reset();
+  }, [stampOn, upkeep]);
   // 설정 창의 값: 열 때마다 지금 값으로 만든다. 보관함 설정을 읽기 전(ctx 없음)에는 열지 않는다.
   const settingsLive = useRef({ ctx, theme, version });
   settingsLive.current = { ctx, theme, version };
@@ -791,6 +819,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
               imageFolder={settings?.imageFolder}
               onAddWorkflow={readmeOpen ? addFirstWorkflow(selected) : undefined}
               onChecklistTick={readmeOpen ? checklistTick(selected) : undefined}
+              upkeep={upkeep}
             />
           ) : (
             <>

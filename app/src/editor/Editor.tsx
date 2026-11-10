@@ -15,6 +15,7 @@ import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { cellExtras, cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
 import { livePreview, readmeEmptyState } from './live';
+import type { Upkeep } from '../labnote/commands/autoUpkeep';
 import { checklistTickWatch, type ChecklistCounts } from '../labnote/commands/statusNudge';
 import { addPropertyCommand, propertiesActions, PROPS_ADD_KEY } from './live/properties';
 import { followLinkAtCursor, linkClickHandler, type LinkOpenDeps, type OpenTarget } from './live/links';
@@ -139,6 +140,11 @@ interface Props {
   onAddWorkflow?: () => void;
   /** 실험 README 에서만 준다(Task 19). 사용자가 체크리스트를 바꾸면 그 전후의 셈과 상태(상태 권유). */
   onChecklistTick?: (prev: ChecklistCounts, next: ChecklistCounts) => void;
+  /**
+   * 쓰는 동안의 손질(Task 20): 바뀐 트랜잭션을 알려 last_updated_date 찍기를 예약하고, 저장 직전에 워크플로 노트의
+   * "Related Unit Operations" 목록을 맞춘다. 부를 때마다 최신 prop 이다.
+   */
+  upkeep?: Upkeep;
 }
 
 export interface WindowApi {
@@ -179,6 +185,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     imageFolder = 'resources',
     onAddWorkflow,
     onChecklistTick,
+    upkeep,
   },
   ref,
 ) {
@@ -267,8 +274,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder, onAddWorkflow, onChecklistTick });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder, onAddWorkflow, onChecklistTick };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder, onAddWorkflow, onChecklistTick, upkeep });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder, onAddWorkflow, onChecklistTick, upkeep };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -368,6 +375,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         setDialogOpen(true);
         return false;
       }
+      // 워크플로 노트의 UO 목록을 버퍼에서 맞춘다(Task 20). 그 편집이 다시 건 자동 저장 시계는 이 저장이 대신한다.
+      if (!force && alive.current && latest.current.upkeep?.beforeSave(doc.path, viewRef.current)) clearTimers();
       const body = text();
       if (!force && body === baseline.current) return true;
       let result;
@@ -685,6 +694,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 표 칸 편집기에는 싣지 않는다: 칸의 변경은 바깥 편집기의 변경으로 다시 온다. 조합 중이면 때가 되어도 다시 미룬다.
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
+        latest.current.upkeep?.observe(path, u);
         samplesSync.touch(path, u.view);
         // 노트 ID 색인(SP7 A5): 랩 노트를 고친 뒤 2 초 조용하면 그 노트의 labnote_id 를 다시 읽는다(조합 중에는 읽지 않는다).
         noteIdTouch(path, u.view);

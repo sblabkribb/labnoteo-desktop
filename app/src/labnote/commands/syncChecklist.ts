@@ -58,7 +58,7 @@ export async function syncWorkflowChecklist(ctx: CommandContext): Promise<void> 
   if (plan.hasSection && plan.added.length > 0) {
     await processNote(host.fs, readmePath, (text) => {
       plan = planWorkflowChecklistSync(text, names, titles, undefined, labnoteDir);
-      return plan.hasSection && plan.added.length > 0 ? stamp(plan.content) : text;
+      return plan.hasSection && plan.added.length > 0 ? stamp(plan.content, readmePath) : text;
     });
   }
   if (!plan.hasSection) {

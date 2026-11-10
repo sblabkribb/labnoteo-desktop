@@ -6,7 +6,7 @@
  * - 이미지는 scan_write_image(이름 그대로, 겹치면 `exists`), vault_exists, vault_read_image, 링크 색인의 백링크로.
  *   새 스캔 이미지를 쓴 뒤에는 편집기의 이미지 이름 색인을 버린다: 이름만 쓴 임베드가 곧바로 그 파일을 찾는다.
  * - 날짜 찍기(stampNote)는 같은 processNote 변환 안에서: 설정 autoUpdateLastUpdated 가 켜져 있고 `*.labnote.md` 일 때만.
- *   README 의 날짜 전파는 lastUpdatedTracker 가 오는 뒤의 하위 프로젝트로 미룬다(E2).
+ *   워크플로 노트면 실험 README 의 날짜도 2 초 뒤 찍는다(Task 20: autoUpkeep 의 markUserEdit, 손으로 정한 날짜는 둔다).
  * - 페이지 해독기(PageDecoder)는 부르는 쪽이 준다(캔버스 해독기는 pageDecoder.ts).
  */
 import { vaultImages } from '../../editor/live/vaultImages';
@@ -15,6 +15,7 @@ import { linkIndex } from '../../links/linkIndex';
 import { noteIds } from '../barcode/noteIdIndex';
 import { appNoteIdSource } from '../barcode/noteIdSource';
 import type { CommandContext } from '../commands/context';
+import { appUpkeep } from '../commands/autoUpkeep';
 import { readmeStamp } from '../commands/stamp';
 import { processNote } from '../openNotes';
 import { NoteIdService, isBarcodeNote } from '../port/noteIdService';
@@ -59,6 +60,13 @@ export function pipelineDeps(ctx: CommandContext, decoder: PageDecoder): Pipelin
     listImages: () => listVaultImages(),
     decoder,
     embedWidth: () => ctx.settings.scanEmbedWidth,
-    stampNote: (path) => noteStamp(ctx.settings)(path),
+    stampNote: (path) => {
+      const stamp = noteStamp(ctx.settings)(path);
+      return (text) => {
+        // 플러그인 markUserEdit: 이 노트와(워크플로 노트면) 실험 README 를 편집처럼 찍는다
+        if (ctx.settings.autoUpdateLastUpdated) appUpkeep()?.markUserEdit(path);
+        return stamp(text);
+      };
+    },
   };
 }

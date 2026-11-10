@@ -64,7 +64,7 @@ export async function applyStatusNudge(ctx: CommandContext, readmePath: string, 
     if (choice === 'clear') changes[DISCUSS_FLAG_KEY] = undefined;
   }
   const stamp = readmeStamp(ctx.settings);
-  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(text, changes)));
+  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(text, changes), readmePath));
 }
 
 /** 체크 뒤에 권할 것이 있으면 단추 하나가 달린 알림을 띄운다. 띄웠으면 true. */

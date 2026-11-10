@@ -8,6 +8,7 @@ import type { OpenTarget } from '../../editor/live/links';
 import { toggleMode } from '../../editor/live/mode';
 import type { SampleEditorConfig } from '../../samples/editorConfig';
 import type { SampleEnv } from '../../samples/env';
+import type { Upkeep } from '../commands/autoUpkeep';
 
 // jsdom 에는 레이아웃이 없다. CodeMirror 가 측정에 쓰는 API 만 빈 값으로 채운다.
 const emptyRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
@@ -28,6 +29,7 @@ export function mountEditor(
     onOpenLink?: (t: OpenTarget) => void;
     samples?: SampleEditorConfig | null;
     sampleEnv?: () => SampleEnv | undefined;
+    upkeep?: Upkeep;
   } = {},
 ) {
   const ref = createRef<EditorHandle>();
@@ -46,6 +48,7 @@ export function mountEditor(
       onOpenLink: extra.onOpenLink,
       samples,
       sampleEnv: extra.sampleEnv,
+      upkeep: extra.upkeep,
     });
   const utils = render(props(extra.samples));
   /** 같은 props 에 새 샘플 설정으로 다시 그린다(앱이 저장소 판이 오른 뒤 하는 것과 같다). */

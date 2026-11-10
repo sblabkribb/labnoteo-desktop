@@ -216,7 +216,7 @@ export async function registerWorkflowInReadme(
   await processNote(host.fs, readmePath, (text) => {
     hasSection = hasWorkflowChecklistSection(text);
     return hasSection
-      ? stamp(insertWorkflowChecklistEntries(text, [{ done: false, title: entry.title, fileName: entry.fileName }]))
+      ? stamp(insertWorkflowChecklistEntries(text, [{ done: false, title: entry.title, fileName: entry.fileName }]), readmePath)
       : text;
   });
   return hasSection ? 'registered' : 'noSection';
@@ -265,7 +265,7 @@ export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: str
       if (!box) continue;
       after = box[1] === ' ';
       lines[i] = lines[i].slice(0, box.index) + (after ? '[x]' : '[ ]') + lines[i].slice(box.index + box[0].length);
-      const written = stamp(lines.join('\n'));
+      const written = stamp(lines.join('\n'), readmePath);
       counts = { prev: checklistCounts(text), next: checklistCounts(written) };
       return written;
     }
