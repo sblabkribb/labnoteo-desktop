@@ -209,6 +209,24 @@ describe('SkinGalleryDialog', () => {
     expect(screen.queryByRole('button', { name: '설치' })).toBeNull();
   });
 
+  it('a failed preview of another entry clears the earlier preview: its install button never stays under the new error (Task 22)', async () => {
+    const bad = entry({ id: 'bad-sha', name: 'bad-sha' });
+    const { invoke, calls } = galleryInvoke(() => preview(), [entry(), bad]);
+    const failing = (async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'skin_gallery_fetch' && args?.entryId === 'bad-sha') throw { kind: 'galleryMismatch', detail: 'sha256' };
+      return invoke(cmd, args);
+    }) as InvokeFn;
+    const { live } = renderDialog(failing);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teal <b>Flask</b> 미리 보기' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '설치' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'bad-sha 미리 보기' }));
+    await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain(catalogs.ko['skin.error.galleryMismatch']));
+    expect(screen.queryByRole('button', { name: '설치' })).toBeNull();
+    expect(document.querySelectorAll('.pet-sprite')).toHaveLength(0);
+    expect(live.size).toBe(0);
+    await waitFor(() => expect(calls).toContainEqual(['skin_staging_discard', { stagingId: preview().stagingId }]));
+  });
+
   it('closing after a preview drops the staging entry and revokes the blob URLs; Tab is trapped and Escape cancels', async () => {
     const { invoke, calls } = galleryInvoke();
     const { view, live, onCancel } = renderDialog(invoke);

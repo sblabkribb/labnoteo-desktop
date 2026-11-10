@@ -61,11 +61,14 @@ export function SkinGalleryDialog(props: {
   const show = async (entry: GalleryEntry) => {
     setBusy(entry.id);
     setStatus(t('gallery.downloading', cleanGalleryText(entry.name)));
+    // 앞의 미리 보기는 먼저 치운다: 새 것을 받지 못해도 앞 팩의 "설치" 가 새 오류 밑에 남지 않는다(Task 22).
+    setPreview(undefined);
+    const old = staged.current;
+    staged.current = null;
+    if (old) void discardStagedSkin(old, invoke).catch(() => undefined);
     try {
       const p = await fetchGallerySkin(entry.id, invoke);
-      const old = staged.current;
       staged.current = p.stagingId;
-      if (old && old !== p.stagingId) void discardStagedSkin(old, invoke).catch(() => undefined);
       setPreview(p);
       setStatus('');
     } catch (e) {
