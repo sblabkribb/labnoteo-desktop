@@ -27,6 +27,7 @@ import {
   type UnitOpTarget,
   type WorkflowNode,
 } from './chain';
+import { prefillInput } from './prefill';
 import { experimentFolderOf, ScopeError, type Scope } from './scope';
 import { estimateTokens } from './tokens';
 import type { ContextSource, SourceKind } from './types';
@@ -453,23 +454,30 @@ export async function buildContext(input: BuildInput): Promise<BuiltContext> {
     );
   }
 
-  // 7. Input prefill: the previous Output IDs with their registry names (no LLM).
-  // TODO(Task 6): switch to the shared `prefillInput` so the registry-name
-  // lookup and the `- ID — name` format live in one place.
+  // 7. Input prefill: the previous Output IDs with their registry names (no LLM),
+  // through the shared `prefillInput` so the command and the draft agree.
   if (target && previous && previous.outputIds.length > 0) {
-    const lines: string[] = [];
+    const names = new Map<string, string>();
     for (const id of previous.outputIds) {
       const type = typeOf(id, types);
       const hit = hits.get(id.toLowerCase()) ?? (type ? await lookup(type, id) : undefined);
-      lines.push(hit?.record.alias ? `- ${id} — ${hit.record.alias}` : `- ${id}`);
+      if (hit?.record.alias) names.set(id, hit.record.alias);
     }
-    sources.push(
-      source('target:input-prefill', 'prefill', [`Input from the previous Output (${previous.workflowPath}, ${previous.heading}):`, ...lines].join('\n'), {
-        label: unitOpLabel(previous, wfOf.get(previous)),
-        path: previous.workflowPath,
-        heading: previous.heading,
-      })
-    );
+    const prefill = prefillInput(chain, { workflowPath: target.workflowPath, unitOpIndex: target.index }, id => names.get(id));
+    if (!('reason' in prefill)) {
+      sources.push(
+        source(
+          'target:input-prefill',
+          'prefill',
+          [`Input from the previous Output (${prefill.from.path}, ${prefill.from.heading}):`, ...prefill.lines].join('\n'),
+          {
+            label: unitOpLabel(previous, wfOf.get(previous)),
+            path: prefill.from.path,
+            heading: prefill.from.heading,
+          }
+        )
+      );
+    }
   }
 
   // 8. Target last.
