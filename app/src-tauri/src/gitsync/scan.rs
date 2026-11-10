@@ -11,8 +11,11 @@
 //!   `Zeroizing` buffers inside Rust; a hit carries only a masked value and
 //!   the line hash, never the raw text.
 //!
-//! The matchers are hand-written (no `regex` dependency).
+//! The matchers are hand-written (no `regex` dependency) and run in time
+//! linear in the line length, so a multi-MiB single-line file (minified JSON,
+//! a one-line plate-reader export) scans as fast as a short one.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -109,6 +112,12 @@ pub struct ScanReport {
 
 /// Scans `files` (path, exact bytes) and every path in `files` and
 /// `names_only` for secrets, and checks pictures for location data.
+///
+/// Every entry must carry the file's real bytes, also for files over
+/// `scan_max`: `has_gps` runs on all of them, so a same-length stand-in for a
+/// large JPEG or TIFF would silently hide its location data. A caller that
+/// does not want to hold a large non-picture file in memory may pass a
+/// stand-in for it only if it runs `has_gps` on the real bytes itself.
 pub fn scan(files: &[(String, Arc<[u8]>)], names_only: &[String], saved: &[SavedSecret], limits: &Limits) -> ScanReport {
     let mut report = ScanReport::default();
     let saved: Vec<(SavedLabel, &[u8])> = saved
@@ -131,7 +140,7 @@ pub fn scan(files: &[(String, Arc<[u8]>)], names_only: &[String], saved: &[Saved
             report.unscanned.push(path.clone());
             continue;
         }
-        if let Some(text) = utf16(bytes) {
+        if let Some(text) = utf16(bytes).map(Zeroizing::new) {
             for (n, line) in lines(text.as_bytes()) {
                 scan_line(&mut report.hits, path, n, line, line, &saved);
             }
@@ -144,6 +153,10 @@ pub fn scan(files: &[(String, Arc<[u8]>)], names_only: &[String], saved: &[Saved
         for (n, raw) in lines(bytes) {
             let text = String::from_utf8_lossy(raw);
             scan_line(&mut report.hits, path, n, raw, text.as_bytes(), &saved);
+            // A decoded copy of the line may hold a secret: wipe it.
+            if let Cow::Owned(copy) = text {
+                drop(Zeroizing::new(copy));
+            }
         }
     }
     report
@@ -198,10 +211,10 @@ fn utf16(bytes: &[u8]) -> Option<String> {
         Some([0xFE, 0xFF]) => false,
         _ => return None,
     };
-    let units: Vec<u16> = bytes[2..]
+    let units: Zeroizing<Vec<u16>> = Zeroizing::new(bytes[2..]
         .chunks_exact(2)
         .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) })
-        .collect();
+        .collect());
     Some(String::from_utf16_lossy(&units))
 }
 
@@ -236,11 +249,15 @@ fn scan_line(hits: &mut Vec<Hit>, path: &str, line: u32, raw: &[u8], text: &[u8]
             at = start + value.len();
         }
     }
+    // Pattern hits never overlap each other (the walk jumps past each one),
+    // so only the saved-key hits need checking: this keeps a line with many
+    // hits linear.
+    let saved_hits = found.len();
     let mut i = 0;
     while i < text.len() {
         match pattern_at(text, i) {
             Some((start, end, kind)) => {
-                if !overlaps(&found, start, end) {
+                if !overlaps(&found[..saved_hits], start, end) {
                     found.push(Found { start, end, kind });
                 }
                 i = end.max(i + 1);
@@ -255,7 +272,7 @@ fn scan_line(hits: &mut Vec<Hit>, path: &str, line: u32, raw: &[u8], text: &[u8]
     found.sort_by_key(|f| f.start);
     let line_hash = Oid::hash_object(ObjectType::Blob, raw).map(|o| o.to_string()).unwrap_or_default();
     for f in found {
-        let value = String::from_utf8_lossy(&text[f.start..f.end]);
+        let value = Zeroizing::new(String::from_utf8_lossy(&text[f.start..f.end]).into_owned());
         hits.push(Hit {
             path: path.to_string(),
             line,
@@ -276,7 +293,7 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 
 /// First 3 + `…` + last 4 characters; `…` + the last 2 below 12 characters.
 pub fn mask(value: &str) -> String {
-    let chars: Vec<char> = value.chars().collect();
+    let chars: Zeroizing<Vec<char>> = Zeroizing::new(value.chars().collect());
     let n = chars.len();
     if n < 12 {
         let tail: String = chars[n.saturating_sub(2)..].iter().collect();
@@ -362,11 +379,13 @@ fn pattern_at(t: &[u8], i: usize) -> Option<(usize, usize, HitKind)> {
         }
     }
     if starts(b"-----BEGIN ") {
+        // The label is upper-case letters, digits and spaces ending in
+        // `PRIVATE KEY`, then `-----`. Walking the label (not searching the
+        // rest of the line) keeps this linear.
         let after = i + 11;
-        if let Some(p) = find(&t[after..], b"PRIVATE KEY-----") {
-            if t[after..after + p].iter().all(|&b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b' ') {
-                return Some((i, after + p + 16, HitKind::PrivateKey));
-            }
+        let label_end = run(t, after, |b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b' ');
+        if t[after..label_end].ends_with(b"PRIVATE KEY") && t[label_end..].starts_with(b"-----") {
+            return Some((i, label_end + 5, HitKind::PrivateKey));
         }
     }
     let word_len = if rest.len() >= 8 && rest[..8].eq_ignore_ascii_case(b"password") {
@@ -411,11 +430,41 @@ fn assigned_value(t: &[u8], from: usize) -> Option<(usize, usize)> {
     (e - s >= 3).then_some((s, e))
 }
 
+/// Suspect key words, matched case-insensitively as whole words.
+const SUSPECT_WORDS: [&[u8]; 3] = [b"key", b"token", b"secret"];
+
+/// Whether `t[s..e]` is a whole word: no letter joins it on either side,
+/// except at a camelCase seam (`apiKey`, `tokenValue`). `_`, `-`, digits and
+/// punctuation are boundaries, so `api_key` and `KEY1` count but `monkey`,
+/// `keyboard` and `tokens` do not.
+fn whole_word(t: &[u8], s: usize, e: usize) -> bool {
+    let left = s == 0 || !t[s - 1].is_ascii_alphabetic() || (t[s - 1].is_ascii_lowercase() && t[s].is_ascii_uppercase());
+    let right = e == t.len()
+        || !t[e].is_ascii_alphabetic()
+        || (t[e - 1].is_ascii_lowercase() && t[e].is_ascii_uppercase());
+    left && right
+}
+
+/// The end offset of the first suspect key word on the line, if any.
+fn first_key_word_end(t: &[u8]) -> Option<usize> {
+    (0..t.len()).find_map(|s| {
+        SUSPECT_WORDS.iter().find_map(|w| {
+            let e = s + w.len();
+            (e <= t.len() && t[s..e].eq_ignore_ascii_case(w) && whole_word(t, s, e)).then_some(e)
+        })
+    })
+}
+
 /// High-entropy values after `key` / `token` / `secret` on the same line,
-/// not already reported.
+/// not already reported. Linear in the line length.
 fn suspects(t: &[u8], found: &mut Vec<Found>) {
-    let lower = t.to_ascii_lowercase();
+    // Only values after the first key word can be suspects.
+    let Some(armed) = first_key_word_end(t) else {
+        return;
+    };
     let token_byte = |b: u8| alnum(b) || matches!(b, b'+' | b'/' | b'=' | b'_' | b'-');
+    // Walk every token from the start so token edges stay the same; a token
+    // counts once the key word ends at or before it.
     let mut i = 0;
     while i < t.len() {
         if !token_byte(t[i]) {
@@ -424,9 +473,8 @@ fn suspects(t: &[u8], found: &mut Vec<Found>) {
         }
         let end = run(t, i, token_byte);
         let value = &t[i..end];
-        let keyword = ["key", "token", "secret"].iter().any(|k| find(&lower[..i], k.as_bytes()).is_some());
-        if keyword
-            && value.len() >= 20
+        if value.len() >= 20
+            && i >= armed
             && value.iter().any(u8::is_ascii_digit)
             && value.iter().any(u8::is_ascii_alphabetic)
             && entropy(value) >= 3.5
@@ -526,6 +574,56 @@ mod tests {
         assert!(r.hits[0].overridable);
         // The same value with no key word is not suspected.
         assert!(one("config.txt", "id = Zx81Qp0LmN4vR7tY2uWc9sKd").hits.is_empty());
+    }
+
+    #[test]
+    fn key_words_must_be_whole_words() {
+        let value = "Zx81Qp0LmN4vR7tY2uWc9sKd";
+        for armed in ["api_key", "API-KEY", "apiKey", "token", "Secret", "key1", "my.token", "tokenValue"] {
+            let r = one("config.txt", &format!("{armed} = {value}"));
+            assert_eq!(kinds(&r), vec![HitKind::Suspect], "{armed}");
+        }
+        for unarmed in ["monkey", "keyboard", "tokens", "secretary", "turkey", "Keynote"] {
+            let r = one("config.txt", &format!("{unarmed} = {value}"));
+            assert!(r.hits.is_empty(), "{unarmed}: {:?}", r.hits);
+        }
+        // A value glued to the key word is one token, as before.
+        assert!(one("config.txt", &format!("key_{value}")).hits.is_empty());
+        // Only values after the key word count.
+        assert!(one("config.txt", &format!("{value} is the key")).hits.is_empty());
+    }
+
+    #[test]
+    fn private_key_label_near_misses() {
+        for text in ["-----BEGIN PUBLIC KEY-----", "-----BEGIN PRIVATE KEY", "-----BEGIN my PRIVATE KEY-----"] {
+            assert!(one("a.md", text).hits.is_empty(), "{text}");
+        }
+        let r = one("a.md", "x -----BEGIN EC PRIVATE KEY----- y");
+        assert_eq!(kinds(&r), vec![HitKind::PrivateKey]);
+    }
+
+    /// A multi-MiB single line (one-line CSV export, minified JSON) must scan
+    /// in linear time. The old suspect check searched the whole line prefix
+    /// per token and took minutes on 1 MB. Budgets are loose for debug builds.
+    #[test]
+    fn long_single_lines_scan_in_linear_time() {
+        const MIB: usize = 1024 * 1024;
+        let lines: Vec<Vec<u8>> = vec![
+            b"12.5,".repeat(4 * MIB / 5),
+            // Armed from the start, with many short tokens after it.
+            [&b"key,"[..], &b"12.5,ab3,".repeat(4 * MIB / 9)].concat(),
+            b"-----BEGIN ".repeat(MIB / 11),
+            b"password ".repeat(MIB / 9),
+            b"eyJabcdefghij. ".repeat(MIB / 15),
+        ];
+        for line in lines {
+            let len = line.len();
+            let started = std::time::Instant::now();
+            let r = scan(&[file("plate.csv", line)], &[], &[], &Limits::DEFAULT);
+            let took = started.elapsed();
+            assert!(r.hits.is_empty() && r.unscanned.is_empty(), "{len}: {:?}", r.hits.first());
+            assert!(took < std::time::Duration::from_secs(10), "{len} bytes took {took:?}");
+        }
     }
 
     #[test]
