@@ -13,6 +13,7 @@ pub mod scholar;
 pub mod secrets;
 pub mod slack;
 pub mod sse;
+pub mod stream;
 pub mod store;
 pub use store::IntegrationDirs;
 pub use error::*;

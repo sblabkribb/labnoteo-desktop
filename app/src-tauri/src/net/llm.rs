@@ -77,35 +77,42 @@ pub fn chat_url(kind: LlmKind, cfg: &ServiceConfig) -> Result<Url, NetError> {
     })
 }
 
-/// `Authorization: Bearer <key>` when there is a key (never for Ollama: the
-/// callers pass `None` there).
-fn auth_headers(key: Option<&str>) -> Vec<(&'static str, String)> {
-    let mut headers = vec![("Accept", "application/json".to_string())];
+/// `Accept: <accept>` and `Authorization: Bearer <key>` when there is a key
+/// (never for Ollama: the callers pass `None` there).
+pub(crate) fn auth_headers(key: Option<&str>, accept: &str) -> Vec<(&'static str, String)> {
+    let mut headers = vec![("Accept", accept.to_string())];
     if let Some(k) = key {
         headers.push(("Authorization", format!("Bearer {k}")));
     }
     headers
 }
 
-/// One chat request to the saved provider. The provider must be the saved
-/// one and the body a JSON object of at most `LLM_MAX_REQUEST` bytes
-/// (`badInput` otherwise, nothing sent). The keychain key goes only to an
-/// OpenAI-compatible endpoint. Cancellable through `request_id`.
-pub async fn llm_call(
-    net: &NetState,
+/// Where a chat request to the saved provider goes, and with which key.
+pub(crate) struct ChatTarget {
+    pub url: Url,
+    pub key: Option<String>,
+    /// The vault's `allowHttpOrigins` holds the URL's origin.
+    pub allow_http: bool,
+}
+
+/// The guards `llm_chat` and `llm_chat_stream` share, checked before anything
+/// is sent: the provider must be the saved one and the body a JSON object of
+/// at most `LLM_MAX_REQUEST` bytes (`badInput`); no saved endpoint is
+/// `notConfigured`. The keychain key is looked up only for an
+/// OpenAI-compatible endpoint (never for Ollama).
+pub(crate) fn chat_target(
     cfg: &ServiceConfig,
     store: &dyn SecretStore,
-    request_id: &str,
     provider: LlmKind,
-    body: Value,
-) -> Result<Incoming, NetError> {
+    body: &Value,
+) -> Result<ChatTarget, NetError> {
     if provider != cfg.llm_provider {
         return Err(NetError::new(NetErrorKind::BadInput, "the AI provider is not the one saved in settings"));
     }
     if !body.is_object() {
         return Err(NetError::new(NetErrorKind::BadInput, "the request body must be a JSON object"));
     }
-    let size = serde_json::to_vec(&body).map(|v| v.len()).unwrap_or(usize::MAX);
+    let size = serde_json::to_vec(body).map(|v| v.len()).unwrap_or(usize::MAX);
     if size > LLM_MAX_REQUEST {
         return Err(NetError::new(NetErrorKind::BadInput, "the request is too large"));
     }
@@ -114,10 +121,26 @@ pub async fn llm_call(
         LlmKind::Openai => key_for(store, Slot::LlmOpenai, cfg)?,
         _ => None,
     };
+    let allow_http = cfg.allow_http.contains(&origin(&url));
+    Ok(ChatTarget { url, key, allow_http })
+}
+
+/// One chat request to the saved provider (`chat_target` holds the guards).
+/// The keychain key goes only to an OpenAI-compatible endpoint. Cancellable
+/// through `request_id`.
+pub async fn llm_call(
+    net: &NetState,
+    cfg: &ServiceConfig,
+    store: &dyn SecretStore,
+    request_id: &str,
+    provider: LlmKind,
+    body: Value,
+) -> Result<Incoming, NetError> {
+    let ChatTarget { url, key, allow_http } = chat_target(cfg, store, provider, &body)?;
     let out = Outgoing {
         method: reqwest::Method::POST,
-        headers: auth_headers(key.as_deref()),
-        allow_http: cfg.allow_http.contains(&origin(&url)),
+        headers: auth_headers(key.as_deref(), "application/json"),
+        allow_http,
         url,
         json: Some(body),
         timeout: Some(LLM_TIMEOUT),
@@ -171,7 +194,7 @@ pub async fn llm_probe_call(
     };
     let out = Outgoing {
         method: reqwest::Method::GET,
-        headers: auth_headers(key.as_deref()),
+        headers: auth_headers(key.as_deref(), "application/json"),
         allow_http: cfg.is_some_and(|c| c.allow_http.contains(&origin(&url))),
         url,
         json: None,

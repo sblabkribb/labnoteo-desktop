@@ -291,6 +291,90 @@ export function llmChat(
   );
 }
 
+/** `llm://frame` 이벤트의 모양(`src-tauri/tests/ipc-events.json`): SSE `data` 하나, 또는 NDJSON 한 줄. */
+export interface LlmFrame {
+  requestId: string;
+  data: string;
+}
+
+export const LLM_FRAME_EVENT = 'llm://frame';
+
+/**
+ * `llm_chat_stream` 의 끝: 프레임을 다 보낸 뒤 `{status, done: true, frames}`, 또는 2xx 가 아닌 답의 앞부분
+ * `{status, text}`(이때 프레임은 없다), 또는 `stream: true` 를 무시한 서버의 JSON 답 전체 `{status: 2xx, text}`.
+ */
+export interface LlmStreamEnd {
+  status: number;
+  text?: string;
+  done?: boolean;
+  frames?: number;
+}
+
+/** 명령 결과가 이벤트를 앞질렀을 때 남은 프레임을 기다리는 시간. */
+const FRAME_WAIT_MS = 2000;
+
+/**
+ * 스트리밍 채팅(spec §6.2). 이 요청 id 의 `llm://frame` 만 차례로 `onFrame` 에 넘긴다. Rust 가 답한 프레임 수보다
+ * 받은 것이 적으면 `frameWaitMs` 까지 기다리고, 그래도 모자라면 `NetError('noResult')`. 끝나거나 취소되면 구독을
+ * 풀고, 그 뒤 프레임은 버린다.
+ */
+export async function llmChatStream(
+  a: {
+    provider: 'ollama' | 'openai';
+    body: unknown;
+    signal?: AbortSignal;
+    onFrame(data: string): void;
+    frameWaitMs?: number;
+  },
+  invoke: InvokeFn = tauriInvoke,
+  listen: ListenFn = tauriListen,
+): Promise<LlmStreamEnd> {
+  if (a.signal?.aborted || vaultSignal().aborted) throw cancelled();
+  let own: string | undefined;
+  let open = true;
+  let received = 0;
+  let wake: (() => void) | undefined;
+  let unlisten: () => void;
+  try {
+    unlisten = await listen<LlmFrame>(LLM_FRAME_EVENT, (e) => {
+      const f = e.payload;
+      if (!open || own === undefined || !f || f.requestId !== own || typeof f.data !== 'string') return;
+      received += 1;
+      a.onFrame(f.data);
+      wake?.();
+    });
+  } catch (e) {
+    throw toNetError(e);
+  }
+  try {
+    const end = await trackRequest(
+      a.signal,
+      (requestId) => {
+        own = requestId;
+        return call<LlmStreamEnd>(invoke, 'llm_chat_stream', { requestId, provider: a.provider, body: a.body });
+      },
+      invoke,
+    );
+    const expected = end.done ? (end.frames ?? 0) : 0;
+    if (received < expected) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, a.frameWaitMs ?? FRAME_WAIT_MS);
+        wake = () => {
+          if (received >= expected) {
+            clearTimeout(timer);
+            resolve();
+          }
+        };
+      });
+      if (received < expected) throw new NetError('noResult', 'some of the streamed answer did not arrive');
+    }
+    return end;
+  } finally {
+    open = false;
+    unlisten();
+  }
+}
+
 export interface LlmProbe {
   models: string[];
   modelFound: boolean;

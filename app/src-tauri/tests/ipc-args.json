@@ -53,6 +53,7 @@
   "partbank_probe": ["connection", "url", "apiKey"],
   "llm_chat": ["requestId", "provider", "body"],
   "llm_probe": ["provider", "endpoint", "model", "apiKey"],
+  "llm_chat_stream": ["requestId", "provider", "body"],
   "bfw_request": ["path", "query"],
   "bfw_probe": ["connection", "url", "apiKey"],
   "bfw_base": [],

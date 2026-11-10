@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/llm/agent.ts:31-186 sha256:099940c5b1620804
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: imports point at ./llmProvider. AgentDeps gains signal?: AbortSignal, passed to every provider.chat (which cancels the request in Rust through net_cancel). runAgent checks deps.signal?.aborted before each model turn, before each tool call of a turn, and again just before each runTool (so an approval answered after a Cancel never writes), and throws NetError('cancelled') (D11). The argument order stays the vendor's runAgent(messages, deps). Task 9 (spec §7.4): AgentDeps gains external?: ReadonlyMap<string, ExternalToolMeta> (the side map of external tools, ../../ai/externalTools) and confirm gains a 4th argument { tainted, reason? }; runAgent keeps tainted (true at start when an MCP tool is offered, and after any external result) and taintSources (MCP server ids, plus 'scholar', grown only by results), returned on AgentRun. Every mutating tool is still confirmed, now with the note; a read-only MCP tool is also confirmed when, after a result, its server is not a taint source (crossServer) or its serialised arguments exceed 2,000 chars (bigArgs); a denial of such a read answers 'User denied this call.'. The logic is otherwise verbatim.
+// Changes: imports point at ./llmProvider. AgentDeps gains signal?: AbortSignal, passed to every provider.chat (which cancels the request in Rust through net_cancel). runAgent checks deps.signal?.aborted before each model turn, before each tool call of a turn, and again just before each runTool (so an approval answered after a Cancel never writes), and throws NetError('cancelled') (D11). The argument order stays the vendor's runAgent(messages, deps). Task 9 (spec §7.4): AgentDeps gains external?: ReadonlyMap<string, ExternalToolMeta> (the side map of external tools, ../../ai/externalTools) and confirm gains a 4th argument { tainted, reason? }; runAgent keeps tainted (true at start when an MCP tool is offered, and after any external result) and taintSources (MCP server ids, plus 'scholar', grown only by results), returned on AgentRun. Every mutating tool is still confirmed, now with the note; a read-only MCP tool is also confirmed when, after a result, its server is not a taint source (crossServer) or its serialised arguments exceed 2,000 chars (bigArgs); a denial of such a read answers 'User denied this call.'. Task 6 (assistant spec §6.2, app only): AgentDeps gains onDelta?(text); when it is set and the provider has chatStream, each model turn goes through provider.chatStream(history, opts, onDelta), so answer text arrives piece by piece in order; the turn's ChatResult and so the AgentRun are the same as with chat. The logic is otherwise verbatim.
 /**
  * The tool-calling loop that makes the built-in AI agentic.
  *
@@ -66,6 +66,11 @@ export interface AgentDeps {
   signal?: AbortSignal;
   /** What the app knows about the external tools among `tools`, by function name (spec §7.2). */
   external?: ReadonlyMap<string, ExternalToolMeta>;
+  /**
+   * Streamed answer text, piece by piece in order (app only, spec §6.2). Set → each model turn uses
+   * `provider.chatStream` when the provider has one; the run's result does not change.
+   */
+  onDelta?: (text: string) => void;
 }
 
 /**
@@ -162,11 +167,11 @@ export async function runAgent(
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     stopIfAborted(deps.signal);
-    const turn: ChatResult = await deps.provider.chat(history, {
-      temperature: deps.temperature,
-      tools,
-      signal: deps.signal,
-    });
+    const opts = { temperature: deps.temperature, tools, signal: deps.signal };
+    const turn: ChatResult =
+      deps.onDelta && deps.provider.chatStream
+        ? await deps.provider.chatStream(history, opts, deps.onDelta)
+        : await deps.provider.chat(history, opts);
 
     if (turn.toolCalls.length === 0) {
       return {

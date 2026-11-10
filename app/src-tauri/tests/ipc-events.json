@@ -12,6 +12,12 @@
       "fields": { "requestId": "requestId", "step": "step", "message": "message" }
     }
   },
+  "llmFrame": {
+    "name": "llm://frame",
+    "payload": {
+      "fields": { "requestId": "requestId", "data": "data" }
+    }
+  },
   "scanFolderChanged": {
     "name": "scan://folder-changed",
     "payload": { "fields": {} }

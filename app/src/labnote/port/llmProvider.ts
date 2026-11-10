@@ -1,8 +1,9 @@
 // Ported from app/vendor/labnoteo/src/llm/provider.ts:27-267 sha256:50318941b2f8b631
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. ChatOptions gains contextWindow (feat/ai-context): Ollama merges it into options as num_ctx beside temperature; the OpenAI body ignores it. The JSON body is otherwise built and the reply parsed as in the vendor file.
+// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. ChatOptions gains contextWindow (feat/ai-context): Ollama merges it into options as num_ctx beside temperature; the OpenAI body ignores it. Task 6 (assistant spec §6.2, app only): LlmProvider gains an optional chatStream(messages, opts, onDelta), implemented by both providers: the same body with stream: true goes to llmChatStream (llm_chat_stream + llm://frame events, integrations/netIpc), the frames are assembled by ../../ai/streamAssembler (OpenAI SSE tool-call deltas merged by index, Ollama NDJSON) into the same ChatResult, and each content delta goes to onDelta in order; a 2xx JSON answer (stream ignored) is read like chat's; a non-2xx answer, or a status/notJson error, before the first frame falls back to one non-streamed chat (never after a frame, never on a network error). chat's body building and reply reading are factored into body()/read() so both paths share them; createLlmProvider takes an optional listen for tests. The JSON body is otherwise built and the reply parsed as in the vendor file.
 import type { ToolDef } from '@labnoteo/core';
-import { llmChat, NetError, type InvokeFn } from '../../integrations/netIpc';
+import { llmChat, llmChatStream, NetError, type InvokeFn, type ListenFn } from '../../integrations/netIpc';
+import { OllamaAssembler, OpenAiAssembler, type StreamAssembler } from '../../ai/streamAssembler';
 import type { AppSettings } from '../settings';
 import { LlmHttpError } from './llmError';
 
@@ -72,6 +73,12 @@ export interface LlmProvider {
   /** The model the request names (`llmModel`). */
   readonly model: string;
   chat(messages: ChatMessage[], opts?: ChatOptions): Promise<ChatResult>;
+  /**
+   * The same turn, streamed (app only, spec §6.2): `onDelta` gets each piece of answer text in order, and the
+   * result equals what `chat` would return. Falls back to one `chat` when the provider refuses the stream
+   * before any frame arrived.
+   */
+  chatStream?(messages: ChatMessage[], opts: ChatOptions | undefined, onDelta: (text: string) => void): Promise<ChatResult>;
 }
 
 /**
@@ -203,12 +210,77 @@ async function post(
   }
 }
 
+/** Errors before the first frame that mean "this server will not stream", not "the network failed". */
+const STREAM_REFUSED: ReadonlySet<string> = new Set(['status', 'notJson']);
+
+/**
+ * `llm_chat_stream` through Rust (app only, spec §6.2). Frames go through `asm`; each content delta goes to
+ * `onDelta`. A 2xx JSON text (the server ignored `stream: true`) is read by `read`. A non-2xx answer, or a
+ * `status`/`notJson` error, before the first frame runs `fallback` (one non-streamed call) instead.
+ */
+async function streamPost(
+  provider: 'ollama' | 'openai',
+  errorName: string,
+  body: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+  invoke: InvokeFn | undefined,
+  listen: ListenFn | undefined,
+  asm: StreamAssembler,
+  read: (json: WireReply | null) => ChatResult,
+  fallback: () => Promise<ChatResult>,
+  onDelta: (text: string) => void
+): Promise<ChatResult> {
+  let frames = 0;
+  let end: Awaited<ReturnType<typeof llmChatStream>>;
+  try {
+    end = await llmChatStream(
+      {
+        provider,
+        body: { ...body, stream: true },
+        signal,
+        onFrame: (data) => {
+          frames += 1;
+          const piece = asm.push(data);
+          if (piece) onDelta(piece);
+        },
+      },
+      invoke,
+      listen
+    );
+  } catch (e) {
+    if (frames === 0 && e instanceof NetError && STREAM_REFUSED.has(e.kind)) return deliver(await fallback(), onDelta);
+    if (e instanceof NetError && e.kind === 'status') throw new LlmHttpError(errorName, e.status ?? 0, e.body ?? '');
+    throw e;
+  }
+  if (end.status < 200 || end.status >= 300) {
+    if (frames === 0) return deliver(await fallback(), onDelta);
+    throw new LlmHttpError(errorName, end.status, end.text ?? '');
+  }
+  if (end.text !== undefined) {
+    let json: WireReply | null;
+    try {
+      json = JSON.parse(end.text) as WireReply | null;
+    } catch {
+      throw new NetError('notJson', 'the AI reply is not JSON');
+    }
+    return deliver(read(json), onDelta);
+  }
+  return asm.result();
+}
+
+/** A reply that arrived whole: its text is one delta. */
+function deliver(result: ChatResult, onDelta: (text: string) => void): ChatResult {
+  if (result.content) onDelta(result.content);
+  return result;
+}
+
 class OllamaProvider implements LlmProvider {
   readonly name = 'ollama';
   readonly label = 'Ollama';
   constructor(
     private readonly settings: AppSettings,
-    private readonly invoke?: InvokeFn
+    private readonly invoke?: InvokeFn,
+    private readonly listen?: ListenFn
   ) {}
 
   get model(): string {
@@ -234,20 +306,36 @@ class OllamaProvider implements LlmProvider {
     });
   }
 
+  private body(messages: ChatMessage[], opts?: ChatOptions): Record<string, unknown> {
+    return {
+      model: this.settings.llmModel,
+      messages: OllamaProvider.toWire(messages),
+      stream: false,
+      tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
+      options: ollamaOptions(opts),
+    };
+  }
+
   async chat(messages: ChatMessage[], opts?: ChatOptions): Promise<ChatResult> {
-    const json = await post(
+    return this.read(await post('ollama', 'Ollama', this.body(messages, opts), opts?.signal, this.invoke));
+  }
+
+  async chatStream(messages: ChatMessage[], opts: ChatOptions | undefined, onDelta: (text: string) => void): Promise<ChatResult> {
+    return streamPost(
       'ollama',
       'Ollama',
-      {
-        model: this.settings.llmModel,
-        messages: OllamaProvider.toWire(messages),
-        stream: false,
-        tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
-        options: ollamaOptions(opts),
-      },
+      this.body(messages, opts),
       opts?.signal,
-      this.invoke
+      this.invoke,
+      this.listen,
+      new OllamaAssembler(),
+      (json) => this.read(json),
+      () => this.chat(messages, opts),
+      onDelta
     );
+  }
+
+  private read(json: WireReply | null): ChatResult {
     const message = json?.message;
     const toolCalls = normalizeToolCalls(message?.tool_calls);
     // Thinking models can spend the whole reply on `thinking` and leave `content` empty (#161).
@@ -270,7 +358,8 @@ class OpenAiProvider implements LlmProvider {
   readonly label = 'OpenAI-compatible';
   constructor(
     private readonly settings: AppSettings,
-    private readonly invoke?: InvokeFn
+    private readonly invoke?: InvokeFn,
+    private readonly listen?: ListenFn
   ) {}
 
   get model(): string {
@@ -298,20 +387,36 @@ class OpenAiProvider implements LlmProvider {
     });
   }
 
+  private body(messages: ChatMessage[], opts?: ChatOptions): Record<string, unknown> {
+    return {
+      model: this.settings.llmModel,
+      messages: OpenAiProvider.toWire(messages),
+      temperature: opts?.temperature,
+      tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
+    };
+  }
+
   async chat(messages: ChatMessage[], opts?: ChatOptions): Promise<ChatResult> {
     // The Authorization header is Rust's: it reads the key from Credential Manager (D6).
-    const json = await post(
+    return this.read(await post('openai', 'OpenAI', this.body(messages, opts), opts?.signal, this.invoke));
+  }
+
+  async chatStream(messages: ChatMessage[], opts: ChatOptions | undefined, onDelta: (text: string) => void): Promise<ChatResult> {
+    return streamPost(
       'openai',
       'OpenAI',
-      {
-        model: this.settings.llmModel,
-        messages: OpenAiProvider.toWire(messages),
-        temperature: opts?.temperature,
-        tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
-      },
+      this.body(messages, opts),
       opts?.signal,
-      this.invoke
+      this.invoke,
+      this.listen,
+      new OpenAiAssembler(),
+      (json) => this.read(json),
+      () => this.chat(messages, opts),
+      onDelta
     );
+  }
+
+  private read(json: WireReply | null): ChatResult {
     const message = json?.choices?.[0]?.message;
     const toolCalls = normalizeToolCalls(message?.tool_calls);
     // OpenAI-compatible servers for reasoning models put the reasoning in `reasoning_content`.
@@ -325,12 +430,12 @@ class OpenAiProvider implements LlmProvider {
 }
 
 /** Build the configured provider, or null when AI is disabled. */
-export function createLlmProvider(settings: AppSettings, invoke?: InvokeFn): LlmProvider | null {
+export function createLlmProvider(settings: AppSettings, invoke?: InvokeFn, listen?: ListenFn): LlmProvider | null {
   switch (settings.llmProvider) {
     case 'ollama':
-      return new OllamaProvider(settings, invoke);
+      return new OllamaProvider(settings, invoke, listen);
     case 'openai':
-      return new OpenAiProvider(settings, invoke);
+      return new OpenAiProvider(settings, invoke, listen);
     default:
       return null;
   }

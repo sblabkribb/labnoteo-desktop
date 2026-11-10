@@ -139,6 +139,7 @@ describe('IPC 인자 이름 계약', () => {
     pending.abort(); // 아직 끝나지 않은 요청을 취소하면 net_cancel 이 간다
     await chat.catch(() => undefined);
     await net.llmProbe({ provider: 'ollama', endpoint: 'http://127.0.0.1:11434', model: 'm' }, r.invoke);
+    await net.llmChatStream({ provider: 'openai', body: {}, onFrame: () => undefined }, r.invoke, (async () => () => undefined) as unknown as net.ListenFn).catch(() => undefined);
     await net.bfwRequest({ path: '/api/auth/me' }, r.invoke);
     await net.bfwProbe({ connection: 'server' }, r.invoke);
     await net.bfwBase(r.invoke);

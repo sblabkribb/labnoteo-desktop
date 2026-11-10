@@ -166,6 +166,8 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("llm_probe", args("llm_probe", vec![json!("ollama"), json!("ftp://x"), json!("m"), Value::Null])).unwrap_err()["kind"],
         "invalidUrl"
     );
+    let stream = call("llm_chat_stream", args("llm_chat_stream", vec![json!("rs"), json!("ollama"), json!({})])).unwrap_err();
+    assert!(stream["kind"] == "badInput" || stream["kind"] == "notConfigured", "{stream}");
     // bfworkflow: with no vault there is no saved URL to resolve.
     assert_eq!(call("bfw_base", args("bfw_base", vec![])).unwrap_err()["kind"], "notConfigured");
     // Note generation checks its input before anything else.
@@ -311,6 +313,9 @@ fn ipc_argument_names_match_the_typescript_side() {
     // names another provider is refused before anything is sent.
     let llm = call("llm_chat", args("llm_chat", vec![json!("r"), json!("ollama"), json!({})])).unwrap_err();
     assert!(llm["kind"] == "badInput" || llm["kind"] == "notConfigured", "{llm}");
+    // The streamed chat shares those guards.
+    let stream = call("llm_chat_stream", args("llm_chat_stream", vec![json!("rs2"), json!("ollama"), json!({})])).unwrap_err();
+    assert!(stream["kind"] == "badInput" || stream["kind"] == "notConfigured", "{stream}");
 
     // bfworkflow with the vault open and no settings written: the default
     // server is the base, a request without a key is keyMissing, and a path
@@ -1066,6 +1071,21 @@ fn bfworkflow_notes_event_matches_the_typescript_side() {
     assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
     assert_eq!(payload[ev["payload"]["fields"]["step"].as_str().unwrap()], "init");
     assert_eq!(payload[ev["payload"]["fields"]["message"].as_str().unwrap()], "m");
+}
+
+#[test]
+fn llm_frame_event_matches_the_typescript_side() {
+    use labnoteo_app_lib::net::stream::{LlmFrame, FRAME_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let ev = &fixture["llmFrame"];
+    assert_eq!(ev["name"], FRAME_EVENT);
+    let payload = serde_json::to_value(LlmFrame { request_id: "r".into(), data: "d".into() }).unwrap();
+    let keys: std::collections::BTreeSet<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+    let fields: std::collections::BTreeSet<&str> =
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(keys, fields, "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
+    assert_eq!(payload[ev["payload"]["fields"]["data"].as_str().unwrap()], "d");
 }
 
 #[test]

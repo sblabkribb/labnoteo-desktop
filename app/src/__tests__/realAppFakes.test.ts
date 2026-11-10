@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
+import { assembleOllama, assembleOpenAi } from '../ai/streamAssembler';
 
 /**
  * 실제 앱 점검용 가짜 서버(plan Task 16): scripts/fakeMcpServer.mjs, fakeScholar.mjs, fakeLlm.mjs.
@@ -187,5 +188,83 @@ describe('fake LLM', () => {
     });
     const m = ((await r.json()) as { choices: Array<{ message: { tool_calls: Array<{ function: { name: string } }> } }> }).choices[0].message;
     expect(m.tool_calls[0].function.name).toBe('pubmed_search');
+  });
+});
+
+describe('fake LLM streaming (--stream)', () => {
+  const TOOLS = ['update_section', 'mcp_fake_lookup_part', 'pubmed_search'].map((name) => ({
+    type: 'function',
+    function: { name, description: '', parameters: { type: 'object' } },
+  }));
+
+  async function post(base: string, path: string, body: unknown): Promise<Response> {
+    return fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+
+  it('sse: streams content and tool-call deltas the assembler puts back together', async () => {
+    const base = await start('fakeLlm.mjs', '--stream', 'sse', '--note', 'notes/a.md', '--heading', 'Result');
+    const messages: unknown[] = [{ role: 'user', content: 'go' }];
+    const names: string[] = [];
+    let answer = '';
+    for (let i = 0; i < 5; i++) {
+      const r = await post(base, '/v1/chat/completions', { model: 'fake-model', messages, tools: TOOLS, stream: true });
+      expect(r.headers.get('content-type')).toContain('text/event-stream');
+      const text = await r.text();
+      expect(text.trimEnd().endsWith('data: [DONE]')).toBe(true);
+      const frames = text.split('\n\n').filter((f) => f.startsWith('data: ')).map((f) => f.slice('data: '.length));
+      const turn = assembleOpenAi(frames);
+      if (turn.toolCalls.length === 0) {
+        answer = turn.content;
+        break;
+      }
+      const call = turn.toolCalls[0];
+      names.push(call.name);
+      if (call.name === 'update_section') expect(call.arguments).toMatchObject({ documentPath: 'notes/a.md', heading: 'Result', mode: 'append' });
+      messages.push({ role: 'assistant', content: null, tool_calls: [{ id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } }] });
+      messages.push({ role: 'tool', tool_call_id: call.id, content: 'ok' });
+    }
+    expect(names).toEqual(['mcp_fake_lookup_part', 'update_section', 'pubmed_search']);
+    expect(answer).toBe('Done (fake LLM).');
+    const log = (await (await fetch(`${base}/__log`)).json()) as Array<{ stream?: boolean }>;
+    expect(log.filter((e) => e.stream !== undefined).every((e) => e.stream)).toBe(true);
+  });
+
+  it('ndjson: serves Ollama /api/tags and streams /api/chat lines with tool calls on the done line', async () => {
+    const base = await start('fakeLlm.mjs', '--stream', 'ndjson');
+    expect((await (await fetch(`${base}/api/tags`)).json()).models[0].name).toBe('fake-model:latest');
+    const messages: unknown[] = [{ role: 'user', content: 'go' }];
+    const names: string[] = [];
+    let answer = '';
+    for (let i = 0; i < 5; i++) {
+      const r = await post(base, '/api/chat', { model: 'fake-model', messages, tools: TOOLS, stream: true });
+      expect(r.headers.get('content-type')).toContain('application/x-ndjson');
+      const lines = (await r.text()).split('\n').filter((l) => l.trim());
+      expect(JSON.parse(lines[lines.length - 1]).done).toBe(true);
+      const turn = assembleOllama(lines);
+      if (turn.toolCalls.length === 0) {
+        answer = turn.content;
+        break;
+      }
+      names.push(turn.toolCalls[0].name);
+      messages.push({ role: 'assistant', content: '', tool_calls: [{ function: { name: turn.toolCalls[0].name, arguments: turn.toolCalls[0].arguments } }] });
+      messages.push({ role: 'tool', tool_name: turn.toolCalls[0].name, content: 'ok' });
+    }
+    expect(names).toEqual(['mcp_fake_lookup_part', 'update_section', 'pubmed_search']);
+    expect(answer).toBe('Done (fake LLM).');
+    const plain = await post(base, '/api/chat', { model: 'fake-model', messages: [{ role: 'user', content: 'go' }], stream: false });
+    expect(((await plain.json()) as { message: { content: string }; done: boolean })).toMatchObject({ message: { content: 'Done (fake LLM).' }, done: true });
+  });
+
+  it('reject: refuses stream:true with a 400 and answers the same request without it', async () => {
+    const base = await start('fakeLlm.mjs', '--stream', 'reject');
+    const body = { model: 'fake-model', messages: [{ role: 'user', content: 'go' }] };
+    expect((await post(base, '/v1/chat/completions', { ...body, stream: true })).status).toBe(400);
+    const r = await post(base, '/v1/chat/completions', body);
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { choices: Array<{ message: { content: string } }> }).choices[0].message.content).toBe('Done (fake LLM).');
+  });
+
+  it('refuses an unknown --stream mode', async () => {
+    await expect(start('fakeLlm.mjs', '--stream', 'websocket')).rejects.toThrow(/exited/);
   });
 });
