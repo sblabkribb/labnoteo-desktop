@@ -508,7 +508,12 @@ async function review(plan: ReadyPlan, head: PreviewHead, ui: FlowUi): Promise<U
 
 /** 진행 창을 띄우고 올린다. 진행 창은 처음부터 취소할 수 없다(Rust 의 올리기는 멈추지 않는다). */
 async function upload(planId: string, choices: UploadChoices, title: string, deps: FlowDeps): Promise<UploadOutcome> {
-  const p = deps.ui.progress(t('github.dest.title', title));
+  return withProgress(t('github.dest.title', title), deps, (requestId) => deps.ipc.githubUpload({ planId, choices, requestId }));
+}
+
+/** 잠긴 진행 창과 진행 줄(`github://progress`, 이 요청의 것만) 안에서 `run` 을 돌린다. */
+async function withProgress(title: string, deps: FlowDeps, run: (requestId: string) => Promise<UploadOutcome>): Promise<UploadOutcome> {
+  const p = deps.ui.progress(title);
   p.setCancellable(false);
   const requestId = crypto.randomUUID();
   const onLine = progressLines(p);
@@ -521,10 +526,98 @@ async function upload(planId: string, choices: UploadChoices, title: string, dep
     // 진행 줄이 없어도 올리기는 된다.
   }
   try {
-    return await deps.ipc.githubUpload({ planId, choices, requestId });
+    return await run(requestId);
   } finally {
     unlisten();
     p.done();
+  }
+}
+
+/** `github_retry` 를 부르는 것(앱에서는 `githubRetry`). */
+export type RetryFn = (a: { folder: string; requestId?: string }) => Promise<UploadOutcome>;
+
+/**
+ * "올리기 마저 하기"(`github.finishUpload`, spec §8.4): 기록이 멈춘 단계에서 Rust 가 이어 간다(`github_retry`).
+ * - 다 올렸으면 알림. 미리보기가 필요하거나(`needsPreview`) 계획이 다시 필요한 답이면 보통 올리기 흐름으로 다시 계획한다.
+ * - 같은 이름이 이미 있으면(기록은 Rust 가 지웠다) 그렇게 말하고 올릴 곳 화면부터 다시 한다.
+ * - 어떤 답도 저절로 다시 시도하지 않는다.
+ */
+export async function finishExperiment(ctx: CommandContext, folder: string, deps: FlowDeps, retry: RetryFn): Promise<void> {
+  void ctx;
+  const { ui } = deps;
+  try {
+    const outcome = await withProgress(t('github.menu.finish'), deps, (requestId) => retry({ folder, requestId }));
+    switch (outcome.outcome) {
+      case 'done': {
+        warnNowPublic(outcome.warnings, ui);
+        const c = outcome.counts;
+        const url = outcome.htmlUrl;
+        ui.notify('info', t('github.done.changes', c.new, c.changed, c.deleted, outcome.fullName), {
+          action: { label: t('github.menu.open'), run: () => void ui.openExternal(url) },
+        });
+        return;
+      }
+      case 'nothingChanged':
+        ui.notify('info', t('github.done.nothing'));
+        return;
+      case 'nameTaken':
+        ui.notify('warn', t('github.dest.taken'));
+        await runFlow(folder, deps);
+        return;
+      case 'needsPreview':
+      case 'needsSignIn':
+      case 'planStale':
+      case 'planExpired':
+      case 'blocked':
+      case 'diverged':
+        await runFlow(folder, deps);
+        return;
+      case 'pushedSeparately': {
+        const url = outcome.compareUrl;
+        ui.notify('info', t('github.diverged.compare'), { action: { label: t('github.menu.open'), run: () => void ui.openExternal(url) } });
+        return;
+      }
+      case 'visibilityMismatch': {
+        const url = outcome.htmlUrl;
+        ui.notify('error', t('github.err.visibilityMismatch'), { action: { label: t('github.menu.open'), run: () => void ui.openExternal(url) } });
+        return;
+      }
+      case 'orgRestricted': {
+        const url = outcome.approveUrl;
+        ui.notify('error', t('github.err.orgRestricted', outcome.org), { action: { label: t('github.err.orgRequest'), run: () => void ui.openExternal(url) } });
+        return;
+      }
+      case 'ssoRequired': {
+        const url = outcome.url;
+        ui.notify('error', t('github.err.sso'), { action: { label: t('github.err.ssoOpen'), run: () => void ui.openExternal(url) } });
+        return;
+      }
+      case 'cannotCreateInOrg':
+        ui.notify('error', t('github.err.cannotCreate'));
+        return;
+      case 'notFoundOrNoAccess':
+        ui.notify('error', t('github.err.notFound'));
+        return;
+      case 'readOnly':
+        ui.notify('error', t('github.err.readOnly'));
+        return;
+      case 'rateLimited':
+        ui.notify('error', t('github.err.rateLimited', minutesOf(outcome.seconds)));
+        return;
+      case 'rejected': {
+        const lead = outcome.kind === 'secretDetected' ? t('github.err.secretByGithub') : t('github.err.rejected');
+        ui.notify('error', lead, outcome.lines.length > 0 ? { title: lead, detail: outcome.lines.join('\n') } : undefined);
+        return;
+      }
+      case 'legalBlock':
+        ui.notify('error', t('github.err.legal', outcome.message));
+        return;
+      case 'busy':
+        ui.notify('warn', t('github.err.busy'));
+        return;
+    }
+  } catch (e) {
+    ui.notify('error', githubErrorText(e) || t('github.err.local'));
   }
 }
 

@@ -281,6 +281,19 @@ button.tree-state { cursor: pointer; }
 button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
 .tree-state[data-icon="circle-check"] { color: var(--success); }
 .tree-state[data-icon="circle-half"] { color: var(--accent); }
+/* 실험 이름 뒤의 GitHub 상태 표시(올라감·안 올린 변경·끝나지 않음). 모양이 상태마다 달라 색만으로 뜻을 전하지 않는다 */
+.tree-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: var(--space-2);
+  color: var(--text-muted);
+}
+.tree-badge[data-icon="cloud-upload"] { color: var(--accent); }
+.tree-badge[data-icon="cloud-alert"] { color: var(--warning); }
 /* 오른쪽 끝의 코드(WB030, UHW250): 흐린 고정폭. 덧말(1/2)이 뒤에 오면 그 앞에 붙는다 */
 .wf-tree-row .meta.code {
   flex: none;

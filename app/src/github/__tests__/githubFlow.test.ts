@@ -11,7 +11,7 @@ import type {
 } from '../../integrations/githubIpc';
 import type { CommandContext } from '../../labnote/commands/context';
 import { NetError } from '../../integrations/netIpc';
-import { fitsQuick, uploadExperiment, type CollectedInfo, type FlowDeps, type FlowUi, type ReadyPlan } from '../githubFlow';
+import { finishExperiment, fitsQuick, uploadExperiment, type CollectedInfo, type FlowDeps, type FlowUi, type ReadyPlan } from '../githubFlow';
 import type { Destination, DestinationInit } from '../UploadDialog';
 import { LinkIndex } from '../../links/linkIndex';
 import { collectInfoWith } from '../collectInfo';
@@ -473,5 +473,54 @@ describe('collectInfo', () => {
       collectInfoWith(folder, { files: ix.files(), read: async () => README, resolved: (p) => ix.resolved(p), sampleTypes: [] });
     await uploadExperiment(ctx, FOLDER, h.deps);
     expect(h.plans[0].infoFindings).toContainEqual({ kind: 'outside', count: 1, paths: ['resources/plasmid_map.png'] });
+  });
+});
+
+describe('finishExperiment (github.finishUpload through githubRetry)', () => {
+  const retry = (...outs: UploadOutcome[]) => vi.fn(async () => outs.shift() ?? DONE);
+
+  it('a finished push shows the changes toast with an open action, without planning', async () => {
+    const h = harness({ status: { ...LINKED, state: 'committed' } });
+    const r = retry(DONE);
+    await finishExperiment(ctx, FOLDER, h.deps, r);
+    expect(r).toHaveBeenCalledWith(expect.objectContaining({ folder: FOLDER }));
+    expect(h.calls).toEqual([]);
+    expect(h.cancellable).toEqual([false]);
+    expect(h.notes).toHaveLength(1);
+    expect(h.notes[0].kind).toBe('info');
+    expect(h.notes[0].message).toContain('새 파일 1');
+  });
+
+  it('needsPreview re-plans and asks again through the normal flow', async () => {
+    const h = harness({ status: { ...LINKED, state: 'repoReady' }, plans: [ready({ mode: 'update' })] });
+    await finishExperiment(ctx, FOLDER, h.deps, retry({ outcome: 'needsPreview', fullName: 'parkyaeseong/x', htmlUrl: 'https://github.com/parkyaeseong/x' }));
+    expect(h.calls).toEqual(['plan', 'quick', 'upload']);
+    expect(h.plans[0].target).toEqual({ kind: 'update' });
+  });
+
+  it('a name that turned out taken says so and opens the destination for an unlinked folder', async () => {
+    const h = harness({ status: { linked: false, state: 'planned' }, destination: ['cancel'] });
+    await finishExperiment(ctx, FOLDER, h.deps, retry({ outcome: 'nameTaken' }));
+    expect(h.notes[0]).toMatchObject({ kind: 'warn', message: t('github.dest.taken') });
+    expect(h.calls).toEqual(['destination']);
+  });
+
+  it('busy and rate limits are reported and never retried', async () => {
+    const h = harness({});
+    const r = retry({ outcome: 'busy' }, { outcome: 'rateLimited', seconds: 120 });
+    await finishExperiment(ctx, FOLDER, h.deps, r);
+    await finishExperiment(ctx, FOLDER, h.deps, r);
+    expect(r).toHaveBeenCalledTimes(2);
+    expect(h.notes.map((n) => n.message)).toEqual([t('github.err.busy'), t('github.err.rateLimited', 2)]);
+    expect(h.calls).toEqual([]);
+  });
+
+  it('an unexpected error is a plain message', async () => {
+    const h = harness({});
+    await finishExperiment(ctx, FOLDER, h.deps, vi.fn(async () => {
+      throw new Error('boom');
+    }));
+    expect(h.notes).toHaveLength(1);
+    expect(h.notes[0].kind).toBe('error');
   });
 });

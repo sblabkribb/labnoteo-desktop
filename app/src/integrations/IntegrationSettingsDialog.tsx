@@ -42,6 +42,7 @@ import {
   githubStatuses,
   githubUnlink,
 } from './githubIpc';
+import { forgetGithubStatus, setGithubStatuses } from '../github/statusStore';
 import { openExternal, tauriExternalDeps } from '../links/openExternal';
 
 export type { IntegrationSettingsValue } from './probes';
@@ -109,8 +110,16 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
     signInWait: (signal) => githubSignInWait({ signal }, invoke),
     signOut: () => githubSignOut(invoke),
     setToken: (value) => githubSetToken(value, invoke),
-    statuses: () => githubStatuses(invoke),
-    unlink: (folder) => githubUnlink(folder, invoke),
+    // 설정에서 읽은 상태와 끊은 연결은 실험 탭의 표시와 메뉴(statusStore)에도 바로 반영한다.
+    statuses: async () => {
+      const all = await githubStatuses(invoke);
+      if (all && typeof all === 'object') setGithubStatuses(all);
+      return all;
+    },
+    unlink: async (folder) => {
+      await githubUnlink(folder, invoke);
+      forgetGithubStatus(folder);
+    },
     openExternal: (url) => openExternal(url, external),
     copy: (text) => external.copy(text),
     appSettings: () => githubAppSettingsGet(invoke),

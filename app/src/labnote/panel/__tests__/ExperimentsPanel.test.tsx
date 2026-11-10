@@ -10,6 +10,8 @@ import { createWorkflow } from '../../commands/workflow';
 import { ContextMenu } from '../../ui/ContextMenu';
 import { closeMenu } from '../../ui/menuStore';
 import { ExperimentsPanel } from '../ExperimentsPanel';
+import { resetGithubStatusesForTest, setGithubStatuses } from '../../../github/statusStore';
+import type { FolderStatus } from '../../../integrations/githubIpc';
 import { WorkflowsPanel } from '../WorkflowsPanel';
 import { DONE, EXP, experimentVault, expReadme, PLAN, WF1, WF2 } from './experimentFixtures';
 import workflowsJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/workflows_en.json';
@@ -40,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => closeMenu());
   cleanup();
+  resetGithubStatusesForTest();
   h?.cleanup();
   setLang('ko');
 });
@@ -249,7 +252,31 @@ describe('ExperimentsPanel', () => {
       coreT('Change experiment status'),
       coreT('Toggle discussion flag'),
       coreT('Retry this experiment'),
+      'GitHub에 올리기…',
     ]);
+  });
+
+  it('the experiment context menu offers the GitHub items for the link state', async () => {
+    setGithubStatuses({ [EXP]: { linked: true, state: 'pushed', changedCount: 0, folderMissing: false, htmlUrl: 'https://github.com/me/x' } });
+    mount();
+    fireEvent.contextMenu(await findRow(/003 · /));
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent).slice(-3)).toEqual(['바뀐 내용 올리기', 'GitHub에서 보기', 'GitHub 연결 끊기…']);
+    expect([...document.querySelectorAll('.context-menu-section')].map((e) => e.textContent)).toContain('GitHub');
+  });
+
+  it('draws a GitHub status mark with aria-label and title for each state, none when not linked', async () => {
+    const st = (over: Partial<FolderStatus>): FolderStatus => ({ linked: true, state: 'pushed', changedCount: 0, folderMissing: false, ...over });
+    setGithubStatuses({ [EXP]: st({}), [PLAN]: st({ changedCount: 4 }) });
+    mount();
+    const badge = async (name: RegExp) => (await findRow(name)).querySelector('.tree-badge');
+    expect((await badge(/003 · /))?.getAttribute('aria-label')).toBe('GitHub에 올라가 있음');
+    expect((await badge(/003 · /))?.getAttribute('title')).toBe('GitHub에 올라가 있음');
+    expect((await badge(/004 · /))?.getAttribute('aria-label')).toBe('올리지 않은 변경 4개');
+    expect(await badge(/005 · /)).toBeNull();
+    act(() => setGithubStatuses({ [EXP]: st({ state: 'committed' }) }));
+    expect(row(/003 · /).querySelector('.tree-badge')?.getAttribute('aria-label')).toBe('올리기가 끝나지 않았습니다');
+    expect(row(/003 · /).querySelector('.tree-badge')?.getAttribute('title')).toBe('올리기가 끝나지 않았습니다');
+    expect(row(/004 · /).querySelector('.tree-badge')).toBeNull();
   });
 
   it('group-by is kept in settings with the plugin value; New experiment runs create-experiment', async () => {

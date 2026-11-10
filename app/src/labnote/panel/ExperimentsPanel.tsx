@@ -41,7 +41,9 @@ import {
   type UoNode,
   type WfNode,
 } from './experimentTree';
-import { TreeView, type TreeAction, type TreeState } from './TreeView';
+import { TreeView, type TreeAction, type TreeBadge, type TreeState } from './TreeView';
+import { githubMenuItems } from '../../github/commands';
+import { statusBadge, useGithubStatuses } from '../../github/statusStore';
 import { CatalogPopover, type CatalogEntry, type CatalogTarget } from './CatalogPopover';
 import { touchesDir, useVaultChanges } from './useVaultChanges';
 
@@ -159,6 +161,8 @@ function useCursorLine(path: string | undefined): number | undefined {
  */
 export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: ExperimentsPanelProps) {
   const lang = useLang();
+  // GitHub 상태 표시와 메뉴: 상태가 바뀌면 다시 그린다.
+  const githubStatuses = useGithubStatuses();
   const { host } = ctx;
   const cache = useMemo(() => new ExperimentEntryCache(host.fs), [host]);
   const [entries, setEntries] = useState<PanelEntry[]>();
@@ -456,6 +460,7 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
         { label: coreT('Toggle discussion flag'), run: changed(folder, () => toggleDiscussionFlag(ctx, folder)) },
         ...((entry.markers ?? 0) > 0 ? [{ label: coreT('Show @issue markers'), run: () => showMarkers(host, folder) }] : []),
         ...(status === 'failed' || status === 'needs-repeat' ? [{ label: coreT('Retry this experiment'), run: () => retryExperiment(ctx, folder) }] : []),
+        ...githubMenuItems(ctx, folder),
       ];
     }
     if (item?.kind === 'workflow') {
@@ -541,6 +546,12 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
     if (item?.kind === 'workflow') return marked(item.wf.code, found.marks.get(`${item.wf.id}:code`));
     if (item?.kind === 'uo') return marked(item.uo.code, found.marks.get(`${item.uo.id}:code`));
     return undefined;
+  };
+
+  /** 실험 줄의 GitHub 상태(spec §5.1). 연결이 없으면 없다. */
+  const badge = (node: TreeNode): TreeBadge | undefined => {
+    const item = items.get(node.id);
+    return item?.kind === 'experiment' ? statusBadge(githubStatuses[item.exp.dir]) : undefined;
   };
 
   const actions = (node: TreeNode): TreeAction[] | undefined => {
@@ -664,6 +675,7 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
             meta={meta}
             code={code}
             state={state}
+            badge={badge}
             actions={actions}
             renderLabel={(node) => marked(node.label, found.marks.get(node.id))}
           />

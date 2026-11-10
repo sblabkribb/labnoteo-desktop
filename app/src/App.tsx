@@ -62,6 +62,9 @@ import { createUpkeep, setAppUpkeep } from './labnote/commands/autoUpkeep';
 import { offerStatusNudge, type ChecklistCounts } from './labnote/commands/statusNudge';
 import { findCommand, registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
+import { githubActions } from './github/commands';
+import { githubNoticeOnOpen, onceForThisVault } from './github/startupNotice';
+import { clearGithubStatuses, scheduleGithubStatusRefresh } from './github/statusStore';
 import { legacyNotesOfferOnOpen } from './labnote/commands/legacyConvert';
 import { useCommandContext, useNoteSwitcher } from './labnote/commands/useCommandContext';
 import { usePaletteHotkey } from './labnote/ui/CommandPalette';
@@ -443,6 +446,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   useEffect(() => (ctx ? startMcpForVault(ctx) : undefined), [ctx]);
   // 앱 밖에서 고친 노트(감시자의 변경)도 동기화한다. 지워진 노트는 읽지 못해 아무것도 하지 않는다.
   useVaultChanges((paths) => {
+    // 실험 폴더가 밖에서 바뀌면 GitHub 상태 표시(안 올린 변경 수)를 다시 읽는다. 네트워크는 쓰지 않는다.
+    if (paths === 'all' || paths.some((p) => p.startsWith('labnote/') || p.includes('/labnote/'))) scheduleGithubStatusRefresh();
     if (paths === 'all') return;
     for (const p of paths) if (p.endsWith('.labnote.md')) samplesSync.touchPath(p);
   });
@@ -452,6 +457,24 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     if (!ctx || catalogNoticed.current) return;
     catalogNoticed.current = true;
     void catalogNoticeOnOpen(ctx);
+  }, [ctx]);
+  // GitHub(P-R9): 보관함마다 한 번 상태를 새로 읽고(앞 보관함의 것은 버린다), 끝나지 않은 올리기가 있으면 [마저 하기] 알림 하나.
+  // 가드는 이 화면의 ref 에 한 번만 만든다: StrictMode 의 효과 두 번 돌기에도 알림은 하나다.
+  const githubCtx = useRef(ctx);
+  githubCtx.current = ctx;
+  const githubNotice = useRef<() => Promise<void>>();
+  githubNotice.current ??= onceForThisVault(async () => {
+    clearGithubStatuses();
+    await githubNoticeOnOpen({
+      notify: (kind, message, opts) => githubCtx.current?.host.notify(kind, message, opts),
+      finish: (folder) => {
+        const c = githubCtx.current;
+        return c ? githubActions.finish(c, folder) : undefined;
+      },
+    });
+  });
+  useEffect(() => {
+    if (ctx) void githubNotice.current?.();
   }, [ctx]);
   // SP7 Part B: 스캔 가져오기(Task 31). 보관함을 열면 ScanFeature 를 놓고 Rust 의 스캔 폴더 감시, 폴더 감시자(30초 폴링),
   // Slack 받은 편지함(90초, 연결을 켠 보관함만), 노트를 따라가는 스캔 옮기기를 시작한다. 보관함을 바꾸면 모두 거두고 해독 워커를 끝낸다.
