@@ -1024,3 +1024,298 @@ fn another_repo_cannot_continue_a_link() {
     assert_eq!(fx.link().name, NAME);
     assert!(fx.link().last_pushed_commit.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Task 9C: "마저 하기" (`retry_at`) from each journal state.
+
+fn env_for<'a>(
+    fx: &'a Fx,
+    ep: &'a GithubEndpoints,
+    steps: &'a dyn Steps,
+    progress: &'a (dyn Fn(Stage, u64, u64) + Sync),
+) -> UploadEnv<'a> {
+    UploadEnv {
+        ep,
+        dirs: &fx.dirs,
+        root: &fx.root,
+        store: &fx.store,
+        net: &fx.net,
+        gh: &fx.gh,
+        request_id: Some("retry-1"),
+        steps,
+        progress,
+        now: NOW,
+    }
+}
+
+fn try_upload(fx: &Fx, s: &TestServer, steps: &dyn Steps, id: &str, c: UploadChoices) -> Result<UploadOutcome, NetError> {
+    let ep = fx.ep(s);
+    let progress = |_: Stage, _: u64, _: u64| {};
+    upload_at(&env_for(fx, &ep, steps, &progress), id, c)
+}
+
+fn retry(fx: &Fx, s: &TestServer, steps: &dyn Steps) -> Result<UploadOutcome, NetError> {
+    let ep = fx.ep(s);
+    let progress = |_: Stage, _: u64, _: u64| {};
+    retry_at(&env_for(fx, &ep, steps, &progress), FOLDER)
+}
+
+/// `YYYY-MM-DDTHH:MM:00Z` for Unix milliseconds `ms`.
+fn github_time(ms: u64) -> String {
+    let t = crate::gitsync::overlay::utc_from_unix(ms / 1000);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:00Z", t.year, t.month, t.day, t.hour, t.minute)
+}
+
+const DESCRIPTION: &str = "단백질 발현 · labnoteO";
+
+/// `GET repos/kim-lab/<NAME>` for the repository a lost create answer made.
+fn found_json(private: bool, description: Option<&str>, created_at: Option<&str>, size: u64) -> Canned {
+    let mut j: Value = serde_json::from_str(&repo_json(NAME, private)).unwrap();
+    j["description"] = json!(description);
+    if let Some(t) = created_at {
+        j["created_at"] = json!(t);
+    }
+    j["size"] = json!(size);
+    Canned::ok(&j.to_string())
+}
+
+fn found(description: &str, created_at: &str, size: u64) -> Canned {
+    found_json(true, Some(description), Some(created_at), size)
+}
+
+fn posts(s: &TestServer) -> usize {
+    s.requests.lock().unwrap().iter().filter(|r| r.method == "POST").count()
+}
+
+/// A push that never reaches the remote (a dropped connection).
+struct PushFails;
+
+impl Steps for PushFails {
+    fn push(
+        &self,
+        _: &Repository,
+        _: &Url,
+        _: &str,
+        _: &str,
+        _: &Zeroizing<String>,
+        _: &GitBase,
+        _: &mut dyn FnMut(Progress) -> bool,
+    ) -> Result<PushResult, GitError> {
+        Err(GitError::Git("the connection was reset".into()))
+    }
+}
+
+/// The push lands, then the app stops before the journal says so.
+struct CrashAfterPush;
+
+impl Steps for CrashAfterPush {
+    fn push(
+        &self,
+        repo: &Repository,
+        remote: &Url,
+        branch: &str,
+        target: &str,
+        token: &Zeroizing<String>,
+        allowed: &GitBase,
+        progress: &mut dyn FnMut(Progress) -> bool,
+    ) -> Result<PushResult, GitError> {
+        assert_eq!(git_push::push(repo, remote, branch, target, token, allowed, progress, &[]).unwrap(), PushResult::Ok);
+        Err(GitError::Git("the app was closed".into()))
+    }
+}
+
+/// Creates the repository and stops the upload at `committed` with `steps`.
+fn committed_with(fx: &Fx, steps: &dyn Steps, c: UploadChoices) -> (Repository, Oid) {
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, true)]);
+    assert!(try_upload(fx, &s, steps, &fx.create(true), c).is_err());
+    let link = fx.link();
+    assert_eq!(link.state, LinkState::Committed);
+    (remote, Oid::from_str(link.pending_commit.as_deref().unwrap()).unwrap())
+}
+
+#[test]
+fn a_lost_create_answer_is_adopted_with_one_post_in_total() {
+    let fx = Fx::new("gh-retry-adopt");
+    let before = snapshot(&fx.root);
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![Canned::drop_connection(), found(DESCRIPTION, &github_time(journal::now_ms()), 0)]);
+    let err = try_upload(&fx, &s, &RealSteps, &fx.create(true), UploadChoices::default()).unwrap_err();
+    assert_ne!(err.kind, NetErrorKind::BadInput, "{err:?}");
+    let link = fx.link();
+    assert_eq!(link.state, LinkState::RepoCreating);
+    // "마저 하기": GET only, adopted, then the preview.
+    let steps = TestSteps::default();
+    let out = retry(&fx, &s, &steps).unwrap();
+    assert_eq!(
+        out,
+        UploadOutcome::NeedsPreview {
+            full_name: format!("kim-lab/{NAME}"),
+            html_url: format!("https://github.com/kim-lab/{NAME}"),
+        }
+    );
+    let reqs = s.requests.lock().unwrap().clone();
+    assert_eq!(reqs.iter().map(|r| r.method.as_str()).collect::<Vec<_>>(), ["POST", "GET"]);
+    assert_eq!(reqs[1].path, format!("/repos/kim-lab/{NAME}"));
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    let adopted = fx.link();
+    assert_eq!((adopted.state, adopted.repo_id, adopted.link_id.as_str()), (LinkState::RepoReady, 99, link.link_id.as_str()));
+    // The preview's upload finishes it: no create.
+    let s2 = serve(vec![got(NAME, true)]);
+    let out = fx.upload(&s2, &fx.plan(PlanTarget::Update), UploadChoices::default());
+    let UploadOutcome::Done { counts, .. } = out else { panic!("{out:?}") };
+    assert_eq!(counts, Counts { new: 3, changed: 0, deleted: 0 });
+    assert_eq!(posts(&s) + posts(&s2), 1, "exactly one POST in total");
+    let pushed = fx.link().last_pushed_commit.unwrap();
+    assert_eq!(main_tip(&remote).to_string(), pushed);
+    assert_eq!(snapshot(&fx.root), before);
+    fx.no_token();
+}
+
+#[test]
+fn a_repo_that_is_not_the_lost_one_is_never_adopted_or_posted_again() {
+    let now = github_time(journal::now_ms());
+    let old = github_time(journal::now_ms() - 60 * 60 * 1000);
+    let cases: Vec<(&str, Canned, bool)> = vec![
+        ("description", found("another lab's · labnoteO", &now, 0), false),
+        ("no description", found_json(true, None, Some(&now), 0), false),
+        ("not empty", found(DESCRIPTION, &now, 12), false),
+        ("has a branch", found(DESCRIPTION, &now, 0), true),
+        ("older", found(DESCRIPTION, &old, 0), false),
+        ("no time", found_json(true, Some(DESCRIPTION), None, 0), false),
+    ];
+    for (case, answer, branch) in cases {
+        let fx = Fx::new("gh-retry-taken");
+        let remote = fx.remote("kim-lab", NAME);
+        if branch {
+            advance_remote(&remote, &[("notes.txt", Some(b"x\n"))]);
+        }
+        let s = serve(vec![Canned::drop_connection(), answer]);
+        assert!(try_upload(&fx, &s, &RealSteps, &fx.create(true), UploadChoices::default()).is_err(), "{case}");
+        let steps = TestSteps::default();
+        assert_eq!(retry(&fx, &s, &steps).unwrap(), UploadOutcome::NameTaken, "{case}");
+        assert_eq!(posts(&s), 1, "{case}: no second POST");
+        assert_eq!(quiet_count(&s), 2, "{case}");
+        assert_eq!(steps.pushes.load(Ordering::SeqCst), 0, "{case}");
+        // The record is gone: the folder goes back to the first-upload form.
+        assert!(fx.links().links.is_empty(), "{case}");
+        fx.no_token();
+    }
+    // No such repository: nothing was made, and the record is gone too.
+    let fx = Fx::new("gh-retry-404");
+    let s = serve(vec![Canned::drop_connection(), Canned::status(404)]);
+    assert!(try_upload(&fx, &s, &RealSteps, &fx.create(true), UploadChoices::default()).is_err());
+    assert_eq!(retry(&fx, &s, &RealSteps).unwrap(), UploadOutcome::NotFoundOrNoAccess);
+    assert_eq!(posts(&s), 1);
+    assert!(fx.links().links.is_empty());
+}
+
+#[test]
+fn an_adopted_repo_that_came_out_public_is_not_pushed_to() {
+    let fx = Fx::new("gh-retry-public");
+    fx.remote("kim-lab", NAME);
+    let s = serve(vec![
+        Canned::drop_connection(),
+        found_json(false, Some(DESCRIPTION), Some(&github_time(journal::now_ms())), 0),
+    ]);
+    assert!(try_upload(&fx, &s, &RealSteps, &fx.create(true), UploadChoices::default()).is_err());
+    let out = retry(&fx, &s, &RealSteps).unwrap();
+    assert_eq!(out, UploadOutcome::VisibilityMismatch { html_url: format!("https://github.com/kim-lab/{NAME}") });
+    assert_eq!(fx.link().state, LinkState::RepoReady);
+}
+
+#[test]
+fn a_failed_push_after_committed_pushes_the_same_commit_again() {
+    let fx = Fx::new("gh-retry-push");
+    let before = snapshot(&fx.root);
+    let (remote, pending) = committed_with(&fx, &PushFails, choices(json!({"untick": ["data/plate.csv"]})));
+    assert!(remote.refname_to_id("refs/heads/main").is_err(), "nothing reached GitHub");
+    // The choices are kept with the commit.
+    assert_eq!(fx.link().excluded, ["data/plate.csv"]);
+    let s = serve(vec![got(NAME, true)]);
+    let steps = TestSteps::default();
+    let out = retry(&fx, &s, &steps).unwrap();
+    assert_eq!(
+        out,
+        UploadOutcome::Done {
+            html_url: format!("https://github.com/kim-lab/{NAME}"),
+            full_name: format!("kim-lab/{NAME}"),
+            counts: Counts { new: 2, changed: 0, deleted: 0 },
+            warnings: vec![],
+        }
+    );
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 1);
+    assert_eq!(main_tip(&remote), pending, "the same commit id");
+    let link = fx.link();
+    assert_eq!(link.state, LinkState::Pushed);
+    assert_eq!(link.last_pushed_commit.as_deref(), Some(pending.to_string().as_str()));
+    assert!(link.pending_commit.is_none() && link.last_pushed_at.is_some());
+    assert_eq!(link.excluded, ["data/plate.csv"]);
+    assert_eq!(fx.links().default_owner.as_deref(), Some("kim-lab"));
+    let reqs = s.requests.lock().unwrap().clone();
+    assert_eq!((reqs.len(), reqs[0].method.as_str()), (1, "GET"));
+    // Finished: a second "마저 하기" sends nothing.
+    let s = serve(vec![]);
+    assert_eq!(retry(&fx, &s, &steps).unwrap(), UploadOutcome::NothingChanged);
+    assert_eq!(quiet_count(&s), 0);
+    assert_eq!(snapshot(&fx.root), before);
+    fx.no_token();
+}
+
+#[test]
+fn a_push_that_landed_before_its_journal_write_is_only_recorded() {
+    let fx = Fx::new("gh-retry-landed");
+    let (remote, pending) = committed_with(&fx, &CrashAfterPush, UploadChoices::default());
+    assert_eq!(main_tip(&remote), pending);
+    let s = serve(vec![got(NAME, true)]);
+    let steps = TestSteps::default();
+    let out = retry(&fx, &s, &steps).unwrap();
+    let UploadOutcome::Done { counts, .. } = out else { panic!("{out:?}") };
+    assert_eq!(counts, Counts { new: 3, changed: 0, deleted: 0 });
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0, "ls-remote equal: no push");
+    let link = fx.link();
+    assert_eq!((link.state, link.last_pushed_commit.as_deref()), (LinkState::Pushed, Some(pending.to_string().as_str())));
+    fx.no_token();
+}
+
+#[test]
+fn a_remote_that_moved_since_the_commit_goes_through_a_new_preview() {
+    let fx = Fx::new("gh-retry-moved");
+    let (remote, _) = committed_with(&fx, &PushFails, UploadChoices::default());
+    let theirs = advance_remote(&remote, &[("notes.txt", Some(b"x\n"))]);
+    let s = serve(vec![got(NAME, true)]);
+    let steps = TestSteps::default();
+    let out = retry(&fx, &s, &steps).unwrap();
+    assert!(matches!(out, UploadOutcome::NeedsPreview { .. }), "{out:?}");
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    assert_eq!(main_tip(&remote), theirs);
+    assert_eq!(fx.link().state, LinkState::Committed);
+}
+
+#[test]
+fn a_retry_while_another_upload_holds_the_lock_is_busy() {
+    let fx = Fx::new("gh-retry-busy");
+    committed_with(&fx, &PushFails, UploadChoices::default());
+    let link = fx.link();
+    let s = serve(vec![got(NAME, true)]);
+    {
+        let _held = lock_link(&fx.gh.busy, &fx.dirs, &fx.root, &[LockKey::Link(link.link_id.clone())]).unwrap();
+        assert_eq!(retry(&fx, &s, &RealSteps).unwrap(), UploadOutcome::Busy);
+    }
+    assert_eq!(quiet_count(&s), 0);
+    assert_eq!(fx.link(), link);
+    // A folder with no link is refused before anything is sent.
+    let fx = Fx::new("gh-retry-none");
+    let s = serve(vec![]);
+    assert_eq!(retry(&fx, &s, &RealSteps).unwrap_err().kind, NetErrorKind::BadInput);
+    assert_eq!(quiet_count(&s), 0);
+}
+
+#[test]
+fn needs_preview_wire_shape() {
+    assert_eq!(
+        serde_json::to_value(UploadOutcome::NeedsPreview { full_name: "a/b".into(), html_url: "https://github.com/a/b".into() })
+            .unwrap(),
+        json!({"outcome": "needsPreview", "fullName": "a/b", "htmlUrl": "https://github.com/a/b"})
+    );
+}

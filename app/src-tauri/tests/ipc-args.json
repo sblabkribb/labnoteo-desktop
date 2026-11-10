@@ -98,6 +98,7 @@
   "github_resolve_repo": ["url"],
   "github_plan": ["folder", "target", "sampleIds", "infoFindings"],
   "github_upload": ["requestId", "planId", "choices"],
+  "github_retry": ["requestId", "folder"],
   "github_folder_status": ["folder"],
   "github_statuses": [],
   "github_default_owner_get": [],

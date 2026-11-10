@@ -394,6 +394,11 @@ fn ipc_argument_names_match_the_typescript_side() {
         json!({"outcome": "planExpired"})
     );
     assert!(call("github_upload", json!({"requestId": "x", "planId": "y", "choices": {"add": ["x"]}})).is_err());
+    // "마저 하기" for a folder with no link: refused before anything is sent.
+    assert_eq!(
+        call("github_retry", args("github_retry", vec![json!("gh-retry-1"), json!("labnote/001_ipc")])).unwrap_err()["kind"],
+        "badInput"
+    );
     // Status, default owner and unlink are offline and answer for an unlinked folder.
     assert_eq!(
         ok("github_folder_status", args("github_folder_status", vec![json!("labnote/001_ipc")])),

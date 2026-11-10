@@ -370,6 +370,18 @@ pub fn ls_remote_tip(
     allowed: &GitBase,
 ) -> Result<Option<Oid>, GitError> {
     let name = branch_ref(branch)?;
+    let heads = ls_remote_heads(repo, remote_url, token, allowed)?;
+    Ok(heads.into_iter().find(|(n, _)| *n == name).map(|(_, id)| id))
+}
+
+/// Every `refs/heads/*` of the remote, without downloading anything (an
+/// empty list: the repository has no branch).
+pub fn ls_remote_heads(
+    repo: &Repository,
+    remote_url: &Url,
+    token: &Zeroizing<String>,
+    allowed: &GitBase,
+) -> Result<Vec<(String, Oid)>, GitError> {
     if !allowed.covers(remote_url) {
         return Err(GitError::NotAllowed);
     }
@@ -384,7 +396,7 @@ pub fn ls_remote_tip(
         Err(e) => return Err(GitError::Git(redact(e.message(), token, &[]))),
     };
     let heads = conn.list().map_err(|e| GitError::Git(redact(e.message(), token, &[])))?;
-    Ok(heads.iter().find(|h| h.name() == name).map(|h| h.oid()))
+    Ok(heads.iter().filter(|h| h.name().starts_with("refs/heads/")).map(|h| (h.name().to_string(), h.oid())).collect())
 }
 
 #[cfg(test)]

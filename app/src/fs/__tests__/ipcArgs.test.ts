@@ -52,6 +52,8 @@ const PENDING_TS_WRAPPERS: readonly string[] = [
   'github_default_owner_get',
   'github_default_owner_set',
   'github_unlink',
+  // Task 9C: 끝나지 않은 올리기 마저 하기.
+  'github_retry',
 ];
 
 /**

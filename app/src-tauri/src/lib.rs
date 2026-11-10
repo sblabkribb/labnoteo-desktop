@@ -132,6 +132,7 @@ macro_rules! register_commands {
             $crate::gitsync::plan::github_plan,
             // GitHub upload and status and default owner and disconnect (all but the upload offline).
             $crate::gitsync::upload::github_upload,
+            $crate::gitsync::upload::github_retry,
             $crate::gitsync::upload::github_folder_status,
             $crate::gitsync::upload::github_statuses,
             $crate::gitsync::upload::github_default_owner_get,

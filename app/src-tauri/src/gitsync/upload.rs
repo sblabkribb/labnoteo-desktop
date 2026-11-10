@@ -24,6 +24,11 @@
 //!   `divergedNotAcknowledged` and `publicNotConfirmed`. Every other answer
 //!   (`readOnly`, other red items, errors) used it up: plan again.
 //! - Status, default owner and unlink never reach the network.
+//! - "마저 하기" (`github_retry`) finishes an interrupted upload from its
+//!   journal state (spec §8.4), under the same lock: a lost create answer is
+//!   adopted only when all four conditions hold (never a second POST), a
+//!   committed upload pushes the same commit again, and a push that landed
+//!   before its journal write is only recorded.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
@@ -147,6 +152,11 @@ pub enum UploadOutcome {
     #[serde(rename_all = "camelCase")]
     VisibilityMismatch { html_url: String },
     Busy,
+    /// `github_retry` only: the repository is ready and nothing is waiting to
+    /// be pushed; the upload goes on through a new plan (`update`) and its
+    /// preview (spec §8.4, `repoReady`).
+    #[serde(rename_all = "camelCase")]
+    NeedsPreview { full_name: String, html_url: String },
 }
 
 /// The steps of the progress dialog (spec §5.5).
@@ -185,11 +195,10 @@ pub enum Point {
 /// The Git side effects of an upload, behind a trait so tests can count
 /// them, pause at a point, or fail a step. `RealSteps` is the app's.
 ///
-/// Only the fetch and the push can be replaced. The create request, the
-/// journal writes and the commit are reachable only through `reached`;
-/// fault injection at every journal state (a lost create answer, a crash
-/// after the push and before its journal write) will need more seams here
-/// (Task 9C).
+/// Only the Git network steps can be replaced. The create request is faulted
+/// through the fake server (an answer that never comes), and a crash after
+/// the push and before its journal write is a `push` that pushes and then
+/// fails.
 pub trait Steps: Sync {
     /// Called before the side effect at `point` runs.
     fn reached(&self, _point: Point) {}
@@ -230,6 +239,18 @@ pub trait Steps: Sync {
         allowed: &GitBase,
     ) -> Result<Option<Oid>, GitError> {
         git_push::ls_remote_tip(repo, remote, branch, token, allowed)
+    }
+
+    /// Every branch of the remote (the adoption check: a repository with no
+    /// branch).
+    fn remote_heads(
+        &self,
+        repo: &Repository,
+        remote: &Url,
+        token: &Zeroizing<String>,
+        allowed: &GitBase,
+    ) -> Result<Vec<(String, Oid)>, GitError> {
+        git_push::ls_remote_heads(repo, remote, token, allowed)
     }
 }
 
@@ -469,6 +490,95 @@ fn remember(rec: &mut LinkRecord, plan: &Plan, sel: &Selection<'_>, choices: &Up
     rec.allowed_hits.sort();
 }
 
+/// The linked repository as GitHub has it now.
+struct Linked {
+    owner: String,
+    name: String,
+    html_url: String,
+}
+
+/// The branch of a link (`main` when the record has none).
+fn link_branch(l: &LinkRecord) -> String {
+    if l.branch.is_empty() {
+        NEW_BRANCH.to_string()
+    } else {
+        l.branch.clone()
+    }
+}
+
+/// Asks GitHub about the linked repository before anything is sent: still
+/// there, still writable, and not public when nothing was pushed to a
+/// repository meant to be private. Records what changed (name, visibility)
+/// and adds the "now public" warning the link still owes. `typed`: a name the
+/// user typed for this link, which must answer with the same repository id.
+fn check_linked(
+    env: &UploadEnv<'_>,
+    l: &LinkRecord,
+    typed: Option<(String, String)>,
+    warnings: &mut Vec<UploadWarning>,
+) -> Result<Result<Linked, UploadOutcome>, NetError> {
+    let (ask_owner, ask_name) = typed.clone().unwrap_or_else(|| (l.owner.clone(), l.name.clone()));
+    let call = GithubCall::GetRepo { owner: ask_owner, name: ask_name };
+    let reply = block_on(call_authed(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id, call.clone(), None))?;
+    match classify(&call, &reply) {
+        ApiOutcome::Ok | ApiOutcome::Moved { .. } => {}
+        other => return api_outcome(env.dirs, other, &reply).map(Err),
+    }
+    let f = repo_facts(&reply.json).ok_or_else(unexpected)?;
+    if typed.is_some() && f.id != l.repo_id {
+        return Err(bad_input("this folder is already linked to a repository"));
+    }
+    if !f.can_push {
+        return Ok(Err(UploadOutcome::ReadOnly));
+    }
+    let html_url = if f.html_url.is_empty() { l.html_url.clone() } else { f.html_url.clone() };
+    // Nothing has been pushed to a repository the app created as
+    // private that is public now: the first push waits until it is
+    // private again (spec §5.3: verified, never assumed).
+    if l.last_pushed_commit.is_none() && l.intended_private == Some(true) && !f.private {
+        return Ok(Err(UploadOutcome::VisibilityMismatch { html_url }));
+    }
+    // Public now and not said yet: the link keeps that until an
+    // upload that sends something has said it.
+    let unwarned = !f.private && (l.private || l.public_unwarned);
+    if unwarned {
+        warnings.push(UploadWarning::NowPublic);
+    }
+    let now = (f.owner.as_str(), f.name.as_str(), f.private, html_url.as_str(), unwarned);
+    if now != (l.owner.as_str(), l.name.as_str(), l.private, l.html_url.as_str(), l.public_unwarned) {
+        journal::advance(env.dirs, env.root, &l.link_id, |r| {
+            r.owner = f.owner.clone();
+            r.name = f.name.clone();
+            r.private = f.private;
+            r.html_url = html_url.clone();
+            r.public_unwarned = unwarned;
+        })?;
+    }
+    Ok(Ok(Linked { owner: f.owner, name: f.name, html_url }))
+}
+
+/// Records a push of `commit` to the link's branch: `pushed`, the default
+/// owner, and whatever `also` adds.
+fn record_pushed(
+    env: &UploadEnv<'_>,
+    link_id: &str,
+    commit: Oid,
+    owner: &str,
+    also: impl FnOnce(&mut LinkRecord),
+) -> Result<(), NetError> {
+    update_links(env.dirs, env.root, |doc| {
+        let rec = doc.links.values_mut().find(|r| r.link_id == link_id).ok_or_else(|| bad_input("the link is gone"))?;
+        rec.state = LinkState::Pushed;
+        rec.last_pushed_commit = Some(commit.to_string());
+        rec.pending_commit = None;
+        rec.last_pushed_at = Some(now_ms());
+        rec.public_unwarned = false;
+        also(rec);
+        doc.default_owner = Some(owner.to_string());
+        Ok(())
+    })
+}
+
 /// Uploads plan `plan_id` (see the module doc). Blocking: runs the GitHub
 /// calls on the async runtime and the Git steps on this thread.
 pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> Result<UploadOutcome, NetError> {
@@ -649,46 +759,12 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         // The linked repository: still there, still writable, still private?
         Dest::Update(l, typed) => {
             (env.progress)(Stage::Preparing, 0, 1);
-            let (ask_owner, ask_name) = typed.clone().unwrap_or_else(|| (l.owner.clone(), l.name.clone()));
-            let call = GithubCall::GetRepo { owner: ask_owner, name: ask_name };
-            let reply = block_on(call_authed(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id, call.clone(), None))?;
-            match classify(&call, &reply) {
-                ApiOutcome::Ok | ApiOutcome::Moved { .. } => {}
-                other => return api_outcome(env.dirs, other, &reply),
-            }
-            let f = repo_facts(&reply.json).ok_or_else(unexpected)?;
-            if typed.is_some() && f.id != l.repo_id {
-                return Err(bad_input("this folder is already linked to a repository"));
-            }
-            if !f.can_push {
-                return Ok(UploadOutcome::ReadOnly);
-            }
-            let html_url = if f.html_url.is_empty() { l.html_url.clone() } else { f.html_url.clone() };
-            // Nothing has been pushed to a repository the app created as
-            // private that is public now: the first push waits until it is
-            // private again (spec §5.3: verified, never assumed).
-            if l.last_pushed_commit.is_none() && l.intended_private == Some(true) && !f.private {
-                return Ok(UploadOutcome::VisibilityMismatch { html_url });
-            }
-            // Public now and not said yet: the link keeps that until an
-            // upload that sends something has said it.
-            let unwarned = !f.private && (l.private || l.public_unwarned);
-            if unwarned {
-                warnings.push(UploadWarning::NowPublic);
-            }
-            let now = (f.owner.as_str(), f.name.as_str(), f.private, html_url.as_str(), unwarned);
-            if now != (l.owner.as_str(), l.name.as_str(), l.private, l.html_url.as_str(), l.public_unwarned) {
-                journal::advance(env.dirs, env.root, &l.link_id, |r| {
-                    r.owner = f.owner.clone();
-                    r.name = f.name.clone();
-                    r.private = f.private;
-                    r.html_url = html_url.clone();
-                    r.public_unwarned = unwarned;
-                })?;
-            }
+            let r = match check_linked(env, &l, typed, &mut warnings)? {
+                Ok(r) => r,
+                Err(outcome) => return Ok(outcome),
+            };
             let parent = l.last_pushed_commit.as_deref().and_then(|c| Oid::from_str(c).ok());
-            let branch = if l.branch.is_empty() { NEW_BRANCH.to_string() } else { l.branch.clone() };
-            (l.link_id, f.owner, f.name, html_url, branch, parent)
+            (l.link_id.clone(), r.owner, r.name, r.html_url, link_branch(&l), parent)
         }
     };
 
@@ -786,9 +862,12 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
     // A separate upload is not journaled: `lastPushedCommit` and the link
     // stay where they were, and "마저 하기" never pushes it to `branch`.
     if separate.is_none() {
+        // The choices are remembered with the commit: "마저 하기" finishes
+        // the push without the plan.
         journal::advance(env.dirs, env.root, &link_id, |r| {
             r.state = LinkState::Committed;
             r.pending_commit = Some(commit.to_string());
+            remember(r, &plan, &sel, &choices);
         })?;
     }
 
@@ -817,18 +896,7 @@ pub fn upload_at(env: &UploadEnv<'_>, plan_id: &str, choices: UploadChoices) -> 
         let compare_url = compare_url(&html_url, &owner, &name, &branch, &sep);
         return Ok(UploadOutcome::PushedSeparately { compare_url, warnings });
     }
-    let pushed_owner = owner.clone();
-    update_links(env.dirs, env.root, |doc| {
-        let rec = doc.links.values_mut().find(|r| r.link_id == link_id).ok_or_else(|| bad_input("the link is gone"))?;
-        rec.state = LinkState::Pushed;
-        rec.last_pushed_commit = Some(commit.to_string());
-        rec.pending_commit = None;
-        rec.last_pushed_at = Some(now_ms());
-        rec.public_unwarned = false;
-        remember(rec, &plan, &sel, &choices);
-        doc.default_owner = Some(pushed_owner);
-        Ok(())
-    })?;
+    record_pushed(env, &link_id, commit, &owner, |r| remember(r, &plan, &sel, &choices))?;
     if let Some(key) = journal::folder_of(env.dirs, env.root, &link_id) {
         let cache: BTreeMap<String, CacheEntry> =
             sel.entries.iter().map(|e| (e.rel.clone(), CacheEntry(e.size, e.mtime_ns, e.oid.to_string()))).collect();
@@ -881,6 +949,223 @@ pub async fn github_upload<R: tauri::Runtime>(
             now: local_now(),
         };
         upload_at(&env, &plan_id, choices)
+    })
+    .await
+    .map_err(|e| NetError::new(NetErrorKind::Io, format!("the upload stopped: {e}")))?
+}
+
+// ---------------------------------------------------------------------------
+// "마저 하기": finishing an interrupted upload from its journal (spec §8.4).
+
+/// How long before the create request GitHub's `created_at` may lie (clock
+/// skew between this PC and GitHub).
+const ADOPT_SKEW_MS: u64 = 2 * 60 * 1000;
+
+/// The user-facing counts of `commit` against `parent` (files that exist
+/// only in the commit left out).
+fn commit_counts(repo: &Repository, parent: Option<Oid>, commit: Oid) -> Counts {
+    let old = parent.and_then(|p| tree_files(repo, p).ok()).unwrap_or_default();
+    let new = tree_files(repo, commit).unwrap_or_default();
+    let mut c = Counts::default();
+    for (path, id) in new.iter().filter(|(p, _)| !generated_only(p)) {
+        match old.get(path) {
+            None => c.new += 1,
+            Some(o) if o != id => c.changed += 1,
+            _ => {}
+        }
+    }
+    c.deleted = old.keys().filter(|p| !generated_only(p) && !new.contains_key(*p)).count() as _;
+    c
+}
+
+fn needs_preview(l: &LinkRecord) -> UploadOutcome {
+    UploadOutcome::NeedsPreview { full_name: format!("{}/{}", l.owner, l.name), html_url: l.html_url.clone() }
+}
+
+/// Finishes the upload of `folder` from its journal state:
+/// - `repoCreating` (the create answer was lost): `GET repos/{owner}/{name}`,
+///   adopted only when the owner and name match, the repository is empty
+///   (`size == 0` and no branch), `created_at` is no earlier than the request
+///   (less two minutes) and the description is the one sent. Anything else
+///   forgets the record and answers `nameTaken` (`notFoundOrNoAccess` when
+///   there is no such repository): never a second POST from here.
+/// - `repoReady`: `needsPreview` (plan, preview, upload).
+/// - `committed`: the remote already at `pendingCommit` is only recorded;
+///   the remote still at the commit's parent gets the same commit pushed
+///   again; a remote that moved goes through a new plan (`needsPreview`).
+/// - `pushed`: `nothingChanged`.
+pub fn retry_at(env: &UploadEnv<'_>, folder: &str) -> Result<UploadOutcome, NetError> {
+    let not_linked = || bad_input("this folder is not linked to a repository");
+    let link = read_links(env.dirs, env.root)?.links.get(folder).cloned().ok_or_else(not_linked)?;
+    if !valid_id(&link.link_id) {
+        return Err(bad_input("the folder's GitHub link is damaged; disconnect it and upload again"));
+    }
+    let keys = [LockKey::Folder(folder.to_string()), LockKey::Link(link.link_id.clone())];
+    let Ok(guard) = lock_link(&env.gh.busy, env.dirs, env.root, &keys) else { return Ok(UploadOutcome::Busy) };
+    // Read again under the lock: an upload that just finished moved it on.
+    let link = read_links(env.dirs, env.root)?
+        .links
+        .get(folder)
+        .filter(|l| l.link_id == link.link_id)
+        .cloned()
+        .ok_or_else(not_linked)?;
+    match link.state {
+        LinkState::Pushed => return Ok(UploadOutcome::NothingChanged),
+        LinkState::Planned | LinkState::RepoReady => return Ok(needs_preview(&link)),
+        LinkState::RepoCreating | LinkState::Committed => {}
+    }
+    let Some(tok) = token(env.gh, env.store)? else { return Ok(UploadOutcome::NeedsSignIn) };
+    let outcome = match link.state {
+        LinkState::RepoCreating => adopt(env, &link, &tok),
+        _ => finish_push(env, &link, &tok),
+    };
+    drop(guard);
+    outcome
+}
+
+/// `repoCreating`: adopt the repository the lost answer made, or forget the
+/// record (see `retry_at`).
+fn adopt(env: &UploadEnv<'_>, link: &LinkRecord, tok: &Zeroizing<String>) -> Result<UploadOutcome, NetError> {
+    (env.progress)(Stage::Creating, 0, 1);
+    let call = GithubCall::GetRepo { owner: link.owner.clone(), name: link.name.clone() };
+    let reply = block_on(call_authed(env.ep, env.dirs, env.store, env.net, env.gh, env.request_id, call.clone(), None))?;
+    let forget = |outcome: UploadOutcome| -> Result<UploadOutcome, NetError> {
+        journal::abandon(env.dirs, env.root, &link.link_id)?;
+        Ok(outcome)
+    };
+    match classify(&call, &reply) {
+        ApiOutcome::Ok => {}
+        // The name answers for another repository now (renamed or transferred).
+        ApiOutcome::Moved { .. } => return forget(UploadOutcome::NameTaken),
+        ApiOutcome::NotFoundOrNoAccess => return forget(UploadOutcome::NotFoundOrNoAccess),
+        other => return api_outcome(env.dirs, other, &reply),
+    }
+    let f = repo_facts(&reply.json).ok_or_else(unexpected)?;
+    let same_name = f.owner.eq_ignore_ascii_case(&link.owner) && f.name.eq_ignore_ascii_case(&link.name);
+    let recent = match (f.created_at_ms, link.requested_at) {
+        (Some(created), Some(requested)) => created >= requested.saturating_sub(ADOPT_SKEW_MS),
+        _ => false,
+    };
+    let same_description = link.sent_description.is_some() && f.description == link.sent_description;
+    if !(same_name && f.empty && recent && same_description) {
+        return forget(UploadOutcome::NameTaken);
+    }
+    // `size` can lag behind a push on GitHub: the repository must also have
+    // no branch at all.
+    let repo = open_or_init(env.dirs, env.root, &link.link_id).map_err(git_error)?;
+    let remote = remote_url(env.ep, &f.owner, &f.name)?;
+    match env.steps.remote_heads(&repo, &remote, tok, &GitBase::from_endpoints(env.ep)) {
+        Ok(heads) if heads.is_empty() => {}
+        Ok(_) => return forget(UploadOutcome::NameTaken),
+        Err(GitError::AuthRejected) => return Ok(UploadOutcome::NeedsSignIn),
+        Err(e) => return Err(git_error(e)),
+    }
+    journal::advance(env.dirs, env.root, &link.link_id, |r| {
+        r.repo_id = f.id;
+        r.owner = f.owner.clone();
+        r.name = f.name.clone();
+        r.html_url = f.html_url.clone();
+        r.private = f.private;
+        r.state = LinkState::RepoReady;
+    })?;
+    if link.intended_private == Some(true) && !f.private {
+        return Ok(UploadOutcome::VisibilityMismatch { html_url: f.html_url });
+    }
+    Ok(UploadOutcome::NeedsPreview { full_name: format!("{}/{}", f.owner, f.name), html_url: f.html_url })
+}
+
+/// `committed`: push `pendingCommit` again, or only record it when the
+/// remote already has it (see `retry_at`).
+fn finish_push(env: &UploadEnv<'_>, link: &LinkRecord, tok: &Zeroizing<String>) -> Result<UploadOutcome, NetError> {
+    (env.progress)(Stage::Preparing, 0, 1);
+    let Some(pending) = link.pending_commit.as_deref().and_then(|c| Oid::from_str(c).ok()) else {
+        return Ok(needs_preview(link));
+    };
+    let mut warnings = Vec::new();
+    let r = match check_linked(env, link, None, &mut warnings)? {
+        Ok(r) => r,
+        Err(outcome) => return Ok(outcome),
+    };
+    let repo = open_or_init(env.dirs, env.root, &link.link_id).map_err(git_error)?;
+    // The app's copy lost the commit: build it again from a new plan.
+    let Ok(commit) = repo.find_commit(pending) else { return Ok(needs_preview(link)) };
+    let parent = commit.parent_id(0).ok();
+    let branch = link_branch(link);
+    let remote = remote_url(env.ep, &r.owner, &r.name)?;
+    let allowed = GitBase::from_endpoints(env.ep);
+    let tip = match env.steps.remote_tip(&repo, &remote, &branch, tok, &allowed) {
+        Ok(t) => t,
+        Err(GitError::AuthRejected) => return Ok(UploadOutcome::NeedsSignIn),
+        Err(e) => return Err(git_error(e)),
+    };
+    if tip != Some(pending) {
+        if tip != parent {
+            // GitHub moved since the commit was made: a new plan shows what
+            // changed there (the divergence screen).
+            return Ok(needs_preview(link));
+        }
+        // The same commit again. A half push left only unreferenced objects.
+        let refname = branch_ref(&branch).map_err(git_error)?;
+        repo.reference(&refname, pending, true, "labnoteO: finish the upload").map_err(|e| git_error(e.into()))?;
+        (env.progress)(Stage::Uploading, 0, 0);
+        env.steps.reached(Point::BeforePush);
+        let mut on_progress = |p: Progress| {
+            if let Progress::Sending { bytes, .. } = p {
+                (env.progress)(Stage::Uploading, bytes as u64, 0);
+            }
+            true
+        };
+        match env.steps.push(&repo, &remote, &branch, &branch, tok, &allowed, &mut on_progress).map_err(git_error)? {
+            PushResult::Ok => {}
+            PushResult::Rejected { kind, lines } => return Ok(UploadOutcome::Rejected { kind, lines }),
+            PushResult::AuthRejected => return Ok(UploadOutcome::NeedsSignIn),
+            PushResult::Cancelled => return Err(NetError::new(NetErrorKind::Cancelled, "the upload was cancelled")),
+        }
+    }
+    (env.progress)(Stage::Checking, 0, 1);
+    record_pushed(env, &link.link_id, pending, &r.owner, |_| {})?;
+    Ok(UploadOutcome::Done {
+        html_url: r.html_url,
+        full_name: format!("{}/{}", r.owner, r.name),
+        counts: commit_counts(&repo, parent, pending),
+        warnings,
+    })
+}
+
+/// "마저 하기" for `folder` (see `retry_at`). Progress goes out on
+/// `github://progress`.
+#[tauri::command]
+pub async fn github_retry<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    request_id: String,
+    folder: String,
+) -> Result<UploadOutcome, NetError> {
+    let no_vault = || NetError::new(NetErrorKind::NotConfigured, "no vault is open");
+    let root = app.try_state::<VaultState>().ok_or_else(no_vault)?.root().map_err(|_| no_vault())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let missing = || NetError::new(NetErrorKind::NotConfigured, "the app is not ready");
+        let dirs = app.try_state::<IntegrationDirs>().ok_or_else(missing)?;
+        let secrets = app.try_state::<Secrets>().ok_or_else(missing)?;
+        let net = app.try_state::<NetState>().ok_or_else(missing)?;
+        let gh = app.try_state::<GithubState>().ok_or_else(missing)?;
+        let emit = |stage: Stage, done: u64, total: u64| {
+            // A lost progress line is not worth failing the upload for.
+            let _ = app.emit(PROGRESS_EVENT, GithubProgress { request_id: request_id.clone(), stage, done, total });
+        };
+        let ep = endpoints();
+        let env = UploadEnv {
+            ep: &ep,
+            dirs: &dirs.0,
+            root: &root,
+            store: secrets.0.as_ref(),
+            net: &net,
+            gh: &gh,
+            request_id: Some(&request_id),
+            steps: &RealSteps,
+            progress: &emit,
+            now: local_now(),
+        };
+        retry_at(&env, &folder)
     })
     .await
     .map_err(|e| NetError::new(NetErrorKind::Io, format!("the upload stopped: {e}")))?

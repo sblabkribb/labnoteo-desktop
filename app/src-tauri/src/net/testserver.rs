@@ -18,6 +18,9 @@ pub struct Canned {
     pub headers: Vec<(&'static str, String)>,
     pub body: Vec<u8>,
     pub chunks: Vec<(Duration, Vec<u8>)>,
+    /// Read the request, then close the connection without answering (a
+    /// request that reached the server and whose answer was lost).
+    pub drop: bool,
 }
 
 impl Canned {
@@ -28,7 +31,7 @@ impl Canned {
 
     /// The given status with an empty body.
     pub fn status(code: u16) -> Self {
-        Canned { status: code, headers: Vec::new(), body: Vec::new(), chunks: Vec::new() }
+        Canned { status: code, headers: Vec::new(), body: Vec::new(), chunks: Vec::new(), drop: false }
     }
 
     /// Sets a header, replacing one of the same name (case-insensitive).
@@ -41,6 +44,11 @@ impl Canned {
     pub fn body(mut self, b: impl Into<Vec<u8>>) -> Self {
         self.body = b.into();
         self
+    }
+
+    /// Reads the request and closes the connection with no answer at all.
+    pub fn drop_connection() -> Self {
+        Canned { drop: true, ..Canned::status(200) }
     }
 
     pub fn chunk(mut self, after: Duration, bytes: &[u8]) -> Self {
@@ -144,6 +152,10 @@ fn reason(code: u16) -> &'static str {
 }
 
 fn write_response(stream: &mut TcpStream, canned: &Canned) {
+    if canned.drop {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        return;
+    }
     let mut head = format!("HTTP/1.1 {} {}\r\n", canned.status, reason(canned.status));
     for (k, v) in &canned.headers {
         if k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("connection") {
@@ -267,6 +279,13 @@ mod tests {
         let out = get(&srv.url, "");
         assert!(!out.contains("Content-Length"));
         assert!(out.ends_with("abc"));
+    }
+
+    #[test]
+    fn drop_connection_reads_the_request_and_answers_nothing() {
+        let srv = serve(vec![Canned::drop_connection()]);
+        assert_eq!(get(&srv.url, ""), "");
+        assert_eq!(srv.request_count(), 1);
     }
 
     #[test]

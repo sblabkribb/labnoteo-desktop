@@ -193,6 +193,38 @@ pub(crate) struct RepoFacts {
     /// `html_url` when it is `https` (the web page of the repo), or `http` on a
     /// loopback host (the test servers); empty otherwise.
     pub html_url: String,
+    /// The repository's description (`None` when GitHub says `null`).
+    pub description: Option<String>,
+    /// `created_at` in Unix milliseconds, when it is a plain UTC time.
+    pub created_at_ms: Option<u64>,
+}
+
+/// A GitHub time `YYYY-MM-DDTHH:MM:SSZ` in Unix milliseconds. Anything else
+/// (another offset, fractions, a date before 1970) is `None`.
+pub(crate) fn github_time_ms(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z' {
+        return None;
+    }
+    // Byte-wise, so a multi-byte character never splits a slice.
+    let num = |r: std::ops::Range<usize>| -> Option<i64> {
+        b[r].iter().try_fold(0i64, |n, c| c.is_ascii_digit().then(|| n * 10 + i64::from(c - b'0')))
+    };
+    let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (hh, mm, ss) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + hh * 3600 + mm * 60 + ss;
+    u64::try_from(secs).ok().map(|s| s * 1000)
 }
 
 /// `None` unless the answer has an id, a visibility and a valid owner and
@@ -219,6 +251,8 @@ pub(crate) fn repo_facts(j: &Value) -> Option<RepoFacts> {
             })
             .unwrap_or("")
             .to_string(),
+        description: j["description"].as_str().map(str::to_string),
+        created_at_ms: j["created_at"].as_str().and_then(github_time_ms),
     })
 }
 
@@ -371,6 +405,21 @@ mod tests {
     use crate::net::secrets::{store_secret, MemoryStore, Slot};
     use crate::net::testserver::{serve, Canned, TestServer};
     use serde_json::json;
+
+    #[test]
+    fn github_times_are_plain_utc_only() {
+        assert_eq!(github_time_ms("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(github_time_ms("2026-11-10T05:32:07Z"), Some(1_794_288_727_000));
+        assert_eq!(github_time_ms("2000-02-29T23:59:59Z"), Some(951_868_799_000));
+        for bad in ["", "2026-11-10", "2026-11-10T05:32:07+09:00", "2026-11-10T05:32:07.5Z", "2026-13-10T05:32:07Z", "1969-12-31T23:59:59Z", "２026-11-10T05:32:07Z"] {
+            assert_eq!(github_time_ms(bad), None, "{bad}");
+        }
+        let f = repo_facts(&json!({"id": 1, "name": "a", "owner": {"login": "o"}, "private": true,
+            "description": "실험 · labnoteO", "created_at": "2026-11-10T05:32:07Z"})).unwrap();
+        assert_eq!((f.description.as_deref(), f.created_at_ms), (Some("실험 · labnoteO"), Some(1_794_288_727_000)));
+        let f = repo_facts(&json!({"id": 1, "name": "a", "owner": {"login": "o"}, "private": true, "description": null})).unwrap();
+        assert_eq!((f.description, f.created_at_ms), (None, None));
+    }
 
     #[test]
     fn repo_facts_keeps_only_an_https_or_loopback_page() {
