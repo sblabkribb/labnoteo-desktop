@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/llm/agent.ts:31-186 sha256:099940c5b1620804
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: imports point at ./llmProvider. AgentDeps gains signal?: AbortSignal, passed to every provider.chat (which cancels the request in Rust through net_cancel). runAgent checks deps.signal?.aborted before each model turn, before each tool call of a turn, and again just before each runTool (so an approval answered after a Cancel never writes), and throws NetError('cancelled') (D11). The argument order stays the vendor's runAgent(messages, deps). The logic is otherwise verbatim.
+// Changes: imports point at ./llmProvider. AgentDeps gains signal?: AbortSignal, passed to every provider.chat (which cancels the request in Rust through net_cancel). runAgent checks deps.signal?.aborted before each model turn, before each tool call of a turn, and again just before each runTool (so an approval answered after a Cancel never writes), and throws NetError('cancelled') (D11). The argument order stays the vendor's runAgent(messages, deps). Task 9 (spec §7.4): AgentDeps gains external?: ReadonlyMap<string, ExternalToolMeta> (the side map of external tools, ../../ai/externalTools) and confirm gains a 4th argument { tainted, reason? }; runAgent keeps tainted (true at start when an MCP tool is offered, and after any external result) and taintSources (MCP server ids, plus 'scholar', grown only by results), returned on AgentRun. Every mutating tool is still confirmed, now with the note; a read-only MCP tool is also confirmed when, after a result, its server is not a taint source (crossServer) or its serialised arguments exceed 2,000 chars (bigArgs); a denial of such a read answers 'User denied this call.'. The logic is otherwise verbatim.
 /**
  * The tool-calling loop that makes the built-in AI agentic.
  *
@@ -22,6 +22,7 @@ import {
   type ToolDef,
 } from '@labnoteo/core';
 import { NetError } from '../../integrations/netIpc';
+import { BIG_ARGS_CHARS, type ConfirmNote, type ExternalToolMeta } from '../../ai/externalTools';
 import type { ChatMessage, ChatResult, LlmProvider, ToolCall } from './llmProvider';
 
 /** Throws NetError('cancelled') once the run's signal has aborted (D11). */
@@ -46,8 +47,15 @@ export interface AgentDeps {
    * Ask the user to approve a mutating tool call. Returning false is a normal
    * outcome, not an error: the denial is reported to the model, which can adapt.
    * `preview` is the tool's {@link ToolDef.describe} result, when it has one.
+   * `note` says whether outside content reached the conversation, and why a
+   * read-only external call is asked about (spec §7.4).
    */
-  confirm(call: ToolCall, tool: ToolDef, preview?: Exclude<ToolPreview, { error: string }>): Promise<boolean>;
+  confirm(
+    call: ToolCall,
+    tool: ToolDef,
+    preview?: Exclude<ToolPreview, { error: string }>,
+    note?: ConfirmNote
+  ): Promise<boolean>;
   /** Tools to offer. Defaults to the full core registry. */
   tools?: ToolDef[];
   temperature?: number;
@@ -56,6 +64,8 @@ export interface AgentDeps {
    * model turn and before each tool runs.
    */
   signal?: AbortSignal;
+  /** What the app knows about the external tools among `tools`, by function name (spec §7.2). */
+  external?: ReadonlyMap<string, ExternalToolMeta>;
 }
 
 /**
@@ -86,6 +96,19 @@ export interface AgentRun {
   }>;
   /** True when the cap stopped the loop before the model finished. */
   stoppedAtLimit: boolean;
+  /** True once outside content could reach the model (spec §7.4). */
+  tainted: boolean;
+  /** Where external results came from: MCP server ids, and 'scholar'. */
+  taintSources: string[];
+}
+
+/** Length of the arguments as they leave the computer. */
+function argsLength(args: Record<string, unknown>): number {
+  try {
+    return JSON.stringify(args)?.length ?? 0;
+  } catch {
+    return Infinity;
+  }
 }
 
 /** {@link AgentRun.executed} counted the way the end notice reports it. */
@@ -131,6 +154,11 @@ export async function runAgent(
   const tools = deps.tools ?? createLabnoteTools();
   const history: ChatMessage[] = [...messages];
   const executed: AgentRun['executed'] = [];
+  const external = deps.external;
+  // Offered MCP tools' descriptions and schemas are server text the model reads unfenced (spec §7.4).
+  let tainted = tools.some(t => external?.get(t.name)?.kind === 'mcp');
+  const taintSources = new Set<string>();
+  const taint = () => ({ tainted, taintSources: [...taintSources] });
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     stopIfAborted(deps.signal);
@@ -146,6 +174,7 @@ export async function runAgent(
         ...(turn.thinkingOnly ? { thinkingOnly: true } : {}),
         executed,
         stoppedAtLimit: false,
+        ...taint(),
       };
     }
 
@@ -163,6 +192,16 @@ export async function runAgent(
         continue;
       }
 
+      const meta = external?.get(tool.name);
+      // A read-only MCP call still sends its arguments out: ask when outside text could be steering
+      // them to another server, or when they are long enough to carry a note (spec §7.2, §7.4).
+      let reason: ConfirmNote['reason'];
+      if (meta?.kind === 'mcp') {
+        if (tainted && taintSources.size > 0 && !taintSources.has(meta.serverId ?? '')) reason = 'crossServer';
+        else if (argsLength(call.arguments) > BIG_ARGS_CHARS) reason = 'bigArgs';
+      }
+      const note: ConfirmNote = reason ? { tainted, reason } : { tainted };
+
       if (tool.mutates) {
         // A call the tool would reject anyway is not put to the user; the
         // model gets the real reason instead of "denied" (#69).
@@ -172,15 +211,26 @@ export async function runAgent(
           executed.push({ call, outcome: 'rejected', mutates: true, ...preview });
           continue;
         }
-        if (!(await deps.confirm(call, tool, preview))) {
+        if (!(await deps.confirm(call, tool, preview, note))) {
           history.push(resultMessage(call, { error: 'User denied this write.' }));
           executed.push({ call, outcome: 'denied', mutates: true });
+          continue;
+        }
+      } else if (reason) {
+        if (!(await deps.confirm(call, tool, undefined, note))) {
+          history.push(resultMessage(call, { error: 'User denied this call.' }));
+          executed.push({ call, outcome: 'denied', mutates: false });
           continue;
         }
       }
 
       stopIfAborted(deps.signal);
       const res = await runTool(tools, call.name, deps.ctx, call.arguments);
+      if (meta) {
+        // The result (or its error text) is outside content from here on.
+        tainted = true;
+        taintSources.add(meta.kind === 'mcp' ? (meta.serverId ?? '') : 'scholar');
+      }
       const payload = res.ok ? (res.data ?? null) : { error: res.error };
       // Wrapped only when there is something to say, so the common payload
       // stays exactly what the tool returned.
@@ -200,5 +250,5 @@ export async function runAgent(
     }
   }
 
-  return { content: '', executed, stoppedAtLimit: true };
+  return { content: '', executed, stoppedAtLimit: true, ...taint() };
 }

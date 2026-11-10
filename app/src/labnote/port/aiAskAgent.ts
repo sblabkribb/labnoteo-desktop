@@ -1,9 +1,12 @@
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:1005-1115 sha256:81a212c99e6b324c
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); createLlmProvider(plugin.settings) → env.provider; plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); new Notice(m, ms) → env.host.notify ('info' for 'Open a lab note first.' and the end notice, 'warn' for the 10 s notices); 'Configure an AI provider in settings first.' → notify('info', overrideOr('ai.configureFirst')) (D21). promptModal → env.host.prompt with the same title, prompt and placeholder. The persistent 'Contacting {0}…' Notice → a cancellable progress dialog (withProgress) around each model turn, so it is closed while an approval is asked (D18: the dialog queue shows one at a time) and reopens for the next turn; Cancel in it aborts the whole run. A vaultGuard() is taken before the goal prompt (D11): its signal is linked into the one signal passed to runAgent (so a vault switch ends the run before the next model turn and before any tool runs), and every write of the tools (writeNote through toolContext's beforeWrite, and fs write, modify, mkdir, remove and rmdir) awaits guard.check() first; a failed check also aborts the run. Sample registries a tool wrote are announced through env.sampleEnv().changed (vendor: the tool's own refresh through Obsidian's vault events), but not after a switch. aiAnswerModal(plugin.app, …) → aiAnswerDialog, not awaited; insertBlock takes env. plugin.markUserEdit is removed (the editor stamps on user edits). A cancelled run (describeLlmError gives '') shows nothing. The user message joins the vendor's template parts with '\n' (src/__tests__/escapes.test.ts reads "note:" followed by an escape as a drive path); the string is the same. The system prompt, the 6000-char cap and the notice texts are the vendor's. feat/ai-context (spec §9): after the goal prompt the experiment scope is resolved from the active note (resolveScope over experimentReadmes) and scopeGate(goal, experiments) gives the folders the request names; inside an experiment runAgent gets deps.tools = appTools({ scope, allowedFolders }) (core tools with a documentPath limited to the experiment, plus list_experiment, search_experiment and read_note), outside one the core tools plus the unscoped list_experiment; the tool context carries scope, allowedFolders, experiments and searchIn (searchNotesIn); the system prompt lists those tools instead of createLabnoteTools() and names the experiment folder.
+// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); createLlmProvider(plugin.settings) → env.provider; plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); new Notice(m, ms) → env.host.notify ('info' for 'Open a lab note first.' and the end notice, 'warn' for the 10 s notices); 'Configure an AI provider in settings first.' → notify('info', overrideOr('ai.configureFirst')) (D21). promptModal → env.host.prompt with the same title, prompt and placeholder. The persistent 'Contacting {0}…' Notice → a cancellable progress dialog (withProgress) around each model turn, so it is closed while an approval is asked (D18: the dialog queue shows one at a time) and reopens for the next turn; Cancel in it aborts the whole run. A vaultGuard() is taken before the goal prompt (D11): its signal is linked into the one signal passed to runAgent (so a vault switch ends the run before the next model turn and before any tool runs), and every write of the tools (writeNote through toolContext's beforeWrite, and fs write, modify, mkdir, remove and rmdir) awaits guard.check() first; a failed check also aborts the run. Sample registries a tool wrote are announced through env.sampleEnv().changed (vendor: the tool's own refresh through Obsidian's vault events), but not after a switch. aiAnswerModal(plugin.app, …) → aiAnswerDialog, not awaited; insertBlock takes env. plugin.markUserEdit is removed (the editor stamps on user edits). A cancelled run (describeLlmError gives '') shows nothing. The user message joins the vendor's template parts with '\n' (src/__tests__/escapes.test.ts reads "note:" followed by an escape as a drive path); the string is the same. The system prompt, the 6000-char cap and the notice texts are the vendor's. feat/ai-context (spec §9): after the goal prompt the experiment scope is resolved from the active note (resolveScope over experimentReadmes) and scopeGate(goal, experiments) gives the folders the request names; inside an experiment runAgent gets deps.tools = appTools({ scope, allowedFolders }) (core tools with a documentPath limited to the experiment, plus list_experiment, search_experiment and read_note), outside one the core tools plus the unscoped list_experiment; the tool context carries scope, allowedFolders, experiments and searchIn (searchNotesIn); the system prompt lists those tools instead of createLabnoteTools() and names the experiment folder. Task 9 (spec §7.2-§7.5): externalAgentTools(env) adds external tools after the core ones in both branches and runAgent gets their side map as deps.external; the system prompt gets UNTRUSTED_RULES only when an external tool is offered; confirm builds the app's own text for an external tool (externalApprovalMessage: server, tool, why it asks, the arguments as capped text) and adds ai.confirm.tainted after the core prompt line when outside content reached the run.
 import { caretBeforeModal } from '@labnoteo/core/lib/caret';
 import { createLabnoteTools, type ToolDef } from '@labnoteo/core';
 import type { AiEnv } from '../../ai/aiEnv';
+import { externalAgentTools, externalApprovalMessage } from '../../ai/externalTools';
+import { UNTRUSTED_RULES } from '../../ai/untrusted';
+import { t as appT } from '../../i18n/t';
 import { vaultGuard } from '../../integrations/netIpc';
 import { withProgress } from '../../integrations/progressStore';
 import { searchNotesIn } from '../../search/indexApi';
@@ -71,9 +74,12 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
     scope = undefined;
   }
   const allowedFolders = scopeGate(goal, experiments);
-  const tools: ToolDef[] = scope
+  const coreTools: ToolDef[] = scope
     ? appTools({ scope, allowedFolders })
     : [...createLabnoteTools(), ...contextTools().filter(t => t.name === 'list_experiment')];
+  // External tools (MCP servers, literature search) go after the core ones in both branches (spec §7.5).
+  const external = await externalAgentTools(env);
+  const tools: ToolDef[] = [...coreTools, ...external.tools];
 
   // One signal for the whole run: Cancel in a turn's progress dialog, a vault switch, or a failed guard check ends it.
   const run$ = new AbortController();
@@ -169,7 +175,8 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
                 'Use another experiment only when the request names it. '
               : '') +
             'If the request needs something these tools cannot do (for example changing the experiment status), ' +
-            'do not pretend: answer that you cannot do it and which Labnote command the user can run instead.',
+            'do not pretend: answer that you cannot do it and which Labnote command the user can run instead.' +
+            (external.tools.length > 0 ? ` ${UNTRUSTED_RULES}` : ''),
         },
         // The vendor's template text, joined so the escapes guard does not read the colon and newline as a drive path.
         { role: 'user', content: [goal, '', 'Active note:', noteText].join('\n') },
@@ -180,11 +187,23 @@ export async function askAgentCommand(env: AiEnv): Promise<void> {
         ctx,
         temperature: 0.2,
         signal: run$.signal,
-        confirm: (call, tool, preview) => {
+        external: external.meta,
+        confirm: (call, tool, preview, note) => {
+          const meta = external.meta.get(tool.name);
+          if (meta) {
+            return env.host.confirm(externalApprovalMessage(call, meta, !!tool.mutates, note), {
+              confirmLabel: env.host.t('Allow'),
+              destructive: false,
+            });
+          }
           // Show the write target, not just the tool name: the model chooses
           // the path, so approving by name alone is blind approval.
           const path = typeof call.arguments.documentPath === 'string' ? call.arguments.documentPath : null;
-          const prompt = env.host.t('Allow AI tool "{0}" to modify the vault?', tool.name);
+          const ask = env.host.t('Allow AI tool "{0}" to modify the vault?', tool.name);
+          // After outside content the user is told this write may come from it (spec §7.4).
+          const prompt = note?.tainted ? `${ask}
+
+${appT('ai.confirm.tainted')}` : ask;
           return env.host.confirm(buildApprovalMessage(env.host.t, prompt, path, preview), {
             confirmLabel: env.host.t('Allow'),
             destructive: erasesRecordedLines(preview),

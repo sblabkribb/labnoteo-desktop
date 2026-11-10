@@ -8,6 +8,7 @@ import type { ToolContext, ToolDef } from '@labnoteo/core';
 import { runAgent, countToolOutcomes, MAX_ITERATIONS } from '../../labnote/port/llmAgent';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider, ToolCall } from '../../labnote/port/llmProvider';
 import { NetError } from '../../integrations/netIpc';
+import type { ExternalToolMeta } from '../externalTools';
 
 /** Replays a fixed script of turns and records what it was sent. */
 class ScriptedProvider implements LlmProvider {
@@ -506,5 +507,156 @@ describe('runAgent with an AbortSignal', () => {
     });
     await expect(run).rejects.toMatchObject({ kind: 'cancelled' });
     expect(ran).toEqual([]);
+  });
+});
+
+/**
+ * 외부 도구 뒤의 오염 표시와 확인(spec §7.4). `external` 이 없으면 위의 사례가 그대로 지나야 한다.
+ */
+describe('runAgent: taint gate for external tools', () => {
+  type Note = { tainted: boolean; reason?: 'crossServer' | 'bigArgs' } | undefined;
+  const ext = (name: string, mutates = false): ToolDef => ({
+    name,
+    mutates,
+    description: name,
+    inputSchema: { type: 'object', properties: {} },
+    handler: async () => ({ ok: true, data: `fenced ${name}` }),
+  });
+  const external = new Map<string, ExternalToolMeta>([
+    ['mcp_a_search', { kind: 'mcp', serverId: 'a', serverName: 'A', readOnly: true }],
+    ['mcp_a_write', { kind: 'mcp', serverId: 'a', serverName: 'A', readOnly: false }],
+    ['mcp_b_search', { kind: 'mcp', serverId: 'b', serverName: 'B', readOnly: true }],
+    ['pubmed_search', { kind: 'scholar', readOnly: true }],
+  ]);
+  const extTools = () => [ext('mcp_a_search'), ext('mcp_a_write', true), ext('mcp_b_search'), ext('pubmed_search')];
+  const recorder = (answer = true) => {
+    const asked: Array<{ name: string; note: Note }> = [];
+    return {
+      asked,
+      confirm: async (c: ToolCall, _t: ToolDef, _p?: unknown, note?: Note) => {
+        asked.push({ name: c.name, note });
+        return answer;
+      },
+    };
+  };
+  const go = [{ role: 'user' as const, content: 'go' }];
+
+  it('without external: reads run unasked and a write gets {tainted:false}', async () => {
+    const { tools, ran } = makeTools();
+    const provider = new ScriptedProvider([turn([call('read_thing', {}, 'a'), call('write_thing', {}, 'b')])]);
+    const r = recorder();
+    const run = await runAgent(go, { provider, ctx: ctx(), tools, confirm: r.confirm });
+    expect(ran).toEqual(['read_thing', 'write_thing']);
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: false } }]);
+    expect(run.tainted).toBe(false);
+    expect(run.taintSources).toEqual([]);
+  });
+
+  it('a run that offers an MCP tool starts tainted with no sources', async () => {
+    const { tools } = makeTools();
+    const provider = new ScriptedProvider([turn([call('write_thing')])]);
+    const r = recorder();
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [...tools, ext('mcp_a_search')], external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: true } }]);
+    expect(run.tainted).toBe(true);
+    expect(run.taintSources).toEqual([]);
+  });
+
+  it('a run that offers only scholarly tools starts clean', async () => {
+    const { tools } = makeTools();
+    const provider = new ScriptedProvider([turn([call('write_thing')])]);
+    const r = recorder();
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [...tools, ext('pubmed_search')], external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: false } }]);
+    expect(run.tainted).toBe(false);
+  });
+
+  it('after one external result every write asks with {tainted:true}, also on later turns; a denial is denied', async () => {
+    const { tools, ran } = makeTools();
+    const provider = new ScriptedProvider([
+      turn([call('pubmed_search', { query: 'x' }, 'a'), call('write_thing', {}, 'b')]),
+      turn([call('write_thing', {}, 'c')]),
+    ]);
+    const answers = [true, false];
+    const asked: Note[] = [];
+    const run = await runAgent(go, {
+      provider,
+      ctx: ctx(),
+      tools: [...tools, ext('pubmed_search')],
+      external,
+      confirm: async (_c, _t, _p, note) => {
+        asked.push(note);
+        return answers.shift() ?? false;
+      },
+    });
+    expect(asked).toEqual([{ tainted: true }, { tainted: true }]);
+    expect(ran).toEqual(['write_thing']);
+    expect(run.executed.map(e => e.outcome)).toEqual(['done', 'done', 'denied']);
+    expect(run.tainted).toBe(true);
+    expect(run.taintSources).toEqual(['scholar']);
+  });
+
+  it('after a result from server A, a read-only tool on server B asks (crossServer); on A it runs directly', async () => {
+    const provider = new ScriptedProvider([
+      turn([call('mcp_a_search', {}, 'a')]),
+      turn([call('mcp_a_search', {}, 'b'), call('mcp_b_search', {}, 'c'), call('pubmed_search', {}, 'd')]),
+    ]);
+    const r = recorder(false);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: extTools(), external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'mcp_b_search', note: { tainted: true, reason: 'crossServer' } }]);
+    expect(run.executed.map(e => [e.call.name, e.outcome, e.mutates])).toEqual([
+      ['mcp_a_search', 'done', false],
+      ['mcp_a_search', 'done', false],
+      ['mcp_b_search', 'denied', false],
+      ['pubmed_search', 'done', false],
+    ]);
+    expect(run.taintSources).toEqual(['a', 'scholar']);
+    // The model hears a denial that does not call the read a write.
+    const denied = provider.seen[2].find(m => m.role === 'tool' && m.toolCallId === 'c');
+    expect(JSON.parse(denied!.content)).toEqual({ error: 'User denied this call.' });
+  });
+
+  it('a crossServer call that is allowed runs and adds its server to the sources', async () => {
+    const provider = new ScriptedProvider([turn([call('mcp_a_search', {}, 'a')]), turn([call('mcp_b_search', {}, 'b')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: extTools(), external, confirm: r.confirm });
+    expect(r.asked.map(a => a.note)).toEqual([{ tainted: true, reason: 'crossServer' }]);
+    expect(run.executed.map(e => e.outcome)).toEqual(['done', 'done']);
+    expect(run.taintSources).toEqual(['a', 'b']);
+  });
+
+  it('a read-only MCP call whose arguments exceed 2,000 chars asks (bigArgs); scholarly tools never ask', async () => {
+    const big = { query: 'x'.repeat(2001) };
+    const provider = new ScriptedProvider([
+      turn([call('mcp_a_search', { query: 'short' }, 'a'), call('mcp_a_search', big, 'b'), call('pubmed_search', big, 'c')]),
+    ]);
+    const r = recorder(true);
+    await runAgent(go, { provider, ctx: ctx(), tools: extTools(), external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'mcp_a_search', note: { tainted: true, reason: 'bigArgs' } }]);
+  });
+
+  it('a mutating MCP tool always asks, with the tainted note', async () => {
+    const provider = new ScriptedProvider([turn([call('mcp_a_write', {}, 'a')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: extTools(), external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'mcp_a_write', note: { tainted: true } }]);
+    expect(run.executed[0]).toMatchObject({ outcome: 'done', mutates: true });
+  });
+
+  it('a failed external result taints too', async () => {
+    const { tools } = makeTools();
+    const failing: ToolDef = { ...ext('pubmed_search'), handler: async () => ({ ok: false, error: 'fenced error' }) };
+    const provider = new ScriptedProvider([turn([call('pubmed_search', {}, 'a')]), turn([call('write_thing', {}, 'b')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [...tools, failing], external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: true } }]);
+    expect(run.taintSources).toEqual(['scholar']);
+  });
+
+  it('a denied external call does not add a source', async () => {
+    const provider = new ScriptedProvider([turn([call('mcp_a_write', {}, 'a')])]);
+    const r = recorder(false);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: extTools(), external, confirm: r.confirm });
+    expect(run.taintSources).toEqual([]);
   });
 });
