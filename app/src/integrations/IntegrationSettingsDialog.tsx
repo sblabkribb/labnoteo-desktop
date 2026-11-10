@@ -27,6 +27,7 @@ import {
   type ImportRefusal,
 } from './importFile';
 import { SelectField } from '../ui/SelectField';
+import { McpClientSection, mcpClientDepsFor, type McpClientDeps } from './mcpClient/McpClientSection';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -41,6 +42,8 @@ export interface IntegrationDeps {
   clearSecret(slot: Slot): Promise<void>;
   /** MCP 묶음(SP7 Part C)이 알림을 띄우고 Rust 를 부를 때. 없으면 MCP 묶음을 그리지 않는다. */
   mcp?: { notify: Notify; invoke?: InvokeFn };
+  /** 외부 MCP 서버(MCP 클라이언트, spec §6.1). `mcp` 는 앱 자신의 서버다. 없으면 "외부 MCP 서버" 묶음을 그리지 않는다. */
+  mcpClient?: McpClientDeps;
   /**
    * "파일에서 가져오기". `run` 은 Rust 가 고르기 창을 띄우고 읽고 키를 저장한 뒤 요약과 설정을 돌려준다(취소하면 null).
    * `runBytes` 는 끌어 놓은 파일의 바이트를 같은 검사와 해석으로 가져온다. `remove` 는 Rust 가 기억한 마지막으로 고른
@@ -98,6 +101,7 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
     setSecret: (slot, value) => setSecret(slot, value, invoke),
     clearSecret: (slot) => clearSecret(slot, invoke),
     mcp: { notify: (kind, message) => ctx.host.notify(kind, message), invoke },
+    mcpClient: mcpClientDepsFor(invoke),
     importFile: {
       run: () => importConnectionsFile(t('integrations.import.pickTitle'), invoke),
       runBytes: (name, bytes) => importConnectionsBytes(name, bytes, invoke as unknown as RawInvoke),
@@ -494,6 +498,11 @@ export function IntegrationSettingsPage(props: {
     }
   };
 
+  /** 섹션이 닫기 전에 부를 저장을 맡긴다(같은 함수는 한 번만). */
+  const registerHide = useRef((commit: () => Promise<void>) => {
+    if (!hideCommits.current.includes(commit)) hideCommits.current.push(commit);
+  }).current;
+
   const addImportLine = (line: ImportLine) => setImportLines((lines) => [...lines, line]);
 
   /** 가져온 파일을 지운다. 휴지통이 안 되면 영구 삭제를 한 번 더 묻는다. */
@@ -795,15 +804,15 @@ export function IntegrationSettingsPage(props: {
           />
         </section>
 
+        <McpClientSection deps={deps} onHide={registerHide} />
+
         {/* SP7 Part B: 바코드와 스캔, Slack(Task 29) */}
         <ScanSettingsSection
           deps={deps}
           secrets={status}
           onSecrets={setStatus}
           onLeave={leave}
-          onHide={(commit) => {
-            if (!hideCommits.current.includes(commit)) hideCommits.current.push(commit);
-          }}
+          onHide={registerHide}
         />
         {deps.mcp ? (
           <McpSection

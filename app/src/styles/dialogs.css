@@ -204,6 +204,20 @@ button.sample-def-link:hover { text-decoration: underline; }
 .scan-howto summary { cursor: pointer; }
 .scan-howto .prompt-hint { white-space: pre-line; }
 
+/* 외부 MCP 서버(MCP 클라이언트, spec §6.1): 서버마다 이름과 스위치 한 줄, 주소 글과 "주소 바꾸기", 연결 결과와 도구 목록 */
+.mcp-client-server { padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.mcp-client-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.mcp-client-name { font-weight: 600; overflow-wrap: anywhere; }
+.mcp-client-head .switch-label { flex-direction: row; gap: var(--space-3); }
+.integration-field.mcp-client-url { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: var(--space-4); }
+.mcp-client-url-text { color: var(--text-muted); overflow-wrap: anywhere; }
+button.mcp-client-link { min-height: 0; padding: 0; border: none; background: none; color: var(--accent); cursor: pointer; }
+button.mcp-client-link:hover { text-decoration: underline; }
+.mcp-client-info { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.mcp-client-tools { margin: 0; padding-left: var(--space-6); display: flex; flex-direction: column; gap: var(--space-2); }
+.mcp-client-tools li { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.mcp-client-tool-name { font-family: var(--font-mono); }
+
 /* SP7 Part C: MCP */
 /* 연동 설정의 MCP 묶음(Task 37): 포트 칸은 좁게, 토큰은 번호만, 단추는 한 줄에 */
 .integration-field input.mcp-port { width: 8rem; }

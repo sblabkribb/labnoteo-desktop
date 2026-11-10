@@ -81,6 +81,7 @@ describe('소스가 부르는 번역 키', () => {
     'src/ui/Dock.tsx': ['x.labelKey'], // DOCK_TABS 의 'sidebar.tab.*' 글자
     'src/ui/RightDock.tsx': ['x.labelKey', 'current.labelKey'], // RIGHT_TABS 의 'sidebar.outline'·'sidebar.tab.links' 글자
     'src/ui/settings/ShortcutsPage.tsx': ['c.nameKey'], // AppCommand.nameKey: appCommands.ts 에 적은 'cmd.*' 글자(appCommands.test.ts 가 ko·en 을 본다)
+    'src/integrations/mcpClient/McpClientSection.tsx': ['row.preset.tokenHintKey'], // MCP_PRESETS 의 'mcpClient.tokenHint.*' 글자(presets.ts)
   };
   const LIT = String.raw`(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")`;
   const ALLOWED_ARG = new RegExp(String.raw`^\s*(?:${LIT}|!?[\w.]+\s*\?\s*${LIT}\s*:\s*${LIT})\s*$`);
