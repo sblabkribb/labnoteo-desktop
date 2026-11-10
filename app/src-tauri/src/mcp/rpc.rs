@@ -1,8 +1,12 @@
 //! JSON-RPC and the request checks for the MCP server (C1, C2), ported in
 //! behaviour from vendor `src/llm/mcpServer.ts` (`handle`,
 //! `buildInitializeResult`, `isAllowedOrigin`, `timingSafeEqual`,
-//! `isAuthorized`). Rust answers `initialize`, `ping` and `tools/list` itself;
-//! `tools/call` goes to the webview through a [`Bridge`] (C3).
+//! `isAuthorized`). Rust answers `initialize`, `ping`, `tools/list` and
+//! `prompts/list` itself; `tools/call` goes to the webview through a
+//! [`Bridge`] (C3). `prompts/get` is validated here and then forwarded over
+//! the same bridge as a read call named `prompt:<name>`, which the webview
+//! fills (ai-context spec §10.2). `tools/call` refuses `prompt:*` names, so an
+//! MCP client cannot reach the prompt route through it.
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -51,14 +55,68 @@ pub enum Reply {
 }
 
 /// The `InitializeResult` (vendor `buildInitializeResult`). `capabilities`
-/// advertises only what is served: a fixed tool list (`listChanged: false`),
-/// no resources, no prompts, no sampling.
+/// advertises only what is served: a fixed tool list and a fixed prompt list
+/// (both `listChanged: false`), no resources, no sampling.
 pub fn initialize_result(version: &str) -> Value {
     json!({
         "protocolVersion": MCP_PROTOCOL_VERSION,
-        "capabilities": { "tools": { "listChanged": false } },
+        "capabilities": { "tools": { "listChanged": false }, "prompts": { "listChanged": false } },
         "serverInfo": { "name": "labnoteo", "version": version },
     })
+}
+
+/// The prompt names served by `prompts/list` and accepted by `prompts/get`.
+const PROMPT_NAMES: [&str; 2] = ["draft-unit-operation", "continue-workflow"];
+
+/// The bridge-call prefix for a forwarded `prompts/get`. `tools/call` refuses
+/// any name starting with it.
+const PROMPT_PREFIX: &str = "prompt:";
+
+/// The static `prompts/list` result (ai-context spec §10.2). The webview fills
+/// the prompts; the planning-only rule is stated in the filled text.
+pub fn prompt_list() -> Value {
+    json!({ "prompts": [
+        {
+            "name": "draft-unit-operation",
+            "description": "Draft the planning sections of one unit operation from its experiment's context (never results or QC).",
+            "arguments": [
+                { "name": "notePath", "required": true },
+                { "name": "unitOp", "required": false },
+                { "name": "sections", "required": false, "description": "comma-separated planning sections" }
+            ]
+        },
+        {
+            "name": "continue-workflow",
+            "description": "Propose the next unit operation(s) of a workflow, or the first of the next workflow, using the experiment chain.",
+            "arguments": [
+                { "name": "notePath", "required": true },
+                { "name": "goal", "required": false }
+            ]
+        }
+    ] })
+}
+
+/// Checks a `prompts/get` request: a known name, `arguments` absent or an
+/// object whose values are all strings, and a non-empty `notePath`. Returns
+/// the name and the arguments to forward, or the `-32602` message.
+fn validate_prompt_get(params: Option<&Value>) -> Result<(String, Value), String> {
+    let name = match params.and_then(|p| p.get("name")) {
+        Some(Value::String(n)) if PROMPT_NAMES.contains(&n.as_str()) => n.clone(),
+        Some(Value::String(n)) => return Err(format!("Unknown prompt: {n}")),
+        _ => return Err("Unknown prompt: missing name".to_string()),
+    };
+    let args = match params.and_then(|p| p.get("arguments")) {
+        None | Some(Value::Null) => Map::new(),
+        Some(Value::Object(m)) => m.clone(),
+        Some(_) => return Err("Invalid prompt arguments: expected an object of strings".to_string()),
+    };
+    if let Some((k, _)) = args.iter().find(|(_, v)| !v.is_string()) {
+        return Err(format!("Invalid prompt argument {k}: expected a string"));
+    }
+    if !args.get("notePath").and_then(Value::as_str).is_some_and(|p| !p.is_empty()) {
+        return Err("Missing required prompt argument: notePath".to_string());
+    }
+    Ok((name, Value::Object(args)))
 }
 
 /// Whether a request's `Origin` may proceed (vendor `isAllowedOrigin`). The MCP
@@ -172,9 +230,24 @@ pub async fn dispatch(body: &[u8], tools: &[ToolInfo], bridge: &dyn Bridge) -> R
                 .collect();
             Reply::Json(200, rpc_result(id, json!({ "tools": list })))
         }
+        Some("prompts/list") => Reply::Json(200, rpc_result(id, prompt_list())),
+        Some("prompts/get") => match validate_prompt_get(rpc.get("params")) {
+            Err(message) => Reply::Json(200, rpc_error(id, -32602, &message)),
+            // Prompts only read: the read timeout applies, and a timeout comes
+            // back as `TIMEOUT_CODE`, as for tools.
+            Ok((name, args)) => match bridge.call(format!("{PROMPT_PREFIX}{name}"), args, false).await {
+                CallOutcome::Result(r) => Reply::Json(200, rpc_result(id, r)),
+                CallOutcome::RpcError(code, message) => Reply::Json(200, rpc_error(id, code, &message)),
+                CallOutcome::NoReply => Reply::NoReply,
+            },
+        },
         Some("tools/call") => {
             let params = rpc.get("params");
             let name = js_string(params.and_then(|p| p.get("name")));
+            // The prompt route is reachable only through `prompts/get`.
+            if name.starts_with(PROMPT_PREFIX) {
+                return Reply::Json(200, rpc_error(id, -32602, &format!("Unknown tool: {name}")));
+            }
             let args = match params.and_then(|p| p.get("arguments")) {
                 None | Some(Value::Null) => json!({}),
                 Some(a) => a.clone(),
@@ -213,8 +286,11 @@ mod tests {
     }
 
     #[test]
-    fn initialize_result_claims_tools_but_not_resources_prompts_or_list_changed() {
-        assert_eq!(initialize_result("0.0.0")["capabilities"], json!({"tools": {"listChanged": false}}));
+    fn initialize_result_claims_tools_and_prompts_but_not_resources_or_list_changed() {
+        assert_eq!(
+            initialize_result("0.0.0")["capabilities"],
+            json!({"tools": {"listChanged": false}, "prompts": {"listChanged": false}})
+        );
     }
 
     // Mirrors vendor `isAllowedOrigin`.
@@ -312,5 +388,174 @@ mod tests {
         .unwrap();
         assert!(t.mutates);
         assert_eq!(t.input_schema, json!({"type": "object"}));
+    }
+
+    // ---- MCP prompts (spec §10.2) ----
+
+    use futures_util::future::BoxFuture;
+    use std::sync::{Arc, Mutex};
+
+    type Calls = Arc<Mutex<Vec<(String, Value, bool)>>>;
+
+    /// Records each forwarded call and answers with a fixed outcome.
+    struct FakeBridge {
+        calls: Calls,
+        outcome: fn() -> CallOutcome,
+    }
+
+    impl Bridge for FakeBridge {
+        fn call(&self, name: String, args: Value, mutates: bool) -> BoxFuture<'static, CallOutcome> {
+            self.calls.lock().unwrap().push((name, args, mutates));
+            let o = (self.outcome)();
+            Box::pin(async move { o })
+        }
+    }
+
+    fn prompt_result() -> CallOutcome {
+        CallOutcome::Result(json!({
+            "description": "d",
+            "messages": [{"role": "user", "content": {"type": "text", "text": "hello"}}]
+        }))
+    }
+
+    fn fake(outcome: fn() -> CallOutcome) -> (FakeBridge, Calls) {
+        let calls: Calls = Arc::default();
+        (FakeBridge { calls: calls.clone(), outcome }, calls)
+    }
+
+    fn run(body: Value, bridge: &FakeBridge) -> Value {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let bytes = serde_json::to_vec(&body).unwrap();
+        match rt.block_on(dispatch(&bytes, &[], bridge)) {
+            Reply::Json(status, v) => {
+                assert_eq!(status, 200);
+                v
+            }
+            other => panic!("unexpected reply {other:?}"),
+        }
+    }
+
+    fn get(params: Value) -> Value {
+        json!({"jsonrpc": "2.0", "id": 7, "method": "prompts/get", "params": params})
+    }
+
+    #[test]
+    fn prompt_list_has_exactly_the_two_prompts_with_their_arguments() {
+        let l = prompt_list();
+        let prompts = l["prompts"].as_array().unwrap();
+        let names: Vec<&str> = prompts.iter().map(|p| p["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["draft-unit-operation", "continue-workflow"]);
+        for p in prompts {
+            assert!(p["description"].as_str().is_some_and(|d| !d.is_empty()));
+            assert_eq!(p["arguments"][0], json!({"name": "notePath", "required": true}));
+        }
+        let arg_names = |p: &Value| -> Vec<String> {
+            p["arguments"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(arg_names(&prompts[0]), ["notePath", "unitOp", "sections"]);
+        assert_eq!(prompts[0]["arguments"][1]["required"], false);
+        assert_eq!(prompts[0]["arguments"][2]["required"], false);
+        assert_eq!(prompts[0]["arguments"][2]["description"], "comma-separated planning sections");
+        assert_eq!(arg_names(&prompts[1]), ["notePath", "goal"]);
+        assert_eq!(prompts[1]["arguments"][1]["required"], false);
+        assert!(prompts[0]["description"].as_str().unwrap().contains("never results or QC"));
+    }
+
+    #[test]
+    fn prompts_list_is_answered_by_rust() {
+        let (b, calls) = fake(prompt_result);
+        let v = run(json!({"jsonrpc": "2.0", "id": 1, "method": "prompts/list"}), &b);
+        assert_eq!(v["id"], 1);
+        assert_eq!(v["result"], prompt_list());
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn invalid_prompts_get_is_refused_without_calling_the_bridge() {
+        for params in [
+            json!({"name": "nope", "arguments": {"notePath": "labnote/001_A/x.md"}}),
+            json!({"arguments": {"notePath": "labnote/001_A/x.md"}}),
+            json!({"name": 5, "arguments": {"notePath": "a.md"}}),
+            json!({"name": "prompt:draft-unit-operation", "arguments": {"notePath": "a.md"}}),
+            json!({"name": "draft-unit-operation", "arguments": {"notePath": "a.md", "unitOp": 2}}),
+            json!({"name": "draft-unit-operation", "arguments": {"notePath": "a.md", "sections": null}}),
+            json!({"name": "draft-unit-operation", "arguments": {"notePath": ["a.md"]}}),
+            json!({"name": "draft-unit-operation", "arguments": "notePath=a.md"}),
+            json!({"name": "draft-unit-operation", "arguments": ["a.md"]}),
+            json!({"name": "draft-unit-operation", "arguments": {}}),
+            json!({"name": "continue-workflow", "arguments": {"goal": "g"}}),
+            json!({"name": "continue-workflow"}),
+            json!({"name": "continue-workflow", "arguments": {"notePath": ""}}),
+            json!("draft-unit-operation"),
+        ] {
+            let (b, calls) = fake(prompt_result);
+            let v = run(get(params.clone()), &b);
+            assert_eq!(v["id"], 7, "{params}");
+            assert_eq!(v["error"]["code"], -32602, "{params}");
+            assert!(calls.lock().unwrap().is_empty(), "bridge called for {params}");
+        }
+        let (b, calls) = fake(prompt_result);
+        let v = run(json!({"jsonrpc": "2.0", "id": 7, "method": "prompts/get"}), &b);
+        assert_eq!(v["error"]["code"], -32602);
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn valid_prompts_get_is_forwarded_as_a_read_with_the_prompt_prefix() {
+        let (b, calls) = fake(prompt_result);
+        let args = json!({"notePath": "labnote/001_A/001_WF.md", "unitOp": "2", "sections": "Input,Method"});
+        let v = run(get(json!({"name": "draft-unit-operation", "arguments": args})), &b);
+        assert_eq!(v["id"], 7);
+        assert_eq!(v["result"]["messages"][0]["content"]["text"], "hello");
+        assert_eq!(v["result"]["description"], "d");
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], ("prompt:draft-unit-operation".to_string(), args, false));
+    }
+
+    #[test]
+    fn continue_workflow_get_is_forwarded_too() {
+        let (b, calls) = fake(prompt_result);
+        let v = run(get(json!({"name": "continue-workflow", "arguments": {"notePath": "labnote/001_A/README.md"}})), &b);
+        assert!(v.get("result").is_some());
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls[0].0, "prompt:continue-workflow");
+        assert!(!calls[0].2);
+    }
+
+    #[test]
+    fn a_bridge_timeout_on_prompts_get_maps_to_the_timeout_code() {
+        let (b, _) = fake(|| CallOutcome::RpcError(crate::mcp::bridge::TIMEOUT_CODE, "timed out".into()));
+        let v = run(get(json!({"name": "draft-unit-operation", "arguments": {"notePath": "a.md"}})), &b);
+        assert_eq!(v["error"]["code"], -32001);
+        assert_eq!(v["error"]["message"], "timed out");
+    }
+
+    #[test]
+    fn a_webview_scope_error_on_prompts_get_is_passed_through() {
+        let (b, _) = fake(|| CallOutcome::RpcError(-32602, "not in an experiment".into()));
+        let v = run(get(json!({"name": "draft-unit-operation", "arguments": {"notePath": "a.md"}})), &b);
+        assert_eq!(v["error"]["code"], -32602);
+        assert_eq!(v["error"]["message"], "not in an experiment");
+    }
+
+    #[test]
+    fn tools_call_cannot_reach_the_prompt_route() {
+        for name in ["prompt:draft-unit-operation", "prompt:continue-workflow", "prompt:", "prompt:anything"] {
+            let (b, calls) = fake(prompt_result);
+            let v = run(
+                json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": name, "arguments": {"notePath": "a.md"}}}),
+                &b,
+            );
+            assert_eq!(v["error"]["code"], -32602, "{name}");
+            assert!(calls.lock().unwrap().is_empty(), "bridge called for {name}");
+        }
+    }
+
+    #[test]
+    fn ordinary_tools_call_is_still_forwarded() {
+        let (b, calls) = fake(prompt_result);
+        run(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "read_note", "arguments": {}}}), &b);
+        assert_eq!(calls.lock().unwrap()[0].0, "read_note");
     }
 }
