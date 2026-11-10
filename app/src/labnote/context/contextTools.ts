@@ -37,7 +37,8 @@ export const GOAL_EXCERPT_CHARS = 600;
 const SEARCH_LIMIT_DEFAULT = 20;
 const SEARCH_LIMIT_MAX = 50;
 
-const folderKey = (p: string): string =>
+/** A path key: NFC, `/` separators, no leading `./` or trailing `/`, lower-cased. */
+export const folderKey = (p: string): string =>
   p.normalize('NFC').replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '').toLowerCase();
 
 const sameFolder = (a: string, b: string): boolean => folderKey(a) === folderKey(b);
@@ -479,7 +480,7 @@ async function getExperimentContext(ctx: ScopedToolContext, args: Record<string,
 }
 
 /** The unit op `wanted` names among `ops`: a 1-based number, heading text, opId, title or alias; first match. */
-function pickUnitOp(ops: readonly UnitOpNode[], wanted: unknown): UnitOpNode | undefined {
+export function pickUnitOp(ops: readonly UnitOpNode[], wanted: unknown): UnitOpNode | undefined {
   if (wanted === undefined || wanted === null || (typeof wanted === 'string' && wanted.trim() === '')) return ops[ops.length - 1];
   if (typeof wanted === 'number') return Number.isInteger(wanted) ? ops[wanted - 1] : undefined;
   if (typeof wanted !== 'string') return undefined;

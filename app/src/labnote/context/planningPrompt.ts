@@ -72,15 +72,25 @@ function requestedBlock(target: UnitOpNode | undefined, sections: readonly strin
  * the requested sections with their current content, and the keep rule.
  */
 export function buildPlanningMessages(ctx: BuiltContext, sections: string[], lang: string): ChatMessage[] {
-  const requested = planningOnly(sections);
   const system = `${PLANNING_RULES}\n\n${replyLanguageInstruction(lang)}`;
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: planningRequestText(ctx, sections) },
+  ];
+}
+
+/**
+ * The user part of a planning draft (spec §6.2): the included sources, the
+ * target heading, the requested planning sections with their current content
+ * and the keep rule. Shared by the in-app draft and the MCP
+ * `draft-unit-operation` prompt (spec §10.2).
+ */
+export function planningRequestText(ctx: BuiltContext, sections: readonly string[]): string {
+  const requested = planningOnly(sections);
   const parts: string[] = [];
   const rendered = renderContext(ctx);
   if (rendered) parts.push('Context sources:', rendered);
   if (ctx.target) parts.push(`Target unit operation: ${ctx.target.heading}`);
   parts.push(`Requested sections: ${requested.join(', ')}`, requestedBlock(ctx.target, requested), KEEP_RESEARCHER_TEXT);
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: parts.join('\n\n') },
-  ];
+  return parts.join('\n\n');
 }

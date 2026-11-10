@@ -10,6 +10,7 @@ import { toolContext } from '../port/aiCommon';
 import { experimentReadmes } from '../port/experiments';
 import { CLOSED_REPLY, callMutating, type McpCall } from '../port/mcpCall';
 import { TaskQueue, buildToolCallResult } from '../port/mcpApproval';
+import { fillPrompt } from './mcpPrompts';
 import { MCP_CALL, MCP_CANCEL, mcpClaim, mcpReply, type McpCallEvent, type McpCancelEvent, type McpReplyIn, type ToolInfo } from './mcpIpc';
 
 /**
@@ -20,6 +21,7 @@ import { MCP_CALL, MCP_CANCEL, mcpClaim, mcpReply, type McpCallEvent, type McpCa
  * - 어떤 도구든 돌리기 직전에 `guard.check()` 다음 `mcp_claim` 을 부른다. false 면 아무것도 돌리지도 답하지도 않는다.
  * - 바꾸는 도구는 한 번에 하나씩(TaskQueue) 미리 보기 → 승인(A9, 조합이 끝난 뒤 `unsolicited`) → 실행이다.
  *   `mcp://cancel` 이 그 호출의 신호를 끊는다: 열린 질문은 거둬지고 늦은 허용은 아무것도 쓰지 않는다.
+ * - `prompt:<name>` 은 `prompts/get` 이다(spec §10.2): 같은 가드와 claim 뒤에 `fillPrompt` 가 읽기로 채운다(승인 없음).
  * - 보관함이 없거나 바뀌면 -32002 로 답한다.
  */
 
@@ -60,6 +62,16 @@ function argsOf(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
 }
 
+/** The bridge-call prefix of a forwarded `prompts/get` (Rust `PROMPT_PREFIX`). */
+const PROMPT_PREFIX = 'prompt:';
+
+/** Prompt arguments: Rust admits only strings; anything else is dropped here too. */
+function stringArgs(args: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(args)) if (typeof v === 'string') out[k] = v;
+  return out;
+}
+
 /**
  * 두 이벤트를 듣기 시작한다. 돌려준 함수는 듣기를 그만두고, 아직 끝나지 않은 호출을 모두 거둔다
  * (열린 승인은 닫히고 아무것도 쓰지 않는다).
@@ -95,7 +107,9 @@ export function startMcpHost(ctx: CommandContext, deps: { invoke?: InvokeFn; lis
         vaultClosed: () => guard.signal.aborted,
       };
       const args = argsOf(event.args);
-      const tool = tools.find((t) => t.name === event.name);
+      // prompts/get (spec §10.2) arrives as `prompt:<name>`; no tool name contains ':'. It is always a read.
+      const prompt = event.name.startsWith(PROMPT_PREFIX) ? event.name.slice(PROMPT_PREFIX.length) : undefined;
+      const tool = prompt === undefined ? tools.find((t) => t.name === event.name) : undefined;
       if (tool?.mutates) return await writes.run(() => callMutating(call, tool, args, signal));
       if (signal.aborted) return guard.signal.aborted ? CLOSED_REPLY : { kind: 'noReply' };
       try {
@@ -109,6 +123,7 @@ export function startMcpHost(ctx: CommandContext, deps: { invoke?: InvokeFn; lis
         experiments: async () => (await experimentReadmes(env.host)).map((e) => ({ folder: e.folder, title: e.title })),
         searchIn: (query, prefix, limit) => searchNotesIn(query, prefix, limit, invoke),
       });
+      if (prompt !== undefined) return await fillPrompt(prompt, stringArgs(args), { toolCtx: context });
       const result = await runTool(tools, event.name, context, args);
       return { kind: 'result', result: buildToolCallResult(result) };
     } finally {

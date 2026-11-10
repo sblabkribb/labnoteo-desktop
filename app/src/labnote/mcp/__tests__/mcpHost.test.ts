@@ -521,4 +521,80 @@ describe('MCP context tools (feat/ai-context, spec §10.1)', () => {
     expect(s.cmds()).toEqual(['mcp_claim']);
     expect(runTool).not.toHaveBeenCalled();
   });
+
+  it('prompts/get arrives as prompt:<name>: claim, then mcp_reply with the filled prompt, no approval', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    await flush();
+    await s.call('p1', 'prompt:draft-unit-operation', { notePath: WF2, sections: 'Method, QC Metrics' }, false);
+    await flush();
+    expect(s.cmds()).toEqual(['mcp_claim', 'mcp_reply']);
+    expect(s.confirm).not.toHaveBeenCalled();
+    expect(runTool).not.toHaveBeenCalledWith(expect.anything(), 'prompt:draft-unit-operation', expect.anything(), expect.anything());
+    const reply = s.replies()[0];
+    expect(reply.callId).toBe('p1');
+    expect(reply.reply).toMatchObject({ kind: 'result' });
+    const result = (reply.reply as { result: { description: string; messages: Array<{ role: string; content: { type: string; text: string } }> } })
+      .result;
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toMatchObject({ role: 'user', content: { type: 'text' } });
+    const text = result.messages[0].content.text;
+    expect(text).toContain('Never output Results & Discussions');
+    expect(text).toContain('Requested sections: Method');
+    expect(text).toContain('Target unit operation: ### [UHW030 Induction]');
+    expect(text).not.toContain('Secret other goal');
+    expect(s.th.vault.files()[WF2]).toBe(files[WF2]);
+  });
+
+  it('a prompt whose notePath is outside any experiment replies a -32602 error', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    await flush();
+    await s.call('p1', 'prompt:continue-workflow', { notePath: 'inbox/a.md' }, false);
+    await flush();
+    expect(s.cmds()).toEqual(['mcp_claim', 'mcp_reply']);
+    expect(s.replies()[0].reply).toMatchObject({ kind: 'error', code: -32602 });
+  });
+
+  it('an unknown prompt replies a -32602 error and runs no tool', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    await flush();
+    await s.call('p1', 'prompt:get_experiment_context', { notePath: WF2 }, false);
+    await flush();
+    expect(s.replies()[0].reply).toMatchObject({ kind: 'error', code: -32602 });
+    expect(runTool).not.toHaveBeenCalled();
+  });
+
+  it('a prompt whose claim Rust refuses is not filled and sends no reply', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files, claim: () => false });
+    await flush();
+    await s.call('p1', 'prompt:draft-unit-operation', { notePath: WF2 }, false);
+    await flush();
+    expect(s.cmds()).toEqual(['mcp_claim']);
+    expect(runTool).not.toHaveBeenCalled();
+  });
+
+  it('a prompt marked mutating by the event still goes the read path without approval', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    await flush();
+    await s.call('p1', 'prompt:draft-unit-operation', { notePath: WF2 }, true);
+    await flush();
+    expect(s.confirm).not.toHaveBeenCalled();
+    expect(s.cmds()).toEqual(['mcp_claim', 'mcp_reply']);
+    expect(s.replies()[0].reply).toMatchObject({ kind: 'result' });
+  });
+
+  it('with no vault open a prompt replies -32002 and claims nothing', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    s.switchVault(undefined as unknown as string);
+    await flush();
+    await s.call('p1', 'prompt:draft-unit-operation', { notePath: WF2 }, false);
+    await flush();
+    expect(s.cmds()).toEqual(['mcp_reply']);
+    expect(s.replies()).toEqual([{ callId: 'p1', reply: CLOSED }]);
+  });
 });
