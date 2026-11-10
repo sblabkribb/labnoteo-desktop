@@ -5,6 +5,7 @@
  * Rust is a fake `invoke` (`mcp_claim`, `mcp_reply`, `vault_current`); the dialogs are the real dialog layer;
  * the tools are the real core tools over the fake vault.
  */
+import { createHash } from 'node:crypto';
 import { act, fireEvent, screen } from '@testing-library/react';
 import type { EditorView } from '@codemirror/view';
 import { runTool } from '@labnoteo/core';
@@ -112,6 +113,37 @@ describe('MCP host (Task 36)', () => {
     expect(cat.find((x) => x.name === 'read_section')).toMatchObject({ mutates: false });
     expect(cat.find((x) => x.name === 'update_section')).toMatchObject({ mutates: true });
     for (const x of cat) expect(Object.keys(x).sort()).toEqual(['description', 'inputSchema', 'mutates', 'name']);
+  });
+
+  it('the catalog is unchanged by the assistant-only tools (assistant plan Task 11A): same names, same bytes', () => {
+    const expected = [
+      'get_sample',
+      'list_samples',
+      'search_samples',
+      'create_sample',
+      'get_unit_operation',
+      'read_section',
+      'update_section',
+      'create_workflow',
+      'insert_unit_operation',
+      'list_experiment',
+      'search_experiment',
+      'read_note',
+      'get_experiment_context',
+      'get_unit_operation_context',
+    ];
+    for (const lang of ['en', 'ko'] as const) {
+      setLang(lang);
+      const cat = toolCatalog();
+      expect(cat.map((x) => x.name)).toEqual(expected);
+      expect(cat.map((x) => x.name)).not.toContain('add_section');
+      expect(cat.map((x) => x.name)).not.toContain('search_catalog');
+      // Pinned before Task 11A: any change to what the MCP server lists must be deliberate.
+      expect(createHash('sha256').update(JSON.stringify(cat)).digest('hex')).toBe(
+        '1336d0ffa3fa162b41c01592ad8e0f00df4a297bf9deb022c8ffedb6c4f37e2c'
+      );
+    }
+    setLang('en');
   });
 
   it('a read tool runs without asking and replies the tool result', async () => {

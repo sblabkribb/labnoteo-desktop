@@ -2,7 +2,8 @@
  * 내장 런타임(assistant spec §5.2, plan Task 7): 앱의 에이전트 루프(`runAgent`)를 말풍선 대화 한 차례로 돌린다.
  *
  * `askAgentCommand`(labnote/port/aiAskAgent.ts, 옮겨 온 파일이라 고치지 않는다)와 같은 단계를 같은 함수로 밟는다:
- * `vaultGuard` → `experimentReadmes` → 범위(`resolveScope`, `scopeGate`) → `appTools` + `externalAgentTools` →
+ * `vaultGuard` → `experimentReadmes` → 범위(`resolveScope`, `scopeGate`) → `appTools` + `assistantTools`(도우미만 쓰는
+ * `add_section`·`search_catalog`, Task 11A) + `externalAgentTools` →
  * `toolContext`(지킴이 검사가 걸린 쓰기) → `runAgent` → 같은 확인 글(`buildApprovalMessage`, `erasesRecordedLines`,
  * `externalApprovalMessage`, `ai.confirm.tainted`) → `toolRunNotice` / `describeLlmError`. 다른 점:
  * - 모델 차례마다 진행 대화상자(`withProgress`)를 띄우지 않는다. 진행은 도우미의 think 상태와 상태 줄이고, 멈춤은
@@ -30,6 +31,7 @@ import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llm
 import { describeLlmError } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
 import { historyBudget, toPromptMessages } from './compact';
+import { addSectionText, assistantTools, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
 import { cleanLabel, SourceLedger, type Source } from './sources';
 
@@ -62,6 +64,13 @@ export function approvalConfirm(env: AiEnv, external: ReadonlyMap<string, Extern
     const path = typeof call.arguments.documentPath === 'string' ? call.arguments.documentPath : null;
     const ask = env.host.t('Allow AI tool "{0}" to modify the vault?', tool.name);
     const prompt = note?.tainted ? `${ask}\n\n${appT('ai.confirm.tainted')}` : ask;
+    // add_section (Task 11A): a new section, worded by the app ("adds … at the end"), not core's "replaces".
+    if (isAddSectionPreview(preview)) {
+      return env.host.confirm(`${buildApprovalMessage(env.host.t, prompt, path)}\n\n${addSectionText(preview, env.host.t)}`, {
+        confirmLabel: env.host.t('Allow'),
+        destructive: false,
+      });
+    }
     return env.host.confirm(buildApprovalMessage(env.host.t, prompt, path, preview), {
       confirmLabel: env.host.t('Allow'),
       destructive: erasesRecordedLines(preview),
@@ -202,9 +211,13 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     }
     const scope = scopeOf(turn.folder, experiments);
     const allowedFolders = scopeGate(turn.userText, experiments);
-    const coreTools: ToolDef[] = scope
-      ? appTools({ scope, allowedFolders })
-      : [...createLabnoteTools(), ...contextTools().filter((x) => x.name === 'list_experiment')];
+    // Chat mode: the app tools plus the assistant-only add_section and search_catalog (Task 11A, R8).
+    const coreTools: ToolDef[] = [
+      ...(scope
+        ? appTools({ scope, allowedFolders })
+        : [...createLabnoteTools(), ...contextTools().filter((x) => x.name === 'list_experiment')]),
+      ...assistantTools(scope),
+    ];
     const external = await externalAgentTools(env, {
       signal: run$.signal,
       notify: (message) => env.host.notify('warn', message),

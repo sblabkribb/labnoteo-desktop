@@ -329,6 +329,59 @@ describe('builtinRuntime', () => {
     expect(p.seen[1].at(-1)!.content).toContain(OTHER_DIR);
   });
 
+  it('chat mode offers the assistant-only add_section and search_catalog, scoped or not (Task 11A)', async () => {
+    const tools: string[][] = [];
+    const seen = (opts?: ChatOptions) => {
+      tools.push((opts?.tools ?? []).map((x: ToolDef) => x.name));
+      return answer('끝');
+    };
+    const { rt } = await setup(new Script([seen]));
+    await rt.run(turnOf('hi'), recordSink().sink, go());
+    const { rt: rt2 } = await setup(new Script([seen]), { mount: false });
+    await rt2.run(turnOf('hi', { folder: null }), recordSink().sink, go());
+    for (const names of tools) {
+      expect(names).toContain('add_section');
+      expect(names).toContain('search_catalog');
+      expect(names).toContain('update_section');
+      expect(new Set(names).size).toBe(names.length);
+    }
+  });
+
+  it('add_section asks with the app wording and the added lines; allowed, it adds the section in the open editor', async () => {
+    const p = new Script([toolTurn('add_section', { documentPath: NOTE, heading: 'Notes', body: '새 메모' }), answer('추가했어요')]);
+    const { rt, th } = await setup(p);
+    th.answer.confirm(true);
+    const { rec, sink } = recordSink();
+    await rt.run(turnOf('메모 섹션을 만들어 줘'), sink, go());
+    expect(th.asked.confirm).toHaveLength(1);
+    const { message, opts } = th.asked.confirm[0];
+    expect(message.startsWith('Allow AI tool "add_section" to modify the vault?')).toBe(true);
+    expect(message).toContain(`Target: ${NOTE}`);
+    expect(message).toContain(t('assistant.addSection.atEnd', 'Notes'));
+    expect(message).toContain('새 메모');
+    expect(message).not.toContain('This replaces section');
+    expect(opts).toEqual({ confirmLabel: 'Allow', destructive: false });
+    expect(docOf(NOTE)).toContain('## Notes\n\n새 메모');
+    expect(rec.status).toContain(t('assistant.status.write', '001_WD010_A.labnote.md'));
+  });
+
+  it('add_section during a vault switch writes nothing', async () => {
+    const p = new Script([toolTurn('add_section', { documentPath: NOTE, heading: 'Notes', body: 'x' }), answer('끝')]);
+    const { rt, th, f } = await setup(p);
+    const write = vi.spyOn(th.host.fs, 'write');
+    const modify = vi.spyOn(th.host.fs, 'modify');
+    th.answer.confirm(() => {
+      void cancelAllRequests(f.invoke);
+      closeAllDialogs();
+      return true;
+    });
+    const r = await rt.run(turnOf('메모 섹션'), recordSink().sink, go());
+    expect(r.cancelled).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+    expect(modify).not.toHaveBeenCalled();
+    expect(docOf(NOTE)).toBe(BODY);
+  });
+
   it('a folder without an open note scopes the context tools to that experiment', async () => {
     const tools: string[][] = [];
     const p = new Script([
