@@ -584,6 +584,19 @@ const ko: Record<string, string> = {
   'aiCtx.err.noExperiment': '열린 노트가 실험 폴더(labnote/###_이름) 안에 있지 않습니다.',
   'aiCtx.err.unknownExperiment': '"{0}" 에 맞는 실험이 없습니다.',
   'aiCtx.err.ambiguousExperiment': '"{0}" 에 맞는 실험이 여럿입니다: {1}.',
+  'aiCtx.cmd.prefillInput': 'AI: 이전 단계 출력으로 입력 채우기',
+  'aiCtx.openNote': '먼저 워크플로 노트를 여세요.',
+  'aiCtx.notInUnitOp': '커서를 단위 공정(### [...]) 안에 두세요.',
+  'aiCtx.notInChain': '이 노트는 실험의 워크플로 노트가 아닙니다(labnote/###_이름/###_….labnote.md).',
+  'aiCtx.noteBusy': '노트가 저장 중이거나 입력 중입니다. 잠시 뒤 다시 하세요.',
+  'aiCtx.draftEmpty': 'AI 답에 계획 섹션이 없습니다. 다시 하거나 다른 모델을 고르세요.',
+  'aiCtx.draftMoved': 'AI 가 쓰는 동안 이 단위 공정이 바뀌어 아무것도 넣지 않았습니다.',
+  'aiCtx.draftInserted': '계획 초안을 {0} 에 넣었습니다.',
+  'aiCtx.droppedSections': '넣지 않음(연구자가 쓰는 섹션이거나 요청하지 않은 섹션): {0}',
+  'aiCtx.prefillNoPrevious': '이전 단위 공정이 없습니다: 실험의 첫 단계입니다.',
+  'aiCtx.prefillNoOutput': '이전 단위 공정({0})의 출력에 샘플 ID 가 없습니다.',
+  'aiCtx.prefillNothing': '입력에 이미 이전 출력의 샘플이 모두 있습니다.',
+  'aiCtx.prefillDone': '{0} ({1}) 의 출력으로 입력을 채웠습니다.',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -1167,6 +1180,19 @@ const en: Record<string, string> = {
   'aiCtx.err.noExperiment': 'The open note is not in an experiment folder (labnote/###_Name).',
   'aiCtx.err.unknownExperiment': 'No experiment matches "{0}".',
   'aiCtx.err.ambiguousExperiment': '"{0}" matches several experiments: {1}.',
+  'aiCtx.cmd.prefillInput': 'AI: Prefill Input from previous step',
+  'aiCtx.openNote': 'Open a workflow note first.',
+  'aiCtx.notInUnitOp': 'Put the cursor inside a unit operation (### [...]).',
+  'aiCtx.notInChain': 'This note is not a workflow note of the experiment (labnote/###_Name/###_….labnote.md).',
+  'aiCtx.noteBusy': 'The note is saving or you are typing. Try again in a moment.',
+  'aiCtx.draftEmpty': 'The AI reply had no planning section. Try again or choose another model.',
+  'aiCtx.draftMoved': 'The unit operation changed while the AI was writing, so nothing was inserted.',
+  'aiCtx.draftInserted': 'Inserted the planning draft into {0}.',
+  'aiCtx.droppedSections': 'Not inserted (researcher-only or not requested): {0}',
+  'aiCtx.prefillNoPrevious': 'There is no previous unit operation: this is the first step of the experiment.',
+  'aiCtx.prefillNoOutput': 'The Output of the previous unit operation ({0}) names no sample ID.',
+  'aiCtx.prefillNothing': 'The Input already has every sample of the previous Output.',
+  'aiCtx.prefillDone': 'Filled the Input from the Output of {0} ({1}).',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

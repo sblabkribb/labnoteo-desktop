@@ -241,6 +241,31 @@ function sampleLookup(fs: LabnoteFs, scopeFolder: string, globalFolder: string |
   };
 }
 
+/**
+ * Registry aliases of `ids` (the scope folder's local registry, then the
+ * global one; never another experiment's), keyed by the ID as given. Read-only.
+ * At most {@link MAX_SAMPLE_SOURCES} IDs are looked up.
+ */
+export async function registryAliases(
+  fs: LabnoteFs,
+  scopeFolder: string,
+  globalFolder: string | undefined,
+  ids: readonly string[],
+  customTypes: readonly string[] = []
+): Promise<Map<string, string>> {
+  const folder = experimentFolderOf(scopeFolder);
+  if (!folder) throw new ScopeError('noExperiment', [scopeFolder]);
+  const types = [...SAMPLE_TYPES, ...customTypes];
+  const lookup = sampleLookup(fs, folder, globalFolder);
+  const out = new Map<string, string>();
+  for (const id of ids.slice(0, MAX_SAMPLE_SOURCES)) {
+    const type = typeOf(id, types);
+    const alias = type ? (await lookup(type, id))?.record.alias : undefined;
+    if (typeof alias === 'string' && alias.trim()) out.set(id, alias);
+  }
+  return out;
+}
+
 function sampleText(hit: SampleHit): string {
   const r = hit.record;
   const lines = [`${hit.id} (${hit.type}, ${hit.where} registry)`];

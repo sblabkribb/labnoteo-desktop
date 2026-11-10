@@ -20,6 +20,7 @@ import { layoutStore } from '../../ui/layoutStore';
 import { runQuickSwitcher } from '../../ui/quickSwitcher';
 import { chooseTheme, type Theme } from '../../theme/useTheme';
 import { setLang, type Lang } from '../../i18n/lang';
+import { contextAppCommands } from '../../ai/contextCommands';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -266,7 +267,7 @@ const langCommand = (id: string, nameKey: string, lang: Lang): AppCommand => ({ 
 const langCommands: AppCommand[] = [langCommand('lang-ko', 'cmd.lang.ko', 'ko'), langCommand('lang-en', 'cmd.lang.en', 'en')];
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, ...themeCommands, ...langCommands];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, ...themeCommands, ...langCommands, ...contextAppCommands];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
