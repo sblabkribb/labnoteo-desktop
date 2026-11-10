@@ -9,20 +9,62 @@ use std::path::{Path, PathBuf};
 use super::fs::FsError;
 use super::path::confine;
 
-/// Extensions (lowercase) that are never opened with the default app: running
-/// them would execute code, not show a document.
+/// Extensions (lowercase) that are never opened or written as attachments:
+/// running them would execute code, not show a document. Microsoft's
+/// Attachment Manager high-risk list plus script interpreters that are often
+/// associated on lab machines (Python, Git Bash, Perl, Ruby). Opening goes
+/// further and needs `OPENABLE_EXTS` too; this list is the floor for writes.
 pub const BLOCKED_EXTS: &[&str] = &[
-    "exe", "msi", "msp", "msix", "appx", "bat", "cmd", "com", "ps1", "psm1", "psd1", "vbs", "vbe", "js", "jse", "wsf",
-    "wsh", "hta", "scr", "pif", "lnk", "url", "reg", "cpl", "msc", "jar", "dll", "sys", "scf", "inf", "gadget",
-    "application", "appref-ms", "settingcontent-ms", "website", "library-ms", "search-ms", "chm", "iso", "img", "vhd",
-    "vhdx",
+    // executables, installers and packages
+    "exe", "msi", "msp", "msu", "msix", "msixbundle", "appx", "appxbundle", "com", "scr", "pif", "cpl", "dll", "sys",
+    "ocx", "drv", "cab", "diagcab", "application", "appref-ms", "gadget", "jar", "jnlp", "xll", "xbap", "vsix",
+    // Windows scripts and script hosts
+    "bat", "cmd", "ps1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2", "psm1", "psd1", "pssc", "cdxml", "msh", "msh1",
+    "msh2", "mshxml", "msh1xml", "msh2xml", "vb", "vbs", "vbe", "js", "jse", "ws", "wsf", "wsh", "wsc", "sct", "hta",
+    "mht", "mhtml", "shb", "shs", "inf", "ins", "isp", "reg", "msc", "mmc", "mst", "mcf",
+    // other interpreters
+    "py", "pyw", "pyz", "pyzw", "pyc", "pyo", "sh", "bash", "zsh", "ksh", "csh", "pl", "pm", "rb", "rbw", "php", "tcl",
+    "lua", "r", "command", "tool", "vbproj", "csproj",
+    // shortcuts, shell and settings handlers
+    "lnk", "url", "scf", "website", "library-ms", "search-ms", "searchconnector-ms", "settingcontent-ms", "theme",
+    "themepack", "deskthemepack", "rdp", "chm", "hlp", "grp", "fxp", "prf", "prg", "crt", "der", "cer", "its",
+    // Access and Office macro containers
+    "ade", "adp", "mad", "maf", "mag", "mam", "maq", "mar", "mas", "mat", "mau", "mav", "maw", "mda", "mdb", "mde",
+    "mdt", "mdw", "mdz", "accda", "accdb", "accde", "accdr", "accdt", "laccdb", "docm", "dotm", "xlsm", "xltm", "xlam",
+    "xla", "pptm", "potm", "ppam", "ppsm", "sldm",
+    // disk images
+    "iso", "img", "vhd", "vhdx",
 ];
+
+/// The only extensions (lowercase) that are opened with the default app: the
+/// documents and data a lab note attaches. Anything else stays in labnoteO
+/// (its own viewer) or is shown in Explorer, never handed to ShellExecute.
+pub const OPENABLE_EXTS: &[&str] = &[
+    // images
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "ico",
+    // documents
+    "pdf", "txt", "md", "rtf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "hwp", "hwpx",
+    // data
+    "csv", "tsv", "json", "log", "yaml", "yml", "fasta", "fa", "fastq", "fq", "gb", "gbk", "ab1", "dna", "pdb", "cif",
+    "sdf", "mol", "fcs",
+    // archives and media
+    "zip", "7z", "gz", "tar", "mp4", "mov", "avi", "mkv", "webm", "mp3", "wav", "m4a",
+];
+
+fn last_ext(name: &str) -> Option<String> {
+    name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase())
+}
 
 /// Whether `name`'s last extension is in `BLOCKED_EXTS`. Windows strips
 /// trailing dots and spaces, but `confine` already refuses such names.
 pub fn is_blocked_name(name: &str) -> bool {
-    name.rsplit_once('.')
-        .is_some_and(|(_, ext)| BLOCKED_EXTS.contains(&ext.to_ascii_lowercase().as_str()))
+    last_ext(name).is_some_and(|ext| BLOCKED_EXTS.contains(&ext.as_str()))
+}
+
+/// Whether `name` may be opened with the default app: its last extension is in
+/// `OPENABLE_EXTS` (and, belt and braces, not in `BLOCKED_EXTS`).
+pub fn is_openable_name(name: &str) -> bool {
+    !is_blocked_name(name) && last_ext(name).is_some_and(|ext| OPENABLE_EXTS.contains(&ext.as_str()))
 }
 
 /// What actually opens things; a trait so tests never launch anything.
@@ -39,7 +81,7 @@ fn opener_error(e: String) -> FsError {
 fn openable(root: &Path, rel: &str) -> Result<PathBuf, FsError> {
     let abs = confine(root, rel)?;
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    if is_blocked_name(name) {
+    if !is_openable_name(name) {
         return Err(FsError::BadInput(format!("{name}: this kind of file is not opened from labnoteO")));
     }
     if !std::fs::metadata(&abs)?.is_file() {
@@ -48,8 +90,8 @@ fn openable(root: &Path, rel: &str) -> Result<PathBuf, FsError> {
     Ok(abs)
 }
 
-/// Open a vault file with the default app. Refuses executables and scripts,
-/// folders, missing files and anything outside the vault.
+/// Open a vault file with the default app. Only allowlisted document and data
+/// types are opened (executables and scripts never), and never folders, missing files and anything outside the vault.
 pub fn open_default(root: &Path, rel: &str, opener: &dyn Opener) -> Result<(), FsError> {
     let abs = openable(root, rel)?;
     opener.open_path(&abs).map_err(opener_error)
@@ -185,6 +227,36 @@ mod tests {
         assert!(matches!(reveal(&t.0, "../x", &spy), Err(FsError::Vault(_))));
         assert!(matches!(reveal(&t.0, "nope.csv", &spy), Err(FsError::Io(_))));
         assert_eq!(spy.revealed.borrow().len(), 2);
+    }
+
+    #[test]
+    fn refuses_interpreter_scripts_and_unknown_types() {
+        let t = Tmp::new();
+        let names = ["x.py", "x.sh", "x.pyw", "x.rb", "x.pl", "x.wsc", "x.theme", "x.rdp", "x.xlsm", "x.html", "x.svg", "noext"];
+        for name in names {
+            touch(&t.0, name);
+        }
+        let spy = Spy::default();
+        for rel in names {
+            assert!(matches!(open_default(&t.0, rel, &spy), Err(FsError::BadInput(_))), "{rel}");
+        }
+        assert!(spy.opened.borrow().is_empty());
+        for ok in ["plate.CSV", "report.pdf", "gel.tif", "data.xlsx", "seq.fasta"] {
+            touch(&t.0, ok);
+            open_default(&t.0, ok, &spy).unwrap();
+        }
+        assert_eq!(spy.opened.borrow().len(), 5);
+    }
+
+    #[test]
+    fn blocked_list_covers_interpreters_and_high_risk_types() {
+        for name in ["a.py", "a.sh", "a.bash", "a.pyz", "a.ps1xml", "a.msu", "a.cab", "a.xll", "a.jnlp", "a.accde", "a.searchconnector-ms"] {
+            assert!(is_blocked_name(name), "{name}");
+            assert!(!is_openable_name(name), "{name}");
+        }
+        for name in OPENABLE_EXTS {
+            assert!(!BLOCKED_EXTS.contains(name), "{name} is both openable and blocked");
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { t } from '../../i18n/t';
 import { useLang } from '../../i18n/useLang';
 import { Icon } from '../../ui/Icon';
@@ -32,9 +32,8 @@ function activate(menu: MenuState, item: MenuItem): void {
   void runCommand(menu.ctx, item.run);
 }
 
-const enabledIn = (panel: HTMLElement | null) => [
-  ...(panel?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []),
-];
+/** 메뉴 칸의 항목 단추 전부. 꺼진 항목도 들어간다: 키보드로도 닿아 까닭을 읽을 수 있게(ARIA APG). */
+const itemsIn = (panel: HTMLElement | null) => [...(panel?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
 
 /** 열린 하위 메뉴: 어느 메뉴(id)의 몇째 항목인지, 열면서 그 안으로 초점을 옮기는지(키보드). */
 interface OpenSub {
@@ -50,7 +49,9 @@ interface OpenSub {
  *   시작하는 다음 항목으로 간다(type-ahead).
  * - 하위 메뉴(한 단계): 마우스를 올리고 150ms 뒤, 또는 ArrowRight·Enter 로 연다. ArrowLeft·Escape 는 하위 메뉴만 닫고
  *   부모 항목으로 돌아간다. 오른쪽에 자리가 없으면 왼쪽으로 연다.
- * - 꺼진 항목은 aria-disabled 이고 까닭을 툴팁으로 보인다. 키보드 이동은 건너뛴다.
+ * - 꺼진 항목은 aria-disabled 이고 실행되지 않는다. 키보드로도 초점이 간다(ARIA APG). 까닭은 마우스에는 툴팁,
+ *   보조 기술에는 aria-describedby, 키보드 초점이 있으면 항목 아래 한 줄로 보인다.
+ * - 구역 이름("실험 노트")이 있으면 그 구역의 항목을 role=group 으로 묶고 이름을 aria-labelledby 로 잇는다.
  * - 바깥을 누르거나 초점이 메뉴 층을 떠나면 닫힌다.
  * 항목 이름은 그릴 때 번역하므로 언어를 바꾸면 열린 채로 바뀐다.
  */
@@ -79,7 +80,7 @@ export function ContextMenu() {
     el.style.setProperty('left', `${Math.round(clamp(x, box.width, window.innerWidth))}px`);
     el.style.setProperty('top', `${Math.round(clamp(y, box.height, window.innerHeight))}px`);
     // 포인터로 열면 메뉴 자체에 초점(항목은 마우스가 가리킨다), 키보드로 열면 첫 항목에. 어느 쪽이든 화살표로 시작한다.
-    (menu.pointer ? el : (enabledIn(el)[0] ?? el)).focus();
+    (menu.pointer ? el : (itemsIn(el)[0] ?? el)).focus();
   }, [menu]);
 
   // 하위 메뉴: 부모 항목 오른쪽에, 자리가 없으면 부모 메뉴 왼쪽에. 위아래는 화면 안으로.
@@ -96,7 +97,7 @@ export function ContextMenu() {
     if (x + box.width > window.innerWidth - EDGE) x = rr.left - box.width + 2;
     el.style.setProperty('left', `${Math.round(Math.max(EDGE, x))}px`);
     el.style.setProperty('top', `${Math.round(clamp(pr.top - EDGE, box.height, window.innerHeight))}px`);
-    if (sub.focus) enabledIn(el)[0]?.focus();
+    if (sub.focus) itemsIn(el)[0]?.focus();
   }, [sub]);
 
   useEffect(() => {
@@ -146,7 +147,7 @@ export function ContextMenu() {
 
   const onKeyDown = (level: 0 | 1) => (e: KeyboardEvent<HTMLDivElement>) => {
     const items = level === 0 ? menu.items : (subItems ?? []);
-    const list = enabledIn(e.currentTarget);
+    const list = itemsIn(e.currentTarget);
     const at = list.indexOf(document.activeElement as HTMLButtonElement);
     const go = (i: number) => list[(i + list.length) % list.length]?.focus();
     const index = at < 0 ? -1 : Number(list[at].dataset.index);
@@ -165,7 +166,7 @@ export function ContextMenu() {
         go(-1);
         break;
       case 'ArrowRight':
-        if (level === 0 && item?.submenu) showSub(index, true);
+        if (level === 0 && item?.submenu && !item.disabled) showSub(index, true);
         break;
       case 'ArrowLeft':
         if (level === 1) hideSub(true);
@@ -176,6 +177,7 @@ export function ContextMenu() {
         break;
       case 'Enter':
       case ' ':
+        if (item?.disabled) break;
         if (item?.submenu && level === 0) showSub(index, true);
         else if (item) activate(menu, item);
         break;
@@ -203,44 +205,81 @@ export function ContextMenu() {
     }
   };
 
-  const renderItems = (items: readonly MenuItem[], level: 0 | 1) =>
-    items.map((item, i) =>
-      item.separator ? (
-        <div key={i} role="separator" className="context-menu-separator" />
-      ) : (
-        <Fragment key={i}>
-          {item.section !== undefined && (
-            <div role="presentation" className="context-menu-section">
-              {t(item.section)}
-            </div>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            data-index={i}
-            className={item.danger ? 'context-menu-item context-menu-danger' : 'context-menu-item'}
-            aria-disabled={item.disabled ? true : undefined}
-            title={item.disabled && item.disabledReason ? t(item.disabledReason) : undefined}
-            aria-haspopup={item.submenu ? 'menu' : undefined}
-            aria-expanded={item.submenu ? sub?.index === i : undefined}
-            onClick={() => {
-              if (item.disabled) return;
-              if (item.submenu) showSub(i, false);
-              else activate(menu, item);
-            }}
-            onMouseEnter={level === 0 ? () => onEnterRoot(i, item) : undefined}
-          >
-            <span className="context-menu-icon" aria-hidden="true">
-              {item.icon && <Icon name={item.icon} size={14} />}
-            </span>
-            <span className="context-menu-label">{labelOf(item)}</span>
-            {item.shortcut && <kbd className="context-menu-shortcut">{item.shortcut}</kbd>}
-            {item.submenu && <Icon name="chevron-right" size={14} className="context-menu-chevron" />}
-          </button>
-        </Fragment>
+  const domId = (level: 0 | 1, i: number, part: string) => `context-menu-${menu.id}-${level}-${i}-${part}`;
+
+  const renderItem = (item: MenuAction, i: number, level: 0 | 1) => {
+    const reason = item.disabled && item.disabledReason ? t(item.disabledReason) : undefined;
+    const reasonId = reason ? domId(level, i, 'reason') : undefined;
+    return [
+      <button
+        key={`item-${i}`}
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        data-index={i}
+        className={item.danger ? 'context-menu-item context-menu-danger' : 'context-menu-item'}
+        aria-disabled={item.disabled ? true : undefined}
+        aria-describedby={reasonId}
+        title={reason}
+        aria-haspopup={item.submenu ? 'menu' : undefined}
+        aria-expanded={item.submenu ? sub?.index === i : undefined}
+        onClick={() => {
+          if (item.disabled) return;
+          if (item.submenu) showSub(i, false);
+          else activate(menu, item);
+        }}
+        onMouseEnter={level === 0 ? () => onEnterRoot(i, item) : undefined}
+      >
+        <span className="context-menu-icon" aria-hidden="true">
+          {item.icon && <Icon name={item.icon} size={14} />}
+        </span>
+        <span className="context-menu-label">{labelOf(item)}</span>
+        {item.shortcut && <kbd className="context-menu-shortcut">{item.shortcut}</kbd>}
+        {item.submenu && <Icon name="chevron-right" size={14} className="context-menu-chevron" />}
+      </button>,
+      // 꺼진 까닭: aria-describedby 의 대상이고, 그 항목에 초점이 있을 때만 보인다(CSS). 읽기는 설명으로만.
+      reason && (
+        <span key={`reason-${i}`} id={reasonId} aria-hidden="true" className="context-menu-reason">
+          {reason}
+        </span>
       ),
-    );
+    ];
+  };
+
+  /** 항목들을 그린다. 구역 이름이 붙은 항목부터 다음 구분선(또는 다음 구역) 앞까지를 role=group 하나로 묶는다. */
+  const renderItems = (items: readonly MenuItem[], level: 0 | 1) => {
+    const out: ReactNode[] = [];
+    let group: { key: number; labelId: string; label: string; children: ReactNode[] } | undefined;
+    const closeGroup = () => {
+      if (!group) return;
+      const g = group;
+      out.push(
+        <div key={`group-${g.key}`} role="group" aria-labelledby={g.labelId} className="context-menu-group">
+          <div id={g.labelId} role="presentation" className="context-menu-section">
+            {g.label}
+          </div>
+          {g.children}
+        </div>,
+      );
+      group = undefined;
+    };
+    items.forEach((item, i) => {
+      if (item.separator) {
+        closeGroup();
+        out.push(<div key={i} role="separator" className="context-menu-separator" />);
+        return;
+      }
+      if (item.section !== undefined) {
+        closeGroup();
+        group = { key: i, labelId: domId(level, i, 'section'), label: t(item.section), children: [] };
+      }
+      const drawn = renderItem(item, i, level);
+      if (group) group.children.push(...drawn);
+      else out.push(...drawn);
+    });
+    closeGroup();
+    return out;
+  };
 
   const parentItem = sub ? menu.items[sub.index] : undefined;
   return (

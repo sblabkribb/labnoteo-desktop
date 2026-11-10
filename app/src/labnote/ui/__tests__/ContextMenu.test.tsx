@@ -54,8 +54,8 @@ describe('맥락 메뉴', () => {
     expect(document.activeElement).toBe(entries[0]); // 첫 항목에 초점
 
     await user.keyboard('{ArrowDown}');
-    expect(document.activeElement).toBe(entries[2]); // 비활성 항목은 건너뛴다
-    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(document.activeElement).toBe(entries[1]); // 꺼진 항목에도 초점이 간다(까닭을 읽을 수 있게)
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
     expect(document.activeElement).toBe(entries[0]); // 끝에서 처음으로
     await user.keyboard('{ArrowUp}');
     expect(document.activeElement).toBe(entries[3]);
@@ -79,6 +79,9 @@ describe('맥락 메뉴', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const runs = [vi.fn(async () => 1), vi.fn(), vi.fn(() => Promise.reject(new NoteBusyError('a.md'))), vi.fn()];
     act(() => openMenu(ctx, { x: 0, y: 0 }, items(runs)));
+    await user.keyboard('{ArrowDown}{Enter}'); // 꺼진 항목: 아무것도 하지 않고 열린 채
+    expect(runs[1]).not.toHaveBeenCalled();
+    expect(screen.getByRole('menu')).toBeTruthy();
     await user.keyboard('{ArrowDown}{Enter}');
     expect(screen.queryByRole('menu')).toBeNull();
     expect(document.activeElement).toBe(trigger);
@@ -160,6 +163,12 @@ describe('맥락 메뉴', () => {
     const cut = screen.getByRole('menuitem', { name: '잘라내기' });
     expect(cut.getAttribute('aria-disabled')).toBe('true');
     expect(cut.getAttribute('title')).toBe('먼저 글을 선택하세요.');
+    // 보조 기술에는 설명으로: aria-describedby 가 까닭 글을 가리킨다(키보드 초점이 있으면 보이는 한 줄)
+    const reason = document.getElementById(cut.getAttribute('aria-describedby')!)!;
+    expect(reason.textContent).toBe('먼저 글을 선택하세요.');
+    expect(reason.classList.contains('context-menu-reason')).toBe(true);
+    expect(screen.getByRole('menuitem', { name: 'b' }).getAttribute('aria-describedby')).toBeNull();
+    expect(document.activeElement).toBe(cut); // 키보드로 열면 첫 항목, 꺼져 있어도
     fireEvent.click(cut);
     expect(run).not.toHaveBeenCalled();
   });
@@ -178,6 +187,10 @@ describe('맥락 메뉴', () => {
     const section = document.querySelector('.context-menu-section')!;
     expect(section.textContent).toBe('실험 노트');
     expect(section.getAttribute('role')).toBe('presentation');
+    // 구역의 항목들은 이름 붙은 group 으로 묶인다
+    const group = screen.getByRole('group', { name: '실험 노트' });
+    expect(group.contains(screen.getByRole('menuitem', { name: 'x' }))).toBe(true);
+    expect(group.contains(copy)).toBe(false);
   });
 
   it('a submenu opens with ArrowRight and closes with ArrowLeft, focus going in and back', async () => {

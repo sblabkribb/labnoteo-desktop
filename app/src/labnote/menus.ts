@@ -32,6 +32,7 @@ import { exportExperimentTablesToCsv, exportTablesToCsv } from './port/exportCsv
 import { sampleEditorMenuItems } from './port/sampleCommands';
 import { isNotePath } from './panel/treeIcons';
 import { README } from './paths';
+import { markerExperimentDir } from '../../vendor/labnoteo/src/issueMarkerIndex';
 import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
 
 /** 폴더가 실험 폴더이거나 그 안에 있으면 그 실험 폴더. */
@@ -143,7 +144,8 @@ function clipboardItems(ctx: CommandContext): MenuItem[] {
 
 /**
  * 삽입 ▸: 표, 콜아웃, 코드 블록, 가로줄, 수식 블록, 그리고 날짜, 날짜·시간, 이슈 마커(플러그인 명령).
- * 이슈 마커는 실험 노트(.labnote.md)에서만 이슈가 되므로 다른 노트에서는 까닭과 함께 꺼 둔다.
+ * 이슈 마커는 실험 폴더 바로 안의 README·워크플로 노트(markerExperimentDir)에서만 이슈가 되므로
+ * 다른 노트에서는 까닭과 함께 꺼 둔다(실험 폴더 밖의 .labnote.md 도).
  */
 function insertSubmenu(ctx: CommandContext, path: string): MenuItem[] {
   const block = (labelKey: string, icon: IconName, insert: (v: EditorView) => boolean): MenuAction => ({
@@ -151,7 +153,7 @@ function insertSubmenu(ctx: CommandContext, path: string): MenuItem[] {
     icon,
     run: async () => runBlockInsert(ctx, insert),
   });
-  const labnote = /\.labnote\.md$/i.test(path);
+  const labnote = markerExperimentDir(path) !== undefined;
   return [
     { ...block('menu.table', 'table', (v) => insertTable(v)), shortcut: displayKey(INSERT_TABLE_KEY) },
     block('menu.callout', 'quote', insertCallout),
@@ -172,8 +174,37 @@ function insertSubmenu(ctx: CommandContext, path: string): MenuItem[] {
 
 /** 서식 ▸: 서식 명령 전부, 단축키와 함께. 블록 서식은 표 칸에서 아무것도 하지 않는다(runFormat). */
 function formatSubmenu(ctx: CommandContext): MenuItem[] {
-  return FORMAT_KEYS.map((f): MenuItem => ({ labelKey: f.nameKey, shortcut: displayKey(f.key), run: async () => runFormatCommand(ctx, f) }));
+  return FORMAT_KEYS.map(
+    (f): MenuItem => ({
+      labelKey: f.nameKey,
+      icon: FORMAT_ICONS[f.id],
+      shortcut: displayKey(f.key),
+      run: async () => runFormatCommand(ctx, f),
+    }),
+  );
 }
+
+/** 서식 ▸ 항목의 아이콘(삽입 ▸ 처럼 왼쪽 아이콘 칸을 채운다). */
+export const FORMAT_ICONS: Readonly<Record<string, IconName>> = {
+  'format-bold': 'bold',
+  'format-italic': 'italic',
+  'format-strikethrough': 'strikethrough',
+  'format-code': 'code',
+  'format-highlight': 'highlighter',
+  'format-link': 'link',
+  'format-heading-1': 'heading-1',
+  'format-heading-2': 'heading-2',
+  'format-heading-3': 'heading-3',
+  'format-heading-4': 'heading-4',
+  'format-heading-5': 'heading-5',
+  'format-heading-6': 'heading-6',
+  'format-paragraph': 'pilcrow',
+  'format-bullet-list': 'list',
+  'format-numbered-list': 'list-ordered',
+  'format-task': 'list-todo',
+  'format-quote': 'text-quote',
+  'format-code-block': 'square-code',
+};
 
 /**
  * 편집기 본문의 메뉴(`path` 는 열린 노트, 명세 §5.6의 순서). 표 칸의 메뉴는 표가 따로 띄운다.

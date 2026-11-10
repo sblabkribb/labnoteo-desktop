@@ -395,12 +395,34 @@ describe('editorMenu', () => {
     expect(submenuOf(editorMenu(h.ctx, WF_PATH), 'menu.insert').find((i) => i.labelKey === 'menu.issueMarker')!.disabled).toBeFalsy();
   });
 
+  it('the issue marker is on only where markers open issues: README and workflow notes directly in an experiment folder', () => {
+    h = createTestHost();
+    const marker = (p: string) => submenuOf(editorMenu(h.ctx, p), 'menu.insert').find((i) => i.labelKey === 'menu.issueMarker')!;
+    expect(marker(WF_PATH).disabled).toBeFalsy();
+    expect(marker(README_PATH).disabled).toBeFalsy();
+    // .labnote.md 이지만 실험 폴더 밖이거나 실험 폴더의 하위 폴더: 이슈가 되지 않으므로 까닭과 함께 꺼 둔다
+    for (const p of ['notes/a.labnote.md', `${DIR}/sub/x.labnote.md`]) {
+      expect(marker(p).disabled, p).toBe(true);
+      expect(marker(p).disabledReason).toBe('menu.issueMarker.onlyLabnote');
+    }
+    expect(t('menu.issueMarker.onlyLabnote')).toContain('실험 폴더 바로 안');
+  });
+
   it('the Format submenu holds every formatting item with its shortcut', () => {
     h = createTestHost();
     const format = submenuOf(editorMenu(h.ctx, 'notes/plain.md'), 'menu.format');
     expect(labels(format)).toEqual(FORMAT);
     expect(format[0].shortcut).toBe('Ctrl+B');
+    // 삽입 ▸ 처럼 모든 항목에 아이콘이 있다(왼쪽 아이콘 칸이 비지 않는다)
+    expect(format.filter((i) => !i.separator && !i.icon).map((i) => (i.separator ? '' : i.labelKey))).toEqual([]);
     expect(t('cmd.format.bold')).toBe('굵게');
+  });
+
+  it('the header keeps its Insert table button next to the menu item (spec §5.6 Step 1)', () => {
+    // 단추의 동작(누르면 표, 잠기면 꺼짐, 영어 이름)은 editor/table/__tests__/commands.test.tsx 의 "편집기의 표 넣기 단추"가 본다.
+    const source = readFileSync('src/editor/Editor.tsx', 'utf-8');
+    expect(source).toContain('data-command-id="editor.insert.table"');
+    expect(source).toContain("t('table.insert')");
   });
 
   it('every item the editor menu had before is still reachable', () => {

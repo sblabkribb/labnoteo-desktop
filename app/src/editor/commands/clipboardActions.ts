@@ -7,6 +7,12 @@
  *   아무도 받지 않으면 글을 입력 트랜잭션으로 넣는다.
  * - 모두 선택은 @codemirror/commands 의 selectAll.
  * 표 칸을 편집 중이면 그 셀 편집기가 대상이다(clipboardTarget).
+ *
+ * WebView2 의 클립보드 읽기 권한: 앱은 창을 enable_clipboard_access 없이 만든다(wry 는 그때만 ClipboardRead 를
+ * 저절로 허락한다). 그래서 메뉴의 붙여넣기는 WebView2 의 기본 동작, 곧 권한 묻기 창을 거친다. 일부러다: MCP 토큰을
+ * Rust 가 클립보드에 잠시 올리므로(mcp/clipboard.rs, 웹뷰는 그것을 보지 않는다는 규칙) 웹뷰에 묻지 않는 읽기를 주지 않는다.
+ * 거절되거나 막히면 read() 와 readText() 가 모두 실패하고 'Ctrl+V 로 붙여 넣으세요' 경고를 띄운다(menu.pasteDenied).
+ * Ctrl+V 는 사용자 동작이 실은 paste 사건이라 권한이 필요 없다.
  */
 import { selectAll } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';

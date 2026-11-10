@@ -5,6 +5,21 @@
  */
 import type { JSX } from 'react';
 import {
+  Bold,
+  Italic,
+  Strikethrough,
+  Highlighter,
+  Heading1,
+  Heading2,
+  Heading3,
+  Heading4,
+  Heading5,
+  Heading6,
+  Pilcrow,
+  List,
+  ListOrdered,
+  ListTodo,
+  TextQuote,
   ArrowLeft,
   ArrowRight,
   BookOpen,
@@ -163,6 +178,21 @@ const ICONS = {
   upload: Upload,
   vault: Vault,
   loader: LoaderCircle,
+  bold: Bold,
+  italic: Italic,
+  strikethrough: Strikethrough,
+  highlighter: Highlighter,
+  'heading-1': Heading1,
+  'heading-2': Heading2,
+  'heading-3': Heading3,
+  'heading-4': Heading4,
+  'heading-5': Heading5,
+  'heading-6': Heading6,
+  pilcrow: Pilcrow,
+  list: List,
+  'list-ordered': ListOrdered,
+  'list-todo': ListTodo,
+  'text-quote': TextQuote,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
