@@ -28,13 +28,15 @@ import { clearSampleSourceCaches, localActionsSource, registrySource, sampleQuer
 import { GLOBAL, NOTE, SAMPLE_VAULT } from '../../samples/__tests__/fixtures';
 import { samples } from '../../samples/sampleStore';
 import { IntegrationSettingsPage, integrationDepsFor } from '../IntegrationSettingsDialog';
-import { NET_ERROR_KINDS, type InvokeFn } from '../netIpc';
+import { NET_ERROR_KINDS, NetError, type InvokeFn } from '../netIpc';
+import * as gh from '../githubIpc';
+import { t } from '../../i18n/t';
 import { netError, secretStatusOf } from './fakeNet';
 
 // ── 소스 훑기 ─────────────────────────────────────────────────────
 
 /** SP6 가 만든 앱 폴더와, 옮겨 온 SP6 포트 파일(계획의 Port files 목록). */
-const NEW_FOLDERS = ['src/integrations', 'src/partbank', 'src/ai', 'src/bfworkflow'];
+const NEW_FOLDERS = ['src/integrations', 'src/partbank', 'src/ai', 'src/bfworkflow', 'src/github'];
 const PORT_DIR = 'src/labnote/port';
 const SP6_PORTS = [
   'partbankClient.ts',
@@ -164,6 +166,73 @@ afterEach(() => {
 });
 
 describe('offline', () => {
+  it('the GitHub network commands are exactly the ones NETWORK lists; the rest stay offline', () => {
+    const fixture: Record<string, string[]> = JSON.parse(readFileSync('src-tauri/tests/ipc-args.json', 'utf-8'));
+    const github = Object.keys(fixture).filter((c) => c.startsWith('github_'));
+    expect(github.filter((c) => NETWORK.test(c)).sort()).toEqual(
+      ['github_name_check', 'github_owners', 'github_resolve_repo', 'github_retry', 'github_set_token', 'github_sign_in_start', 'github_sign_in_wait', 'github_upload'],
+    );
+    expect(github.filter((c) => !NETWORK.test(c)).sort()).toEqual([
+      'github_account',
+      'github_app_settings_get',
+      'github_app_settings_set',
+      'github_default_owner_get',
+      'github_default_owner_set',
+      'github_folder_status',
+      'github_plan',
+      'github_sign_out',
+      'github_statuses',
+      'github_unlink',
+    ]);
+  });
+
+  it('with the network gone, every GitHub network wrapper ends in the offline sentence and the offline ones still answer', async () => {
+    setLang('en');
+    const sent: string[] = [];
+    const invoke = (async (cmd: string) => {
+      sent.push(cmd);
+      if (NETWORK.test(cmd)) throw { kind: 'offline', message: 'raw-rust-text' };
+      if (cmd === 'github_statuses') return {};
+      if (cmd === 'github_app_settings_get' || cmd === 'github_app_settings_set') return { clientIdDefault: true, forgetOnExit: false };
+      if (cmd === 'github_folder_status') return { linked: false, state: 'planned', changedCount: 0, folderMissing: false };
+      if (cmd === 'github_plan') return { outcome: 'notLinked' };
+      return null;
+    }) as InvokeFn;
+    const network: Array<() => Promise<unknown>> = [
+      () => gh.githubSignInStart(invoke),
+      () => gh.githubSignInWait({}, invoke),
+      () => gh.githubSetToken('ghp_FAKE0000000000000000000000000000000000', invoke),
+      () => gh.githubOwners({}, invoke),
+      () => gh.githubNameCheck('me', 'exp', invoke),
+      () => gh.githubResolveRepo('me/exp', invoke),
+      () => gh.githubUpload({ planId: 'p', choices: {} }, invoke),
+      () => gh.githubRetry({ folder: 'labnote/001_A' }, invoke),
+    ];
+    for (const run of network) {
+      const e = await run().then(
+        () => undefined,
+        (x: unknown) => x,
+      );
+      expect(e).toBeInstanceOf(NetError);
+      expect(gh.githubErrorText(e)).toBe(t('github.err.apiLeg'));
+      expect(gh.githubErrorText(e)).not.toContain('raw-rust-text');
+    }
+    // 오프라인 커맨드는 네트워크 없이 그대로 답한다
+    expect(await gh.githubAccount(invoke)).toBeNull();
+    await gh.githubSignOut(invoke);
+    expect((await gh.githubAppSettingsGet(invoke)).clientIdDefault).toBe(true);
+    await gh.githubAppSettingsSet({ forgetOnExit: false }, invoke);
+    expect(await gh.githubPlan({ folder: 'labnote/001_A', target: { kind: 'update' }, sampleIds: [], infoFindings: [] }, invoke)).toEqual({
+      outcome: 'notLinked',
+    });
+    expect((await gh.githubFolderStatus('labnote/001_A', invoke)).linked).toBe(false);
+    expect(await gh.githubStatuses(invoke)).toEqual({});
+    expect(await gh.githubDefaultOwnerGet(invoke)).toBeNull();
+    await gh.githubDefaultOwnerSet('lab', invoke);
+    await gh.githubUnlink('labnote/001_A', invoke);
+    expect(sent.filter((c) => NETWORK.test(c))).toHaveLength(network.length);
+  });
+
   it('with every network command failing offline, @ completion, the sample store and note editing still work', async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (e: unknown) => void unhandled.push(e);
@@ -301,6 +370,7 @@ describe('errors', () => {
           llm: describeLlmError(e, llmSettings, coreT),
           bfw: bfwErrorText(e, { connection: 'server', url: 'https://workflow.kbiofoundry.kr', scope: 'read' }),
           bfwDesktop: bfwErrorText(e, { connection: 'desktop', url: 'http://127.0.0.1:1234' }),
+          github: gh.githubErrorText(e),
         };
         for (const [where, text] of Object.entries(texts)) {
           const label = `${k} ${JSON.stringify(extra)} ${where}`;

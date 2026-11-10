@@ -10,6 +10,7 @@ import { fileInfo, openWithDefaultApp, revealInFolder } from '../vaultOpen';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
+import * as gh from '../../integrations/githubIpc';
 import { deleteImportedFile, importConnectionsBytes, importConnectionsFile } from '../../integrations/importFile';
 import { openInBrowser } from '../../labnote/print/openInBrowser';
 import * as scan from '../../labnote/scan/scanIpc';
@@ -28,33 +29,9 @@ const fixture: Record<string, string[]> = JSON.parse(
  * 래퍼가 생긴 커맨드를 여기 남겨 두면(또는 픽스처에 없는 이름을 두면) 마지막 테스트가 실패한다.
  * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
  * SP7 Part C 의 mcp_* 커맨드 아홉은 Task 36 의 mcpIpc.ts 래퍼로 비웠다.
+ * feat/github-upload: github_* 커맨드 열여덟은 Task 11 의 githubIpc.ts 래퍼로 비웠다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [
-  // feat/github-upload: Task 1 이 Rust 커맨드를 등록했다. githubIpc.ts 래퍼는 Task 11 이 만들며 이 목록을 비운다.
-  'github_app_settings_get',
-  'github_app_settings_set',
-  // Task 3: 로그인(기기 코드), 토큰 붙여넣기, 계정, 로그아웃.
-  'github_sign_in_start',
-  'github_sign_in_wait',
-  'github_account',
-  'github_sign_out',
-  'github_set_token',
-  // Task 4: 올릴 곳(계정·조직) 목록, 저장소 이름 확인, 기존 저장소 주소 확인.
-  'github_owners',
-  'github_name_check',
-  'github_resolve_repo',
-  // Task 7: 올릴 파일 확인(계획). 네트워크를 쓰지 않는다.
-  'github_plan',
-  // Task 9A: 올리기, 폴더 상태, 기본 올릴 곳, 연결 끊기(올리기 말고는 네트워크를 쓰지 않는다).
-  'github_upload',
-  'github_folder_status',
-  'github_statuses',
-  'github_default_owner_get',
-  'github_default_owner_set',
-  'github_unlink',
-  // Task 9C: 끝나지 않은 올리기 마저 하기.
-  'github_retry',
-];
+const PENDING_TS_WRAPPERS: readonly string[] = [];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
@@ -201,6 +178,25 @@ describe('IPC 인자 이름 계약', () => {
     await skillStatus(r.invoke);
     await skillInstall(false, r.invoke);
     await skillSaveAs(r.invoke);
+    // feat/github-upload: GitHub 커맨드, 래퍼마다 한 번씩(토큰은 githubSetToken 만 보낸다)
+    await gh.githubSignInStart(r.invoke);
+    await gh.githubSignInWait({}, r.invoke);
+    await gh.githubAccount(r.invoke);
+    await gh.githubSignOut(r.invoke);
+    await gh.githubSetToken('ghp_FAKE0000000000000000000000000000000000', r.invoke);
+    await gh.githubAppSettingsGet(r.invoke);
+    await gh.githubAppSettingsSet({ clientId: null }, r.invoke);
+    await gh.githubOwners({}, r.invoke);
+    await gh.githubNameCheck('me', 'exp', r.invoke);
+    await gh.githubResolveRepo('me/exp', r.invoke);
+    await gh.githubPlan({ folder: 'labnote/001_A', target: { kind: 'update' }, sampleIds: [], infoFindings: [] }, r.invoke);
+    await gh.githubUpload({ planId: 'p', choices: {} }, r.invoke);
+    await gh.githubRetry({ folder: 'labnote/001_A' }, r.invoke);
+    await gh.githubFolderStatus('labnote/001_A', r.invoke);
+    await gh.githubStatuses(r.invoke);
+    await gh.githubDefaultOwnerGet(r.invoke);
+    await gh.githubDefaultOwnerSet('lab', r.invoke);
+    await gh.githubUnlink('labnote/001_A', r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)
