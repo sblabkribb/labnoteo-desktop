@@ -27,7 +27,7 @@ import { createSampleEnv } from '../../samples/env';
 import { clearSampleSourceCaches, localActionsSource, registrySource, sampleQueryAt, type SampleRow } from '../../samples/sources';
 import { GLOBAL, NOTE, SAMPLE_VAULT } from '../../samples/__tests__/fixtures';
 import { samples } from '../../samples/sampleStore';
-import { IntegrationSettingsDialog, integrationDepsFor } from '../IntegrationSettingsDialog';
+import { IntegrationSettingsPage, integrationDepsFor } from '../IntegrationSettingsDialog';
 import { NET_ERROR_KINDS, type InvokeFn } from '../netIpc';
 import { netError, secretStatusOf } from './fakeNet';
 
@@ -253,7 +253,7 @@ describe('keys', () => {
         await saveVaultSettings(settings, invoke);
       },
     } as typeof th.ctx;
-    render(createElement(IntegrationSettingsDialog, { deps: integrationDepsFor(ctx, invoke), onDone: () => {}, onCancel: () => {} }));
+    render(createElement(IntegrationSettingsPage, { deps: integrationDepsFor(ctx, invoke), onLeave: async () => {} }));
 
     const url = (await screen.findByLabelText('partbank server address')) as HTMLInputElement;
     const key = screen.getByLabelText('partbank server API key') as HTMLInputElement;

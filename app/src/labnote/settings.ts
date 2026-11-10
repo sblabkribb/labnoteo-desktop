@@ -45,7 +45,24 @@ export type AppSettings = Pick<
   allowHttpOrigins: string[];
   /** 앱에만 있는 키(SP7 Part C): MCP 서버가 듣는 127.0.0.1 포트. 1024-65535 정수, 아니면 3987. */
   mcpPort: number;
+  /** 앱에만 있는 키(UI 재설계): 새 실험의 실험자 칸에 미리 채울 이름. 기본 ''. 설정 → 실험·워크플로. */
+  defaultExperimenter: string;
+  /** 앱에만 있는 키(UI 재설계 R1): 노트에 붙인 그림을 둘 폴더. 기본 'images'(Obsidian·플러그인과 같다). 설정 → 편집기. */
+  imageFolder: ImageFolder;
 };
+
+/** 그림 저장 폴더: 노트 폴더의 images/(기본) 또는 실험의 resources/. */
+export type ImageFolder = 'images' | 'resources';
+
+/** 실험자 이름의 최대 길이(글자). 넘는 것은 자른다. */
+export const EXPERIMENTER_MAX = 120;
+
+/** 실험자 이름: 제어 문자(줄 바꿈, 탭, NUL)는 빈칸으로, 앞뒤 빈칸은 지우고, EXPERIMENTER_MAX 에서 자른다. 글이 아니면 ''. */
+export function cleanExperimenter(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  return v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, EXPERIMENTER_MAX).trim();
+}
 
 /** MCP 서버의 기본 포트(플러그인과 같다). */
 export const MCP_DEFAULT_PORT = 3987;
@@ -131,6 +148,9 @@ const KEYS = [
   // SP7 Part C: MCP 서버. mcpEnabled 는 플러그인 키지만 가져올 때는 늘 끈다(C6). mcpPort 는 앱 키.
   'mcpEnabled',
   'mcpPort',
+  // UI 재설계(Task 8): 기본 실험자와 그림 저장 폴더. 앱 키다.
+  'defaultExperimenter',
+  'imageFolder',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -139,6 +159,8 @@ const APP_DEFAULTS = {
   bfwUrl: BFW_DEFAULT_URL,
   bfwConnection: 'server',
   mcpPort: MCP_DEFAULT_PORT,
+  defaultExperimenter: '',
+  imageFolder: 'images',
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -180,6 +202,12 @@ export function fromStored(raw: unknown): AppSettings {
   if (raw && typeof raw === 'object' && (raw as { mcpEnabled?: unknown }).mcpEnabled === true) settings.mcpEnabled = true;
   const port = raw && typeof raw === 'object' ? (raw as { mcpPort?: unknown }).mcpPort : undefined;
   if (isMcpPort(port)) settings.mcpPort = port;
+  // UI 재설계(Task 8): 실험자는 다듬어 살리고, 그림 폴더는 아는 값만 살린다.
+  if (raw && typeof raw === 'object') {
+    const o = raw as { defaultExperimenter?: unknown; imageFolder?: unknown };
+    settings.defaultExperimenter = cleanExperimenter(o.defaultExperimenter);
+    if (o.imageFolder === 'images' || o.imageFolder === 'resources') settings.imageFolder = o.imageFolder;
+  }
   return settings;
 }
 

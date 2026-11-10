@@ -2,8 +2,7 @@ import type { MouseEvent } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import type { CommandContext } from '../labnote/commands/context';
-import { appCommands } from '../editor/commands/appCommands';
-import { openMenu, type MenuItem } from '../labnote/ui/menuStore';
+import { openMenu } from '../labnote/ui/menuStore';
 import { Icon } from './Icon';
 
 interface Props {
@@ -15,32 +14,17 @@ interface Props {
   ctx: CommandContext | undefined;
   /** 저장 안 된 편집을 저장한 뒤 보관함 선택 화면으로 간다(저장하지 못하면 떠나지 않는다). */
   onSwitchVault: () => Promise<void>;
+  /** 설정 창을 연다(Ctrl+, 와 같다). */
+  onOpenSettings: () => void;
 }
 
-/** 앱 명령을 메뉴 항목으로(이름은 그 명령의 번역 키, 실행은 메뉴가 runCommand 로 감싼다). 없는 명령은 빼낸다. */
-function appCommandItem(ctx: CommandContext, id: string): MenuItem[] {
-  const c = appCommands().find((x) => x.id === id);
-  if (!c) return [];
-  return [{ labelKey: c.nameKey, run: async () => c.run(ctx) }];
-}
-
-/**
- * 왼쪽 독 맨 아래의 보관함 줄(40px): 보관함 아이콘과 이름, ⇅ 메뉴(보관함 바꾸기), 설정 톱니(연동·샘플 설정).
- * 설정 모달(Task 8)이 생기면 톱니는 그 창을 연다.
- */
-export function VaultBar({ name, root, ctx, onSwitchVault }: Props) {
+/** 왼쪽 독 맨 아래의 보관함 줄(40px): 보관함 아이콘과 이름, ⇅ 메뉴(보관함 바꾸기), 설정 톱니(설정 창, Ctrl+,). */
+export function VaultBar({ name, root, ctx, onSwitchVault, onOpenSettings }: Props) {
   useLang();
   const openVaultMenu = (e: MouseEvent<HTMLButtonElement>) => {
     // 맥락이 아직 없으면(설정을 읽는 중) 메뉴 없이 바로 바꾼다: 잘못 고른 폴더에서 늘 빠져나올 수 있어야 한다
     if (!ctx) return void onSwitchVault();
     openMenu(ctx, { element: e.currentTarget }, [{ labelKey: 'vault.change', run: onSwitchVault }]);
-  };
-  const openSettingsMenu = (e: MouseEvent<HTMLButtonElement>) => {
-    if (!ctx) return;
-    openMenu(ctx, { element: e.currentTarget }, [
-      ...appCommandItem(ctx, 'app.integration-settings'),
-      ...appCommandItem(ctx, 'app.sample-settings'),
-    ]);
   };
   return (
     <div className="vault-bar" role="group" aria-label={t('vault.bar')}>
@@ -55,10 +39,11 @@ export function VaultBar({ name, root, ctx, onSwitchVault }: Props) {
         type="button"
         className="ibtn"
         aria-label={t('vault.settings')}
-        title={t('vault.settings')}
-        aria-haspopup="menu"
+        title={t('ribbon.withKey', t('vault.settings'), 'Ctrl+,')}
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Control+,"
         disabled={!ctx}
-        onClick={openSettingsMenu}
+        onClick={onOpenSettings}
       >
         <Icon name="settings" size={16} />
       </button>

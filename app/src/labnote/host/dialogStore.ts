@@ -3,8 +3,7 @@ import type { PickItem, PromptOpts } from '@labnoteo/core';
 import type { AliasOpts } from './AliasDialog';
 import type { SampleDefinitionModel, SampleDefinitionResult, UsageGroup } from '../port/sampleDefinitionModel';
 import { deepActiveElement } from '../../ui/returnFocus';
-import type { SampleSettingsValue } from '../../samples/SampleSettingsDialog';
-import type { IntegrationDeps } from '../../integrations/IntegrationSettingsDialog';
+import type { SettingsDeps, SettingsPage } from '../../ui/SettingsModal';
 import type { PartbankSearchOpts } from '../../partbank/PartbankSearchDialog';
 import type { WorksheetUnitOp } from '@labnoteo/core/lib/worksheet';
 import type { WorksheetPaperSize } from '../../../vendor/labnoteo/src/settings';
@@ -50,9 +49,9 @@ export type DialogSpec =
     }
   | { kind: 'choice'; message: string; title?: string; choices: readonly ChoiceItem<unknown>[]; unsolicited?: boolean }
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
-  | { kind: 'sampleSettings'; value: SampleSettingsValue }
   | { kind: 'progress'; id: number }
-  | { kind: 'integrationSettings'; deps: IntegrationDeps }
+  // 설정 창(UI 재설계 Task 8): 일반·편집기·실험·샘플·연동·단축키·정보. 닫힌 뒤 할 일(설정 창 뒤에 줄 서면 안 되는 질문)이 있으면 그 함수
+  | { kind: 'settings'; page: SettingsPage; deps: SettingsDeps }
   | { kind: 'partbankSearch'; opts: PartbankSearchOpts }
   | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> }
   | { kind: 'worksheet'; unitOps: readonly WorksheetUnitOp[]; paper: WorksheetPaperSize }

@@ -97,6 +97,16 @@ const openPath = async (path: string) => {
   await waitFor(async () => expect((await editorView()).state.readOnly).toBe(false));
 };
 
+async function runFromPalette(user: ReturnType<typeof userEvent.setup>, name: string) {
+  const button = screen.getAllByRole('button', { name: /^(명령 팔레트|Command palette)$/ })[0] as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  await user.click(button);
+  await user.type(within(await screen.findByRole('dialog')).getByRole('combobox'), name);
+  await act(async () => {
+    await user.keyboard('{Enter}');
+  });
+}
+
 const header = () => within(document.querySelector('.view-header') as HTMLElement);
 const statusbar = () => within(document.querySelector('.statusbar') as HTMLElement);
 
@@ -199,10 +209,11 @@ describe('view header and status bar', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Appearance' })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Appearance' }));
-    // 모든 설정 열기: 지금은 명령 팔레트(설정 명령이 모두 있다)
+    // 모든 설정 열기: 설정 창의 일반 쪽
     await user.click(screen.getByRole('button', { name: 'Appearance' }));
     await user.click(screen.getByRole('button', { name: /Open all settings/ }));
-    expect(await screen.findByRole('dialog', { name: /Command/ })).toBeTruthy();
+    const settings = within(await screen.findByRole('dialog', { name: 'Settings' }));
+    expect(settings.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('Ctrl+, opens all settings', async () => {
@@ -211,6 +222,35 @@ describe('view header and status bar', () => {
     await openPath('Plain note.md');
     await waitFor(() => expect((screen.getAllByRole('button', { name: '명령 팔레트' })[0] as HTMLButtonElement).disabled).toBe(false));
     fireEvent.keyDown(window, { key: ',', code: 'Comma', ctrlKey: true });
-    expect(await screen.findByRole('dialog', { name: '명령' })).toBeTruthy();
+    const settings = within(await screen.findByRole('dialog', { name: '설정' }));
+    expect(settings.getByRole('tab', { name: '일반' }).getAttribute('aria-selected')).toBe('true');
+    expect(settings.getByRole('radiogroup', { name: '테마' })).toBeTruthy();
+  });
+
+  it('the gear in the vault bar opens settings; Esc closes it and gives focus back to the gear', async () => {
+    const user = userEvent.setup();
+    await openVault(user, 'Plain note.md');
+    const gear = screen.getByRole('button', { name: '설정' });
+    await waitFor(() => expect((gear as HTMLButtonElement).disabled).toBe(false));
+    expect(gear.getAttribute('aria-haspopup')).toBe('dialog');
+    await user.click(gear);
+    const settings = within(await screen.findByRole('dialog', { name: '설정' }));
+    expect(settings.getByRole('tab', { name: '일반' }).getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '설정' })).toBeNull());
+    expect(document.activeElement).toBe(gear);
+  });
+
+  it('the integration and sample settings commands open those settings pages', async () => {
+    const user = userEvent.setup();
+    await openVault(user, 'Plain note.md');
+    await runFromPalette(user, '연동 설정');
+    let settings = within(await screen.findByRole('dialog', { name: '설정' }));
+    expect(settings.getByRole('tab', { name: '연동' }).getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '설정' })).toBeNull());
+    await runFromPalette(user, '샘플 설정');
+    settings = within(await screen.findByRole('dialog', { name: '설정' }));
+    expect(settings.getByRole('tab', { name: '샘플' }).getAttribute('aria-selected')).toBe('true');
   });
 });

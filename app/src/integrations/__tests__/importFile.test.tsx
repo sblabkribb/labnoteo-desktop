@@ -7,7 +7,7 @@ import type { CommandContext } from '../../labnote/commands/context';
 import { fromPluginData } from '../../labnote/settings';
 import { styleAttributes } from '../../labnote/host/__tests__/harness';
 import {
-  IntegrationSettingsDialog,
+  IntegrationSettingsPage,
   integrationDepsFor,
   type IntegrationDeps,
   type IntegrationSettingsValue,
@@ -80,7 +80,7 @@ function importDeps(opts: { outcome?: ImportOutcome; path?: string | null; remov
 }
 
 function show(deps: IntegrationDeps) {
-  return render(<IntegrationSettingsDialog deps={deps} onDone={() => {}} onCancel={() => {}} />);
+  return render(<IntegrationSettingsPage deps={deps} onLeave={async () => {}} autoFocus />);
 }
 
 const importButton = () => screen.findByRole('button', { name: t('integrations.import.button') });

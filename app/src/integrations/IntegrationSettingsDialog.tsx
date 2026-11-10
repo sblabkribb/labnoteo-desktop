@@ -1,12 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type MutableRefObject } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
 import { coreT, overrideOr } from '../labnote/i18n';
 import type { CommandContext } from '../labnote/commands/context';
 import type { Notify } from '../labnote/mcp/commands';
 import { McpSection } from '../labnote/mcp/McpSection';
-import { DialogFrame } from '../labnote/host/DialogFrame';
-import { openDialog } from '../labnote/host/dialogStore';
 import { BFW_DEFAULT_URL, fromPluginData, isOriginUrl, type AppSettings } from '../labnote/settings';
 import { KeyField } from './KeyField';
 import { notifySecretsChange } from './secretsEvents';
@@ -97,16 +95,6 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
       remove: (permanent) => deleteImportedFile(permanent, invoke),
     },
   };
-}
-
-/** 연동 설정 대화상자를 연다. 바꾼 값은 열린 동안 칸마다 바로 저장된다. 닫히면 끝난다. */
-export function openIntegrationSettings(deps: IntegrationDeps): Promise<void> {
-  return openDialog<void>({ kind: 'integrationSettings', deps }, undefined);
-}
-
-/** `app.integration-settings` 명령. */
-export function runIntegrationSettings(ctx: CommandContext): Promise<void> {
-  return openIntegrationSettings(integrationDepsFor(ctx));
 }
 
 const DEFAULTS = fromPluginData(undefined);
@@ -228,11 +216,22 @@ function ProbeButton(props: { id: ProbeId; target: string; fields: () => Paramet
 }
 
 /**
- * 연동 설정 대화상자(D17): partbank, AI 제공자, bfworkflow 세 묶음. SampleSettingsDialog 처럼 플러그인 설정 탭의 줄을 그
- * 이름(coreT)으로 보인다. 주소 칸은 칸을 떠날 때 검사해 저장하고, 고르기와 스위치는 바로 저장한다. 키 칸은 쓰기만 한다.
+ * 연동 설정 쪽(D17, UI 재설계 Task 8): 설정 창의 "연동" 쪽에 들어간다. partbank, AI 제공자, bfworkflow, 바코드와 스캔, MCP.
+ * 플러그인 설정 탭의 줄을 그 이름(coreT)으로 보인다. 주소 칸은 칸을 떠날 때 검사해 저장하고, 고르기와 스위치는 바로 저장한다.
+ * 키 칸은 쓰기만 한다.
+ *
+ * - `commitRef`: 설정 창이 닫히기 전에 부를, 아직 떠나지 않은 칸의 저장(칸이 사라질 때는 blur 가 오지 않는다).
+ * - `onLeave`: 다른 대화상자를 여는 동작(스캔 폴더 고르기 등)이 설정 창을 먼저 닫을 때. 그 대화상자가 이 창 뒤에 줄 서지 않게.
+ * - `autoFocus`: 처음 칸에 초점을 줄지. 설정 창은 왼쪽 목록에 초점을 두므로 주지 않는다.
  */
-export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone: (value?: unknown) => void; onCancel: () => void }) {
+export function IntegrationSettingsPage(props: {
+  deps: IntegrationDeps;
+  onLeave: () => Promise<void>;
+  commitRef?: MutableRefObject<(() => Promise<void>) | null>;
+  autoFocus?: boolean;
+}) {
   const { deps } = props;
+  const autoFocus = useRef(props.autoFocus === true);
   const id = useId();
   const valRef = useRef<IntegrationSettingsValue>(deps.value());
   const [val, setVal] = useState(valRef.current);
@@ -267,7 +266,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
       (s) => live && setStatus(s),
       () => undefined,
     );
-    first.current?.querySelector('input')?.focus();
+    if (autoFocus.current) first.current?.querySelector('input')?.focus();
     return () => {
       live = false;
     };
@@ -426,13 +425,11 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
     if (s) setStatus(s);
   };
 
-  const close = async () => {
+  // 설정 창이 닫히기 전에 부른다. 렌더마다 최신 함수로 바꿔 둔다(commitAll 은 ref 만 읽지만 hideCommits 도 같은 ref 다).
+  if (props.commitRef) props.commitRef.current = commitAll;
+  const leave = async () => {
     await commitAll();
-    props.onDone(undefined);
-  };
-  const cancel = async () => {
-    await commitAll();
-    props.onCancel();
+    await props.onLeave();
   };
 
   // ── partbank ──
@@ -490,7 +487,6 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
   const bfwField = originField('bfwUrl', true);
 
   return (
-    <DialogFrame title={t('cmd.integrationSettings')} className="prompt integration-settings" onCancel={() => void cancel()}>
       <div className="integration-body" ref={first}>
         {deps.importFile ? (
           <section className="integration-section">
@@ -692,7 +688,7 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
           deps={deps}
           secrets={status}
           onSecrets={setStatus}
-          onLeave={close}
+          onLeave={leave}
           onHide={(commit) => {
             if (!hideCommits.current.includes(commit)) hideCommits.current.push(commit);
           }}
@@ -707,11 +703,5 @@ export function IntegrationSettingsDialog(props: { deps: IntegrationDeps; onDone
           />
         ) : null}
       </div>
-      <div className="dialog-actions">
-        <button type="button" className="primary" onClick={() => void close()}>
-          {t('integrations.close')}
-        </button>
-      </div>
-    </DialogFrame>
   );
 }

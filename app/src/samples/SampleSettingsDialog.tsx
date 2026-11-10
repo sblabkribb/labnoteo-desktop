@@ -4,12 +4,10 @@ import { getSampleDisplayMeta, suggestSampleTypeName } from '@labnoteo/core/lib/
 import { t } from '../i18n/t';
 import { coreT } from '../labnote/i18n';
 import type { CommandContext } from '../labnote/commands/context';
-import { DialogFrame } from '../labnote/host/DialogFrame';
-import { openDialog, type DialogSpec } from '../labnote/host/dialogStore';
 import { partitionCustomSampleTypes, removedCustomSampleTypes } from '../labnote/port/customSampleTypes';
 import { commitGlobalFolder, offerGlobalSampleFolderMove, offerToRestoreSampleTypes } from '../labnote/port/sampleSettings';
 import type { AppSettings } from '../labnote/settings';
-import { createSampleEnv, normalizeSampleFolder, type SampleEnv } from './env';
+import { normalizeSampleFolder, type SampleEnv } from './env';
 import { samples } from './sampleStore';
 import { sampleTypesFor } from './types';
 
@@ -20,12 +18,8 @@ export interface SampleSettingsValue {
   globalSampleFolder: string;
 }
 
-/** 샘플 설정 대화상자를 연다. 저장하면 새 값, 닫으면 undefined. 대화상자는 값만 돌려주고 적용은 applySampleSettings 가 한다(D16). */
-export function openSampleSettings(current: SampleSettingsValue): Promise<SampleSettingsValue | undefined> {
-  return openDialog<SampleSettingsValue | undefined>({ kind: 'sampleSettings', value: current }, undefined);
-}
-
-const pickSampleSettings = (s: AppSettings): SampleSettingsValue => ({
+/** 지금 설정의 샘플 세 값. 설정 창의 "샘플" 쪽이 이 값으로 열린다. */
+export const pickSampleSettings = (s: AppSettings): SampleSettingsValue => ({
   sampleTracking: s.sampleTracking,
   customSampleTypes: s.customSampleTypes,
   globalSampleFolder: s.globalSampleFolder,
@@ -70,11 +64,13 @@ export async function applySampleSettings(env: SampleEnv, ctx: CommandContext, b
   if (removed.length > 0) await offerToRestoreSampleTypes(live, removed, (customSampleTypes) => save({ customSampleTypes }));
 }
 
-/** `app.sample-settings` 명령: 지금 설정으로 대화상자를 열고, 저장하면 적용한다. */
-export async function runSampleSettings(ctx: CommandContext): Promise<void> {
-  const before = pickSampleSettings(ctx.settings);
-  const after = await openSampleSettings(before);
-  if (after) await applySampleSettings(createSampleEnv(ctx), ctx, before, after);
+/**
+ * 저장하면 applySampleSettings 가 무언가를 물을 수 있는가: Global 폴더가 바뀌었거나(옮길지) 사용자 종류를 지웠다(되돌릴지).
+ * 그러면 설정 창을 먼저 닫는다: 묻는 대화상자가 설정 창 뒤에 줄 서지 않게. 아니면 설정 창 안에서 바로 적용한다.
+ */
+export function sampleSettingsMayAsk(before: SampleSettingsValue, after: SampleSettingsValue): boolean {
+  if (!isSameSampleFolder(normalizeSampleFolder(before.globalSampleFolder), normalizeSampleFolder(after.globalSampleFolder))) return true;
+  return removedCustomSampleTypes(before.customSampleTypes, after.customSampleTypes).length > 0;
 }
 
 /** renderCustomTypes 의 blur 문장들(settingsTab.ts:233-530): 저장하지 않은 이름마다 그 까닭. */
@@ -172,16 +168,21 @@ function legacyWarnings(stored: readonly string[]): string[] {
 }
 
 /**
- * 샘플 설정 대화상자(plan SP5 Task 28, D17). 플러그인 samplesSection 의 세 줄을 그 이름과 설명(coreT)으로 보인다. 추적 스위치의
- * 설명만 앱 키다(앱에서는 바로 적용된다). 사용자 종류 칸은 칸을 떠날 때 저장하지 않을 이름의 까닭을 보이고 칸을 저장할 값으로
- * 되돌린다. Global 폴더 칸은 칸을 떠날 때 commitGlobalFolder 로 검사한다. 순수한 화면이다: 저장하면 값을 돌려줄 뿐이다.
+ * 샘플 설정(plan SP5 Task 28, D17; UI 재설계 Task 8 부터 설정 창의 "샘플" 쪽). 플러그인 samplesSection 의 세 줄을 그 이름과
+ * 설명(coreT)으로 보인다. 추적 스위치의 설명만 앱 키다(앱에서는 바로 적용된다). 사용자 종류 칸은 칸을 떠날 때 저장하지 않을
+ * 이름의 까닭을 보이고 칸을 저장할 값으로 되돌린다. Global 폴더 칸은 칸을 떠날 때 commitGlobalFolder 로 검사한다.
+ * 순수한 화면이다: 저장하면 값을 `onSave` 로 넘길 뿐이고 적용은 부른 쪽(applySampleSettings)이 한다(D16).
  */
-export function SampleSettingsDialog(props: {
-  spec: Extract<DialogSpec, { kind: 'sampleSettings' }>;
-  onDone: (value: SampleSettingsValue) => void;
-  onCancel: () => void;
+export function SampleSettingsForm(props: {
+  value: SampleSettingsValue;
+  onSave: (value: SampleSettingsValue) => void;
+  /** 처음 칸에 초점을 줄지(설정 창은 왼쪽 목록에 초점을 두므로 주지 않는다). */
+  autoFocus?: boolean;
+  /** 저장 단추 옆의 상태 글(예: 저장했습니다). */
+  status?: string;
 }) {
-  const { value } = props.spec;
+  const { value } = props;
+  const autoFocus = useRef(props.autoFocus === true);
   const id = useId();
   // 검사가 생기기 전에 저장된 이름은 계속 쓸 수 있다(#81).
   const stored = useRef(value.customSampleTypes).current;
@@ -197,7 +198,9 @@ export function SampleSettingsDialog(props: {
   // 대화상자를 연 채로 둔다(까닭이 함께 사라지지 않게). 한 번 멈추면 지운다 — 다시 누른 저장은 되돌린 값으로 저장한다.
   const refused = useRef({ folder: false, types: false });
 
-  useEffect(() => first.current?.focus(), []);
+  useEffect(() => {
+    if (autoFocus.current) first.current?.focus();
+  }, []);
 
   const leaveTypes = () => {
     const next = typeNotices(types, stored);
@@ -234,11 +237,11 @@ export function SampleSettingsDialog(props: {
       refused.current = { folder: false, types: false };
       return;
     }
-    props.onDone({ sampleTracking: tracking, customSampleTypes: keptTypes, globalSampleFolder: kept });
+    props.onSave({ sampleTracking: tracking, customSampleTypes: keptTypes, globalSampleFolder: kept });
   };
 
   return (
-    <DialogFrame title={t('cmd.sampleSettings')} className="prompt sample-settings" onCancel={props.onCancel}>
+    <div className="sample-settings">
       <div className="sample-settings-row">
         <label className="prompt-question">
           <input ref={first} id={`${id}-tracking`} type="checkbox" checked={tracking} onChange={(e) => setTracking(e.target.checked)} />{' '}
@@ -301,13 +304,15 @@ export function SampleSettingsDialog(props: {
         ) : null}
       </div>
       <div className="dialog-actions">
+        {props.status ? (
+          <span role="status" className="settings-saved">
+            {props.status}
+          </span>
+        ) : null}
         <button type="button" className="primary" onClick={save}>
           {t('samples.settings.save')}
         </button>
-        <button type="button" onClick={props.onCancel}>
-          {coreT('Cancel')}
-        </button>
       </div>
-    </DialogFrame>
+    </div>
   );
 }

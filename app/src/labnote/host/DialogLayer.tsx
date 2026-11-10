@@ -7,9 +7,8 @@ import { settleDialog, takeReturnFocus, useCurrentDialog, type DialogEntry } fro
 import { PickManyDialog, Picker } from './Picker';
 import { PromptDialog } from './PromptDialog';
 import { SampleDefinitionDialog } from '../../samples/SampleDefinitionDialog';
-import { SampleSettingsDialog } from '../../samples/SampleSettingsDialog';
 import { ProgressDialog } from '../../integrations/ProgressDialog';
-import { IntegrationSettingsDialog } from '../../integrations/IntegrationSettingsDialog';
+import { SettingsModal } from '../../ui/SettingsModal';
 import { PartbankSearchDialog } from '../../partbank/PartbankSearchDialog';
 import { AiAnswerDialog } from '../port/aiAnswerDialog';
 import { WorksheetDialog } from '../print/WorksheetDialog';
@@ -38,12 +37,10 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <ChoiceDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'sampleDefinition':
       return <SampleDefinitionDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
-    case 'sampleSettings':
-      return <SampleSettingsDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'progress':
       return <ProgressDialog spec={spec} onCancel={onCancel} />;
-    case 'integrationSettings':
-      return <IntegrationSettingsDialog deps={spec.deps} onDone={onDone} onCancel={onCancel} />;
+    case 'settings':
+      return <SettingsModal spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'partbankSearch':
       return <PartbankSearchDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'aiAnswer':

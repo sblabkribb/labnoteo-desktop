@@ -8,7 +8,7 @@ import type { CommandContext } from '../../labnote/commands/context';
 import { fromPluginData, type AppSettings } from '../../labnote/settings';
 import { styleAttributes } from '../../labnote/host/__tests__/harness';
 import {
-  IntegrationSettingsDialog,
+  IntegrationSettingsPage,
   integrationDepsFor,
   type IntegrationDeps,
   type IntegrationSettingsValue,
@@ -74,12 +74,12 @@ function fakeDeps(value: Partial<IntegrationSettingsValue> = {}, set: Partial<Re
 }
 
 function show(deps: IntegrationDeps) {
-  return render(<IntegrationSettingsDialog deps={deps} onDone={() => {}} onCancel={() => {}} />);
+  return render(<IntegrationSettingsPage deps={deps} onLeave={async () => {}} autoFocus />);
 }
 
 const keyRow = (input: HTMLElement) => within(input.closest('.integration-key') as HTMLElement);
 
-describe('IntegrationSettingsDialog', () => {
+describe('IntegrationSettingsPage', () => {
   it('KeyField saves through setSecret, clears the input and never renders the key', async () => {
     const deps = fakeDeps();
     show(deps);
@@ -414,15 +414,16 @@ describe('IntegrationSettingsDialog', () => {
     expect(document.body.textContent).not.toContain('pbk_bad');
   });
 
-  it('shows the Barcode & scans section, and Close saves a scan size still being edited', async () => {
+  it('shows the Barcode & scans section, and the close hook (the settings modal calls it) saves a scan size still being edited', async () => {
     const deps = fakeDeps();
-    const onDone = vi.fn();
-    render(<IntegrationSettingsDialog deps={deps} onDone={onDone} onCancel={() => {}} />);
+    const commitRef: { current: (() => Promise<void>) | null } = { current: null };
+    render(<IntegrationSettingsPage deps={deps} onLeave={async () => {}} commitRef={commitRef} />);
     expect(await screen.findByRole('heading', { name: coreT('Barcode & scans') })).toBeTruthy();
     expect(screen.getByRole('heading', { name: coreT('Slack scans (optional)') })).toBeTruthy();
     fireEvent.change(screen.getByLabelText(coreT('Stored scan size')), { target: { value: '3000' } });
-    fireEvent.click(screen.getByText(t('integrations.close'), { selector: 'button.primary' }));
-    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    await act(async () => {
+      await commitRef.current!();
+    });
     expect(deps.commit).toHaveBeenCalledWith({ scanMaxImageEdge: 3000 });
   });
 });

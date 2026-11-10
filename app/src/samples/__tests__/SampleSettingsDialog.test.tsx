@@ -16,7 +16,17 @@ import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost'
 import { appCommands, registerAllAppCommands } from '../../editor/commands/appCommands';
 import { partitionCustomSampleTypes } from '../../labnote/port/customSampleTypes';
 import { commitGlobalFolder } from '../../labnote/port/sampleSettings';
-import { applySampleSettings, openSampleSettings, type SampleSettingsValue } from '../SampleSettingsDialog';
+import { applySampleSettings, SampleSettingsForm, type SampleSettingsValue } from '../SampleSettingsDialog';
+
+/**
+ * The sample settings now live on the Samples page of the settings modal (UI redesign Task 8). The form is the same:
+ * this renders it alone and resolves with what Save hands over, as the old dialog did.
+ */
+function openSampleSettings(value: SampleSettingsValue): Promise<SampleSettingsValue | undefined> {
+  return new Promise((resolve) => {
+    render(<SampleSettingsForm value={value} onSave={resolve} autoFocus />);
+  });
+}
 import { sampleCompletionSource } from '../complete';
 import { sampleEditorConfig } from '../editorConfig';
 import { createSampleEnv } from '../env';
@@ -187,10 +197,10 @@ describe('SampleSettingsDialog', () => {
       ),
     ).toBeTruthy();
     expect((screen.getByLabelText(coreT('Sample tracking')) as HTMLInputElement).checked).toBe(true);
-    expect(document.querySelector('.dialog [style]')).toBeNull();
+    expect(document.querySelector('.sample-settings [style]')).toBeNull();
   });
 
-  it('a refused Global folder shows the plugin sentence and goes back; Cancel resolves undefined', async () => {
+  it('a refused Global folder shows the plugin sentence and goes back; there is no Cancel (the settings modal closes)', async () => {
     render(<DialogLayer />);
     let result: Promise<SampleSettingsValue | undefined> | undefined;
     act(() => {
@@ -201,8 +211,10 @@ describe('SampleSettingsDialog', () => {
     fireEvent.blur(folder);
     expect(screen.getByText(commitGlobalFolder(coreT, 'a/con', GLOBAL).notice!)).toBeTruthy();
     expect(folder.value).toBe(GLOBAL);
-    fireEvent.click(screen.getByRole('button', { name: coreT('Cancel') }));
-    await expect(result).resolves.toBeUndefined();
+    expect(screen.queryByRole('button', { name: coreT('Cancel') })).toBeNull();
+    const done = settled(result!);
+    await act(async () => {});
+    expect(done.done).toBe(false);
   });
 });
 

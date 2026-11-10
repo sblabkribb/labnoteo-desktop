@@ -81,6 +81,8 @@ describe('app-command registry', () => {
     expect(displayKey('Mod-Shift-.')).toBe('Ctrl+Shift+.');
     expect(displayKey('Mod-Alt-c')).toBe('Ctrl+Alt+C');
     expect(displayKey('Mod-;')).toBe('Ctrl+;');
+    expect(displayKey('Alt-ArrowLeft')).toBe('Alt+←');
+    expect(displayKey('Mod-,')).toBe('Ctrl+,');
   });
 
   it('no app command id collides with a vendor command id', () => {

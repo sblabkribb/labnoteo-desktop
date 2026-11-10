@@ -8,9 +8,8 @@ import { undoLastRename } from '../../links/undoRename';
 import { TOGGLE_MODE_KEY, toggleMode } from '../live/mode';
 import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/properties';
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
-import { runSampleSettings } from '../../samples/SampleSettingsDialog';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
-import { runIntegrationSettings } from '../../integrations/IntegrationSettingsDialog';
+import { openSettings } from '../../ui/SettingsModal';
 import { runOpenLabnoteoLink } from '../../partbank/linkCommand';
 import { bfwReady } from '../../bfworkflow/bfwApp';
 import { runBfwSyncCatalogs } from '../../bfworkflow/syncCatalogs';
@@ -137,11 +136,11 @@ const propsEditYaml: AppCommand = {
   run: (ctx) => runOnNote(ctx, editYamlCommand),
 };
 
-/** 샘플 설정(SP5 Task 28, D17): 앱에는 설정 화면이 없어 이 명령이 플러그인 설정 탭의 샘플 칸을 대신한다. */
+/** 샘플 설정(SP5 Task 28, D17): 설정 창의 샘플 쪽을 연다(UI 재설계 Task 8). */
 const sampleSettings: AppCommand = {
   id: 'app.sample-settings',
   nameKey: 'cmd.sampleSettings',
-  run: (ctx) => runSampleSettings(ctx),
+  run: () => openSettings('samples'),
 };
 
 /** 예전 형식(.md) 실험 노트를 .labnote.md 로 바꾸기: 보관함을 열 때의 제안과 같은 대화상자("다시 묻지 않기"와 상관없이). */
@@ -155,7 +154,15 @@ const convertLegacyNotes: AppCommand = {
 const integrationSettings: AppCommand = {
   id: 'app.integration-settings',
   nameKey: 'cmd.integrationSettings',
-  run: (ctx) => runIntegrationSettings(ctx),
+  run: () => openSettings('integrations'),
+};
+
+/** 설정 창(UI 재설계 Task 8): 일반 쪽으로 연다. 키는 보여 주기만 한다: App 의 window keydown 이 code === 'Comma' 로 듣는다. */
+const openSettingsCommand: AppCommand = {
+  id: 'app.open-settings',
+  nameKey: 'cmd.openSettings',
+  key: 'Mod-,',
+  run: () => openSettings(),
 };
 
 /** labnoteO 링크 열기(SP6 D14): partbank 가 만든 labnoteo-import·labnoteo-open 링크를 붙여 넣어 연다. OS 주소 체계는 등록하지 않는다. */
@@ -259,7 +266,7 @@ const langCommand = (id: string, nameKey: string, lang: Lang): AppCommand => ({ 
 const langCommands: AppCommand[] = [langCommand('lang-ko', 'cmd.lang.ko', 'ko'), langCommand('lang-en', 'cmd.lang.en', 'en')];
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, toggleLeft, toggleRight, newNote, quickSwitcher, ...themeCommands, ...langCommands];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, ...themeCommands, ...langCommands];
 }
 
 /** 모든 앱 명령을 등록한다. 여러 번 불러도 된다: 이미 같은 명령이 등록돼 있으면 건너뛴다. App.tsx 가 registerAllCommands() 옆에서 부른다. */
@@ -271,10 +278,13 @@ export function registerAllAppCommands(): void {
 }
 
 /** CodeMirror 키를 보여 줄 꼴로: 'Mod-Shift-.' → 'Ctrl+Shift+.', 'Mod-e' → 'Ctrl+E'. */
+/** 화살표 키는 글자 대신 화살표로 보인다(Alt+← 처럼). */
+const ARROWS: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+
 export function displayKey(cmKey: string): string {
   const parts = cmKey.split(/-(?!$)/);
   const last = parts.pop() ?? '';
   const mods = parts.map((m) => (m === 'Mod' || m === 'Ctrl' ? 'Ctrl' : m === 'Shift' ? 'Shift' : m === 'Alt' ? 'Alt' : m));
-  const keyLabel = /^[a-z]$/.test(last) ? last.toUpperCase() : last;
+  const keyLabel = /^[a-z]$/.test(last) ? last.toUpperCase() : (ARROWS[last] ?? last);
   return [...mods, keyLabel].join('+');
 }

@@ -22,12 +22,14 @@ import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { startUpdateChecks } from './update/updateStore';
 import { ThemeToggle } from './theme/ThemeToggle';
-import { useTheme, type Theme } from './theme/useTheme';
+import { chooseTheme, useTheme, type Theme } from './theme/useTheme';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { applyHtmlLang, getLang, setLang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
 import { offerPluginLlmKey } from './integrations/importLlmKey';
+import { integrationDepsFor } from './integrations/IntegrationSettingsDialog';
+import { applySampleSettings, pickSampleSettings } from './samples/SampleSettingsDialog';
 import { registerLlmProbe } from './ai/llmProbe';
 import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSampleStore';
 import { createSampleEnv } from './samples/env';
@@ -90,6 +92,7 @@ import { NoteLead } from './ui/Breadcrumb';
 import { StatusBar } from './ui/StatusBar';
 import { AppearanceButton } from './ui/AppearancePopover';
 import { Icon } from './ui/Icon';
+import { openSettings as openSettingsModal, setSettingsSource } from './ui/SettingsModal';
 
 /** 명령(showPanel)이 부르는 이름. 'workflows' 는 플러그인의 워크플로 뷰라 왼쪽 독의 실험 탭으로 간다. */
 type PanelName = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
@@ -336,6 +339,33 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     newNote: () => void newNote(),
   });
   usePaletteHotkey(ctx);
+  // 설정 창의 값: 열 때마다 지금 값으로 만든다. 보관함 설정을 읽기 전(ctx 없음)에는 열지 않는다.
+  const settingsLive = useRef({ ctx, theme, version });
+  settingsLive.current = { ctx, theme, version };
+  useEffect(
+    () =>
+      setSettingsSource(() => {
+        const first = settingsLive.current;
+        const c = first.ctx;
+        if (!c) return undefined;
+        const now = () => settingsLive.current.ctx ?? c;
+        return {
+          theme: () => settingsLive.current.theme,
+          setTheme: chooseTheme,
+          settings: () => now().settings,
+          update: async (patch) => {
+            await now().updateSettings(patch);
+          },
+          version: first.version,
+          integrations: integrationDepsFor(c),
+          samples: {
+            value: () => pickSampleSettings(now().settings),
+            apply: (before, after) => applySampleSettings(createSampleEnv(now()), now(), before, after),
+          },
+        };
+      }),
+    [],
+  );
   // 창 제목: `labnoteO — <보관함>`. 독을 숨겨도 어느 보관함인지 보인다. 보관함을 떠나면 앱 이름만.
   useEffect(() => {
     setWindowTitle(vault.name);
@@ -502,8 +532,10 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       if (ctx && c) void runCommand(ctx, c);
     },
   };
-  // "모든 설정 열기"(모양 창의 바닥, Ctrl+,). 설정 창이 생기기 전까지는 설정 명령이 모두 있는 명령 팔레트를 연다.
-  const openSettings = () => ribbonActions.palette();
+  // 설정 창(Task 8): Ctrl+,, 보관함 줄의 톱니, 모양 창의 "모든 설정 열기". 실패(샘플 폴더 옮기기 등)는 알림으로 바뀐다.
+  const openSettings = () => {
+    if (ctx) void runCommand(ctx, () => openSettingsModal());
+  };
   // 셸 단축키: Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바(둘 다 code 로 맞춘다: 한국어 자판의 ₩ 키도 Backslash 다),
   // Ctrl+N 새 노트, Ctrl+O 빠른 이동. 편집기 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 는 넷 다 묶지 않는다
   // (기본 keymap 의 Shift-Mod-\ 는 Editor.tsx 가 뺀다). 대화상자가 열려 있으면 듣지 않는다.
@@ -617,7 +649,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           {failed && <p role="alert">{t('tree.error')}</p>}
           {settingsImported && <p role="status">{t('settings.imported')}</p>}
         </div>
-        <Dock tab={tab} onTab={showLeft} footer={<VaultBar name={vault.name} root={vault.root} ctx={ctx} onSwitchVault={switchVault} />}>
+        <Dock tab={tab} onTab={showLeft} footer={<VaultBar name={vault.name} root={vault.root} ctx={ctx} onSwitchVault={switchVault} onOpenSettings={openSettings} />}>
           {/* 파일 탭은 숨겨도 내리지 않는다: 접어 둔 폴더와 찾던 말이 남는다 */}
           <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
             <SearchPanel onOpen={openNote} />

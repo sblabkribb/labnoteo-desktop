@@ -57,7 +57,9 @@ describe('보관함별 설정', () => {
         'bfwUrl',
         'catalogNoticeHash',
         'customSampleTypes',
+        'defaultExperimenter',
         'globalSampleFolder',
+        'imageFolder',
         'legacyNotesOfferDismissed',
         'llmEndpointOllama',
         'llmEndpointOpenai',
@@ -198,6 +200,24 @@ describe('보관함별 설정', () => {
     // a stored non-boolean is the default
     const odd = fakeStore({ stored: JSON.stringify({ legacyNotesOfferDismissed: 'yes' }) });
     expect((await loadVaultSettings(odd.invoke)).settings.legacyNotesOfferDismissed).toBe(false);
+  });
+
+  it('defaultExperimenter and imageFolder (app-only keys) have defaults, parse safely and survive a save and reload', async () => {
+    expect(fromPluginData(undefined)).toMatchObject({ defaultExperimenter: '', imageFolder: 'images' });
+    // not plugin keys: importing plugin data does not take them
+    expect(fromPluginData({ defaultExperimenter: 'Kim', imageFolder: 'resources' })).toMatchObject({ defaultExperimenter: '', imageFolder: 'images' });
+    expect(fromStored({ defaultExperimenter: '  Park Yaeseong \n', imageFolder: 'resources' })).toMatchObject({
+      defaultExperimenter: 'Park Yaeseong',
+      imageFolder: 'resources',
+    });
+    expect(fromStored({ defaultExperimenter: 'a\u0000b\tc' }).defaultExperimenter).toBe('a b c');
+    expect(fromStored({ defaultExperimenter: 'x'.repeat(500) }).defaultExperimenter).toHaveLength(120);
+    expect(fromStored({ defaultExperimenter: 42, imageFolder: '../etc' })).toMatchObject({ defaultExperimenter: '', imageFolder: 'images' });
+    const store = fakeStore();
+    const { settings } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings({ ...settings, defaultExperimenter: '박예성', imageFolder: 'resources' }, store.invoke);
+    expect(JSON.parse(store.stored()!)).toMatchObject({ defaultExperimenter: '박예성', imageFolder: 'resources' });
+    expect((await loadVaultSettings(store.invoke)).settings).toMatchObject({ defaultExperimenter: '박예성', imageFolder: 'resources' });
   });
 
   it('integration settings get the plugin defaults, with usage sending off', () => {
