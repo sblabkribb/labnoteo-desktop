@@ -16,8 +16,8 @@ import type { Source } from './sources';
 export type { PetState } from './petStore';
 export type { Source } from './sources';
 
-/** 말풍선 칩(spec §4.4). 칩 흐름은 Task 11B 에서 붙는다. */
-export type ChipId = 'howto' | 'section' | 'unitOp' | 'workflow' | 'chat';
+/** 말풍선 칩(spec §4.4, 흐름은 chips.ts). */
+export type ChipId = 'howTo' | 'section' | 'unitOp' | 'workflow' | 'chat';
 export type ChipParams = Readonly<Record<string, string>>;
 
 /** 실험 폴더 대화 기록의 메시지 하나(spec §6.1). 도구 결과와 가져온 페이지 글은 담지 않는다. */

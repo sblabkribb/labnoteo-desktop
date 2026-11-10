@@ -2,6 +2,7 @@ import { t } from '../i18n/t';
 import type { AppCommand } from '../editor/commands/appCommands';
 import { openSettings } from '../ui/SettingsModal';
 import { captureFocus } from '../ui/returnFocus';
+import type { ChipId } from './chips';
 import { petStore } from './petStore';
 import { assistantSession } from './useAssistantSession';
 
@@ -18,6 +19,10 @@ export const ASSISTANT_COMMAND_IDS = [
   'assistant.chat',
   'assistant.stop',
   'assistant.clearHistory',
+  'assistant.howTo',
+  'assistant.createSection',
+  'assistant.createUnitOperation',
+  'assistant.createWorkflow',
 ] as const;
 
 /** 말풍선을 열고(숨겨 두었으면 보이고) 지금 초점 자리를 기억한다: Esc 로 닫으면 거기로 돌아간다. 보관함 설정이 없어도 된다. */
@@ -25,6 +30,17 @@ export function openAssistant(): void {
   const restore = captureFocus();
   if (petStore.get().hidden) petStore.setHidden(false);
   petStore.setOpen(true, restore);
+}
+
+/**
+ * 말풍선을 칩 `chip` 으로 연다(Task 11B). 이미 열려 있으면 칩만 바꾼다(말풍선이 그 칩 칸으로 초점을 옮긴다).
+ * 제공자나 실험 노트가 없으면 말풍선이 왜 못 하는지와 고칠 단추를 보인다.
+ */
+export function openAssistantOn(chip: ChipId): void {
+  assistantSession.setChip(chip);
+  const s = petStore.get();
+  if (s.open && !s.hidden) return;
+  openAssistant();
 }
 
 /** 보이기·숨기기. 숨기면 다시 켜는 곳을 알린다. 보관함 설정이 없어도 된다(App 이 명령 맥락 없이도 부른다). */
@@ -66,12 +82,13 @@ const settings: AppCommand = {
   run: () => openSettings('assistant'),
 };
 
-/** 대화를 연다: 말풍선을 열고 입력 칸에 초점을 둔다(이미 열려 있으면 입력 칸으로만). 칩이 붙으면(11B) 대화 칩이 된다. */
+/** 대화를 연다: 대화 칩으로 말풍선을 열고 입력 칸에 초점을 둔다(이미 열려 있으면 입력 칸으로만). */
 const chat: AppCommand = {
   id: 'assistant.chat',
   nameKey: 'cmd.assistant.chat',
   icon: 'bot',
   run: () => {
+    assistantSession.setChip('chat');
     if (petStore.get().open && !petStore.get().hidden) {
       document.querySelector<HTMLTextAreaElement>('.pet-composer-input')?.focus();
       return;
@@ -109,6 +126,18 @@ const clearHistory: AppCommand = {
   },
 };
 
+/** 칩 명령(Task 11B): 말풍선을 그 칩으로 연다. */
+const chipCommand = (id: string, nameKey: string, icon: AppCommand['icon'], chip: ChipId): AppCommand => ({
+  id,
+  nameKey,
+  icon,
+  run: () => openAssistantOn(chip),
+});
+const howTo = chipCommand('assistant.howTo', 'cmd.assistant.howTo', 'info', 'howTo');
+const createSection = chipCommand('assistant.createSection', 'cmd.assistant.createSection', 'file-plus', 'section');
+const createUnitOperation = chipCommand('assistant.createUnitOperation', 'cmd.assistant.createUnitOperation', 'test-tube', 'unitOp');
+const createWorkflow = chipCommand('assistant.createWorkflow', 'cmd.assistant.createWorkflow', 'workflow', 'workflow');
+
 export function assistantCommands(): AppCommand[] {
-  return [open, toggleVisible, resetPosition, settings, chat, stop, clearHistory];
+  return [open, toggleVisible, resetPosition, settings, chat, stop, clearHistory, howTo, createSection, createUnitOperation, createWorkflow];
 }

@@ -95,3 +95,34 @@ describe('connectAssistant', () => {
     expect(getRuntime('builtin')).toBeUndefined();
   });
 });
+
+describe('chip actions (Task 11B)', () => {
+  it('lineAt counts newlines before an offset', async () => {
+    const { lineAt } = await import('../wiring');
+    expect(lineAt('a\nb\nc', 0)).toBe(0);
+    expect(lineAt('a\nb\nc', 2)).toBe(1);
+    expect(lineAt('a\nb\nc', 99)).toBe(2);
+  });
+
+  it('activeNote reads the open note and its cursor line; nothing without an open note', async () => {
+    const target = {
+      path: 'labnote/001_A/001_WD010_X.labnote.md',
+      getText: async () => '# x\n## y\nz',
+      getCursorOffset: async () => 6,
+    };
+    const c = { host: { editTarget: () => target } } as unknown as CommandContext;
+    await expect(bubbleActions(() => c).activeNote!()).resolves.toEqual({ path: target.path, text: '# x\n## y\nz', cursorLine: 1 });
+    const none = { host: { editTarget: () => undefined } } as unknown as CommandContext;
+    await expect(bubbleActions(() => none).activeNote!()).resolves.toBeUndefined();
+  });
+
+  it('workflowNotes lists the ###_….md notes of the folder in number order, without the README', async () => {
+    const list = vi.fn(async () => ['README.labnote.md', '010_WD030_C.labnote.md', '002_WD020_B.labnote.md', 'notes.md', 'attachments']);
+    const c = { host: { fs: { list } } } as unknown as CommandContext;
+    await expect(bubbleActions(() => c).workflowNotes!('labnote/001_A/')).resolves.toEqual([
+      'labnote/001_A/002_WD020_B.labnote.md',
+      'labnote/001_A/010_WD030_C.labnote.md',
+    ]);
+    expect(list).toHaveBeenCalledWith('labnote/001_A');
+  });
+});

@@ -44,6 +44,10 @@ describe('assistant commands (spec §10.2, the ones that work after Task 5)', ()
       'assistant.chat',
       'assistant.stop',
       'assistant.clearHistory',
+      'assistant.howTo',
+      'assistant.createSection',
+      'assistant.createUnitOperation',
+      'assistant.createWorkflow',
     ]);
     expect(assistantCommands().map((c) => c.id)).toEqual([...ASSISTANT_COMMAND_IDS]);
     const ids = appCommands().map((c) => c.id);
@@ -126,9 +130,27 @@ describe('chat commands (Task 10)', () => {
     return { cleared, release: () => release() };
   }
 
-  it('assistant.chat opens the bubble', async () => {
+  it('assistant.chat opens the bubble on the chat chip', async () => {
+    assistantSession.setChip('section');
     await run('assistant.chat');
     expect(petStore.get().open).toBe(true);
+    expect(assistantSession.get().chip).toBe('chat');
+  });
+
+  it('the four chip commands open the bubble (showing a hidden pet) on their chip (Task 11B)', async () => {
+    const cases = [
+      ['assistant.howTo', 'howTo'],
+      ['assistant.createSection', 'section'],
+      ['assistant.createUnitOperation', 'unitOp'],
+      ['assistant.createWorkflow', 'workflow'],
+    ] as const;
+    for (const [id, chip] of cases) {
+      petStore.setOpen(false);
+      layoutStore.setPet({ hidden: true });
+      await run(id);
+      expect(petStore.get(), id).toMatchObject({ hidden: false, open: true });
+      expect(assistantSession.get().chip, id).toBe(chip);
+    }
   });
 
   it('assistant.stop is shown only while a reply runs, and says so when nothing runs', async () => {

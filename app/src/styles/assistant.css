@@ -214,6 +214,71 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   gap: var(--space-2);
 }
 
+/* 칩 줄(role=toolbar, roving tabindex): 줄을 넘기면 다음 줄로. 고른 칩은 aria-pressed 로 칠한다 */
+.pet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pet-chip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-element);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--font-size-sm);
+}
+.pet-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 칩 칸: 사용법 도움말, 제공자·실험 안내, 대상 고르기 */
+.pet-chip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pet-howto,
+.pet-gate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+.pet-howto p,
+.pet-gate p { margin: 0; }
+.pet-howto-title {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+}
+.pet-howto-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pet-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.pet-field-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.pet-select,
+.pet-input {
+  box-sizing: border-box;
+  width: 100%;
+}
+.pet-chip-target {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
 /* 화면에는 보이지 않고 읽기 프로그램만 읽는 글(누가 말했는지) */
 .pet-sr {
   position: absolute;
@@ -239,6 +304,7 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   .pet-bubble { border: 1px solid CanvasText; }
   .pet-msg { border: 1px solid CanvasText; }
   .pet-cite, .pet-source-link { color: LinkText; }
+  .pet-chip[aria-pressed="true"] { border: 2px solid Highlight; }
 }
 
 @media print {

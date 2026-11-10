@@ -4,11 +4,27 @@ import { Icon } from '../ui/Icon';
 import { SourceLedger, type Source } from './sources';
 import type { ChatItem } from './useAssistantSession';
 
-/** 말풍선이 바깥에 맡기는 일: 출처 열기(노트는 편집기, 주소는 시스템 브라우저), 답을 노트에 넣기. */
+/** 열린 노트(섹션 만들기 칩이 제목을 고르는 데 쓴다). `cursorLine` 은 0부터. */
+export interface ActiveNote {
+  path: string;
+  text: string;
+  cursorLine?: number;
+}
+
+/**
+ * 말풍선이 바깥에 맡기는 일: 출처 열기(노트는 편집기, 주소는 시스템 브라우저), 답을 노트에 넣기, 명령 부르기(id),
+ * 칩이 쓰는 열린 노트 읽기와 실험의 워크플로 노트 목록.
+ */
 export interface BubbleActions {
   openSource?(src: Source): void;
   /** 열린 노트에 답을 넣는다. `tainted` 면 먼저 묻는다(ai.confirm.tainted). */
   insert?(text: string, tainted: boolean): void | Promise<void>;
+  /** 명령 하나를 부른다(연동 설정, 실험 목록, 어시스턴트 설정 …). */
+  runCommand?(id: string): void;
+  /** 열린 노트의 글과 커서 줄. */
+  activeNote?(): Promise<ActiveNote | undefined>;
+  /** 실험 폴더의 워크플로 노트(보관함 상대 경로, 번호 차례). */
+  workflowNotes?(folder: string): Promise<string[]>;
 }
 
 /**

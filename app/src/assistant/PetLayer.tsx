@@ -144,7 +144,9 @@ export function PetLayer(props: { store?: PetStore; session?: AssistantSession; 
   const label = t('pet.open');
   return (
     <div ref={wrap} className="pet-wrap" data-open={snap.open}>
-      {snap.open && <Bubble id={bubbleId} onClose={close} onHide={hide} chat={chat} actions={props.actions} />}
+      {snap.open && (
+        <Bubble id={bubbleId} onClose={close} onHide={hide} chat={chat} activePath={props.activePath} actions={props.actions} />
+      )}
       <button
         ref={button}
         type="button"

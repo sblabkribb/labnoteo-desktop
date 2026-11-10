@@ -4,13 +4,18 @@
  *   차례 전 압축도 같은 제공자로 한다(`prepareHistory`, 문맥 창은 설정의 값).
  * - `bubbleActions`: 출처 열기(노트는 편집기, 주소는 `links/openExternal.ts` 로 시스템 브라우저)와 "노트에 넣기"
  *   (aiAnswerDialog 의 onInsert 처럼 `insertBlock`; 바깥 내용이 닿은 답은 `ai.confirm.tainted` 로 먼저 묻는다).
+ *   칩(Task 11B)을 위해: 명령 부르기(`findCommand` → `runCommand`, 실패는 알림), 열린 노트의 글과 커서 줄,
+ *   실험 폴더의 워크플로 노트 목록(`###_….md`, README 빼고, 번호 차례).
  */
 import { createAiEnv } from '../ai/aiEnv';
 import { t } from '../i18n/t';
+import { findCommand } from '../editor/commands/appCommands';
 import type { CommandContext } from '../labnote/commands/context';
+import { runCommand } from '../labnote/commands/runCommand';
 import { insertBlock } from '../labnote/port/aiCommon';
 import { openExternal, tauriExternalDeps } from '../links/openExternal';
 import { builtinRuntime } from './builtinRuntime';
+import { isWorkflowNotePath } from './chips';
 import { prepareHistory } from './compact';
 import type { BubbleActions } from './MessageView';
 import { registerRuntime, type AssistantRuntime } from './runtime';
@@ -28,8 +33,42 @@ export async function openSourceWith(
   else await deps.openUrl(target);
 }
 
+/** 글자 위치(offset)의 줄 번호(0부터). */
+export function lineAt(text: string, offset: number): number {
+  let line = 0;
+  const end = Math.max(0, Math.min(offset, text.length));
+  for (let i = 0; i < end; i++) if (text.charCodeAt(i) === 10) line++;
+  return line;
+}
+
 export function bubbleActions(getCtx: () => CommandContext | undefined): BubbleActions {
   return {
+    runCommand(id) {
+      const ctx = getCtx();
+      const cmd = findCommand(id);
+      if (!ctx || !cmd) {
+        console.warn('[labnoteo] assistant: no command', id);
+        return;
+      }
+      void runCommand(ctx, cmd);
+    },
+    async activeNote() {
+      const target = getCtx()?.host.editTarget();
+      if (!target) return undefined;
+      const text = await target.getText();
+      const offset = await target.getCursorOffset?.();
+      return { path: target.path, text, ...(offset !== undefined ? { cursorLine: lineAt(text, offset) } : {}) };
+    },
+    async workflowNotes(folder) {
+      const ctx = getCtx();
+      if (!ctx) return [];
+      const dir = folder.replace(/\\/g, '/').replace(/\/+$/, '');
+      const names = await ctx.host.fs.list(dir);
+      return names
+        .filter((n) => !n.includes('/') && isWorkflowNotePath(n))
+        .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+        .map((n) => `${dir}/${n}`);
+    },
     openSource(src) {
       const ctx = getCtx();
       if (!ctx) return;

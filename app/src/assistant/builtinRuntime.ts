@@ -10,18 +10,19 @@
  *   말풍선의 멈춤 단추가 `signal` 로 한다(모달이 도우미를 inert 로 만들고 초점을 빼앗지 않게).
  * - 답은 흘려 보낸다(`onDelta`). 범위는 이번 차례의 실험 폴더(`turn.folder`)에서 정한다(대화 기록과 같은 폴더).
  * - 노트를 읽은 도구는 출처 장부에 들어가고, 모델은 결과의 `cite` 번호로 [n] 을 단다.
+ * - 칩 모드(Task 11B): 칩의 좁은 도구 묶음(`chipTools`)만 주고 외부 도구는 주지 않으며, 칩의 할 일을 시스템 프롬프트에
+ *   더한다. 사용법 칩은 모델을 부르지 않고, 만들기 칩은 실험 폴더가 없으면 아무것도 부르지 않는다.
  * - 오염된 기록·요약은 울타리에 싸서 보내고 실행을 오염된 채로 시작한다(`initialTaint`, R11). 기록은 `compact.ts` 의
  *   `toPromptMessages` 로 만들고, 문맥 창의 0.4 에 들어가는 최근 것만 보낸다(압축이 실패했을 때의 대비).
  */
-import { createLabnoteTools, type ToolDef, type ToolResult } from '@labnoteo/core';
+import type { ToolDef, ToolResult } from '@labnoteo/core';
 import type { AiEnv } from '../ai/aiEnv';
 import { externalAgentTools, externalApprovalMessage, type ExternalToolMeta } from '../ai/externalTools';
 import { UNTRUSTED_RULES } from '../ai/untrusted';
 import { t as appT } from '../i18n/t';
 import { vaultGuard } from '../integrations/netIpc';
 import { searchNotesIn } from '../search/indexApi';
-import { appTools } from '../labnote/context/appTools';
-import { contextTools, type ScopedToolContext } from '../labnote/context/contextTools';
+import type { ScopedToolContext } from '../labnote/context/contextTools';
 import { experimentFolderOf, resolveScope, scopeGate, type ExperimentRef, type Scope } from '../labnote/context/scope';
 import { overrideOr } from '../labnote/i18n';
 import { noAnswerMessage, replyLanguageInstruction, toolContext, toolRunNotice } from '../labnote/port/aiCommon';
@@ -31,7 +32,8 @@ import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llm
 import { describeLlmError } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
 import { historyBudget, toPromptMessages } from './compact';
-import { addSectionText, assistantTools, isAddSectionPreview } from './tools';
+import { chipNeedsScope, chipSystemPrompt, chipTools } from './chips';
+import { addSectionText, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
 import { cleanLabel, SourceLedger, type Source } from './sources';
 
@@ -134,6 +136,8 @@ function systemPrompt(o: {
   /** 울타리에 싼 앞선 답이나 요약이 프롬프트에 있다. */
   fencedHistory: boolean;
   lang: string;
+  /** 칩 모드의 할 일(chipSystemPrompt). */
+  chip?: string;
 }): string {
   const parts = [
     "You are labnoteO's lab notebook assistant, chatting with a researcher in a small chat bubble. " +
@@ -150,6 +154,7 @@ function systemPrompt(o: {
       : '',
     'If the request needs something these tools cannot do (for example changing the experiment status), ' +
       'do not pretend: answer that you cannot do it and which Labnote command the user can run instead.',
+    o.chip ?? '',
     replyLanguageInstruction(o.lang),
   ];
   // Whenever fenced text can be in the prompt: a fence without its rules means nothing to the model.
@@ -179,9 +184,13 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     tainted: false,
     ...extra,
   });
+  const chip = turn.mode.kind === 'chip' ? turn.mode.chip : undefined;
+  // How to use is a help card: it never reaches a model.
+  if (chip === 'howTo') return empty({});
   const provider = env.provider;
   if (!provider) return empty({ error: overrideOr('ai.configureFirst') });
   if (signal.aborted) return empty({ cancelled: true });
+  if (chip && chipNeedsScope(chip) && !turn.folder) return empty({ error: appT('pet.needExperiment') });
 
   let current: PetState | undefined;
   const state = (s: PetState) => {
@@ -210,18 +219,21 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
       // No experiment list: only the turn's own folder can be the scope.
     }
     const scope = scopeOf(turn.folder, experiments);
+    if (chip && chipNeedsScope(chip) && !scope) {
+      state('idle');
+      return empty({ error: appT('pet.needExperiment') });
+    }
     const allowedFolders = scopeGate(turn.userText, experiments);
-    // Chat mode: the app tools plus the assistant-only add_section and search_catalog (Task 11A, R8).
-    const coreTools: ToolDef[] = [
-      ...(scope
-        ? appTools({ scope, allowedFolders })
-        : [...createLabnoteTools(), ...contextTools().filter((x) => x.name === 'list_experiment')]),
-      ...assistantTools(scope),
-    ];
-    const external = await externalAgentTools(env, {
-      signal: run$.signal,
-      notify: (message) => env.host.notify('warn', message),
-    });
+    // Chat: the app tools plus the assistant-only add_section and search_catalog (Task 11A, R8), and external tools.
+    // A making chip: only its own narrow set, no external tools (Task 11B); a call outside it runs nothing.
+    const coreTools: ToolDef[] = chipTools(chip ?? 'chat', scope, { allowedFolders });
+    const external =
+      chip && chip !== 'chat'
+        ? { tools: [] as ToolDef[], meta: new Map<string, ExternalToolMeta>() }
+        : await externalAgentTools(env, {
+            signal: run$.signal,
+            notify: (message) => env.host.notify('warn', message),
+          });
     const hooks = {
       running: (line: string) => {
         state('think');
@@ -313,6 +325,7 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
           external: external.tools.length > 0,
           fencedHistory: earlier.fenced,
           lang: env.lang(),
+          ...(chip ? { chip: chipSystemPrompt(chip) } : {}),
         }),
       },
       ...earlier.messages,

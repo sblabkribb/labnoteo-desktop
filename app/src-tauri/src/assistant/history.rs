@@ -79,7 +79,7 @@ pub enum SourceKind {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Chip {
-    Howto,
+    HowTo,
     Section,
     UnitOp,
     Workflow,
@@ -677,6 +677,15 @@ mod tests {
         let wire = serde_json::to_value(&back).unwrap();
         assert_eq!(wire["messages"][0].get("tainted"), None, "absent optionals stay absent");
         assert_eq!(wire["messages"][0]["chip"], "unitOp");
+    }
+
+    #[test]
+    fn every_chip_id_of_the_webview_round_trips() {
+        for id in ["howTo", "section", "unitOp", "workflow", "chat"] {
+            let chip: Chip = serde_json::from_value(json!(id)).unwrap();
+            assert_eq!(serde_json::to_value(chip).unwrap(), json!(id));
+        }
+        assert!(serde_json::from_value::<Chip>(json!("howto")).is_err());
     }
 
     #[test]
