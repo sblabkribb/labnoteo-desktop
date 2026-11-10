@@ -156,6 +156,13 @@ describe('assertInScope', () => {
 });
 
 describe('scopeGate', () => {
+  it('ignores short common-word ASCII titles', () => {
+    const exps = [{ folder: 'labnote/001_new', title: 'new' }, { folder: 'labnote/002_X', title: 'test' }];
+    expect([...scopeGate('write a new test method', exps as never)]).toEqual([]);
+    const ok = [{ folder: 'labnote/003_Y', title: 'Plasmid prep' }];
+    expect([...scopeGate('compare with plasmid prep', ok as never)]).toEqual(['labnote/003_Y']);
+  });
+
   it('finds a number and a Korean title in a sentence', () => {
     const gate = scopeGate(`002번 실험의 결과를 ${TITLE_OTHER} 실험과 비교해 줘`, FIXTURE_EXPERIMENTS);
     expect([...gate].sort()).toEqual([EXP_MAIN, EXP_OTHER].sort());
@@ -174,7 +181,7 @@ describe('scopeGate', () => {
     expect([...scopeGate('compare with 001_AB', FIXTURE_EXPERIMENTS)]).toEqual([EXP_AB]);
     expect([...scopeGate('compare with 001_A.', FIXTURE_EXPERIMENTS)]).toEqual([EXP_A]);
     expect([...scopeGate('what did Alpha Beta do?', FIXTURE_EXPERIMENTS)]).toEqual([EXP_AB]);
-    expect([...scopeGate('what did alpha do?', FIXTURE_EXPERIMENTS)]).toEqual([EXP_A]);
+    expect([...scopeGate('what did alpha do?', FIXTURE_EXPERIMENTS)]).toEqual([]);
     expect([...scopeGate('the alphabet', FIXTURE_EXPERIMENTS)]).toEqual([]);
   });
 

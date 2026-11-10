@@ -219,10 +219,16 @@ function occurrences(text: string, needle: string): Array<[number, number]> {
   return out;
 }
 
-/** A title long enough to name an experiment in prose: 3+ characters, or 2+ with a non-ASCII one (Korean). */
+/**
+ * A title distinctive enough to name an experiment in prose. A Korean (non-ASCII)
+ * title needs 2+ characters; an ASCII title needs two words or 8+ characters, so a
+ * common word like "new" or "test" never opens another experiment to the agent.
+ */
 function usableTitle(title: string): boolean {
-  const chars = [...title];
-  return chars.length >= 3 || (chars.length >= 2 && /[^\x00-\x7f]/.test(title));
+  const trimmed = title.trim();
+  const chars = [...trimmed];
+  if (/[^\x00-\x7f]/.test(trimmed)) return chars.length >= 2;
+  return /\s/.test(trimmed) || chars.length >= 8;
 }
 
 /**
