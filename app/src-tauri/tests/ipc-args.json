@@ -113,5 +113,8 @@
   "skin_remove": ["id"],
   "skin_import_pick": [],
   "skin_staging_discard": ["stagingId"],
-  "skin_export": ["id"]
+  "skin_export": ["id"],
+  "skin_pick_sheet": [],
+  "skin_build": ["draft"],
+  "skin_export_staged": ["stagingId"]
 }

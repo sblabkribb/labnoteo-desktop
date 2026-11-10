@@ -13,4 +13,4 @@ pub mod store;
 pub(crate) mod testpacks;
 
 pub use pack::{validate_pack, Manifest, SkinError, SkinErrorKind, ValidPack};
-pub use store::{SkinData, SkinFileDialogs, SkinStaging, StagedSkin, BUILTIN_ID};
+pub use store::{SheetStaging, SkinData, SkinFileDialogs, SkinStaging, StagedSkin, BUILTIN_ID};

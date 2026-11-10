@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
 import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
+import { openSkinEditor } from '../../assistant/skins/SkinEditor';
 import { exportSkinFile, importSkinFile } from '../../assistant/skins/transfer';
 import type { SkinManifest } from '../../assistant/skins/types';
 import type { WebSearchResult } from '../../assistant/web/ipc';
@@ -18,7 +19,7 @@ import { SettingRow, Toggle } from './SettingRow';
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
  * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json),
- * 대화 기록(Task 10). 스킨 가져오기(Task 17)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
+ * 대화 기록(Task 10). 스킨 가져오기(Task 17)와 내 스킨 만들기(Task 18)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
  */
 export function AssistantPage(props: { leave?: (after: () => Promise<void>) => void } = {}) {
   useLang();
@@ -65,6 +66,8 @@ export interface SkinRowDeps {
   importSkin?: () => Promise<unknown>;
   /** 스킨 파일 내보내기(Rust 저장 창). */
   exportSkin?: (id: string) => Promise<boolean>;
+  /** 내 스킨 만들기 창(Task 18). */
+  makeSkin?: () => Promise<unknown>;
   /** 설정 창을 닫고 그 뒤에 `after` 를 한다(가져오기의 창들이 설정 창 뒤에 줄 서지 않게). 없으면 바로 한다. */
   leave?: (after: () => Promise<void>) => void;
 }
@@ -86,6 +89,7 @@ export function SkinRow(deps: SkinRowDeps = {}) {
   const notify = deps.notify ?? toast;
   const importSkin = deps.importSkin ?? (() => importSkinFile());
   const exportSkin = deps.exportSkin ?? ((id: string) => exportSkinFile(id));
+  const makeSkin = deps.makeSkin ?? (() => openSkinEditor());
   const [installed, setInstalled] = useState<SkinManifest[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -125,19 +129,21 @@ export function SkinRow(deps: SkinRowDeps = {}) {
     }
   };
 
-  const runImport = () => {
+  /** 설정 창을 닫고(창이 설정 창 뒤에 줄 서지 않게) `flow` 를 한다. 설정 창이 없으면 바로 하고 목록을 다시 읽는다. */
+  const runOutside = (flow: () => Promise<unknown>) => {
     if (deps.leave) {
       deps.leave(async () => {
-        await importSkin();
+        await flow();
       });
       return;
     }
     setBusy(true);
-    void importSkin().finally(() => {
+    void flow().finally(() => {
       setBusy(false);
       void refresh();
     });
   };
+  const runImport = () => runOutside(importSkin);
 
   const runExport = async () => {
     setBusy(true);
@@ -167,6 +173,9 @@ export function SkinRow(deps: SkinRowDeps = {}) {
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => void runExport()}>
             {t('settings.assistant.skin.export')}
+          </button>
+          <button type="button" className="btn" disabled={busy} onClick={() => runOutside(makeSkin)}>
+            {t('settings.assistant.skin.make')}
           </button>
           <button type="button" className="btn danger" disabled={busy || current.builtin} onClick={() => void run()}>
             {t('settings.assistant.skin.remove')}

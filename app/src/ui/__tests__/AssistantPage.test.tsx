@@ -265,4 +265,15 @@ describe('Assistant pane: skin import and export (Task 17)', () => {
     expect(importSkin).toHaveBeenCalledTimes(1);
     expect(list).toHaveBeenCalledTimes(2);
   });
+
+  it('"내 스킨 만들기" leaves the settings window first, then opens the editor (Task 18)', async () => {
+    const makeSkin = vi.fn(async () => undefined);
+    const leave = vi.fn(async (after: () => Promise<void>) => after());
+    render(<SkinRow list={vi.fn(async () => [])} makeSkin={makeSkin} leave={leave} active="flasko" />);
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '내 스킨 만들기' }));
+    expect(leave).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(makeSkin).toHaveBeenCalledTimes(1);
+  });
 });

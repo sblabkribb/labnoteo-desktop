@@ -151,6 +151,10 @@ macro_rules! register_commands {
             $crate::skins::store::skin_import_pick,
             $crate::skins::store::skin_staging_discard,
             $crate::skins::store::skin_export,
+            // Skin editor-lite: picked PNG sheets and the built pack (assistant Task 18).
+            $crate::skins::store::skin_pick_sheet,
+            $crate::skins::store::skin_build,
+            $crate::skins::store::skin_export_staged,
         ])
     };
 }
@@ -195,6 +199,8 @@ pub fn run() {
         .manage(skill::SkillPaths::from_env())
         // Skin packs validated by Rust and waiting for an explicit install (in memory only).
         .manage(skins::SkinStaging::default())
+        // PNG sheets picked in the skin editor-lite, re-encoded, under random tokens (in memory only).
+        .manage(skins::SheetStaging::default())
         // SP7 Part C: a page load in the main webview (reload, navigation,
         // crash recovery) stops the MCP server and fails its pending calls,
         // from Rust, because JS cannot reliably invoke during unload (C3).

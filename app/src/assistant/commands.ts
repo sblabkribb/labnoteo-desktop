@@ -4,6 +4,7 @@ import { openSettings } from '../ui/SettingsModal';
 import { captureFocus } from '../ui/returnFocus';
 import type { ChipId } from './chips';
 import { petStore } from './petStore';
+import { openSkinEditor } from './skins/SkinEditor';
 import { activeSkinForExport, exportSkinFile, importSkinFile } from './skins/transfer';
 import { assistantSession } from './useAssistantSession';
 
@@ -26,6 +27,7 @@ export const ASSISTANT_COMMAND_IDS = [
   'assistant.createWorkflow',
   'skins.import',
   'skins.export',
+  'skins.editor',
 ] as const;
 
 /** 말풍선을 열고(숨겨 두었으면 보이고) 지금 초점 자리를 기억한다: Esc 로 닫으면 거기로 돌아간다. 보관함 설정이 없어도 된다. */
@@ -161,6 +163,16 @@ const skinsExport: AppCommand = {
   },
 };
 
+/** 내 스킨 만들기(Task 18): PNG 시트로 스킨을 만들어 미리 보고, 내보내거나 설치한다. */
+const skinsEditor: AppCommand = {
+  id: 'skins.editor',
+  nameKey: 'cmd.skins.editor',
+  icon: 'pencil',
+  run: async (ctx) => {
+    await openSkinEditor({ notify: (kind, message) => ctx.host.notify(kind, message) });
+  },
+};
+
 export function assistantCommands(): AppCommand[] {
   return [
     open,
@@ -176,5 +188,6 @@ export function assistantCommands(): AppCommand[] {
     createWorkflow,
     skinsImport,
     skinsExport,
+    skinsEditor,
   ];
 }

@@ -70,11 +70,18 @@ fn ipc_argument_names_match_the_typescript_side() {
         // The assistant's chat history: a temp app data dir, never the real one.
         .manage(labnoteo_app_lib::assistant::AssistantDirs(dir.join("data").join("assistant")))
         .manage(labnoteo_app_lib::skins::SkinStaging::default())
+        .manage(labnoteo_app_lib::skins::SheetStaging::default())
         // Skin pack dialogs: the open dialog picks a too-big temp file once,
         // then cancels; the save dialog picks a temp path once, then cancels.
         .manage(labnoteo_app_lib::skins::SkinFileDialogs {
             open: std::sync::Arc::new({
                 let picked = dir.join("big.labnoteo-skin");
+                let once = std::sync::atomic::AtomicBool::new(true);
+                move || once.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| picked.clone())
+            }),
+            // The editor-lite's PNG dialog: a temp PNG once, then cancel.
+            open_sheet: std::sync::Arc::new({
+                let picked = dir.join("strip.png");
                 let once = std::sync::atomic::AtomicBool::new(true);
                 move || once.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| picked.clone())
             }),
@@ -296,6 +303,33 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert!(std::fs::read(dir.join("flasko.labnoteo-skin")).unwrap().starts_with(b"PK"));
     assert_eq!(ok("skin_export", args("skin_export", vec![json!("flasko")])), json!(false));
     assert_eq!(call("skin_export", args("skin_export", vec![json!("nope-skin")])).unwrap_err()["kind"], "notFound");
+
+    // Editor-lite (assistant Task 18): a PNG picked by Rust's dialog comes back
+    // re-encoded under a token; a draft holds tokens only, and an unknown token
+    // or staging id is refused; nothing is written into the vault.
+    std::fs::write(dir.join("strip.png"), include_bytes!("../../public/skins/flasko/idle.png")).unwrap();
+    let picked = ok("skin_pick_sheet", args("skin_pick_sheet", vec![]));
+    assert_eq!((picked["width"].as_u64(), picked["height"].as_u64()), (Some(128), Some(32)));
+    assert_eq!(picked["sheetToken"].as_str().map(str::len), Some(32));
+    assert_eq!(picked["bytes"][0], 0x89);
+    assert_eq!(ok("skin_pick_sheet", args("skin_pick_sheet", vec![])), Value::Null);
+    let token = picked["sheetToken"].clone();
+    let st = |t: &Value| json!({"sheetToken": t, "frames": 4, "fps": 4});
+    let draft = |talk: Value| json!({"name": "Pal", "author": "Kim", "licence": "MIT", "frame": {"width": 32, "height": 32},
+        "states": {"idle": st(&token), "talk": st(&talk), "think": st(&token), "done": st(&token)}});
+    let refused = call("skin_build", args("skin_build", vec![draft(json!("0123456789abcdef0123456789abcdef"))])).unwrap_err();
+    assert_eq!((refused["kind"].as_str(), refused["detail"].as_str()), (Some("stagingUnknown"), Some("talk")));
+    let built = ok("skin_build", args("skin_build", vec![draft(token.clone())]));
+    assert_eq!(built["manifest"]["id"], "pal");
+    assert_eq!(built["manifest"]["licence"], "MIT");
+    assert_eq!(
+        call("skin_export_staged", args("skin_export_staged", vec![json!("0123456789abcdef0123456789abcdef")])).unwrap_err()["kind"],
+        "stagingUnknown"
+    );
+    // The save dialog was used once above and now cancels.
+    assert_eq!(ok("skin_export_staged", args("skin_export_staged", vec![built["stagingId"].clone()])), json!(false));
+    assert!(call("skin_build", json!({"draft": {"name": "x", "bytes": [1]}})).is_err(), "no bytes in a draft");
+    assert!(!dir.join("vault").join("skins").exists());
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");

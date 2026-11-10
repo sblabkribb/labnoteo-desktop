@@ -25,6 +25,13 @@
 //!   files (or the built-in skin) through Rust's save dialog. Exported packs
 //!   are deterministic (fixed entry order and timestamps) and pass
 //!   [`validate_pack`] before they are written.
+//! - Editor-lite (Task 18): `skin_pick_sheet` reads one PNG through Rust's
+//!   own open dialog (at most [`MAX_ENTRY_BYTES`], checked before reading),
+//!   decodes and re-encodes it and holds it in [`SheetStaging`] under a random
+//!   token. `skin_build(draft)` takes text fields, the frame size and per state
+//!   a token (never bytes or paths), zips the held sheets with a manifest made
+//!   from the draft, runs [`validate_pack`] on the result and stages it like an
+//!   import; `skin_export_staged` writes such a pack through the save dialog.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -32,13 +39,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::State;
 
 use super::pack::{
-    decode_png, is_skin_id, parse_manifest, validate_pack, Manifest, SkinError, SkinErrorKind as K, ValidPack, MAX_ENTRY_BYTES,
-    MAX_MANIFEST_BYTES, MAX_PACK_BYTES, STATES,
+    decode_png, encode_rgba, is_skin_id, parse_manifest, validate_pack, Frame, Manifest, SkinError, SkinErrorKind as K, StateSpec,
+    States, ValidPack, MAX_ENTRY_BYTES, MAX_MANIFEST_BYTES, MAX_PACK_BYTES, STATES,
 };
 use crate::assistant::AssistantDirs;
 use crate::vault::VaultState;
@@ -362,6 +369,8 @@ pub const PACK_EXT: &str = "labnoteo-skin";
 #[derive(Clone)]
 pub struct SkinFileDialogs {
     pub open: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+    /// Picks one PNG sprite sheet for the editor-lite (Task 18).
+    pub open_sheet: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
     pub save: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
 }
 
@@ -370,12 +379,22 @@ impl SkinFileDialogs {
     /// as `skill.rs` `SkillPicker::dialog` does), filtered to `.labnoteo-skin`.
     pub fn dialog<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> SkinFileDialogs {
         let app2 = app.clone();
+        let app3 = app.clone();
         SkinFileDialogs {
             open: Arc::new(move || {
                 use tauri::Manager;
                 use tauri_plugin_dialog::DialogExt;
                 let mut b = app.dialog().file().add_filter("labnoteO skin", &[PACK_EXT]);
                 if let Some(w) = app.get_webview_window("main") {
+                    b = b.set_parent(&w);
+                }
+                b.blocking_pick_file().and_then(|p| p.into_path().ok())
+            }),
+            open_sheet: Arc::new(move || {
+                use tauri::Manager;
+                use tauri_plugin_dialog::DialogExt;
+                let mut b = app3.dialog().file().add_filter("PNG", &["png"]);
+                if let Some(w) = app3.get_webview_window("main") {
                     b = b.set_parent(&w);
                 }
                 b.blocking_pick_file().and_then(|p| p.into_path().ok())
@@ -517,17 +536,219 @@ pub fn export_bytes(dirs: &AssistantDirs, id: &str) -> Result<(String, Vec<u8>),
 /// rename). Returns whether it was saved (`false` on cancel).
 pub fn export(dirs: &AssistantDirs, dialogs: &SkinFileDialogs, id: &str) -> Result<bool, SkinError> {
     let (name, bytes) = export_bytes(dirs, id)?;
-    let Some(path) = (dialogs.save)(&name) else { return Ok(false) };
+    save_pack(dialogs, &name, &bytes)
+}
+
+/// Asks the save dialog where to write a pack (temp file + rename). Returns
+/// whether it was saved (`false` on cancel).
+fn save_pack(dialogs: &SkinFileDialogs, name: &str, bytes: &[u8]) -> Result<bool, SkinError> {
+    let Some(path) = (dialogs.save)(name) else { return Ok(false) };
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     let tmp = parent.join(format!(".{}.tmp", random_id()));
     let written = (|| -> Result<(), SkinError> {
-        std::fs::write(&tmp, &bytes).map_err(io("pack write"))?;
+        std::fs::write(&tmp, bytes).map_err(io("pack write"))?;
         std::fs::rename(&tmp, &path).map_err(io("pack write"))
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     written.map(|()| true)
+}
+
+
+// ---------------------------------------------------------------- editor-lite (Task 18)
+
+/// Picked sheets held for the editor-lite: at most [`SHEET_MAX`] for [`SHEET_TTL`].
+pub const SHEET_MAX: usize = 8;
+pub const SHEET_TTL: Duration = Duration::from_secs(30 * 60);
+/// The version every editor-built manifest gets.
+pub const DRAFT_VERSION: &str = "1.0.0";
+
+struct StagedSheet {
+    token: String,
+    at: Instant,
+    width: u32,
+    height: u32,
+    png: Vec<u8>,
+}
+
+/// PNG sheets that Rust read, decoded and re-encoded for the editor-lite
+/// (managed state). The webview only ever holds the random token.
+#[derive(Default)]
+pub struct SheetStaging(Mutex<Vec<StagedSheet>>);
+
+impl SheetStaging {
+    pub fn stage_at(&self, width: u32, height: u32, png: Vec<u8>, now: Instant) -> String {
+        let mut v = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        v.retain(|s| now.saturating_duration_since(s.at) < SHEET_TTL);
+        while v.len() >= SHEET_MAX {
+            v.remove(0);
+        }
+        let token = random_id();
+        v.push(StagedSheet { token: token.clone(), at: now, width, height, png });
+        token
+    }
+
+    /// `(width, height, re-encoded PNG)` of a sheet still held at `now`.
+    pub fn get_at(&self, token: &str, now: Instant) -> Option<(u32, u32, Vec<u8>)> {
+        let mut v = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        v.retain(|s| now.saturating_duration_since(s.at) < SHEET_TTL);
+        v.iter().find(|s| s.token == token).map(|s| (s.width, s.height, s.png.clone()))
+    }
+}
+
+/// What `skin_pick_sheet` returns: the token, the size and the re-encoded
+/// PNG bytes (for the live preview's `blob:` URL).
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedSheet {
+    pub sheet_token: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: Vec<u8>,
+}
+
+/// Decodes an untrusted PNG within the sheet limits and re-encodes it (RGBA8,
+/// IHDR/IDAT/IEND only): `(width, height, png)`.
+pub fn sheet_from_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), SkinError> {
+    let (w, h, rgba) = decode_png("sheet.png", bytes)?;
+    Ok((w, h, encode_rgba("sheet.png", w, h, &rgba)?))
+}
+
+/// Reads a picked PNG: a regular file of at most [`MAX_ENTRY_BYTES`], checked
+/// by its size before anything is read (and capped while reading).
+fn read_sheet_file(path: &Path) -> Result<Vec<u8>, SkinError> {
+    let meta = std::fs::metadata(path).map_err(io("sheet file"))?;
+    if !meta.is_file() {
+        return Err(err(K::Io, "not a file"));
+    }
+    if meta.len() > MAX_ENTRY_BYTES {
+        return Err(SkinError::new(K::TooLarge, None));
+    }
+    let f = std::fs::File::open(path).map_err(io("sheet file"))?;
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    f.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes).map_err(io("sheet file"))?;
+    if bytes.len() as u64 > MAX_ENTRY_BYTES {
+        return Err(SkinError::new(K::TooLarge, None));
+    }
+    Ok(bytes)
+}
+
+/// Asks the PNG open dialog for a file, reads, decodes and re-encodes it.
+/// Cancel gives `Ok(None)`. Blocking.
+fn read_picked_sheet(dialogs: &SkinFileDialogs) -> Result<Option<(u32, u32, Vec<u8>)>, SkinError> {
+    let Some(path) = (dialogs.open_sheet)() else { return Ok(None) };
+    sheet_from_bytes(&read_sheet_file(&path)?).map(Some)
+}
+
+fn stage_sheet(sheets: &SheetStaging, (width, height, png): (u32, u32, Vec<u8>), now: Instant) -> PickedSheet {
+    let sheet_token = sheets.stage_at(width, height, png.clone(), now);
+    PickedSheet { sheet_token, width, height, bytes: png }
+}
+
+/// Picks a PNG sheet, validates and re-encodes it, and holds it under a token.
+pub fn pick_sheet(dialogs: &SkinFileDialogs, sheets: &SheetStaging, now: Instant) -> Result<Option<PickedSheet>, SkinError> {
+    Ok(read_picked_sheet(dialogs)?.map(|s| stage_sheet(sheets, s, now)))
+}
+
+/// One state of a draft: a sheet token from `skin_pick_sheet`, frames and fps.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftState {
+    pub sheet_token: String,
+    pub frames: u32,
+    pub fps: u32,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct DraftStates {
+    pub idle: DraftState,
+    pub talk: DraftState,
+    pub think: DraftState,
+    pub done: DraftState,
+}
+
+/// What the editor-lite sends: text fields, the frame size and per state a
+/// sheet token. No bytes and no paths come from the webview.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkinDraft {
+    pub name: String,
+    pub author: String,
+    pub licence: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub frame: Frame,
+    pub states: DraftStates,
+}
+
+/// A skin id from the draft's name: lowercase ASCII letters and digits, other
+/// runs become `-`, at most 32 characters. A name with too few of those
+/// (a Korean name, say) gets `skin-<8 hex of its SHA-256>`; the built-in id
+/// becomes `my-flasko`.
+pub fn draft_id(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.trim().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.truncate(32);
+    let slug = slug.trim_end_matches('-').to_string();
+    if slug == BUILTIN_ID {
+        return format!("my-{slug}");
+    }
+    if is_skin_id(&slug) {
+        return slug;
+    }
+    let hash: String = Sha256::digest(name.as_bytes()).iter().take(4).map(|b| format!("{b:02x}")).collect();
+    format!("skin-{hash}")
+}
+
+/// Builds a pack from the draft and the held sheets and runs [`validate_pack`]
+/// on it, exactly as for an imported file.
+pub fn build(draft: &SkinDraft, sheets: &SheetStaging, now: Instant) -> Result<ValidPack, SkinError> {
+    let spec = |state: &str, d: &DraftState| StateSpec { sheet: sheet_name(state), frames: d.frames, fps: d.fps };
+    let s = &draft.states;
+    let mut pngs = BTreeMap::new();
+    for (state, d) in [("idle", &s.idle), ("talk", &s.talk), ("think", &s.think), ("done", &s.done)] {
+        let (_, _, png) = sheets.get_at(&d.sheet_token, now).ok_or_else(|| err(K::StagingUnknown, state))?;
+        pngs.insert(state.to_string(), png);
+    }
+    let manifest = Manifest {
+        format: 1,
+        id: draft_id(&draft.name),
+        name: draft.name.clone(),
+        author: draft.author.clone(),
+        licence: draft.licence.clone(),
+        version: DRAFT_VERSION.to_string(),
+        description: draft.description.clone().filter(|d| !d.trim().is_empty()),
+        frame: draft.frame.clone(),
+        states: States { idle: spec("idle", &s.idle), talk: spec("talk", &s.talk), think: spec("think", &s.think), done: spec("done", &s.done) },
+    };
+    validate_pack(&build_pack(&manifest, &pngs)?)
+}
+
+/// Builds and stages the draft's pack; returns what the editor shows and installs.
+pub fn build_view(draft: &SkinDraft, sheets: &SheetStaging, staging: &SkinStaging, now: Instant) -> Result<StagedSkin, SkinError> {
+    stage_view(staging, build(draft, sheets, now)?)
+}
+
+/// Writes a staged pack (re-built and re-validated) through the save dialog.
+/// The staging entry stays (the user may still install it).
+pub fn export_staged(staging: &SkinStaging, dialogs: &SkinFileDialogs, staging_id: &str, now: Instant) -> Result<bool, SkinError> {
+    let pack = staging.get_at(staging_id, now).ok_or_else(|| SkinError::new(K::StagingUnknown, None))?;
+    export_pack(dialogs, &pack)
+}
+
+fn export_pack(dialogs: &SkinFileDialogs, pack: &ValidPack) -> Result<bool, SkinError> {
+    let manifest = installed_manifest(&pack.manifest);
+    let bytes = build_pack(&manifest, &per_state(pack)?)?;
+    validate_pack(&bytes)?;
+    save_pack(dialogs, &format!("{}.{PACK_EXT}", manifest.id), &bytes)
 }
 
 /// File work and dialogs block: keep them off the async runtime.
@@ -586,6 +807,35 @@ pub async fn skin_export(dirs: State<'_, AssistantDirs>, dialogs: State<'_, Skin
     let dirs = AssistantDirs(dirs.0.clone());
     let dialogs = dialogs.inner().clone();
     blocking(move || export(&dirs, &dialogs, &id)).await
+}
+
+/// Editor-lite: picks a PNG sheet in Rust's open dialog, validates and
+/// re-encodes it and holds it under a token. `null` on cancel. Takes no path.
+#[tauri::command]
+pub async fn skin_pick_sheet(dialogs: State<'_, SkinFileDialogs>, sheets: State<'_, SheetStaging>) -> Result<Option<PickedSheet>, SkinError> {
+    let dialogs = dialogs.inner().clone();
+    let picked = blocking(move || read_picked_sheet(&dialogs)).await?;
+    Ok(picked.map(|s| stage_sheet(&sheets, s, Instant::now())))
+}
+
+/// Editor-lite: builds a pack from the draft (sheet tokens only), validates
+/// and stages it. Installs nothing.
+#[tauri::command]
+pub fn skin_build(sheets: State<'_, SheetStaging>, staging: State<'_, SkinStaging>, draft: SkinDraft) -> Result<StagedSkin, SkinError> {
+    build_view(&draft, &sheets, &staging, Instant::now())
+}
+
+/// Writes a staged pack (built by the editor-lite) through Rust's save
+/// dialog. Returns whether it was saved. Takes no path; keeps the staging entry.
+#[tauri::command]
+pub async fn skin_export_staged(
+    dialogs: State<'_, SkinFileDialogs>,
+    staging: State<'_, SkinStaging>,
+    staging_id: String,
+) -> Result<bool, SkinError> {
+    let dialogs = dialogs.inner().clone();
+    let pack = staging.get_at(&staging_id, Instant::now()).ok_or_else(|| SkinError::new(K::StagingUnknown, None))?;
+    blocking(move || export_pack(&dialogs, &pack)).await
 }
 
 #[cfg(test)]
@@ -825,6 +1075,7 @@ mod tests {
         let a = asked.clone();
         let d = SkinFileDialogs {
             open: Arc::new(move || open.clone()),
+            open_sheet: Arc::new(|| None),
             save: Arc::new(move |name: &str| {
                 a.lock().unwrap().push(name.to_string());
                 save.clone()
@@ -946,5 +1197,169 @@ mod tests {
         assert_eq!(v["sheets"]["idle"][0], 0x89);
         assert!(staging.discard(&staged.staging_id));
         assert_eq!(kind(install(&fx.dirs, None, &staging, &staged.staging_id, false, Instant::now())), K::StagingUnknown);
+    }
+
+    // ------------------------------------------------------------ editor-lite (Task 18)
+
+    fn sheet_dialogs(sheet: Option<PathBuf>, save: Option<PathBuf>) -> SkinFileDialogs {
+        SkinFileDialogs {
+            open: Arc::new(|| None),
+            open_sheet: Arc::new(move || sheet.clone()),
+            save: Arc::new(move |_: &str| save.clone()),
+        }
+    }
+
+    /// Stages each Flasko sheet as a picked PNG and returns a draft using them.
+    fn flasko_draft(sheets: &SheetStaging, name: &str) -> SkinDraft {
+        let mut tokens = BTreeMap::new();
+        for s in STATES {
+            let (w, h, png) = sheet_from_bytes(&flasko_sheet(&format!("{s}.png"))).unwrap();
+            tokens.insert(s, sheets.stage_at(w, h, png, Instant::now()));
+        }
+        let st = |s: &str, frames: u32, fps: u32| DraftState { sheet_token: tokens[s].clone(), frames, fps };
+        SkinDraft {
+            name: name.into(),
+            author: "Kim".into(),
+            licence: "CC-BY-4.0".into(),
+            description: Some("Mine".into()),
+            frame: Frame { width: 32, height: 32 },
+            states: DraftStates { idle: st("idle", 4, 4), talk: st("talk", 4, 8), think: st("think", 6, 6), done: st("done", 6, 10) },
+        }
+    }
+
+    #[test]
+    fn pick_sheet_reencodes_the_png_and_holds_it_under_a_token() {
+        let fx = Fx::new();
+        let sheets = SheetStaging::default();
+        // A PNG with a text chunk: the bytes handed back are re-encoded without it.
+        let raw = insert_after_ihdr(&png_rgba(64, 32), &[chunk(b"tEXt", b"Comment\0hi")]);
+        let file = fx.base.join("strip.png");
+        std::fs::create_dir_all(&fx.base).unwrap();
+        std::fs::write(&file, &raw).unwrap();
+        let picked = pick_sheet(&sheet_dialogs(Some(file), None), &sheets, Instant::now()).unwrap().expect("picked");
+        assert_eq!((picked.width, picked.height), (64, 32));
+        assert_eq!(picked.sheet_token.len(), 32);
+        assert_eq!(chunk_types(&picked.bytes), ["IHDR", "IDAT", "IEND"]);
+        assert_eq!(sheets.get_at(&picked.sheet_token, Instant::now()).unwrap().2, picked.bytes);
+        let v = serde_json::to_value(&picked).unwrap();
+        assert_eq!(v["sheetToken"], picked.sheet_token.as_str());
+        assert_eq!(v["bytes"][0], 0x89);
+        // Cancel gives None.
+        assert!(pick_sheet(&sheet_dialogs(None, None), &sheets, Instant::now()).unwrap().is_none());
+    }
+
+    #[test]
+    fn pick_sheet_refuses_big_files_before_reading_and_bad_images() {
+        let fx = Fx::new();
+        let sheets = SheetStaging::default();
+        let big = fx.base.join("big.png");
+        std::fs::write(&big, vec![0u8; MAX_ENTRY_BYTES as usize + 1]).unwrap();
+        assert_eq!(kind(pick_sheet(&sheet_dialogs(Some(big), None), &sheets, Instant::now())), K::TooLarge);
+        let svg = fx.base.join("x.png");
+        std::fs::write(&svg, b"<svg/>").unwrap();
+        assert_eq!(kind(pick_sheet(&sheet_dialogs(Some(svg), None), &sheets, Instant::now())), K::BadPng);
+        let huge = fx.base.join("huge.png");
+        std::fs::write(&huge, png_rgba(2000, 32)).unwrap();
+        assert_eq!(kind(pick_sheet(&sheet_dialogs(Some(huge), None), &sheets, Instant::now())), K::PngTooLarge);
+        let dir = fx.base.join("folder.png");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(kind(pick_sheet(&sheet_dialogs(Some(dir), None), &sheets, Instant::now())), K::Io);
+        assert!(sheets.0.lock().unwrap().is_empty(), "nothing staged on failure");
+    }
+
+    #[test]
+    fn sheet_tokens_expire_and_are_evicted() {
+        let sheets = SheetStaging::default();
+        let t0 = Instant::now();
+        let png = png_rgba(32, 32);
+        let first = sheets.stage_at(32, 32, png.clone(), t0);
+        assert!(sheets.get_at(&first, t0).is_some());
+        assert!(sheets.get_at(&first, t0 + SHEET_TTL).is_none(), "expired");
+        let ids: Vec<String> = (0..=SHEET_MAX).map(|_| sheets.stage_at(32, 32, png.clone(), t0)).collect();
+        assert!(sheets.get_at(&ids[0], t0).is_none(), "oldest evicted");
+        assert!(sheets.get_at(&ids[SHEET_MAX], t0).is_some());
+    }
+
+    #[test]
+    fn build_makes_a_validated_staged_pack_from_tokens() {
+        let fx = Fx::new();
+        let sheets = SheetStaging::default();
+        let staging = SkinStaging::default();
+        let draft = flasko_draft(&sheets, "Pipette Pal");
+        let staged = build_view(&draft, &sheets, &staging, Instant::now()).unwrap();
+        assert_eq!(staged.manifest.id, "pipette-pal");
+        assert_eq!(staged.manifest.name, "Pipette Pal");
+        assert_eq!(staged.manifest.licence, "CC-BY-4.0");
+        assert_eq!(staged.manifest.version, "1.0.0");
+        assert_eq!(staged.manifest.description.as_deref(), Some("Mine"));
+        assert_eq!(staged.manifest.states.think.frames, 6);
+        assert_eq!(staged.manifest.states.done.fps, 10);
+        assert_eq!(staged.manifest.states.talk.sheet, "talk.png");
+        let shipped: BTreeMap<String, Vec<u8>> =
+            flasko_files().into_iter().skip(1).map(|(n, b)| (n.trim_end_matches(".png").to_string(), b)).collect();
+        assert_eq!(pixels(&staged.sheets), pixels(&shipped));
+        // Install goes through the same staging (and so through validate_pack).
+        let m = install(&fx.dirs, Some(&fx.vault), &staging, &staged.staging_id, false, Instant::now()).unwrap();
+        assert_eq!(m.id, "pipette-pal");
+        assert_eq!(read(&fx.dirs, "pipette-pal").unwrap().manifest.author, "Kim");
+    }
+
+    #[test]
+    fn build_refuses_unknown_tokens_and_reports_validation_errors() {
+        let sheets = SheetStaging::default();
+        let staging = SkinStaging::default();
+        let mut draft = flasko_draft(&sheets, "Mine");
+        draft.states.talk.sheet_token = "0123456789abcdef0123456789abcdef".into();
+        let e = build_view(&draft, &sheets, &staging, Instant::now()).unwrap_err();
+        assert_eq!((e.kind, e.detail.as_deref()), (K::StagingUnknown, Some("talk")));
+        // Expired tokens too.
+        let draft = flasko_draft(&sheets, "Mine");
+        assert_eq!(kind(build_view(&draft, &sheets, &staging, Instant::now() + SHEET_TTL)), K::StagingUnknown);
+
+        let check = |edit: &dyn Fn(&mut SkinDraft), want: K| {
+            let mut d = flasko_draft(&sheets, "Mine");
+            edit(&mut d);
+            assert_eq!(kind(build_view(&d, &sheets, &staging, Instant::now())), want);
+        };
+        check(&|d| d.licence = String::new(), K::LicenceMissing);
+        check(&|d| d.licence = "GPL-3.0".into(), K::LicenceNotAllowed);
+        check(&|d| d.name = "\u{202E}".into(), K::ManifestInvalid);
+        check(&|d| d.states.idle.frames = 17, K::ManifestInvalid);
+        check(&|d| d.states.idle.fps = 0, K::ManifestInvalid);
+        check(&|d| d.frame.width = 8, K::ManifestInvalid);
+        // Sheet width does not match frame x frames.
+        check(&|d| d.states.think.frames = 5, K::SheetSize);
+        assert!(staging.0.lock().unwrap().is_empty(), "nothing staged on failure");
+    }
+
+    #[test]
+    fn draft_ids_are_slugs_with_a_hash_fallback() {
+        assert_eq!(draft_id("Pipette Pal"), "pipette-pal");
+        assert_eq!(draft_id("  My__Skin!! v2 "), "my-skin-v2");
+        assert_eq!(draft_id("Flasko"), "my-flasko");
+        let ko = draft_id("플라스크 친구");
+        assert!(ko.starts_with("skin-") && ko.len() == 13 && is_skin_id(&ko), "{ko}");
+        assert_ne!(ko, draft_id("피펫 친구"));
+        assert_eq!(draft_id(&"a".repeat(50)).len(), 32);
+        assert!(is_skin_id(&draft_id("x")));
+    }
+
+    #[test]
+    fn a_built_pack_exports_through_the_save_dialog_and_validates() {
+        let fx = Fx::new();
+        let sheets = SheetStaging::default();
+        let staging = SkinStaging::default();
+        let staged = build_view(&flasko_draft(&sheets, "Pipette Pal"), &sheets, &staging, Instant::now()).unwrap();
+        let target = fx.base.join("pal.labnoteo-skin");
+        assert!(export_staged(&staging, &sheet_dialogs(None, Some(target.clone())), &staged.staging_id, Instant::now()).unwrap());
+        let v = validate_pack(&std::fs::read(&target).unwrap()).unwrap();
+        assert_eq!(installed_manifest(&v.manifest), staged.manifest);
+        // Cancel writes nothing; an unknown staging id is refused before any dialog.
+        assert!(!export_staged(&staging, &sheet_dialogs(None, None), &staged.staging_id, Instant::now()).unwrap());
+        assert_eq!(
+            kind(export_staged(&staging, &sheet_dialogs(None, Some(target)), "0123456789abcdef0123456789abcdef", Instant::now())),
+            K::StagingUnknown
+        );
+        assert!(list(&fx.dirs).unwrap().is_empty(), "export installs nothing");
     }
 }

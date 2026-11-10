@@ -22,6 +22,7 @@ import * as history from '../../assistant/history';
 import * as assistantConfig from '../../assistant/config';
 import { webIpcFor } from '../../assistant/web/ipc';
 import * as skins from '../../assistant/skins/store';
+import * as skinDraft from '../../assistant/skins/skinDraft';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -216,6 +217,24 @@ describe('IPC 인자 이름 계약', () => {
     await skins.pickSkinFile(r.invoke);
     await skins.discardStagedSkin('ab'.repeat(16), r.invoke);
     await skins.exportSkin('flasko', r.invoke);
+    // 내 스킨 만들기(assistant Task 18): 토큰과 숫자만 담은 초안, 보관 id. 바이트·경로는 보내지 않는다.
+    await skinDraft.pickSheet(r.invoke);
+    await skinDraft.buildSkin(
+      {
+        name: 'Pal',
+        author: 'Kim',
+        licence: 'MIT',
+        frame: { width: 32, height: 32 },
+        states: {
+          idle: { sheetToken: 'a', frames: 4, fps: 4 },
+          talk: { sheetToken: 'a', frames: 4, fps: 4 },
+          think: { sheetToken: 'a', frames: 4, fps: 4 },
+          done: { sheetToken: 'a', frames: 4, fps: 4 },
+        },
+      },
+      r.invoke,
+    );
+    await skinDraft.exportStagedSkin('ab'.repeat(16), r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)
