@@ -668,6 +668,11 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
 /// A connection file dropped on the dialog: its bytes as the raw request body
 /// and its name in the percent-encoded `x-lno-name` header. The same checks and
 /// parser as a picked file; there is no path, so nothing is kept for deletion.
+///
+/// Known limit: the raw body is borrowed from Tauri's request (`&[u8]` behind a
+/// shared reference) and freed by Tauri after the command returns, so it cannot
+/// be zeroed here. Only the copies this module owns are zeroed; the webview
+/// zeroes its own buffer after sending.
 #[tauri::command]
 pub fn integration_import_bytes(
     vault: State<'_, VaultState>,

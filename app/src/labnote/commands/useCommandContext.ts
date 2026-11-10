@@ -74,7 +74,7 @@ export interface CommandContextDeps {
   host: AppHost;
   vaultRoot: string;
   settings: AppSettings | undefined;
-  updateSettings(p: Partial<AppSettings>): void | Promise<void>;
+  updateSettings(p: Partial<AppSettings>): void | Promise<void | boolean>;
   selected: string | undefined;
   /** 렌더를 기다리지 않는 지금 노트(useNoteSwitcher.activePath). 없으면 `selected`. */
   activePath?: () => string | undefined;

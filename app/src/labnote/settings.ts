@@ -278,11 +278,14 @@ export async function loadVaultSettings(
  * 처음 가져왔을 때만 true 다(다음 실행부터는 저장된 설정을 읽으므로 false). `foundLlmKey` 는 그때
  * 플러그인 data.json 에 아직 저장하지 않은 LLM 키가 있었다는 뜻이다(App 이 저장을 제안한다).
  */
-export function useVaultSettings(vaultRoot: string): {
+export function useVaultSettings(
+  vaultRoot: string,
+  invoke: InvokeFn = tauriInvoke,
+): {
   settings: AppSettings | undefined;
   imported: boolean;
   foundLlmKey: boolean;
-  update(patch: Partial<AppSettings>): Promise<void>;
+  update(patch: Partial<AppSettings>): Promise<boolean>;
 } {
   const [settings, setSettings] = useState<AppSettings>();
   const [imported, setImported] = useState(false);
@@ -294,7 +297,7 @@ export function useVaultSettings(vaultRoot: string): {
     setSettings(undefined);
     setImported(false);
     setFoundLlmKey(false);
-    loadVaultSettings().then((r) => {
+    loadVaultSettings(invoke).then((r) => {
       if (!live) return;
       current.current = r.settings;
       setSettings(r.settings);
@@ -305,13 +308,19 @@ export function useVaultSettings(vaultRoot: string): {
       live = false;
     };
   }, [vaultRoot]);
-  /** 바꾼 값을 곧바로 보이고 저장한다. 저장이 끝나면(실패해도) 풀린다: 연동 설정은 Rust 가 저장본을 읽은 뒤에 고리를 부른다. */
-  const update = (patch: Partial<AppSettings>): Promise<void> => {
-    if (!current.current) return Promise.resolve();
+  /**
+   * 바꾼 값을 곧바로 보이고 저장한다. 저장이 끝나면(실패해도) 풀린다: 연동 설정은 Rust 가 저장본을 읽은 뒤에 고리를 부른다.
+   * 디스크에 썼으면 true, 설정을 아직 읽지 못했거나 쓰지 못했으면 false(던지지 않는다: 기다리지 않는 호출이 많다).
+   */
+  const update = (patch: Partial<AppSettings>): Promise<boolean> => {
+    if (!current.current) return Promise.resolve(false);
     const next = { ...current.current, ...patch };
     current.current = next;
     setSettings(next);
-    return saveVaultSettings(next).catch(() => undefined);
+    return saveVaultSettings(next, invoke).then(
+      () => true,
+      () => false,
+    );
   };
   return { settings, imported, foundLlmKey, update };
 }

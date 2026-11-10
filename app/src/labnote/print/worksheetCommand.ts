@@ -50,7 +50,9 @@ export function worksheetDeps(ctx: CommandContext): WorksheetDeps {
     t: ctx.host.t,
     read: (path) => ctx.host.fs.read(path),
     paper: () => ctx.settings.worksheetPaperSize,
-    setPaper: async (paper) => ctx.updateSettings({ worksheetPaperSize: paper }),
+    setPaper: async (paper) => {
+      await ctx.updateSettings({ worksheetPaperSize: paper });
+    },
     ensureNoteId: (path) => ensureNoteId(ctx, path),
     sampleLookup: async (path) => {
       const env = createSampleEnv(ctx);

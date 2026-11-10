@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import type { CommandContext } from '../../labnote/commands/context';
-import { fromPluginData } from '../../labnote/settings';
+import { fromPluginData, useVaultSettings } from '../../labnote/settings';
 import { styleAttributes } from '../../labnote/host/__tests__/harness';
 import {
   IntegrationSettingsPage,
@@ -191,6 +191,63 @@ describe('Integration settings: Import from file…', () => {
     expect(await screen.findByText(t('integrations.import.saveFailed'))).toBeTruthy();
     expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
     expect(screen.queryByRole('button', { name: t('integrations.import.deleteYes') })).toBeNull();
+  });
+
+  it('an LLM import that names no provider, with the stored provider off, says to choose one', async () => {
+    const f = importDeps({
+      outcome: { status: 'done', imported: [{ part: 'llm', keySaved: true }], invalid: [], settings: { llmModel: 'm' } },
+    });
+    expect(BASE.llmProvider).toBe('none');
+    show(f.deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.chooseProvider'))).toBeTruthy();
+    // 공급자를 말한 파일(DONE)에는 이 줄이 없다.
+    cleanup();
+    const g = importDeps();
+    show(g.deps);
+    await userEvent.click(await importButton());
+    await screen.findByText(t('integrations.import.importedKey', t('integrations.import.part.llm')));
+    expect(screen.queryByText(t('integrations.import.chooseProvider'))).toBeNull();
+  });
+
+  it('a failed settings_vault_write through useVaultSettings and integrationDepsFor warns and offers no delete', async () => {
+    let writes = 0;
+    const f = fakeInvoke({
+      settings_vault_read: () => '{}',
+      settings_vault_write: () => {
+        writes++;
+        throw { kind: 'io', message: 'raw-rust-text' };
+      },
+      secret_status: () => secretStatusOf({ llmOpenai: true }),
+      integration_import_pick: () => DONE,
+      integration_import_delete: () => 'trashed',
+    });
+    const hook = renderHook(() => useVaultSettings('/vault', f.invoke));
+    await waitFor(() => expect(hook.result.current.settings).toBeDefined());
+    // 앱의 update 는 던지지 않고 false 로 실패를 알린다.
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await hook.result.current.update({ llmModel: 'x' });
+    });
+    expect(ok).toBe(false);
+    const ctx = {
+      get settings() {
+        return hook.result.current.settings!;
+      },
+      updateSettings: (p: Partial<IntegrationSettingsValue>) => hook.result.current.update(p),
+      host: { notify: () => {} },
+    } as unknown as CommandContext;
+    const deps = integrationDepsFor(ctx, f.invoke);
+    await act(async () => {
+      await expect(deps.commit({ llmModel: 'y' })).rejects.toBeTruthy();
+    });
+    show(deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.saveFailed'))).toBeTruthy();
+    expect(writes).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
+    expect(f.calls.some(([cmd]) => cmd === 'integration_import_delete')).toBe(false);
+    expect(document.body.textContent).not.toContain('raw-rust-text');
   });
 
   it('integrationDepsFor asks Rust to pick (title only), drops non-connection settings, and passes a cancel through', async () => {

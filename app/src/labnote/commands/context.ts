@@ -19,8 +19,8 @@ export interface CommandContext {
   vaultRoot: string;
   /** 부를 때의 설정(updateSettings 뒤에는 새 값). */
   readonly settings: AppSettings;
-  /** 설정을 바꾸고 저장한다. 앱에서는 저장이 끝나면 풀리는 약속을 돌려준다(Rust 가 저장본을 읽는다). */
-  updateSettings(p: Partial<AppSettings>): void | Promise<void>;
+  /** 설정을 바꾸고 저장한다. 앱에서는 저장이 끝나면 풀리는 약속을 돌려준다(Rust 가 저장본을 읽는다). 저장하지 못하면 false 로 풀린다. */
+  updateSettings(p: Partial<AppSettings>): void | Promise<void | boolean>;
   /** 편집기에 열린 노트(VaultView.selected). */
   activePath(): string | undefined;
   /** 편집기의 뷰. 열린 노트가 없거나 편집기가 바쁘면 undefined. */

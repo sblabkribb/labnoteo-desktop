@@ -85,7 +85,8 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
       const after: IntegrationSettingsValue = { ...before, ...patch };
       current = after;
       // 먼저 저장한다: Rust 는 요청마다 저장된 설정에서 주소를 읽고, 고리(예: 사용처 동기화)는 새 값을 본다.
-      await ctx.updateSettings(patch);
+      // 앱의 updateSettings 는 던지지 않고 false 로 저장 실패를 알린다. 여기서는 던져서 대화상자가 실패로 다루게 한다.
+      if ((await ctx.updateSettings(patch)) === false) throw new Error('settings were not saved');
       await runIntegrationChangeHooks(before, after);
     },
     status: () => secretStatus(invoke),
@@ -390,6 +391,15 @@ export function IntegrationSettingsPage(props: {
    */
   const applyImport = async (out: ImportOutcome, source: 'picked' | 'dropped') => {
     const lines = summaryLines(out);
+    // 파일이 공급자를 말하지 않으면 저장된 공급자를 그대로 둔다(Rust). 그것이 '없음'이면 AI 는 꺼진 채라서 알린다.
+    if (
+      out.status === 'done' &&
+      out.imported.some((i) => i.part === 'llm') &&
+      !('llmProvider' in out.settings) &&
+      valRef.current.llmProvider === 'none'
+    ) {
+      lines.push({ text: t('integrations.import.chooseProvider'), warn: true });
+    }
     setImportLines(lines);
     if (out.status !== 'done') return;
     const patch = out.settings;
