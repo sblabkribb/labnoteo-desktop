@@ -14,7 +14,8 @@ import { tableExtension } from './table/field';
 import { INSERT_TABLE_KEY, insertTable } from './table/commands';
 import { cellExtras, cellOuterKeys } from './table/cellEditor';
 import { getMode, subscribeMode, toggleMode, TOGGLE_MODE_KEY, type EditorMode } from './live/mode';
-import { livePreview } from './live';
+import { livePreview, readmeEmptyState } from './live';
+import { checklistTickWatch, type ChecklistCounts } from '../labnote/commands/statusNudge';
 import { addPropertyCommand, propertiesActions, PROPS_ADD_KEY } from './live/properties';
 import { followLinkAtCursor, linkClickHandler, type LinkOpenDeps, type OpenTarget } from './live/links';
 import { imageLoader } from './live/imageWidget';
@@ -131,6 +132,13 @@ interface Props {
   sampleEnv?: () => SampleEnv | undefined;
   /** 붙여 넣거나 끌어 놓은 그림을 둘 폴더(보관함 설정 imageFolder). 기본 'resources'. 붙여 넣을 때마다 최신 값을 읽는다. */
   imageFolder?: ImageFolder;
+  /**
+   * 실험 README 에서만 준다(UI 재설계 Task 19). 라이브 미리보기의 빈 체크리스트 카드 단추("첫 워크플로 추가")가 부른다.
+   * 처음 그릴 때 있었는지로 카드를 싣는다(노트가 바뀌면 다시 마운트한다). 부를 때는 최신 prop 이다.
+   */
+  onAddWorkflow?: () => void;
+  /** 실험 README 에서만 준다(Task 19). 사용자가 체크리스트를 바꾸면 그 전후의 셈과 상태(상태 권유). */
+  onChecklistTick?: (prev: ChecklistCounts, next: ChecklistCounts) => void;
 }
 
 export interface WindowApi {
@@ -169,6 +177,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     samples = null,
     sampleEnv,
     imageFolder = 'resources',
+    onAddWorkflow,
+    onChecklistTick,
   },
   ref,
 ) {
@@ -257,8 +267,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder, onAddWorkflow, onChecklistTick });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder, onAddWorkflow, onChecklistTick };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -622,6 +632,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         onChangeStatus: () => latest.current.onChangeStatus?.(),
         onOpenLink: (target) => latest.current.onOpenLink?.(target),
       }),
+      // 실험 README(Task 19): 빈 체크리스트 카드의 "첫 워크플로 추가"와 체크 뒤의 상태 권유. 늘 최신 prop 을 부른다.
+      readmeEmptyState.of(latest.current.onAddWorkflow ? { onAddWorkflow: () => latest.current.onAddWorkflow?.() } : null),
+      latest.current.onChecklistTick ? checklistTickWatch((prev, next) => latest.current.onChecklistTick?.(prev, next)) : [],
       // 그림·첨부 붙여 넣기·끌어 놓기(Task 17) → 실험의 resources/(그림은 설정에 따라 노트 폴더의 images/)에 새 파일 + 링크.
       // 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 쓴 뒤에는 pasteImages 가 이름 색인을 버리고(isUnique 가 새 파일을 보게)
       // 이름만 넣을지 경로를 넣을지 정한다.

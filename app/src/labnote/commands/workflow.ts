@@ -45,6 +45,7 @@ import { resolveLabnoteDir, warnIfWindowsPathTooLong } from '../port/experiments
 import type { CommandContext } from './context';
 import type { Command } from './registry';
 import { readmeStamp } from './stamp';
+import { checklistCounts, offerStatusNudge, type ChecklistCounts } from './statusNudge';
 
 /**
  * registerWorkflowInReadme 가 한 일. 'notRegistered': README 가 편집기에 열려 있는데 바쁘거나(NoteBusyError)
@@ -251,7 +252,9 @@ export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: str
   const stamp = readmeStamp(ctx.settings);
   const want = fileName.toLowerCase();
   let after: boolean | undefined;
+  let counts: { prev: ChecklistCounts; next: ChecklistCounts } | undefined;
   await processNote(host.fs, readmePath, (text) => {
+    counts = undefined;
     const range = workflowChecklistSectionRange(text);
     if (!range) return text;
     const lines = text.split('\n');
@@ -262,11 +265,15 @@ export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: str
       if (!box) continue;
       after = box[1] === ' ';
       lines[i] = lines[i].slice(0, box.index) + (after ? '[x]' : '[ ]') + lines[i].slice(box.index + box[0].length);
-      return stamp(lines.join('\n'));
+      const written = stamp(lines.join('\n'));
+      counts = { prev: checklistCounts(text), next: checklistCounts(written) };
+      return written;
     }
     return text;
   });
   if (after === undefined) host.notify('warn', t('experiments.notInChecklist', fileName, host.t('Sync workflow checklist with folder')));
+  // 상태 권유(Task 19): 계획 실험의 첫 체크 → 진행 중, 마지막 체크 → 완료를 알림 단추로 묻는다
+  else if (counts) offerStatusNudge(ctx, readmePath, counts.prev, counts.next);
   return after;
 }
 

@@ -16,6 +16,7 @@ import { activeCellView, focusCell } from '../../editor/table/cellEditor';
 import { installFakeVault, type FakeVault } from '../../__tests__/fakeVault';
 import { setLang } from '../../i18n/lang';
 import { readmeStamp } from '../commands/stamp';
+import { stripInstructionCallouts } from '../commands/experiment';
 import { clearCommandsForTest } from '../commands/registry';
 import { closeAllDialogs, currentDialog, deepActiveElement, settleDialog, type DialogEntry, type DialogSpec } from '../host/dialogStore';
 import { clearToasts, subscribeToasts, currentToasts, type Toast } from '../host/toastStore';
@@ -175,7 +176,7 @@ describe('하루의 흐름(앱 전체)', () => {
 
       // 1. Ctrl+P → "실험 생성" → 제목
       await palette('Create experiment');
-      await answer('prompt', () => TITLE);
+      await answer('newExperiment', () => ({ title: TITLE, experimenter: '' }));
 
       // 2. README 가 열린다
       await editorReady(README_PATH, 'Related Workflows');
@@ -256,7 +257,7 @@ describe('하루의 흐름(앱 전체)', () => {
 
       // 9. 다시 하기: 제목은 다음 차수, README 의 retry_of 는 원래 실험
       await palette('Retry this experiment');
-      const retryPrompt = await answer('prompt', (spec) => spec.opts.value);
+      const retryPrompt = await answer('newExperiment', (spec) => ({ title: spec.opts.value, experimenter: spec.opts.experimenter }));
       expect(retryPrompt.opts.value).toBe('형질전환 2차');
       await editorReady(RETRY_README, 'retry_of');
 
@@ -264,7 +265,7 @@ describe('하루의 흐름(앱 전체)', () => {
       const files = vault.files();
       const settings = fromPluginData(undefined);
       const stamp = readmeStamp(settings);
-      const base = createLabnoteStructure('.', TITLE, [], undefined, { locale: 'ko' }).readmeContent;
+      const base = stripInstructionCallouts(createLabnoteStructure('.', TITLE, [], undefined, { locale: 'ko' }).readmeContent);
       expect(maskDates(created)).toBe(maskDates(base));
       const expectedReadme = stamp(
         setFrontMatterKeys(
@@ -274,7 +275,7 @@ describe('하루의 흐름(앱 전체)', () => {
       );
       expect(maskDates(files[README_PATH])).toBe(maskDates(expectedReadme));
 
-      const retryBase = createLabnoteStructure('.', '형질전환 2차', ['001_형질전환_1차'], undefined, { locale: 'ko' }).readmeContent;
+      const retryBase = stripInstructionCallouts(createLabnoteStructure('.', '형질전환 2차', ['001_형질전환_1차'], undefined, { locale: 'ko' }).readmeContent);
       const expectedRetry = copyFrontMatterKeys(files[README_PATH], setRetryOf(retryBase, retryOfLink(DIR)), ['author', 'project']);
       expect(maskDates(files[RETRY_README])).toBe(maskDates(expectedRetry));
       expect(files[RETRY_README]).toContain('retry_of');

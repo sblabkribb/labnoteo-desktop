@@ -57,6 +57,8 @@ import { activeEditTarget, openNote as openEditor } from './labnote/openNotes';
 import { registerAllCommands } from './labnote/commands/registerAll';
 import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
+import { createWorkflow, isExperimentReadme } from './labnote/commands/workflow';
+import { offerStatusNudge, type ChecklistCounts } from './labnote/commands/statusNudge';
 import { findCommand, registerAllAppCommands } from './editor/commands/appCommands';
 import { catalogNoticeOnOpen } from './labnote/commands/catalogs';
 import { legacyNotesOfferOnOpen } from './labnote/commands/legacyConvert';
@@ -644,6 +646,15 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     </button>
   );
   const changeStatus = ctx ? () => void runCommand(ctx, commandById('change-experiment-status')!) : undefined;
+  // 실험 README(Task 19): 빈 체크리스트 카드의 "첫 워크플로 추가"는 이 실험에 워크플로를 만들고(카탈로그 고르기),
+  // 편집기에서 체크하면 상태 권유 알림을 띄운다. 열린 노트가 README 일 때만 편집기에 넘긴다.
+  const readmeOpen = !!selected && isExperimentReadme(selected);
+  const addFirstWorkflow = (readme: string) => () => {
+    if (ctx) void runCommand(ctx, () => createWorkflow(ctx, undefined, { experimentDir: readme.slice(0, readme.lastIndexOf('/')) }));
+  };
+  const checklistTick = (readme: string) => (prev: ChecklistCounts, next: ChecklistCounts) => {
+    if (ctx) offerStatusNudge(ctx, readme, prev, next);
+  };
   return (
     <>
       <div className="shell" ref={shell}>
@@ -778,6 +789,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
               samples={sampleConfig}
               sampleEnv={() => ctx && createSampleEnv(ctx)}
               imageFolder={settings?.imageFolder}
+              onAddWorkflow={readmeOpen ? addFirstWorkflow(selected) : undefined}
+              onChecklistTick={readmeOpen ? checklistTick(selected) : undefined}
             />
           ) : (
             <>

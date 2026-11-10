@@ -21,7 +21,8 @@ import type { CommandContext } from '../commands/context';
 import { editorAwareFs } from '../editorAwareFs';
 import { coreT } from '../i18n';
 import type { AliasOpts, AppHost } from '../host/createAppHost';
-import type { AliasBack, PickExtras } from '../host/dialogStore';
+import type { AliasBack, NewExperimentOpts, NewExperimentResult, PickExtras } from '../host/dialogStore';
+import type { NotifyOpts } from '../host/toastStore';
 import { activeEditTarget, openNote } from '../openNotes';
 import { fromPluginData, type AppSettings } from '../settings';
 import { editorConfigFrom } from '../../samples/editorConfig';
@@ -37,6 +38,7 @@ export interface Asked {
   confirm: Array<{ message: string; opts?: { confirmLabel?: string } }>;
   alias: AliasOpts[];
   choose: Array<{ message: string; choices: Array<{ label: string; value: unknown }>; opts?: { title?: string } }>;
+  newExperiment: NewExperimentOpts[];
 }
 
 export interface TestHost {
@@ -44,6 +46,8 @@ export interface TestHost {
   host: AppHost;
   ctx: CommandContext;
   notes: Array<{ kind: NotifyKind; message: string }>;
+  /** 알림마다 받은 덧붙임(제목, 단추 …), `notes` 와 같은 차례. */
+  noteOpts: NotifyOpts[];
   asked: Asked;
   opened: string[];
   /** ctx.showPanel 으로 고른 사이드바 탭, 차례대로. */
@@ -57,6 +61,11 @@ export interface TestHost {
     alias(...a: Array<Answer<[AliasOpts], string | undefined | AliasBack>>): void;
     /** 고를 단추의 값, 또는 받은 글로 값을 고르는 함수. 답이 떨어지면 닫은 것(undefined)이다. */
     choose(...a: unknown[]): void;
+    /**
+     * 새 실험 대화상자의 답. 답이 없으면 prompt 의 답을 제목으로 쓰고(물음은 asked.prompt 에도 남는다) 실험자는 미리 채운
+     * 값 그대로 낸다: 예전 prompt 로 답하던 테스트가 그대로 돈다.
+     */
+    newExperiment(...a: Array<Answer<[NewExperimentOpts], NewExperimentResult | undefined>>): void;
   };
   /** "이 노트"(편집기에 열린 노트)를 바꾼다. 편집기는 열지 않는다. */
   setActive(path: string | undefined): void;
@@ -81,10 +90,11 @@ export function createTestHost(
   for (const [p, text] of Object.entries(files)) if (p.endsWith('.md')) linkIndex.setNote(p, parseRaw(p, text).text);
   linkIndex.markReady();
   const notes: TestHost['notes'] = [];
-  const asked: Asked = { pick: [], prompt: [], confirm: [], alias: [], choose: [] };
+  const noteOpts: NotifyOpts[] = [];
+  const asked: Asked = { pick: [], prompt: [], confirm: [], alias: [], choose: [], newExperiment: [] };
   const opened: string[] = [];
   const panels: TestHost['panels'] = [];
-  const queues = { pick: [] as unknown[], prompt: [] as unknown[], confirm: [] as unknown[], alias: [] as unknown[], choose: [] as unknown[] };
+  const queues = { pick: [] as unknown[], prompt: [] as unknown[], confirm: [] as unknown[], alias: [] as unknown[], choose: [] as unknown[], newExperiment: [] as unknown[] };
   const next = <R>(q: unknown[], fallback: R, ...args: unknown[]): R => {
     if (q.length === 0) return fallback;
     const a = q.shift();
@@ -124,7 +134,18 @@ export function createTestHost(
       asked.choose.push({ message, choices: [...choices], opts });
       return next<T | undefined>(queues.choose, undefined, message);
     },
-    notify: (kind, message) => void notes.push({ kind, message }),
+    newExperiment: async (opts) => {
+      asked.newExperiment.push(opts);
+      if (queues.newExperiment.length > 0) return next<NewExperimentResult | undefined>(queues.newExperiment, undefined, opts);
+      const promptOpts = { title: opts.title, value: opts.value, validate: opts.validate, hint: opts.hint };
+      asked.prompt.push(promptOpts);
+      const title = next<string | undefined>(queues.prompt, undefined, promptOpts);
+      return title === undefined ? undefined : { title, experimenter: opts.experimenter };
+    },
+    notify: (kind, message, opts) => {
+      notes.push({ kind, message });
+      noteOpts.push(opts ?? {});
+    },
     editTarget: () => activeEditTarget(active),
     openFile,
     t: coreT, // 앱 호스트와 같은 번역기: 부를 때의 언어
@@ -161,6 +182,7 @@ export function createTestHost(
     host,
     ctx,
     notes,
+    noteOpts,
     asked,
     opened,
     panels,
@@ -171,6 +193,7 @@ export function createTestHost(
       confirm: (...a) => void queues.confirm.push(...a),
       alias: (...a) => void queues.alias.push(...a),
       choose: (...a) => void queues.choose.push(...a),
+      newExperiment: (...a) => void queues.newExperiment.push(...a),
     },
     setActive: (path) => void (active = path),
     async mount(path) {

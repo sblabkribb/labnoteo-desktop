@@ -6,11 +6,14 @@ import {
   aliasDialog,
   choiceDialog,
   confirmDialog,
+  newExperimentDialog,
   pickDialog,
   pickManyDialog,
   promptDialog,
   type AliasBack,
   type ChoiceItem,
+  type NewExperimentOpts,
+  type NewExperimentResult,
   type PickExtras,
 } from './dialogStore';
 import { notify, type NotifyOpts } from './toastStore';
@@ -35,6 +38,8 @@ export interface AppHost extends LabnoteHost {
     items: PickItem<T>[],
     opts?: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean } & PickExtras,
   ): Promise<T | undefined>;
+  /** 새 실험 대화상자(제목과 실험자, UI 재설계 Task 19). 닫으면 undefined. */
+  newExperiment(opts: NewExperimentOpts): Promise<NewExperimentResult | undefined>;
   /** 코어의 확인에 `unsolicited`(A9)를 더한다. */
   confirm(
     message: string,
@@ -61,6 +66,7 @@ export function createAppHost(deps: {
     confirm: (message, opts) => confirmDialog(message, opts),
     alias: (opts) => aliasDialog(opts as AliasOpts & { back: true }),
     choose: (message, choices, opts) => choiceDialog(message, choices, opts),
+    newExperiment: (opts) => newExperimentDialog(opts),
     notify: (kind, message, opts) => notify(kind, message, opts),
     editTarget: () => deps.editTarget(),
     openFile: (path, at) => deps.openFile(path, at),

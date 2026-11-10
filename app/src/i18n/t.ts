@@ -707,6 +707,16 @@ const ko: Record<string, string> = {
   'settings.about.notices': '제3자 고지',
   'settings.about.lucide': 'Lucide 아이콘(lucide-react) — ISC 라이선스, Copyright (c) Lucide Icons and Contributors',
   'settings.about.noticesFile': '라이선스 전문은 labnoteO 저장소의 THIRD_PARTY_NOTICES.md 에 있습니다.',
+  'nudge.inProgress': "실험 상태를 '진행 중'으로 바꿀까요?",
+  'nudge.done': "실험 상태를 '완료'로 바꿀까요?",
+  'nudge.change': '바꾸기',
+  'newExperiment.titleLabel': '실험 제목',
+  'newExperiment.experimenter': '실험자',
+  'newExperiment.experimenterHint': '이 실험의 워크플로와 UO 에도 실험자로 들어갑니다. 다음 새 실험에 미리 채웁니다.',
+  'newExperiment.create': '만들기',
+  'emptyState.title': '아직 워크플로가 없습니다',
+  'emptyState.body': '실험은 워크플로로, 워크플로는 유닛 오퍼레이션(UO)으로 나뉩니다. 첫 워크플로를 카탈로그에서 고르세요.',
+  'emptyState.add': '첫 워크플로 추가',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -1413,6 +1423,16 @@ const en: Record<string, string> = {
   'settings.about.notices': 'Third-party notices',
   'settings.about.lucide': 'Lucide icons (lucide-react) — ISC License, Copyright (c) Lucide Icons and Contributors',
   'settings.about.noticesFile': 'The full licence texts are in THIRD_PARTY_NOTICES.md in the labnoteO repository.',
+  'nudge.inProgress': 'Mark the experiment In progress?',
+  'nudge.done': 'Mark the experiment Done?',
+  'nudge.change': 'Change',
+  'newExperiment.titleLabel': 'Experiment title',
+  'newExperiment.experimenter': 'Experimenter',
+  'newExperiment.experimenterHint': 'Also used as the experimenter of its workflows and UOs, and pre-filled next time.',
+  'newExperiment.create': 'Create',
+  'emptyState.title': 'No workflows yet',
+  'emptyState.body': 'An experiment is split into workflows, and a workflow into unit operations (UOs). Pick the first workflow from the catalog.',
+  'emptyState.add': 'Add the first workflow',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

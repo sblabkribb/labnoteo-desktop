@@ -306,6 +306,25 @@ export const editorThemeSpec = {
   },
   // 템플릿 자리 글(live/placeholders.ts): 흐린 기울임, 누르면 통째로 골라진다
   '.lno-placeholder': { color: 'var(--text-faint)', fontStyle: 'italic', cursor: 'pointer' },
+  // README 빈 체크리스트 카드(live/emptyState.ts): 점선 테두리 상자에 아이콘, 제목·설명, 주 단추 하나
+  '.lno-empty-state': {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'var(--space-5)',
+    margin: 'var(--space-4) 0',
+    padding: 'var(--space-5) var(--space-6)',
+    border: '1px dashed var(--border-strong)',
+    borderRadius: 'var(--radius-l)',
+    backgroundColor: 'var(--bg-side)',
+    lineHeight: '1.5',
+  },
+  '.lno-empty-state-icon': { display: 'inline-flex', color: 'var(--accent)', flex: '0 0 auto' },
+  '.lno-empty-state-text': { flex: '1 1 16rem', minWidth: '0' },
+  '.lno-empty-state-text p': { margin: '0' },
+  '.lno-empty-state-title': { fontWeight: '600' },
+  '.lno-empty-state-body': { color: 'var(--text-muted)', fontSize: '0.9em' },
+  '.lno-empty-state-add': { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', height: '30px', flex: '0 0 auto', whiteSpace: 'nowrap' },
   // 샘플 ID(samples/typeClass.ts): 종류별 옅은 바탕. 레지스트리에 없는 ID 는 위험색 물결 밑줄, 낡은 별칭은 경고색 점선 밑줄,
   // 폐기된 샘플은 흐리고 취소선. 폐기 + 낡은 별칭은 두 줄을 함께 긋는다. 자동 완성의 샘플 행은 설명을 흐리게, 폐기 행은 흐리게.
   '.lno-sample-id': { borderRadius: '3px', padding: '0 2px' },

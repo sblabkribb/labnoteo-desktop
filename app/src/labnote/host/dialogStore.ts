@@ -63,7 +63,30 @@ export type DialogSpec =
   // 미분류 스캔 대기열(Task 26): 끝나면 손으로 넣을 페이지, 닫으면 undefined
   | { kind: 'scanUnmatched'; io: UnmatchedIo }
   // 새 노트(UI 재설계 Task 5): 리본·Ctrl+N·팔레트. 끝나면 만든 노트의 경로, 닫으면 undefined
-  | { kind: 'newNote'; flush: () => Promise<boolean>; invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
+  | { kind: 'newNote'; flush: () => Promise<boolean>; invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> }
+  // 새 실험(UI 재설계 Task 19): 제목과 실험자. 끝나면 NewExperimentResult, 닫으면 undefined
+  | { kind: 'newExperiment'; opts: NewExperimentOpts };
+
+/**
+ * 새 실험 대화상자의 물음(AppHost.newExperiment). 제목 칸은 PromptOpts 의 value·validate·hint 와 같은 규칙이고,
+ * 실험자 칸은 `experimenter`(설정의 defaultExperimenter, 다시 하기면 원래 실험의 author)로 미리 채운다.
+ */
+export interface NewExperimentOpts {
+  /** 대화상자 제목(새 실험 / 실험 다시 하기). */
+  title: string;
+  /** 미리 채울 실험 제목. */
+  value?: string;
+  /** 미리 채울 실험자. */
+  experimenter: string;
+  validate?: PromptOpts['validate'];
+  hint?: PromptOpts['hint'];
+}
+
+/** 새 실험 대화상자의 답: 다듬지 않은 제목과 실험자. */
+export interface NewExperimentResult {
+  title: string;
+  experimenter: string;
+}
 
 /**
  * 고르기의 덧붙임(UI 재설계 Task 11). 카탈로그 고르기가 쓴다.
@@ -239,6 +262,11 @@ export async function pickThen<T, R>(
 
 export function pickManyDialog<T>(items: readonly PickItem<T>[], opts: { title?: string; placeholder?: string } = {}): Promise<T[]> {
   return openDialog<T[]>({ kind: 'pickMany', items, ...opts }, []);
+}
+
+/** 새 실험 대화상자(AppHost.newExperiment). 닫으면 undefined. */
+export function newExperimentDialog(opts: NewExperimentOpts): Promise<NewExperimentResult | undefined> {
+  return openDialog<NewExperimentResult | undefined>({ kind: 'newExperiment', opts }, undefined);
 }
 
 export function promptDialog(opts: PromptOpts): Promise<string | undefined> {

@@ -9,10 +9,15 @@
  *   그 변환은 쓰는 순간의 노트에 적용한다. 열린 노트는 버퍼에 한 트랜잭션(되돌리기 한 번)으로 들어간다.
  * - 자동화가 없을 때('none') "Setup research automation" 안내는 붙이지 않는다(그 명령은 뒤의 하위 프로젝트에서 온다).
  * - 만든 뒤에는 ctx.refresh() 하고 README 를 연다. 경로 길이 경고는 ctx.vaultRoot 로 잰다.
+ * - (UI 재설계 Task 19) 제목 하나 묻는 입력 대신 새 실험 대화상자가 제목과 실험자를 묻는다. 실험자는 README 의 author 가 되고
+ *   설정 defaultExperimenter 로 기억한다. 앱이 새로 쓰는 README 에서는 Ctrl+P/Cmd+P 안내 인용을 지운다
+ *   (stripInstructionCallouts, 플러그인과 일부러 다른 점). 이미 있는 파일은 건드리지 않는다.
  */
 import { DISCUSS_FLAG_KEY, EXPERIMENT_STATUSES, copyFrontMatterKeys, isDiscussFlagged, isValidStatus, parseFrontMatterYaml, setFrontMatterKeys } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import {
+  KO_COMMAND_NAMES,
+  commandName,
   createLabnoteStructure,
   getExperimentDir,
   retryFamily,
@@ -39,10 +44,45 @@ import { confirmCompleted, readNoteForFrontMatterEdit, statusMeanings } from '..
 import type { CommandContext } from './context';
 import type { Command } from './registry';
 import { readmeStamp } from './stamp';
+import { cleanExperimenter } from '../settings';
+
+/**
+ * 코어 README 템플릿(generateReadmeContent)의 "Related Workflows" 안내 인용 세 줄. 언어마다 명령 이름만 다르다.
+ * 템플릿이 바뀌면 여기도 바꿔야 한다(테스트가 코어 템플릿으로 확인한다).
+ */
+function instructionBlock(locale: string | undefined): string[] {
+  return [
+    `> Press \`Ctrl+P\` (\`Cmd+P\` on macOS) to open the command palette, then run ${commandName('Create workflow', KO_COMMAND_NAMES.createWorkflow, locale)}; a checklist entry for the new workflow is added to this section automatically.`,
+    `> Workflow notes moved or copied into this folder are not listed automatically; run ${commandName('Sync workflow checklist with folder', KO_COMMAND_NAMES.syncWorkflowChecklist, locale)} to add them.`,
+    "> The name entered in the author: field of the YAML block above will be automatically entered as the experimenter's name when creating workflows and unit operations.",
+  ];
+}
+
+const INSTRUCTION_BLOCKS = [instructionBlock('en'), instructionBlock('ko')];
+
+/**
+ * 새 README 글에서 코어 템플릿의 안내 인용(Ctrl+P "Create workflow", macOS Cmd+P …)을 지운다. 세 줄이 템플릿 그대로일 때만
+ * 지우고(사용자가 쓴 인용이나 고친 줄은 그대로), 그 자리의 빈 줄은 하나로 줄인다. 그런 블록이 없으면 그대로 돌려준다.
+ */
+export function stripInstructionCallouts(readme: string): string {
+  const lines = readme.split('\n');
+  const bare = (i: number) => (lines[i] ?? '').replace(/\r$/, '');
+  for (const block of INSTRUCTION_BLOCKS) {
+    for (let i = 0; i + block.length <= lines.length; i++) {
+      if (!block.every((line, k) => bare(i + k) === line)) continue;
+      lines.splice(i, block.length);
+      // 블록 앞뒤의 빈 줄을 하나로
+      while (i > 0 && i < lines.length && bare(i).trim() === '' && bare(i - 1).trim() === '') lines.splice(i, 1);
+      return lines.join('\n');
+    }
+  }
+  return readme;
+}
 
 /**
  * 새 실험 폴더(labnote/###_Title)와 README 를 만들고 연다. README 경로를 돌려준다(취소하면 undefined).
- * `retryOf` 가 있으면 README 의 retry_of 가 그 실험을 가리키고, author 와 project 는 `retryReadme` 에서 온다.
+ * 새 실험 대화상자가 제목과 실험자를 묻는다(실험자는 설정 defaultExperimenter 로 미리 채우고, 낸 값을 다시 기억한다).
+ * `retryOf` 가 있으면 README 의 retry_of 가 그 실험을 가리키고, project 는 `retryReadme` 에서, 실험자는 그 author 로 미리 채운다.
  */
 export async function createExperiment(
   ctx: CommandContext,
@@ -50,10 +90,16 @@ export async function createExperiment(
 ): Promise<string | undefined> {
   const { host } = ctx;
   const readmes = opts.readmes ?? (await experimentReadmes(host));
-  const title = await host.prompt({
+  // 실험자: 다시 하기면 원래 실험의 author, 아니면 마지막에 쓴 이름(설정)
+  let experimenter = ctx.settings.defaultExperimenter;
+  if (opts.retryReadme !== undefined) {
+    const author = parseFrontMatterYaml(frontMatterText(opts.retryReadme)).frontMatter.author;
+    if (typeof author === 'string' && author.trim()) experimenter = cleanExperimenter(author);
+  }
+  const answer = await host.newExperiment({
     title: opts.retryOf ? host.t('Retry experiment {0}', posix.basename(opts.retryOf)) : host.t('New experiment'),
-    prompt: host.t('Experiment title'),
     value: opts.title,
+    experimenter,
     validate: (v) => {
       if (!v.trim()) return host.t('Title is required.');
       if (!sanitizeTitle(v.trim())) {
@@ -63,19 +109,23 @@ export async function createExperiment(
     },
     hint: experimentTitleHint(host, readmes),
   });
-  if (!title) return undefined;
+  if (!answer) return undefined;
+  const title = answer.title;
+  const author = cleanExperimenter(answer.experimenter);
+  if (author !== ctx.settings.defaultExperimenter) await ctx.updateSettings({ defaultExperimenter: author });
 
   const existing = await experimentFolderNames(host);
-  const structure = createLabnoteStructure(VAULT_ROOT, title.trim(), existing, undefined, { locale: coreLocale() });
+  const structure = createLabnoteStructure(VAULT_ROOT, title.trim(), existing, author || undefined, { locale: coreLocale() });
 
   await host.fs.mkdir(structure.labnoteFolder);
   await host.fs.mkdir(structure.imagesFolder);
   await host.fs.mkdir(structure.resourcesFolder);
-  let readme = structure.readmeContent;
+  let readme = stripInstructionCallouts(structure.readmeContent);
   if (opts.retryOf) readme = setRetryOf(readme, retryOfLink(opts.retryOf));
   // 원래 README 에는 BOM 이나 CRLF 가 있을 수 있다: 읽을 수 있는 꼴로 넘긴다. 새 README 는 앱의 기본 꼴(BOM 없음, LF)이다.
+  // author 는 대화상자의 실험자(원래 실험의 author 로 미리 채웠다)라 project 만 옮긴다.
   if (opts.retryReadme !== undefined) {
-    readme = copyFrontMatterKeys(frontMatterText(opts.retryReadme), readme, ['author', 'project']);
+    readme = copyFrontMatterKeys(frontMatterText(opts.retryReadme), readme, ['project']);
   }
   await host.fs.write(structure.readmePath, readme);
 
