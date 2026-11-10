@@ -1,14 +1,15 @@
 // Ported from app/vendor/labnoteo/src/lastUpdatedTracker.ts:1-109 sha256:d5f272f95deef5ed
 // Ported from app/vendor/labnoteo/src/lastUpdatedStamp.ts:22-32 sha256:9e7731b9bfb70fdb
 // Ported from app/vendor/labnoteo/src/unitOpReorderFilter.ts:33-117 sha256:c05e01d2bebc276b
+// Ported from app/vendor/labnoteo/src/unitOpReorderFilter.ts:120-186 sha256:590911ec16ecfc27
 // Ported from app/vendor/labnoteo/src/main.ts:2653-2670 sha256:cce7725341955e97
 // Ported from app/vendor/labnoteo/src/main.ts:2707-2758 sha256:492d19325690832d
 // Ported from app/vendor/labnoteo/src/main.ts:2627-2639 sha256:92b4005177071fe0
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: one file for the writing upkeep (UI redesign Task 20). LastUpdatedTracker is the vendor class unchanged. isLabNotePath and experimentReadmeOf are the vendor helpers. classifyChange is the vendor classify() of unitOpReorderFilter: a user edit is a transaction whose userEvent is input.*, delete.* or move.* (the app's checkbox tick is 'input.toggle', so the vendor's isTaskToggle shape test is dropped); undo/redo is fromHistory; and an edit made by an app command ('input.labnote', which may set the date itself, as readmeStamp does) counts as a user edit but never as a date set by hand. stampLastUpdated (vendor plugin.stampLastUpdated) and LastUpdatedScheduler (vendor scheduleLastUpdatedStamp and markUserEdit) take their settings, notify and the note writer as deps instead of the plugin: window.setTimeout → setTimeout with a delay that defaults to the vendor's 2000 ms, console.warn on a failed write is kept, Notices → deps.notify('info') with the vendor strings through coreT. syncTocOnSave is the body of the vendor's debounced registerUnitOpTocAutoSync, run when a workflow note is saved instead of 1.5 s after an edit; it returns the new text, or null when nothing changes, when the caret sits in the span the rewrite would replace (shouldDeferTocSync), or right after an undo/redo. With the setting off, entries whose block is gone are also dropped (vendor: pruneUnitOpTocEntries in the reorder filter), and the order is left as the researcher arranged it.
+// Changes: one file for the writing upkeep (UI redesign Task 20). LastUpdatedTracker is the vendor class unchanged. isLabNotePath and experimentReadmeOf are the vendor helpers. classifyChange is the vendor classify() of unitOpReorderFilter: a user edit is a transaction whose userEvent is input.*, delete.* or move.* (the app's checkbox tick is 'input.toggle', so the vendor's isTaskToggle shape test is dropped); undo/redo is fromHistory; and an edit made by an app command ('input.labnote', which may set the date itself, as readmeStamp does) counts as a user edit but never as a date set by hand. stampLastUpdated (vendor plugin.stampLastUpdated) and LastUpdatedScheduler (vendor scheduleLastUpdatedStamp and markUserEdit) take their settings, notify and the note writer as deps instead of the plugin: window.setTimeout → setTimeout with a delay that defaults to the vendor's 2000 ms, console.warn on a failed write is kept, Notices → deps.notify('info') with the vendor strings through coreT. syncTocOnSave is the body of the vendor's debounced registerUnitOpTocAutoSync, run when a workflow note is saved instead of 1.5 s after an edit; it returns the new text, or null when nothing changes, when the caret sits in the span the rewrite would replace (shouldDeferTocSync), or right after an undo/redo. With the setting off it applies only refreshUnitOpTocEntries, as the vendor timer does: the order is left as the researcher arranged it and no entry is dropped on save. pruneOnUnitOpDelete is the sorting-off branch of the vendor reorder filter (deletesWholeUnitOpHeading, #406): a user deletion that takes a whole `### [` heading line drops that block's entry in the same transaction, but a cut ('delete.cut') does not, since the block is usually pasted back elsewhere. The filter skips composition, file reloads and undo/redo as the vendor's does; with sorting on it does nothing here, since the save rebuilds the list.
 
 import type { Transaction, Text } from '@codemirror/state';
-import { applyTextEdits, minimalReplacement, pruneUnitOpTocEntries, rebuildUnitOpToc, refreshUnitOpTocEntries, shouldDeferTocSync } from '@labnoteo/core';
+import { minimalReplacement, pruneUnitOpTocEntries, rebuildUnitOpToc, refreshUnitOpTocEntries, shouldDeferTocSync } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import { getSeoulDateString, readLastUpdatedDate, touchLastUpdatedDate } from '@labnoteo/core/lib/dateUtils';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
@@ -276,8 +277,8 @@ export class LastUpdatedScheduler {
 // main.ts: registerUnitOpTocAutoSync, run on save
 
 /**
- * A workflow note's `## Related Unit Operations` list rebuilt from its `### [..]` headings (sorting on) or matched to
- * them in the order the note has (sorting off). Null when nothing changes, when `path` is no workflow note, when the
+ * A workflow note's `## Related Unit Operations` list rebuilt from its `### [..]` headings (sorting on) or its entries'
+ * names and links matched to them in the order the note has (sorting off: no entry is added or dropped here). Null when nothing changes, when `path` is no workflow note, when the
  * caret is in the span the rewrite would replace (#562), or when `fromHistory` (the redo stack stays walkable).
  */
 export function syncTocOnSave(
@@ -290,9 +291,49 @@ export function syncTocOnSave(
   const before = text;
   const after = settings.autoSyncUnitOpToc
     ? rebuildUnitOpToc(before)
-    : refreshUnitOpTocEntries(applyTextEdits(before, pruneUnitOpTocEntries(before)));
+    : refreshUnitOpTocEntries(before);
   const edit = minimalReplacement(before, after);
   if (!edit) return null;
   if (opts.caret !== undefined && shouldDeferTocSync(opts.caret, edit)) return null;
   return after;
+}
+
+// ---------------------------------------------------------------------------
+// unitOpReorderFilter.ts: with sorting off, a deleted block takes its own entry (#406)
+
+const UNIT_OP_HEADING_MARK = '### [';
+
+/**
+ * A user deletion that took at least one whole `### [` heading line with it (deleting or cutting a unit-op block).
+ * Deleting a heading character by character is not one, since the heading is usually being retyped.
+ */
+function deletesWholeUnitOpHeading(tr: Transaction): boolean {
+  if (!tr.isUserEvent('delete')) return false;
+  const doc = tr.startState.doc;
+  let hit = false;
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (hit || inserted.length > 0 || toA === fromA) return;
+    const removed = doc.sliceString(fromA, toA);
+    if (!removed.includes('\n')) return;
+    const atLineStart = doc.lineAt(fromA).from === fromA;
+    hit = (atLineStart && removed.startsWith(UNIT_OP_HEADING_MARK)) || removed.includes(`\n${UNIT_OP_HEADING_MARK}`);
+  });
+  return hit;
+}
+
+/**
+ * Changes (positions in `tr.newDoc`, sequential) that drop the list entries of the unit-op blocks `tr` deleted, for a
+ * workflow note with sorting off; empty otherwise. A cut keeps its entry: the block is usually pasted back elsewhere.
+ * Run as a transaction filter so one undo brings the block and its entry back together.
+ */
+export function pruneOnUnitOpDelete(
+  tr: Transaction,
+  path: string,
+  settings: Pick<UpkeepSettings, 'autoSyncUnitOpToc'>,
+): { from: number; to: number; insert: string }[] {
+  if (!tr.docChanged || settings.autoSyncUnitOpToc) return [];
+  if (tr.isUserEvent('input.type.compose') || tr.isUserEvent('set') || tr.isUserEvent('undo') || tr.isUserEvent('redo')) return [];
+  if (!isValidWorkflowPath(path)) return [];
+  if (!deletesWholeUnitOpHeading(tr) || tr.isUserEvent('delete.cut')) return [];
+  return pruneUnitOpTocEntries(tr.newDoc.toString());
 }

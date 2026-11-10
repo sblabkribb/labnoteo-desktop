@@ -373,6 +373,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
         }),
         notify: (message) => host.notify('info', message),
       }),
+    // vault.root 는 안에서 읽지 않지만 일부러 넣는다: 보관함을 바꾸면 새 upkeep(새 추적기)을 만들어 앞 보관함의 손으로 정한 날짜와 기다리던 편집을 버린다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [host, vault.root],
   );
   useEffect(() => {
@@ -383,9 +385,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     };
   }, [upkeep]);
   // 설정을 다시 켜면 손으로 정한 날짜와 기다리던 편집을 잊는다(플러그인 resetLastUpdatedTracking, #202).
+  // 처음 그릴 때나 설정을 처음 읽었을 때(undefined → 값)는 지울 것이 없으니, 읽은 꺼짐 → 켜짐일 때만 부른다.
   const stampOn = settings?.autoUpdateLastUpdated;
+  const prevStampOn = useRef(stampOn);
   useEffect(() => {
-    if (stampOn) upkeep.reset();
+    if (stampOn === true && prevStampOn.current === false) upkeep.reset();
+    prevStampOn.current = stampOn;
   }, [stampOn, upkeep]);
   // 설정 창의 값: 열 때마다 지금 값으로 만든다. 보관함 설정을 읽기 전(ctx 없음)에는 열지 않는다.
   const settingsLive = useRef({ ctx, theme, version });

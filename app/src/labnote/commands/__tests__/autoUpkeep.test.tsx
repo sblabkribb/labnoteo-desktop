@@ -12,6 +12,7 @@ import { mountEditor } from '../../__tests__/editorHarness';
 import { registerOpenNote } from '../../openNotes';
 import { ExperimentEntryCache } from '../../panel/experimentEntries';
 import { buildExperimentTree, groupExperiments } from '../../panel/experimentTree';
+import { history, undo } from '@codemirror/commands';
 import { syncTocOnSave } from '../../port/lastUpdatedStamp';
 import type { AppSettings } from '../../settings';
 import { createUpkeep, setAppUpkeep, type Upkeep } from '../autoUpkeep';
@@ -192,10 +193,10 @@ describe('syncTocOnSave', () => {
   const off = { autoSyncUnitOpToc: false };
   const withoutPlate = (text: string) => text.slice(0, text.indexOf('---\n\n### [UHW380')) + text.slice(text.indexOf('## Conclusions'));
 
-  it('deleting a UO block rebuilds the list without its entry (sorting on or off)', () => {
+  it('a UO block gone: sorting on rebuilds the list without its entry; sorting off leaves the entry (the filter drops it on delete)', () => {
     const cut = withoutPlate(workflow());
     expect(tocLines(syncTocOnSave(WF, cut, on)!)).toEqual([expect.stringMatching(/^- \[UHW180 Incubation\]/)]);
-    expect(tocLines(syncTocOnSave(WF, cut, off)!)).toEqual([expect.stringMatching(/^- \[UHW180 Incubation\]/)]);
+    expect(syncTocOnSave(WF, cut, off)).toBeNull();
   });
 
   it('renaming an alias updates its entry', () => {
@@ -261,6 +262,100 @@ describe('the editor syncs the list on save', () => {
       await m.ref.current!.flush();
     });
     expect(tocLines(vault.files()[WF])).toEqual([b, a]);
+    m.unmount();
+  });
+});
+
+describe('sorting off: a deleted UO block takes its entry, a cut one keeps it (plugin #406)', () => {
+  const blockRange = (text: string) => ({ from: text.indexOf('---\n\n### [UHW380'), to: text.indexOf('## Conclusions') });
+
+  function filtered(upkeep: Upkeep, doc: string) {
+    return new EditorView({
+      state: EditorState.create({
+        doc,
+        extensions: [history(), EditorState.transactionFilter.of((tr) => {
+          const extra = upkeep.filter(WF, tr);
+          return extra ? [tr, extra] : tr;
+        })],
+      }),
+    });
+  }
+
+  it('a delete drops the entry in the same transaction, and one undo brings both back', () => {
+    const { upkeep } = setup({}, { stamp: false, toc: false });
+    const text = workflow();
+    const view = filtered(upkeep, text);
+    view.dispatch({ changes: blockRange(text), userEvent: 'delete.backward' });
+    expect(tocLines(view.state.doc.toString())).toEqual([expect.stringMatching(/^- \[UHW180 Incubation\]/)]);
+    undo(view);
+    expect(view.state.doc.toString()).toBe(text);
+    view.destroy();
+  });
+
+  it('a cut, a reload, a character delete inside the heading, or sorting on: the list is left alone', () => {
+    const { upkeep, settings } = setup({}, { stamp: false, toc: false });
+    const text = workflow();
+    const view = filtered(upkeep, text);
+    view.dispatch({ changes: blockRange(text), userEvent: 'delete.cut' });
+    expect(tocLines(view.state.doc.toString())).toEqual(tocLines(text));
+    const v2 = filtered(upkeep, text);
+    v2.dispatch({ changes: blockRange(text), userEvent: 'set' });
+    expect(tocLines(v2.state.doc.toString())).toEqual(tocLines(text));
+    const v3 = filtered(upkeep, text);
+    const at = text.indexOf('### [UHW380') + 5;
+    v3.dispatch({ changes: { from: at, to: at + 1 }, userEvent: 'delete.backward' });
+    expect(tocLines(v3.state.doc.toString())).toEqual(tocLines(text));
+    settings.autoSyncUnitOpToc = true;
+    const v4 = filtered(upkeep, text);
+    v4.dispatch({ changes: blockRange(text), userEvent: 'delete.backward' });
+    expect(tocLines(v4.state.doc.toString())).toEqual(tocLines(text));
+    [view, v2, v3, v4].forEach((v) => v.destroy());
+  });
+
+  it('in the editor: cut a block, save, paste it back, save; the hand-arranged entry survives', async () => {
+    vi.useRealTimers();
+    const text = workflow();
+    const [a, b] = tocLines(text);
+    const swapped = text.replace(`${a}\n${b}`, `${b}\n${a}`);
+    const { vault, upkeep } = setup({ [WF]: swapped }, { stamp: false, toc: false });
+    const m = mountEditor(vault, WF, { upkeep });
+    await m.loaded();
+    const doc = m.view().state.doc.toString();
+    const { from, to } = blockRange(doc);
+    const block = doc.slice(from, to);
+    await act(async () => {
+      m.view().dispatch({ changes: { from, to }, selection: { anchor: 0 }, userEvent: 'delete.cut' });
+    });
+    await act(async () => {
+      await m.ref.current!.flush();
+    });
+    expect(tocLines(vault.files()[WF])).toEqual([b, a]);
+    const back = m.view().state.doc.toString().indexOf('---\n\n### [UHW180');
+    await act(async () => {
+      m.view().dispatch({ changes: { from: back, insert: block }, selection: { anchor: 0 }, userEvent: 'input.paste' });
+    });
+    await act(async () => {
+      await m.ref.current!.flush();
+    });
+    expect(tocLines(vault.files()[WF])).toEqual([b, a]);
+    expect(vault.files()[WF]).toContain('### [UHW380 Microplate Reading] plate 1');
+    m.unmount();
+  });
+
+  it('in the editor: deleting a block drops its entry right away and the save keeps it out', async () => {
+    vi.useRealTimers();
+    const { vault, upkeep } = setup({ [WF]: workflow() }, { stamp: false, toc: false });
+    const m = mountEditor(vault, WF, { upkeep });
+    await m.loaded();
+    const { from, to } = blockRange(m.view().state.doc.toString());
+    await act(async () => {
+      m.view().dispatch({ changes: { from, to }, selection: { anchor: 0 }, userEvent: 'delete.backward' });
+    });
+    expect(tocLines(m.view().state.doc.toString())).toEqual([expect.stringMatching(/^- \[UHW180 Incubation\]/)]);
+    await act(async () => {
+      await m.ref.current!.flush();
+    });
+    expect(tocLines(vault.files()[WF])).toEqual([expect.stringMatching(/^- \[UHW180 Incubation\]/)]);
     m.unmount();
   });
 });

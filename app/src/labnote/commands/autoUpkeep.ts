@@ -3,20 +3,22 @@
  * - last_updated_date: 랩 노트를 고친 뒤 2 초 조용하면 오늘(서울)로 찍는다. 워크플로 노트면 실험 README 도 찍는다.
  *   오늘 손으로 정한 날짜는 그대로 둔다. 설정 autoUpdateLastUpdated 가 꺼져 있으면 아무것도 쓰지 않는다.
  * - "Related Unit Operations" 목록: 워크플로 노트를 저장할 때 `### [..]` 제목들에서 다시 만든다(autoSyncUnitOpToc).
- *   지우거나 이름을 바꾼 UO 블록의 낡은 항목이 남지 않는다. 꺼져 있으면 차례는 두고 이름·링크만 맞추고 사라진 항목만 뺀다.
+ *   지우거나 이름을 바꾼 UO 블록의 낡은 항목이 남지 않는다. 꺼져 있으면 저장 때는 차례는 두고 이름·링크만 맞춘다(항목을 빼지 않는다).
+ *   꺼져 있을 때 UO 블록을 제목 줄째 지우면 그 항목을 같은 트랜잭션에서 뺀다(filter, 플러그인 #406). 잘라 내기는 빼지 않는다:
+ *   보통 다른 곳에 다시 붙인다.
  * 열린 노트는 버퍼에 최소 교체로(자동 저장이 쓴다), 닫힌 노트는 processNote(비교 후 쓰기)로 쓴다.
  * 이 손질이 한 편집은 userEvent `labnote.upkeep` 이다: 사용자 편집으로 세지 않아 다시 찍기를 부르지 않는다.
  * 날짜 찍기는 되돌리기 기록에 넣지 않는다(Ctrl+Z 가 곧바로 사용자의 입력으로 간다). 목록 다시 만들기는 넣는다:
  * UO 블록 지우기를 되돌리면 목록도 함께 돌아온다.
  */
 import { isolateHistory } from '@codemirror/commands';
-import { Transaction } from '@codemirror/state';
+import { Transaction, type TransactionSpec } from '@codemirror/state';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { minimalReplacement } from '@labnoteo/core';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { toDocBreaks } from '../editTarget';
 import { openNote, processNote } from '../openNotes';
-import { classifyChange, LastUpdatedScheduler, LastUpdatedTracker, syncTocOnSave, type UpkeepSettings } from '../port/lastUpdatedStamp';
+import { classifyChange, LastUpdatedScheduler, LastUpdatedTracker, pruneOnUnitOpDelete, syncTocOnSave, type UpkeepSettings } from '../port/lastUpdatedStamp';
 
 /** 손질이 한 편집의 userEvent. 'input' 으로 시작하지 않는다: 사용자 편집이 아니다. */
 export const UPKEEP_EVENT = 'labnote.upkeep';
@@ -35,6 +37,8 @@ export interface UpkeepDeps {
 export interface Upkeep {
   /** 편집기의 갱신 하나: 바뀐 트랜잭션마다 무엇이 바뀌었는지 적는다(편집기의 updateListener 가 부른다). */
   observe(path: string, update: ViewUpdate): void;
+  /** 편집기의 transactionFilter: 정렬이 꺼진 워크플로 노트에서 UO 블록을 지운 트랜잭션에 그 목록 항목 빼기를 덧붙인다. 없으면 null. */
+  filter(path: string, tr: Transaction): TransactionSpec | null;
   /** 저장 직전(편집기의 doSave): 워크플로 노트의 UO 목록을 버퍼에서 맞춘다. 바꿨으면 true. */
   beforeSave(path: string, view: EditorView): boolean;
   /** 코드가 대신한 사용자 편집(스캔 넣기 등): 친 것처럼 찍기를 예약한다. */
@@ -82,6 +86,10 @@ export function createUpkeep(deps: UpkeepDeps): Upkeep {
         lastFromHistory.set(path, change.fromHistory);
         scheduler.record(path, change);
       }
+    },
+    filter(path, tr) {
+      const changes = pruneOnUnitOpDelete(tr, path, deps.settings());
+      return changes.length === 0 ? null : { changes, sequential: true };
     },
     beforeSave(path, view) {
       if (view.composing || view.state.readOnly) return false;
