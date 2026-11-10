@@ -1,5 +1,6 @@
-//! "Import from file…" in the Integration settings dialog: LLM, PartBank and
-//! bfworkflow connection settings and keys, read from one file the user picks.
+//! "Import from file…" in the Integration settings dialog: LLM, PartBank,
+//! bfworkflow and GitHub connection settings and keys, read from one file the
+//! user picks.
 //!
 //! The webview never names a path: Rust shows the file picker itself
 //! (`integration_import_pick`), so a compromised webview cannot make it read an
@@ -13,12 +14,14 @@
 //! ```json
 //! {"llm": {"provider": "openai", "baseUrl": "…", "model": "…", "apiKey": "…"},
 //!  "partbank": {"connection": "web", "url": "…", "apiKey": "…"},
-//!  "bfworkflow": {"url": "…", "apiKey": "…"}}
+//!  "bfworkflow": {"url": "…", "apiKey": "…"},
+//!  "github": {"clientId": "…", "token": "…"}}
 //! ```
 //!
 //! or as `.env` lines (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_PROVIDER`,
 //! `PARTBANK_URL`, `PARTBANK_API_KEY`, `PARTBANK_CONNECTION`, `BFWORKFLOW_URL`,
-//! `BFWORKFLOW_API_KEY`; a ` # comment` after an unquoted value is dropped), and
+//! `BFWORKFLOW_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_TOKEN`; a ` # comment`
+//! after an unquoted value is dropped), and
 //! checks every field with the same parsers and key
 //! rules the dialog uses. Unknown keys are ignored.
 //!
@@ -31,6 +34,13 @@
 //! answer is a summary of codes: it never holds a key, and nothing in it is
 //! copied from the file. A file that names no LLM provider leaves the stored
 //! provider as it is, and its LLM fields fill that provider's settings.
+//!
+//! The GitHub part is app-wide, not a vault setting: its token goes to the
+//! fixed-origin GitHub slot (offline, not checked against GitHub; the next
+//! GitHub call does that), and its client ID comes back in the outcome's
+//! Rust-only `github` field, which the commands write to `github/app.json`
+//! (`finish_github_import`). An import never sets an owner or a visibility:
+//! those keys are ignored like any other unknown key.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -41,8 +51,10 @@ use tauri::State;
 
 use super::config::{parse_llm_endpoint, parse_origin_url, LlmKind, ServiceConfig, Url};
 use super::error::{NetError, NetErrorKind};
-use super::secrets::{store_secret_at_url, validate_secret_for, SecretStore, Secrets, Slot};
-use super::NetState;
+use super::github::GithubState;
+use super::secrets::{clear_secret, store_secret, store_secret_at_url, validate_secret_for, SecretStore, Secrets, Slot};
+use super::{IntegrationDirs, NetState};
+use crate::gitsync::state::{client_id_ok, github_client_id, read_doc, write_doc, GithubAppSettings, GithubDoc};
 use crate::vault::{SettingsFile, VaultState};
 
 /// Largest file read, in bytes.
@@ -75,6 +87,7 @@ pub enum Part {
     Llm,
     Partbank,
     Bfworkflow,
+    Github,
 }
 
 /// Why a field was refused.
@@ -94,6 +107,10 @@ pub enum Problem {
     KeyNotUsed,
     /// Credential Manager refused the key.
     Keychain,
+    /// Not a GitHub access token (`ghp_`, `github_pat_`, `gho_`, `ghu_`).
+    BadToken,
+    /// Not the shape of a GitHub OAuth App client ID.
+    BadClientId,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -107,7 +124,8 @@ pub struct Imported {
 #[serde(rename_all = "camelCase")]
 pub struct Invalid {
     pub part: Part,
-    /// The file's field name (`baseUrl`, `url`, `apiKey`, `model`, `provider`, `connection`).
+    /// The file's field name (`baseUrl`, `url`, `apiKey`, `model`, `provider`,
+    /// `connection`, `clientId`, `token`).
     pub field: &'static str,
     pub reason: Problem,
 }
@@ -123,7 +141,21 @@ pub enum ImportOutcome {
         invalid: Vec<Invalid>,
         /// The non-secret settings to save, keyed like the frontend's settings.
         settings: Map<String, Value>,
+        /// The GitHub part, when it was imported: for the command to write
+        /// app-wide. Never sent to the webview.
+        #[serde(skip)]
+        github: Option<GithubImport>,
     },
+}
+
+/// What an imported GitHub part leaves for `finish_github_import`. Holds no
+/// secret (the token is already in the keychain).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GithubImport {
+    /// The client ID from the file, already checked.
+    pub client_id: Option<String>,
+    /// A token was stored in the GitHub slot.
+    pub token_saved: bool,
 }
 
 /// One field as found in the file. Blank counts as absent.
@@ -180,10 +212,17 @@ struct BfwFields {
 }
 
 #[derive(Debug, Default, PartialEq)]
+struct GithubFields {
+    client_id: Field,
+    token: Field,
+}
+
+#[derive(Debug, Default, PartialEq)]
 struct Parsed {
     llm: LlmFields,
     partbank: PartbankFields,
     bfw: BfwFields,
+    github: GithubFields,
 }
 
 impl Parsed {
@@ -255,6 +294,10 @@ fn parse_json(text: &str) -> Option<Parsed> {
     if let Some(o) = part("bfworkflow") {
         p.bfw = BfwFields { url: Field::of_json(o.get("url")), api_key: Field::of_json(o.get("apiKey")) };
     }
+    // Only these two: an `owner`, `public` or any other key is ignored.
+    if let Some(o) = part("github") {
+        p.github = GithubFields { client_id: Field::of_json(o.get("clientId")), token: Field::of_json(o.get("token")) };
+    }
     Some(p)
 }
 
@@ -301,6 +344,8 @@ fn parse_env(text: &str) -> Parsed {
             "PARTBANK_API_KEY" => p.partbank.api_key = field,
             "BFWORKFLOW_URL" => p.bfw.url = field,
             "BFWORKFLOW_API_KEY" => p.bfw.api_key = field,
+            "GITHUB_CLIENT_ID" => p.github.client_id = field,
+            "GITHUB_TOKEN" => p.github.token = field,
             _ => {}
         }
     }
@@ -479,6 +524,39 @@ fn plan_bfw(f: &BfwFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Optio
     Some(Plan { settings, key })
 }
 
+/// The GitHub part: a checked client ID and token. No network call.
+struct GithubPlan {
+    client_id: Option<String>,
+    token: Option<zeroize::Zeroizing<String>>,
+}
+
+fn plan_github(f: &GithubFields, bad: &mut Vec<Invalid>) -> Option<GithubPlan> {
+    let part = Part::Github;
+    let before = bad.len();
+    let client_id = text_of(&f.client_id, part, "clientId", bad).and_then(|id| {
+        let ok = client_id_ok(id);
+        if !ok {
+            bad.push(Invalid { part, field: "clientId", reason: Problem::BadClientId });
+        }
+        ok.then(|| id.to_string())
+    });
+    let token = text_of(&f.token, part, "token", bad).and_then(|raw| match validate_secret_for(Slot::Github, raw) {
+        Ok(t) => Some(zeroize::Zeroizing::new(t)),
+        Err(_) => {
+            bad.push(Invalid { part, field: "token", reason: Problem::BadToken });
+            None
+        }
+    });
+    (bad.len() == before).then_some(GithubPlan { client_id, token })
+}
+
+/// Stores the GitHub token in the fixed-origin slot. The refresh token of an
+/// earlier sign-in belongs to another token, so it goes first.
+fn store_github(store: &dyn SecretStore, cfg: &ServiceConfig, token: &str) -> Result<(), NetError> {
+    clear_secret(store, Slot::GithubRefresh, cfg)?;
+    store_secret(store, Slot::Github, cfg, token)
+}
+
 /// Parses `text` and stores its keys (the settings are only returned). `cfg`
 /// is the open vault's stored config: the address a key binds to when the
 /// file names none.
@@ -493,19 +571,35 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
     let mut imported = Vec::new();
     let mut invalid = Vec::new();
     let mut settings = Map::new();
+    let mut github = None;
     let parts = [
         (Part::Llm, parsed.llm == LlmFields::default()),
         (Part::Partbank, parsed.partbank == PartbankFields::default()),
         (Part::Bfworkflow, parsed.bfw == BfwFields::default()),
+        (Part::Github, parsed.github == GithubFields::default()),
     ];
     for (part, empty) in parts {
         if empty {
+            continue;
+        }
+        if part == Part::Github {
+            let Some(plan) = plan_github(&parsed.github, &mut invalid) else { continue };
+            if let Some(token) = &plan.token {
+                if store_github(store, cfg, token).is_err() {
+                    invalid.push(Invalid { part, field: "token", reason: Problem::Keychain });
+                    continue;
+                }
+            }
+            let token_saved = plan.token.is_some();
+            github = Some(GithubImport { client_id: plan.client_id, token_saved });
+            imported.push(Imported { part, key_saved: token_saved });
             continue;
         }
         let plan = match part {
             Part::Llm => plan_llm(&parsed.llm, cfg, &mut invalid),
             Part::Partbank => plan_partbank(&parsed.partbank, cfg, &mut invalid),
             Part::Bfworkflow => plan_bfw(&parsed.bfw, cfg, &mut invalid),
+            Part::Github => unreachable!("handled above"),
         };
         let Some(plan) = plan else { continue };
         // The key first: if Credential Manager refuses it, the part's settings are not saved either.
@@ -524,7 +618,33 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
         }
         imported.push(Imported { part, key_saved });
     }
-    ImportOutcome::Done { imported, invalid, settings }
+    ImportOutcome::Done { imported, invalid, settings, github }
+}
+
+/// The app-wide half of an imported GitHub part (`apply_import` has no
+/// app-data access): writes the client ID to `github/app.json`, and settles
+/// the sign-in. A new token replaces the old sign-in (device session, memory
+/// tokens, account record; with `forgetOnExit` on it moves into memory). A new
+/// client ID with no token signs out, as in the settings, since a token
+/// belongs to the OAuth App that issued it. Nothing for any other outcome.
+pub fn finish_github_import(
+    dirs: &Path,
+    store: &dyn SecretStore,
+    gh: &GithubState,
+    outcome: &ImportOutcome,
+) -> Result<(), NetError> {
+    let ImportOutcome::Done { github: Some(imported), .. } = outcome else { return Ok(()) };
+    let mut app: GithubAppSettings = read_doc(dirs, None, GithubDoc::App)?;
+    let before = github_client_id(&app);
+    if let Some(id) = &imported.client_id {
+        app.client_id = Some(id.clone());
+    }
+    if imported.token_saved {
+        gh.adopt_imported_token(dirs, store, app.forget_on_exit)?;
+    } else if github_client_id(&app) != before {
+        gh.sign_out(dirs, store)?;
+    }
+    write_doc(dirs, None, GithubDoc::App, &app)
 }
 
 /// The text of an import file's bytes: at most `MAX_IMPORT_BYTES`, UTF-8 with
@@ -632,6 +752,8 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
     vault: State<'_, VaultState>,
     settings: State<'_, SettingsFile>,
     secrets: State<'_, Secrets>,
+    dirs: State<'_, IntegrationDirs>,
+    github: State<'_, GithubState>,
     title: String,
 ) -> Result<Option<ImportOutcome>, NetError> {
     use tauri::Manager;
@@ -662,6 +784,7 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
     })
     .await
     .map_err(|e| NetError::new(NetErrorKind::Io, format!("import failed: {e}")))?;
+    finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &outcome)?;
     Ok(Some(outcome))
 }
 
@@ -678,6 +801,8 @@ pub fn integration_import_bytes(
     vault: State<'_, VaultState>,
     settings: State<'_, SettingsFile>,
     secrets: State<'_, Secrets>,
+    dirs: State<'_, IntegrationDirs>,
+    github: State<'_, GithubState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<ImportOutcome, NetError> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
@@ -687,7 +812,9 @@ pub fn integration_import_bytes(
         .map_err(|_| NetError::new(NetErrorKind::BadInput, "the file name is missing"))?;
     let root = vault.root().map_err(|_| no_vault())?;
     let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
-    Ok(import_bytes(secrets.0.as_ref(), &name, bytes, &cfg))
+    let outcome = import_bytes(secrets.0.as_ref(), &name, bytes, &cfg);
+    finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &outcome)?;
+    Ok(outcome)
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -748,6 +875,7 @@ pub async fn integration_import_delete(net: State<'_, NetState>, permanent: bool
 mod tests {
     use super::*;
     use crate::net::config::tests::scratch_dir;
+    use crate::net::github::GithubState;
     use crate::net::secrets::{status_of, MemoryStore};
 
     fn cfg(json: &str) -> ServiceConfig {
@@ -756,7 +884,7 @@ mod tests {
 
     fn done(o: &ImportOutcome) -> (&Vec<Imported>, &Vec<Invalid>, &Map<String, Value>) {
         match o {
-            ImportOutcome::Done { imported, invalid, settings } => (imported, invalid, settings),
+            ImportOutcome::Done { imported, invalid, settings, .. } => (imported, invalid, settings),
             other => panic!("expected done, got {other:?}"),
         }
     }
@@ -1039,6 +1167,205 @@ mod tests {
         let out = import_picked(&net, &MemoryStore::default(), &good, &dir.join("vault"), &cfg("{}"));
         assert_eq!(done(&out).0.len(), 1);
         assert_eq!(*net.last_import.lock().unwrap(), Some(std::fs::canonicalize(&good).unwrap()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const GH_FAKE: &str = "ghp_FAKEimport0000000000000000000000000000";
+
+    fn gh_dir(tag: &str) -> PathBuf {
+        let dir = scratch_dir(tag);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The import, then the command's app-wide step.
+    fn import_github(dir: &Path, store: &MemoryStore, gh: &GithubState, name: &str, text: &str) -> ImportOutcome {
+        let out = import_bytes(store, name, text.as_bytes(), &cfg("{}"));
+        finish_github_import(dir, store, gh, &out).unwrap();
+        out
+    }
+
+    fn app_doc(dir: &Path) -> Option<Value> {
+        std::fs::read_to_string(dir.join("github").join("app.json")).ok().map(|t| serde_json::from_str(&t).unwrap())
+    }
+
+    fn gh_token(gh: &GithubState, store: &MemoryStore) -> Option<String> {
+        crate::net::github::auth::token(gh, store).unwrap().map(|t| t.as_str().to_string())
+    }
+
+    #[test]
+    fn github_json_saves_the_token_in_the_keychain_and_the_client_id_app_wide() {
+        let dir = gh_dir("import-gh-json");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        let text = format!(r#"{{"github":{{"clientId":"Iv1.lab0001","token":"{GH_FAKE}"}}}}"#);
+        let out = import_github(&dir, &store, &gh, "conn.json", &text);
+        let (imported, invalid, settings) = done(&out);
+        assert!(invalid.is_empty(), "{invalid:?}");
+        assert_eq!(imported, &vec![Imported { part: Part::Github, key_saved: true }]);
+        // Nothing for the vault settings: the client ID is app-wide.
+        assert!(settings.is_empty(), "{settings:?}");
+        let account = crate::net::secrets::account(Slot::Github, &cfg("{}")).unwrap();
+        assert!(account.starts_with("github|https://github.com"), "{account}");
+        assert_eq!(store.get(&account).unwrap().as_deref(), Some(GH_FAKE));
+        assert_eq!(app_doc(&dir).unwrap()["clientId"], "Iv1.lab0001");
+        assert_eq!(crate::gitsync::state::app_settings_get_at(&dir).unwrap().client_id.as_deref(), Some("Iv1.lab0001"));
+        // The summary carries neither the token nor the client ID.
+        let wire = serde_json::to_string(&out).unwrap();
+        assert!(!wire.contains(GH_FAKE) && !wire.contains("ghp_") && !wire.contains("Iv1.lab0001"), "{wire}");
+        assert!(!format!("{out:?}").contains(GH_FAKE));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn github_env_lines_behave_the_same() {
+        let dir = gh_dir("import-gh-env");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        let text = format!("GITHUB_CLIENT_ID=Ov23lab # lab app\nexport GITHUB_TOKEN=\"{GH_FAKE}\"\n");
+        let out = import_github(&dir, &store, &gh, ".env", &text);
+        let (imported, invalid, settings) = done(&out);
+        assert!(invalid.is_empty() && settings.is_empty(), "{invalid:?} {settings:?}");
+        assert_eq!(imported, &vec![Imported { part: Part::Github, key_saved: true }]);
+        assert_eq!(gh_token(&gh, &store).as_deref(), Some(GH_FAKE));
+        assert_eq!(app_doc(&dir).unwrap()["clientId"], "Ov23lab");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_github_token_or_client_id_stores_nothing() {
+        let dir = gh_dir("import-gh-bad");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        let fixed = cfg("{}");
+        let nothing = |store: &MemoryStore| {
+            crate::net::secrets::key_for(store, Slot::Github, &fixed).unwrap().is_none()
+                && crate::net::secrets::status_of(store, &fixed).epoch.github == 0
+        };
+        let out = import_github(&dir, &store, &gh, "c.json", r#"{"github":{"clientId":"Iv1.ok","token":"abc"}}"#);
+        let (imported, invalid, _) = done(&out);
+        assert!(imported.is_empty());
+        assert_eq!(invalid, &vec![Invalid { part: Part::Github, field: "token", reason: Problem::BadToken }]);
+        // All or nothing: the valid client ID is not saved either.
+        assert_eq!(app_doc(&dir), None);
+        assert!(nothing(&store));
+        let out =
+            import_github(&dir, &store, &gh, "c.json", &format!(r#"{{"github":{{"clientId":"Iv1 lab","token":"{GH_FAKE}"}}}}"#));
+        assert_eq!(done(&out).1, &vec![Invalid { part: Part::Github, field: "clientId", reason: Problem::BadClientId }]);
+        assert!(done(&out).0.is_empty());
+        assert_eq!(app_doc(&dir), None);
+        assert!(nothing(&store));
+        let out = import_github(&dir, &store, &gh, "c.json", r#"{"github":{"token":7}}"#);
+        assert_eq!(done(&out).1, &vec![Invalid { part: Part::Github, field: "token", reason: Problem::NotText }]);
+        // A refresh token is not an access token.
+        let out = import_github(&dir, &store, &gh, "c.env", "GITHUB_TOKEN=ghr_FAKE00\n");
+        assert_eq!(done(&out).1[0].reason, Problem::BadToken);
+        assert!(nothing(&store));
+        let wire = serde_json::to_string(&out).unwrap();
+        assert!(!wire.contains("ghr_FAKE00"), "{wire}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every file under `dir`, concatenated.
+    fn walk_text(dir: &Path) -> String {
+        let mut out = String::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push_str(&String::from_utf8_lossy(&std::fs::read(&p).unwrap_or_default()));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn unknown_github_keys_are_ignored_and_never_applied() {
+        let dir = gh_dir("import-gh-unknown");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        // Only unknown keys: there is nothing to import.
+        let out = import_github(&dir, &store, &gh, "c.json", r#"{"github":{"public":true,"owner":"kim-lab"}}"#);
+        assert_eq!(out, ImportOutcome::Refused { reason: Refusal::Unrecognized });
+        let text = format!(r#"{{"github":{{"public":true,"owner":"kim-lab","visibility":"public","token":"{GH_FAKE}"}}}}"#);
+        let out = import_github(&dir, &store, &gh, "c.json", &text);
+        let (imported, invalid, settings) = done(&out);
+        assert!(invalid.is_empty() && settings.is_empty());
+        assert_eq!(imported, &vec![Imported { part: Part::Github, key_saved: true }]);
+        // No client ID in the file: the app-wide one is left alone, and no
+        // owner or visibility was written anywhere.
+        let app = app_doc(&dir).unwrap_or(Value::Null);
+        assert!(app.get("clientId").is_none(), "{app}");
+        let all = walk_text(&dir);
+        assert!(!all.contains("kim-lab") && !all.contains("public") && !all.contains(GH_FAKE), "{all}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_imported_token_replaces_the_old_sign_in_without_losing_itself() {
+        use crate::gitsync::state::{read_doc, write_doc, GithubDoc};
+        let dir = gh_dir("import-gh-replace");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        // Signed in before with another app's token, a refresh token and an account.
+        let fixed = cfg("{}");
+        crate::net::secrets::store_secret(&store, Slot::Github, &fixed, "gho_FAKEold").unwrap();
+        crate::net::secrets::store_secret(&store, Slot::GithubRefresh, &fixed, "ghr_FAKEold").unwrap();
+        write_doc(&dir, None, GithubDoc::Account, &serde_json::json!({"login": "old-login", "id": 1, "avatarUrl": ""}))
+            .unwrap();
+        let text = format!(r#"{{"github":{{"clientId":"Iv1.new","token":"{GH_FAKE}"}}}}"#);
+        import_github(&dir, &store, &gh, "c.json", &text);
+        // The new client ID did not sign the new token out; the old refresh
+        // token and the old identity are gone.
+        assert_eq!(gh_token(&gh, &store).as_deref(), Some(GH_FAKE));
+        assert_eq!(crate::net::secrets::key_for(&store, Slot::GithubRefresh, &fixed).unwrap(), None);
+        assert_eq!(read_doc::<Option<Value>>(&dir, None, GithubDoc::Account).unwrap(), None);
+        assert_eq!(app_doc(&dir).unwrap()["clientId"], "Iv1.new");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_client_id_alone_signs_the_old_token_out() {
+        let dir = gh_dir("import-gh-client");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        let fixed = cfg("{}");
+        crate::net::secrets::store_secret(&store, Slot::Github, &fixed, "gho_FAKEold").unwrap();
+        let out = import_github(&dir, &store, &gh, "c.env", "GITHUB_CLIENT_ID=Iv1.other\n");
+        assert_eq!(done(&out).0, &vec![Imported { part: Part::Github, key_saved: false }]);
+        assert_eq!(gh_token(&gh, &store), None);
+        assert_eq!(app_doc(&dir).unwrap()["clientId"], "Iv1.other");
+        // The same client ID again keeps a token.
+        crate::net::secrets::store_secret(&store, Slot::Github, &fixed, "gho_FAKEnew").unwrap();
+        import_github(&dir, &store, &gh, "c.env", "GITHUB_CLIENT_ID=Iv1.other\n");
+        assert_eq!(gh_token(&gh, &store).as_deref(), Some("gho_FAKEnew"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn with_forget_on_exit_an_imported_token_is_kept_in_memory_only() {
+        use crate::gitsync::state::{write_doc, GithubAppSettings, GithubDoc};
+        let dir = gh_dir("import-gh-forget");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        write_doc(&dir, None, GithubDoc::App, &GithubAppSettings { client_id: None, forget_on_exit: true }).unwrap();
+        import_github(&dir, &store, &gh, "c.env", &format!("GITHUB_TOKEN={GH_FAKE}\n"));
+        assert!(gh.has_memory_token());
+        assert_eq!(crate::net::secrets::key_for(&store, Slot::Github, &cfg("{}")).unwrap(), None);
+        assert_eq!(gh_token(&gh, &store).as_deref(), Some(GH_FAKE));
+        assert_eq!(app_doc(&dir).unwrap()["forgetOnExit"], true);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn github_sits_beside_the_other_parts_and_is_all_or_nothing_alone() {
+        let dir = gh_dir("import-gh-mixed");
+        let (store, gh) = (MemoryStore::default(), GithubState::default());
+        let text = r#"{"bfworkflow":{"url":"https://wf.lab.example","apiKey":"bfw_t"},"github":{"token":"nope"}}"#;
+        let out = import_github(&dir, &store, &gh, "c.json", text);
+        let (imported, invalid, settings) = done(&out);
+        assert_eq!(imported, &vec![Imported { part: Part::Bfworkflow, key_saved: true }]);
+        assert_eq!(invalid, &vec![Invalid { part: Part::Github, field: "token", reason: Problem::BadToken }]);
+        assert_eq!(settings["bfwUrl"], "https://wf.lab.example");
+        assert_eq!(gh_token(&gh, &store), None);
+        assert_eq!(app_doc(&dir), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

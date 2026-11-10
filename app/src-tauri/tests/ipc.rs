@@ -872,6 +872,29 @@ title: 실험
     // A JSON body is refused: the bytes must come raw.
     assert!(call("integration_import_bytes", json!({"name": "conn.env"})).is_err());
 
+    // The GitHub part: the token goes to the keychain slot and the client ID
+    // to the app-wide GitHub settings, never to the vault settings or the
+    // answer. Owner and visibility keys are ignored.
+    let conn = format!("GITHUB_CLIENT_ID=Iv1.import\nGITHUB_TOKEN={FAKE_GITHUB_TOKEN}\nGITHUB_OWNER=kim-lab\n");
+    let done = raw_call("integration_import_bytes", vec!["conn.env"], conn.into_bytes()).unwrap();
+    assert_no_github_token(&done.to_string());
+    assert_eq!(
+        done,
+        json!({"status": "done", "imported": [{"part": "github", "keySaved": true}], "invalid": [], "settings": {}})
+    );
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_no_github_token(&status.to_string());
+    assert_eq!(status["set"]["github"], true);
+    assert_eq!(
+        ok("github_app_settings_get", args("github_app_settings_get", vec![])),
+        json!({"clientId": "Iv1.import", "clientIdDefault": false, "forgetOnExit": false})
+    );
+    let bad = raw_call("integration_import_bytes", vec!["conn.json"], br#"{"github":{"token":"abc"}}"#.to_vec()).unwrap();
+    assert_eq!(bad["invalid"], json!([{"part": "github", "field": "token", "reason": "badToken"}]));
+    assert_eq!(ok("github_sign_out", args("github_sign_out", vec![])), Value::Null);
+    ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": null})]));
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["github"], false);
+
     // The MCP token (Credential Manager; here the memory store): the webview
     // learns a flag and an epoch, and the copy goes to the clipboard from Rust.
     let first = responses.borrow().len();

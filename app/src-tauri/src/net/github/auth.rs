@@ -153,6 +153,25 @@ impl GithubState {
         crate::gitsync::state::sign_out_stored(dirs, store)
     }
 
+    /// A connection import stored a new token in the keychain (and cleared
+    /// the refresh slot): the device session, the old memory tokens and the
+    /// old account record go. With `forgetOnExit` on, the token moves into
+    /// memory. The token is checked by the next GitHub call.
+    pub(crate) fn adopt_imported_token(
+        &self,
+        dirs: &Path,
+        store: &dyn SecretStore,
+        forget_on_exit: bool,
+    ) -> Result<(), NetError> {
+        *lock(&self.device) = None;
+        self.forget_memory_token();
+        remove_doc(dirs, None, GithubDoc::Account)?;
+        if forget_on_exit {
+            self.move_to_memory(store)?;
+        }
+        Ok(())
+    }
+
     /// Turning `forgetOnExit` on while signed in: the keychain tokens move
     /// into memory and the keychain entries are deleted.
     pub(crate) fn move_to_memory(&self, store: &dyn SecretStore) -> Result<(), NetError> {

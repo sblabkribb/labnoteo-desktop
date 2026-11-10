@@ -159,6 +159,39 @@ describe('Integration settings: Import from file…', () => {
     expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
   });
 
+  it('a GitHub part: the summary names GitHub, a bad token says so, and nothing goes to the vault settings', async () => {
+    const f = importDeps({
+      outcome: {
+        status: 'done',
+        imported: [{ part: 'github', keySaved: true }],
+        invalid: [{ part: 'github', field: 'clientId', reason: 'badClientId' }],
+        settings: {},
+      },
+    });
+    show(f.deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.importedKey', t('github.import.part')))).toBeTruthy();
+    expect(
+      screen.getByText(t('integrations.import.invalid', t('github.import.part'), 'clientId', t('github.import.badClientId'))),
+    ).toBeTruthy();
+    // 저장할 볼트 설정이 없다: 설정 저장은 부르지 않지만 토큰이 든 파일은 지우기를 제안한다.
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(await screen.findByText(t('integrations.import.deleteAsk'))).toBeTruthy();
+    cleanup();
+    const g = importDeps({
+      outcome: { status: 'done', imported: [], invalid: [{ part: 'github', field: 'token', reason: 'badToken' }], settings: {} },
+    });
+    show(g.deps);
+    await userEvent.click(await importButton());
+    expect(
+      await screen.findByText(t('integrations.import.invalid', t('github.import.part'), 'token', t('github.import.badToken'))),
+    ).toBeTruthy();
+    expect(screen.queryByText(t('integrations.import.deleteAsk'))).toBeNull();
+    setLang('ko');
+    expect(t('github.import.part')).toBe('GitHub');
+    expect(t('github.import.badToken')).toBe('GitHub 토큰 형식이 아닙니다');
+  });
+
   it('nothing imported: says so and offers no delete', async () => {
     const f = importDeps({
       outcome: { status: 'done', imported: [], invalid: [{ part: 'llm', field: 'apiKey', reason: 'badKey' }], settings: {} },

@@ -136,6 +136,7 @@ const PART_LABEL: Record<ImportPart, () => string> = {
   llm: () => t('integrations.import.part.llm'),
   partbank: () => t('integrations.import.part.partbank'),
   bfworkflow: () => t('integrations.import.part.bfworkflow'),
+  github: () => t('github.import.part'),
 };
 
 const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
@@ -175,6 +176,8 @@ const PROBLEM_TEXT: Record<ImportProblem, () => string> = {
   noUrl: () => t('integrations.import.reason.noUrl'),
   keyNotUsed: () => t('integrations.import.reason.keyNotUsed'),
   keychain: () => t('integrations.import.reason.keychain'),
+  badToken: () => t('github.import.badToken'),
+  badClientId: () => t('github.import.badClientId'),
 };
 
 const DELETED_TEXT: Record<Exclude<DeleteOutcome, 'trashUnavailable'>, () => string> = {

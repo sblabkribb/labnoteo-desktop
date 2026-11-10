@@ -10,7 +10,8 @@ import type { RawInvoke } from '../fs/vaultImage';
  * 코드)과 저장할 설정뿐이다. 키는 IPC 를 건너 돌아오지 않는다. 설정은 대화상자가 늘 쓰는 저장 흐름으로 저장한다(하나의 원천).
  */
 
-export type ImportPart = 'llm' | 'partbank' | 'bfworkflow';
+/** `github`: 토큰은 자격 증명 관리자의 GitHub 칸에, Client ID 는 앱 전체 GitHub 설정에(Rust). 볼트 설정에는 아무것도 오지 않는다. */
+export type ImportPart = 'llm' | 'partbank' | 'bfworkflow' | 'github';
 
 export type ImportRefusal = 'insideVault' | 'tooLarge' | 'unreadable' | 'notText' | 'unrecognized' | 'wrongType';
 
@@ -26,7 +27,9 @@ export type ImportProblem =
   | 'notText'
   | 'noUrl'
   | 'keyNotUsed'
-  | 'keychain';
+  | 'keychain'
+  | 'badToken'
+  | 'badClientId';
 
 /** Rust `ImportOutcome`. `settings` 는 키가 아닌 연동 설정만 담는다. */
 export type ImportOutcome =
