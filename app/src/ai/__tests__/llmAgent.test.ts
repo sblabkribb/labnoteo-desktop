@@ -514,7 +514,7 @@ describe('runAgent with an AbortSignal', () => {
  * 외부 도구 뒤의 오염 표시와 확인(spec §7.4). `external` 이 없으면 위의 사례가 그대로 지나야 한다.
  */
 describe('runAgent: taint gate for external tools', () => {
-  type Note = { tainted: boolean; reason?: 'crossServer' | 'bigArgs' } | undefined;
+  type Note = { tainted: boolean; reason?: 'crossServer' | 'bigArgs' | 'webAfterTaint'; web?: boolean } | undefined;
   const ext = (name: string, mutates = false): ToolDef => ({
     name,
     mutates,
@@ -527,6 +527,8 @@ describe('runAgent: taint gate for external tools', () => {
     ['mcp_a_write', { kind: 'mcp', serverId: 'a', serverName: 'A', readOnly: false }],
     ['mcp_b_search', { kind: 'mcp', serverId: 'b', serverName: 'B', readOnly: true }],
     ['pubmed_search', { kind: 'scholar', readOnly: true }],
+    ['web_search', { kind: 'web', serverName: 'web', toolTitle: 'web_search', readOnly: true }],
+    ['fetch_page', { kind: 'web', serverName: 'web', toolTitle: 'fetch_page', readOnly: true }],
   ]);
   const extTools = () => [ext('mcp_a_search'), ext('mcp_a_write', true), ext('mcp_b_search'), ext('pubmed_search')];
   const recorder = (answer = true) => {
@@ -689,6 +691,79 @@ describe('runAgent: taint gate for external tools', () => {
     const run = await runAgent(go, { provider, ctx: ctx(), tools, confirm: r.confirm, initialTaint: ['scholar'] });
     expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: true } }]);
     expect(run).toMatchObject({ tainted: true, taintSources: ['scholar'] });
+  });
+
+  // Assistant spec §7.3, plan Task 14: the web taint kind and the webAfterTaint confirm.
+  it('a web result taints the run with the source "web" (not "scholar"), and later writes carry the web note', async () => {
+    const { tools, ran } = makeTools();
+    const provider = new ScriptedProvider([turn([call('fetch_page', {}, 'a'), call('write_thing', {}, 'b')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [...tools, ext('fetch_page')], external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: true, web: true } }]);
+    expect(ran).toEqual(['write_thing']);
+    expect(run.tainted).toBe(true);
+    expect(run.taintSources).toEqual(['web']);
+  });
+
+  it('an untainted web_search runs without asking', async () => {
+    const provider = new ScriptedProvider([turn([call('web_search', { query: 'pcr' })])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [ext('web_search')], external, confirm: r.confirm });
+    expect(r.asked).toEqual([]);
+    expect(run.executed.map(e => e.outcome)).toEqual(['done']);
+  });
+
+  it('web_search after any outside result asks webAfterTaint; a denial runs nothing', async () => {
+    let searched = 0;
+    const search: ToolDef = { ...ext('web_search'), handler: async () => ((searched++), { ok: true, data: 'hits' }) };
+    const provider = new ScriptedProvider([
+      turn([call('pubmed_search', {}, 'a'), call('web_search', { query: 'leak this note text' }, 'b')]),
+    ]);
+    const r = recorder(false);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [ext('pubmed_search'), search], external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'web_search', note: { tainted: true, reason: 'webAfterTaint' } }]);
+    expect(searched).toBe(0);
+    expect(run.executed.map(e => e.outcome)).toEqual(['done', 'denied']);
+    expect(provider.seen[1].at(-1)?.content).toContain('User denied this call.');
+  });
+
+  it('a second web_search after a web result asks webAfterTaint with the web note; allowed, it runs', async () => {
+    let searched = 0;
+    const search: ToolDef = { ...ext('web_search'), handler: async () => ((searched++), { ok: true, data: 'hits' }) };
+    const provider = new ScriptedProvider([turn([call('web_search', { query: 'a' }, 'a'), call('web_search', { query: 'b' }, 'b')])]);
+    const r = recorder(true);
+    await runAgent(go, { provider, ctx: ctx(), tools: [search], external, confirm: r.confirm });
+    expect(r.asked).toEqual([{ name: 'web_search', note: { tainted: true, reason: 'webAfterTaint', web: true } }]);
+    expect(searched).toBe(2);
+  });
+
+  it('initialTaint from history makes the first web_search ask webAfterTaint', async () => {
+    const provider = new ScriptedProvider([turn([call('web_search', { query: 'q' })])]);
+    const r = recorder(true);
+    await runAgent(go, { provider, ctx: ctx(), tools: [ext('web_search')], external, confirm: r.confirm, initialTaint: ['history'] });
+    expect(r.asked).toEqual([{ name: 'web_search', note: { tainted: true, reason: 'webAfterTaint' } }]);
+  });
+
+  it('a read-only MCP call after a web result asks crossServer (the web is never an MCP taint source)', async () => {
+    const provider = new ScriptedProvider([turn([call('fetch_page', {}, 'a'), call('mcp_a_search', {}, 'b')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, {
+      provider,
+      ctx: ctx(),
+      tools: [ext('fetch_page'), ext('mcp_a_search')],
+      external,
+      confirm: r.confirm,
+    });
+    expect(r.asked).toEqual([{ name: 'mcp_a_search', note: { tainted: true, reason: 'crossServer', web: true } }]);
+    expect(run.taintSources).toEqual(['web', 'a']);
+  });
+
+  it('fetch_page itself is never asked, even after taint', async () => {
+    const provider = new ScriptedProvider([turn([call('pubmed_search', {}, 'a'), call('fetch_page', {}, 'b')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools: [ext('pubmed_search'), ext('fetch_page')], external, confirm: r.confirm });
+    expect(r.asked).toEqual([]);
+    expect(run.taintSources).toEqual(['scholar', 'web']);
   });
 
   it('an empty initialTaint changes nothing', async () => {

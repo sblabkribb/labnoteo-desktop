@@ -25,6 +25,8 @@ export interface BubbleActions {
   activeNote?(): Promise<ActiveNote | undefined>;
   /** 실험 폴더의 워크플로 노트(보관함 상대 경로, 번호 차례). */
   workflowNotes?(folder: string): Promise<string[]>;
+  /** 이 PC 에 웹 검색 주소가 있는지(`assistant.json`). 없으면 대화 칩이 한 번 안내한다. */
+  webSearchConfigured?(): Promise<boolean>;
 }
 
 /**

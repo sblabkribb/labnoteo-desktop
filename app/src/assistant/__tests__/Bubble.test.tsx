@@ -12,6 +12,7 @@ import { confirmDialog } from '../../labnote/host/dialogStore';
 import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createLayoutStore, type UiPrefs } from '../../ui/layoutStore';
 import { AssistantHistoryError, emptyHistory, type HistoryDoc } from '../history';
+import { resetWebHint } from '../Bubble';
 import { PetLayer, type BubbleActions } from '../PetLayer';
 import { createPetStore, type PetStore } from '../petStore';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn } from '../runtime';
@@ -84,7 +85,15 @@ function Harness(props: { store: PetStore; session: AssistantSession; activePath
 }
 
 let vault = 'v1';
-function setup(opts: { plan?: Plan; seed?: Record<string, HistoryDoc>; activePath?: string; confirm?: () => Promise<boolean> } = {}) {
+function setup(
+  opts: {
+    plan?: Plan;
+    seed?: Record<string, HistoryDoc>;
+    activePath?: string;
+    confirm?: () => Promise<boolean>;
+    actions?: Partial<BubbleActions>;
+  } = {}
+) {
   vault = 'v1';
   const docs = new Map(Object.entries(opts.seed ?? {}));
   const writes: HistoryDoc[] = [];
@@ -108,7 +117,7 @@ function setup(opts: { plan?: Plan; seed?: Record<string, HistoryDoc>; activePat
     setPetState: (s) => store.setState(s),
     confirm,
   });
-  const actions = { openSource: vi.fn(), insert: vi.fn() };
+  const actions = { ...opts.actions, openSource: vi.fn(), insert: vi.fn() };
   const view = render(<Harness store={store} session={session} activePath={opts.activePath ?? NOTE_A} actions={actions} />);
   const rerender = (activePath: string | undefined) =>
     view.rerender(<Harness store={store} session={session} activePath={activePath} actions={actions} />);
@@ -130,6 +139,7 @@ async function type(text: string) {
 }
 
 afterEach(() => {
+  resetWebHint();
   cleanupDialogs();
   cleanup();
   setLang('ko');
@@ -350,5 +360,38 @@ describe('assistant bubble chat', () => {
     await open(store);
     expect(screen.getByRole('textbox', { name: 'Message to the assistant' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+  });
+});
+
+// Plan Task 14: without a search address the chat shows a one-time hint that opens Settings › Assistant.
+describe('assistant bubble web search hint', () => {
+  it('shows the hint in chat when no search address is set; its button opens the Assistant pane and it stays gone', async () => {
+    const runCommand = vi.fn();
+    const { store } = setup({ actions: { webSearchConfigured: async () => false, runCommand } });
+    await open(store);
+    await settle();
+    const hint = screen.getByRole('note');
+    expect(hint.textContent).toContain('웹 검색을 쓰려면 설정 › 어시스턴트에서 검색 주소를 넣으세요.');
+    fireEvent.click(screen.getByRole('button', { name: '설정 열기' }));
+    expect(runCommand).toHaveBeenCalledWith('assistant.settings');
+    expect(screen.queryByRole('note')).toBeNull();
+    await act(async () => store.setOpen(false));
+    await open(store);
+    await settle();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('the hint can be dismissed and is not shown when an address is set', async () => {
+    const a = setup({ actions: { webSearchConfigured: async () => false, runCommand: vi.fn() } });
+    await open(a.store);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: '알림 닫기' }));
+    expect(screen.queryByRole('note')).toBeNull();
+    cleanup();
+    resetWebHint();
+    const b = setup({ actions: { webSearchConfigured: async () => true, runCommand: vi.fn() } });
+    await open(b.store);
+    await settle();
+    expect(screen.queryByRole('note')).toBeNull();
   });
 });

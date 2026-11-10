@@ -14,6 +14,9 @@
  *   더한다. 사용법 칩은 모델을 부르지 않고, 만들기 칩은 실험 폴더가 없으면 아무것도 부르지 않는다.
  * - 오염된 기록·요약은 울타리에 싸서 보내고 실행을 오염된 채로 시작한다(`initialTaint`, R11). 기록은 `compact.ts` 의
  *   `toPromptMessages` 로 만들고, 문맥 창의 0.4 에 들어가는 최근 것만 보낸다(압축이 실패했을 때의 대비).
+ * - 웹 도구(Task 14): 대화 칩에서, 이 PC 의 `assistant.json` 에 검색 주소가 있을 때만 `web_search`/`fetch_page` 를 준다.
+ *   `fetch_page` 의 허용 목록은 이번 차례의 사용자 글과 이 폴더 기록의 사용자 글, 검색 결과, 문헌 검색 결과의 링크다.
+ *   검색 중 상태 줄은 보낼 검색어를 그대로 보인다(`web.queryShown`). 한도(검색 3번, 페이지 5개)는 실행마다 새로 센다.
  */
 import type { ToolDef, ToolResult } from '@labnoteo/core';
 import type { AiEnv } from '../ai/aiEnv';
@@ -36,6 +39,9 @@ import { chipNeedsScope, chipSystemPrompt, chipTools } from './chips';
 import { addSectionText, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
 import { cleanLabel, SourceLedger, type Source } from './sources';
+import { readAssistantConfig } from './config';
+import { UrlAllowlist, webAgentTools } from './web/agentTools';
+import { MAX_WEB_QUERY, webIpcFor } from './web/ipc';
 
 export { HISTORY_TAINT } from './compact';
 
@@ -65,7 +71,9 @@ export function approvalConfirm(env: AiEnv, external: ReadonlyMap<string, Extern
     }
     const path = typeof call.arguments.documentPath === 'string' ? call.arguments.documentPath : null;
     const ask = env.host.t('Allow AI tool "{0}" to modify the vault?', tool.name);
-    const prompt = note?.tainted ? `${ask}\n\n${appT('ai.confirm.tainted')}` : ask;
+    const tainted = note?.tainted ? `${ask}\n\n${appT('ai.confirm.tainted')}` : ask;
+    // The web line is shown in addition when web content reached the run (assistant spec §7.3, §11).
+    const prompt = note?.web ? `${tainted}\n\n${appT('web.tainted')}` : tainted;
     // add_section (Task 11A): a new section, worded by the app ("adds … at the end"), not core's "replaces".
     if (isAddSectionPreview(preview)) {
       return env.host.confirm(`${buildApprovalMessage(env.host.t, prompt, path)}\n\n${addSectionText(preview, env.host.t)}`, {
@@ -101,11 +109,30 @@ function notePathOf(tool: ToolDef, args: Record<string, unknown>): string | unde
   return undefined;
 }
 
-/** 도구 하나를 감싸 진행 줄을 내고, 노트를 읽은 결과는 출처 번호(`cite`)와 함께 돌려준다. */
+/** 웹 도구의 상태 줄: 검색은 보낼 검색어 그대로(spec §7.1), 페이지는 호스트. 웹 도구가 아니면 undefined. */
+function webStatus(tool: ToolDef, meta: ExternalToolMeta | undefined, args: Record<string, unknown>): string | undefined {
+  if (meta?.kind !== 'web') return undefined;
+  if (tool.name === 'web_search') {
+    const q = typeof args.query === 'string' ? args.query.trim() : '';
+    return appT('web.queryShown', cleanLabel(q, '…', MAX_WEB_QUERY));
+  }
+  let host = '';
+  try {
+    host = typeof args.url === 'string' ? new URL(args.url).hostname : '';
+  } catch {
+    // An unparsable link is refused by the tool; the line only names the step.
+  }
+  return appT('web.fetching', cleanLabel(host, '…', STATUS_TITLE_MAX));
+}
+
+/**
+ * 도구 하나를 감싸 진행 줄을 내고, 노트를 읽은 결과는 출처 번호(`cite`)와 함께 돌려준다. 문헌 검색 결과의 링크는
+ * `fetch_page` 허용 목록에 들어간다(`scholarLinks`).
+ */
 function instrument(
   tool: ToolDef,
   meta: ExternalToolMeta | undefined,
-  hooks: { running(line: string): void; cite(src: Source): number }
+  hooks: { running(line: string): void; cite(src: Source): number; scholarLinks?(text: string): void }
 ): ToolDef {
   return {
     ...tool,
@@ -113,13 +140,15 @@ function instrument(
       const notePath = notePathOf(tool, args);
       const docPath = typeof args.documentPath === 'string' ? args.documentPath : undefined;
       hooks.running(
-        notePath
-          ? appT('assistant.status.read', basename(notePath))
-          : tool.mutates && docPath && !meta
-            ? appT('assistant.status.write', basename(docPath))
-            : appT('assistant.status.tool', cleanLabel(meta?.toolTitle ?? tool.name, tool.name, STATUS_TITLE_MAX))
+        webStatus(tool, meta, args) ??
+          (notePath
+            ? appT('assistant.status.read', basename(notePath))
+            : tool.mutates && docPath && !meta
+              ? appT('assistant.status.write', basename(docPath))
+              : appT('assistant.status.tool', cleanLabel(meta?.toolTitle ?? tool.name, tool.name, STATUS_TITLE_MAX)))
       );
       const res = await tool.handler(ctx, args);
+      if (res.ok && meta?.kind === 'scholar' && typeof res.data === 'string') hooks.scholarLinks?.(res.data);
       if (!res.ok || !notePath) return res;
       const n = hooks.cite({ kind: 'note', label: basename(notePath), target: notePath });
       return n ? { ...res, data: { cite: n, data: res.data ?? null } } : res;
@@ -131,8 +160,10 @@ function systemPrompt(o: {
   tools: readonly ToolDef[];
   scope?: Scope;
   activePath?: string;
-  /** 외부 도구를 준다. */
+  /** 외부 도구(문헌 검색, MCP, 웹)를 준다. */
   external: boolean;
+  /** 웹 도구를 준다. */
+  web?: boolean;
   /** 울타리에 싼 앞선 답이나 요약이 프롬프트에 있다. */
   fencedHistory: boolean;
   lang: string;
@@ -154,6 +185,11 @@ function systemPrompt(o: {
       : '',
     'If the request needs something these tools cannot do (for example changing the experiment status), ' +
       'do not pretend: answer that you cannot do it and which Labnote command the user can run instead.',
+    o.web
+      ? 'Use web_search only when the question needs information from the web, with short search words and never note text. ' +
+        'fetch_page opens only links from web_search or literature results or links the user typed, exactly as given. ' +
+        'Cite what you use from the web with its cite number.'
+      : '',
     o.chip ?? '',
     replyLanguageInstruction(o.lang),
   ];
@@ -161,6 +197,25 @@ function systemPrompt(o: {
   if (o.external || o.fencedHistory) parts.push(UNTRUSTED_RULES);
   if (o.fencedHistory) parts.push(EARLIER_UNTRUSTED_RULES);
   return parts.filter(Boolean).join(' ');
+}
+
+/**
+ * 이번 실행의 웹 도구(spec §7): 이 PC 의 `assistant.json` 에 검색 주소가 없으면 undefined(도구를 주지 않는다; 말풍선이
+ * 안내 칩을 보인다). 주소 자체는 웹뷰가 넘기지 않는다: Rust 가 부를 때마다 읽는다(D8). 허용 목록은 이번 차례의 글과
+ * 이 폴더 기록의 사용자 글로 시작한다.
+ */
+async function webToolsFor(
+  env: AiEnv,
+  turn: AssistantTurn,
+  signal: AbortSignal,
+  cite: (src: Source) => number
+): Promise<(ReturnType<typeof webAgentTools> & { allowedUrls: UrlAllowlist }) | undefined> {
+  const cfg = await readAssistantConfig(env.invoke);
+  if (!cfg.searxngUrl) return undefined;
+  const allowedUrls = new UrlAllowlist();
+  for (const m of turn.history) if (m.role === 'user') allowedUrls.addFromText(m.text);
+  allowedUrls.addFromText(turn.userText);
+  return { ...webAgentTools(webIpcFor(env.invoke, signal), { allowedUrls, ledger: { add: cite } }), allowedUrls };
 }
 
 /** `makeEnv` 는 실행마다 새 `createAiEnv(ctx)`: 설정과 제공자가 늘 지금 것이다. */
@@ -234,19 +289,25 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
             signal: run$.signal,
             notify: (message) => env.host.notify('warn', message),
           });
+    const cite = (src: Source) => {
+      const known = ledger.list().length;
+      const n = ledger.add(src);
+      if (n > known) sink.source(n, ledger.get(n)!);
+      return n;
+    };
+    // Web tools (Task 14): chat only, and only when this PC has a search address (assistant.json, R9).
+    const web =
+      chip && chip !== 'chat' ? undefined : await webToolsFor(env, turn, run$.signal, cite);
+    const meta = new Map<string, ExternalToolMeta>([...external.meta, ...(web?.meta ?? [])]);
     const hooks = {
       running: (line: string) => {
         state('think');
         sink.status(line);
       },
-      cite: (src: Source) => {
-        const known = ledger.list().length;
-        const n = ledger.add(src);
-        if (n > known) sink.source(n, ledger.get(n)!);
-        return n;
-      },
+      cite,
+      ...(web ? { scholarLinks: (text: string) => web.allowedUrls.addFromResultLines(text) } : {}),
     };
-    const tools = [...coreTools, ...external.tools].map((x) => instrument(x, external.meta.get(x.name), hooks));
+    const tools = [...coreTools, ...external.tools, ...(web?.tools ?? [])].map((x) => instrument(x, meta.get(x.name), hooks));
 
     const check = async (): Promise<void> => {
       try {
@@ -322,7 +383,8 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
           tools,
           scope,
           activePath,
-          external: external.tools.length > 0,
+          external: external.tools.length > 0 || !!web,
+          web: !!web,
           fencedHistory: earlier.fenced,
           lang: env.lang(),
           ...(chip ? { chip: chipSystemPrompt(chip) } : {}),
@@ -338,8 +400,8 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
       ctx,
       temperature: 0.2,
       signal: run$.signal,
-      external: external.meta,
-      confirm: approvalConfirm(env, external.meta),
+      external: meta,
+      confirm: approvalConfirm(env, meta),
       onDelta: (text) => {
         state('talk');
         sink.delta(text);

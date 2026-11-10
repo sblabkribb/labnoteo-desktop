@@ -16,6 +16,14 @@ function composing(e: KeyboardEvent): boolean {
 
 const basename = (p: string): string => p.split('/').filter(Boolean).pop() ?? p;
 
+/** 웹 검색 안내 칩을 닫았거나 그 단추를 눌렀다: 이 실행(앱 세션) 동안 다시 보이지 않는다. */
+let webHintDone = false;
+
+/** 테스트용: 안내 칩을 다시 보일 수 있게 한다. */
+export function resetWebHint(): void {
+  webHintDone = false;
+}
+
 /** 칩마다 입력 칸의 안내 글. */
 function placeholderOf(chip: ChipId): string {
   switch (chip) {
@@ -38,6 +46,7 @@ function placeholderOf(chip: ChipId): string {
  *   사용법 말고는 AI 제공자가 있어야 하고(없으면 ai.configureFirst 와 연동 설정 단추), 만들기 칩은 실험 노트가 열려
  *   있어야 한다(없으면 "실험 노트를 먼저 열어 주세요" 와 실험 목록 단추).
  * - 대화(role="log", aria-live="polite"): 흘러 들어오는 답, 상태 줄, 출처. 글은 글 그대로 그린다(MessageView).
+ * - 대화 칩: 이 PC 에 웹 검색 주소가 없으면 안내 칩(role="note")을 한 번 보인다. "설정 열기"는 어시스턴트 설정을 연다.
  * - 입력 칸: Enter 보내기(IME 조합 중에는 아니다), Shift+Enter 줄바꿈. 실행 중에는 멈추기 단추가 보인다. 섹션 칩은
  *   섹션을 고른 뒤에만, 단위 공정·워크플로 칩은 글이 있어야 보낸다.
  * - 열리면 초점은 입력 칸(없으면 칩 칸의 첫 칸, 그것도 없으면 고른 칩)에, 칩을 바꾸면 그 칩 칸의 첫 칸으로 간다.
@@ -69,6 +78,7 @@ export function Bubble(props: {
   const gate = chipGate(chip, { provider: provider !== false, folder: chat.folder });
   const ready = gate === 'ok';
   const firstChip = useRef(true);
+  const [webHint, setWebHint] = useState(false);
 
   // AI 제공자가 있는지: 열 때와 칩을 바꿀 때 다시 본다(설정 창에서 바꿨을 수 있다)
   const { ready: checkReady } = chat;
@@ -81,6 +91,26 @@ export function Bubble(props: {
       live = false;
     };
   }, [checkReady, chip]);
+
+  // 대화 칩: 웹 검색 주소가 없으면 한 번 안내한다(Task 14). 닫거나 설정을 열면 다시 보이지 않는다.
+  const webConfigured = actions?.webSearchConfigured;
+  useEffect(() => {
+    if (chip !== 'chat' || !ready || webHintDone || !webConfigured) return;
+    let live = true;
+    void webConfigured().then(
+      (ok) => {
+        if (live && !ok && !webHintDone) setWebHint(true);
+      },
+      (err: unknown) => console.warn('[labnoteo] assistant could not read the web search setting:', err)
+    );
+    return () => {
+      live = false;
+    };
+  }, [chip, ready, webConfigured]);
+  const closeWebHint = () => {
+    webHintDone = true;
+    setWebHint(false);
+  };
 
   // 섹션 칩: 열린 노트의 제목들
   const noteReader = actions?.activeNote;
@@ -301,6 +331,33 @@ export function Bubble(props: {
         <p className="pet-bubble-notice" role="status">
           {chat.notice}
         </p>
+      ) : null}
+      {webHint && chip === 'chat' && ready ? (
+        <div className="pet-hint" role="note">
+          <Icon name="search" size={14} />
+          <p className="pet-hint-text">{t('web.noUrl')}</p>
+          {run ? (
+            <button
+              type="button"
+              className="btn pet-hint-open"
+              onClick={() => {
+                closeWebHint();
+                run('assistant.settings');
+              }}
+            >
+              {t('web.hint.open')}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="ibtn pet-hint-close"
+            aria-label={t('web.hint.dismiss')}
+            title={t('web.hint.dismiss')}
+            onClick={closeWebHint}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </div>
       ) : null}
       <div className="pet-log" role="log" aria-live="polite" aria-relevant="additions" aria-label={t('pet.log')}>
         {chat.messages.length === 0 && !chat.summarised ? <p className="pet-bubble-greeting">{t('pet.greeting')}</p> : null}

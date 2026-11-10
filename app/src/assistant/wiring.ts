@@ -5,7 +5,7 @@
  * - `bubbleActions`: 출처 열기(노트는 편집기, 주소는 `links/openExternal.ts` 로 시스템 브라우저)와 "노트에 넣기"
  *   (aiAnswerDialog 의 onInsert 처럼 `insertBlock`; 바깥 내용이 닿은 답은 `ai.confirm.tainted` 로 먼저 묻는다).
  *   칩(Task 11B)을 위해: 명령 부르기(`findCommand` → `runCommand`, 실패는 알림), 열린 노트의 글과 커서 줄,
- *   실험 폴더의 워크플로 노트 목록(`###_….md`, README 빼고, 번호 차례).
+ *   실험 폴더의 워크플로 노트 목록(`###_….md`, README 빼고, 번호 차례). 웹 검색 주소가 있는지(Task 14, 안내 칩).
  */
 import { createAiEnv } from '../ai/aiEnv';
 import { t } from '../i18n/t';
@@ -16,6 +16,7 @@ import { insertBlock } from '../labnote/port/aiCommon';
 import { openExternal, tauriExternalDeps } from '../links/openExternal';
 import { builtinRuntime } from './builtinRuntime';
 import { isWorkflowNotePath } from './chips';
+import { readAssistantConfig } from './config';
 import { prepareHistory } from './compact';
 import type { BubbleActions } from './MessageView';
 import { registerRuntime, type AssistantRuntime } from './runtime';
@@ -68,6 +69,9 @@ export function bubbleActions(getCtx: () => CommandContext | undefined): BubbleA
         .filter((n) => !n.includes('/') && isWorkflowNotePath(n))
         .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
         .map((n) => `${dir}/${n}`);
+    },
+    async webSearchConfigured() {
+      return !!(await readAssistantConfig()).searxngUrl;
     },
     openSource(src) {
       const ctx = getCtx();

@@ -15,17 +15,22 @@ import { scholarIpcFor } from '../integrations/scholar/ipc';
 import type { AiEnv } from './aiEnv';
 
 export interface ExternalToolMeta {
-  kind: 'mcp' | 'scholar';
+  /** `web` 은 도우미의 `web_search`/`fetch_page`(assistant/web/agentTools.ts, assistant spec §7). */
+  kind: 'mcp' | 'scholar' | 'web';
   serverId?: string;
   serverName?: string;
   toolTitle?: string;
   readOnly: boolean;
 }
 
-/** runAgent 가 confirm 의 넷째 인자로 넘기는 것(spec §7.4). */
+/**
+ * runAgent 가 confirm 의 넷째 인자로 넘기는 것(spec §7.4). `webAfterTaint`: 바깥 내용이 닿은 뒤의 `web_search`
+ * (검색어가 PC 밖으로 나간다, assistant spec §7.1). `web`: 이 실행에 웹에서 온 내용이 닿았다(확인 글에 웹 줄을 붙인다).
+ */
 export interface ConfirmNote {
   tainted: boolean;
-  reason?: 'crossServer' | 'bigArgs';
+  reason?: 'crossServer' | 'bigArgs' | 'webAfterTaint';
+  web?: boolean;
 }
 
 export interface ExternalTools {
@@ -83,9 +88,20 @@ export function argsPreview(args: Record<string, unknown>): string {
   return json.length > BIG_ARGS_CHARS ? `${json.slice(0, BIG_ARGS_CHARS - 1)}…` : json;
 }
 
+// Controls (C0, DEL, C1) and bidi/zero-width formatting characters.
+// eslint-disable-next-line no-control-regex
+const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g;
+
+/** 확인 글에 넣을 검색어: 한 줄, 제어·양방향 글자 없이, 200자까지(Rust `web_search::MAX_QUERY`). */
+function queryLine(args: Record<string, unknown>): string {
+  const q = typeof args.query === 'string' ? args.query : '';
+  return [...q.replace(/[\r\n\t]+/g, ' ').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim()].slice(0, 200).join('');
+}
+
 /**
  * 외부 도구 호출의 확인 글(spec §7.2, §7.4): 서버와 도구 이름, 왜 묻는지, 보낼 인자. core `buildApprovalMessage` 는
- * core 미리보기만 알아서 쓰지 않는다.
+ * core 미리보기만 알아서 쓰지 않는다. 바깥 내용이 닿은 뒤의 웹 검색은 보낼 검색어를 따로 보이고, 웹에서 온 내용이
+ * 닿은 실행이면 웹 줄(`web.tainted`)을 덧붙인다(assistant spec §7.3).
  */
 export function externalApprovalMessage(call: ToolCall, meta: ExternalToolMeta, mutates: boolean, note?: ConfirmNote): string {
   const server = meta.serverName ?? meta.serverId ?? meta.kind;
@@ -94,7 +110,9 @@ export function externalApprovalMessage(call: ToolCall, meta: ExternalToolMeta, 
   if (mutates) parts.push(t('mcpClient.confirm.writes'));
   if (note?.reason === 'crossServer') parts.push(t('ai.confirm.crossServer'));
   if (note?.reason === 'bigArgs') parts.push(t('mcpClient.confirm.bigArgs'));
+  if (note?.reason === 'webAfterTaint') parts.push(t('web.confirm.afterTaint', queryLine(call.arguments)));
   if (note?.tainted && mutates) parts.push(t('ai.confirm.tainted'));
+  if (note?.web && (mutates || note.reason)) parts.push(t('web.tainted'));
   parts.push(`${t('mcpClient.confirm.args')}\n${argsPreview(call.arguments)}`);
   return parts.join('\n\n');
 }

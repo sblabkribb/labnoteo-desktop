@@ -1,5 +1,6 @@
 /**
- * 바깥에서 온 글의 울타리(spec §7.3). MCP 도구와 문헌 검색의 결과·오류 글은 모두 이 함수로 감싼 뒤 모델에 간다.
+ * 바깥에서 온 글의 울타리(spec §7.3). MCP 도구, 문헌 검색, 웹(검색 결과와 가져온 페이지, assistant spec §7.3)의
+ * 결과·오류 글은 모두 이 함수로 감싼 뒤 모델에 간다.
  *
  * ```
  * <untrusted-data source="mcp:RAPID/search_parts" id="7f3a9c21b04e">
@@ -11,8 +12,8 @@
  */
 
 export interface UntrustedSource {
-  kind: 'mcp' | 'scholar';
-  /** source 속성에 들어가는 이름(예: `mcp:RAPID/search_parts`, `scholar:pubmed`). */
+  kind: 'mcp' | 'scholar' | 'web';
+  /** source 속성에 들어가는 이름(예: `mcp:RAPID/search_parts`, `scholar:pubmed`, 웹은 `web search` 나 페이지의 호스트). */
   label: string;
   serverId?: string;
 }

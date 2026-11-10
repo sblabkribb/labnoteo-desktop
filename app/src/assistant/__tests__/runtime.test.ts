@@ -106,7 +106,12 @@ async function setup(
   const th = createTestHost(FILES, { ...LLM, scholarSources: NO_SCHOLAR, ...opts.settings });
   hosts.push(th);
   if (opts.mount !== false) await th.mount(NOTE);
-  const f = fakeInvoke({ net_cancel: () => null, vault_current: () => ({ root: 'C:/Vault', name: 'Vault' }), ...opts.routes });
+  const f = fakeInvoke({
+    net_cancel: () => null,
+    vault_current: () => ({ root: 'C:/Vault', name: 'Vault' }),
+    assistant_config_read: () => ({}),
+    ...opts.routes,
+  });
   const makeEnv = (): AiEnv => ({ ...createAiEnv(th.ctx, f.invoke), provider });
   return { th, f, rt: builtinRuntime(makeEnv) };
 }
@@ -553,5 +558,87 @@ describe('builtinRuntime', () => {
     expect(line).toContain('evil x');
     expect(line).toContain('x'.repeat(STATUS_TITLE_MAX - 'evil '.length));
     expect(line).not.toContain('x'.repeat(STATUS_TITLE_MAX));
+  });
+});
+
+// Plan Task 14: the web tools join a chat only when this PC has a search address (assistant.json).
+describe('builtinRuntime web tools', () => {
+  const SEARX = { assistant_config_read: () => ({ searxngUrl: 'http://127.0.0.1:8888' }) };
+  const hits = {
+    hits: [{ title: 'PCR guide', url: 'https://example.test/pcr?id=1', snippet: 'spin column', engine: 'fake' }],
+    enginesDown: false,
+  };
+
+  it('without a search address no web tool is offered', async () => {
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p);
+    await rt.run(turnOf('hi'), recordSink().sink, go());
+    expect(p.seen[0][0].content).not.toContain('web_search');
+    expect(p.seen[0][0].content).not.toContain('fetch_page');
+    expect(p.seen[0][0].content).not.toContain(UNTRUSTED_RULES);
+  });
+
+  it('with a search address chat offers web_search and fetch_page with the untrusted rules; chips do not', async () => {
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p, { routes: SEARX });
+    await rt.run(turnOf('hi'), recordSink().sink, go());
+    expect(p.seen[0][0].content).toContain('web_search, fetch_page');
+    expect(p.seen[0][0].content).toContain(UNTRUSTED_RULES);
+
+    const q = new Script([answer('끝')]);
+    const b = await setup(q, { routes: SEARX });
+    await b.rt.run(
+      turnOf('워크플로', { mode: { kind: 'chip', chip: 'workflow', params: { documentPath: DIR } } }),
+      recordSink().sink,
+      go()
+    );
+    expect(q.seen[0][0].content).not.toContain('web_search');
+  });
+
+  it('a search shows the query in the status line, cites the hits and lets fetch_page open a hit', async () => {
+    const p = new Script([
+      toolTurn('web_search', { query: 'PCR 정제' }),
+      toolTurn('fetch_page', { url: 'https://example.test/pcr?id=1' }),
+      answer('정리했어요 [1]'),
+    ]);
+    const fetched: unknown[] = [];
+    const { rt } = await setup(p, {
+      routes: {
+        ...SEARX,
+        web_search: () => hits,
+        fetch_page: (a) => {
+          fetched.push(a.url);
+          return { kind: 'ok', title: 'PCR guide', url: 'https://example.test/pcr?id=1', text: 'Bind, wash, elute.' };
+        },
+      },
+    });
+    const { rec, sink } = recordSink();
+    const res = await rt.run(turnOf('PCR 정제 방법 찾아 줘'), sink, go());
+    expect(rec.status[0]).toBe(t('web.queryShown', 'PCR 정제'));
+    expect(fetched).toEqual(['https://example.test/pcr?id=1']);
+    expect(res.sources).toEqual([{ kind: 'web', label: 'PCR guide', target: 'https://example.test/pcr?id=1' }]);
+    expect(rec.sources.map(([n]) => n)).toEqual([1]);
+    expect(res.tainted).toBe(true);
+  });
+
+  it('fetch_page opens a URL the user typed earlier in this folder, and refuses others without IPC', async () => {
+    const p = new Script([
+      toolTurn('fetch_page', { url: 'https://user.test/protocol' }),
+      toolTurn('fetch_page', { url: 'https://user.test/protocol?note=secret' }),
+      answer('끝'),
+    ]);
+    const fetched: unknown[] = [];
+    const { rt } = await setup(p, {
+      routes: {
+        ...SEARX,
+        fetch_page: (a) => {
+          fetched.push(a.url);
+          return { kind: 'blocked_or_js_required', url: a.url };
+        },
+      },
+    });
+    await rt.run(turnOf('그 페이지 읽어 줘', { history: [msg('user', '참고: https://user.test/protocol')] }), recordSink().sink, go());
+    expect(fetched).toEqual(['https://user.test/protocol']);
+    expect(JSON.stringify(p.seen[2])).toContain('not from search results or the user');
   });
 });

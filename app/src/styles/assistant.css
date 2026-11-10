@@ -247,6 +247,22 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   gap: var(--space-2);
   font-size: var(--font-size-sm);
 }
+/* 웹 검색 안내 칩(Task 14): 검색 주소가 없을 때 대화 칩에 한 번 */
+.pet-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-element);
+  background: var(--bg-side);
+  font-size: var(--font-size-sm);
+}
+.pet-hint-text {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
 .pet-howto p,
 .pet-gate p { margin: 0; }
 .pet-howto-title {
