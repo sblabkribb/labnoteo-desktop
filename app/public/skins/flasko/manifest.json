@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "id": "flasko",
+  "name": "Flasko",
+  "author": "labnoteO",
+  "licence": "CC0-1.0",
+  "version": "1.0.0",
+  "description": "A little round-bottom flask that helps with lab notes.",
+  "frame": {
+    "width": 32,
+    "height": 32
+  },
+  "states": {
+    "idle": {
+      "sheet": "idle.png",
+      "frames": 4,
+      "fps": 4
+    },
+    "talk": {
+      "sheet": "talk.png",
+      "frames": 4,
+      "fps": 8
+    },
+    "think": {
+      "sheet": "think.png",
+      "frames": 6,
+      "fps": 6
+    },
+    "done": {
+      "sheet": "done.png",
+      "frames": 6,
+      "fps": 10
+    }
+  }
+}
