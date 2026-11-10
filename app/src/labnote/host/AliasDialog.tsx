@@ -2,7 +2,7 @@ import type { PromptHint } from '@labnoteo/core';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { t } from '../../i18n/t';
 import { DialogFrame, isComposing } from './DialogFrame';
-import type { DialogSpec } from './dialogStore';
+import { ALIAS_BACK, type DialogSpec } from './dialogStore';
 
 /** 플러그인 `WorkflowAliasOpts`(src/modals.ts)와 같은 모양. */
 export interface AliasOpts {
@@ -10,8 +10,10 @@ export interface AliasOpts {
   id: string;
   /** 카탈로그 이름, 예: `Nucleotide Sequencing`. */
   catalogName: string;
-  /** 대화상자 제목. */
-  title: string;
+  /** 대화상자 제목. 없으면 "별칭 (선택)"(UI 재설계 Task 11). */
+  title?: string;
+  /** 고르기 다음 단계: "← 다시 고르기" 단추를 보이고, Esc 는 닫지 않고 고르기로 돌아간다(ALIAS_BACK). */
+  back?: boolean;
   /** 빈 입력 칸에 보이는 글자. */
   placeholder?: string;
   /** 처음 별칭. 선택된 채로 열려 치면 바뀐다. */
@@ -67,7 +69,7 @@ export function AliasDialog(props: {
 
   const describedBy = [opts.hint ? `${id}-hint` : '', error ? `${id}-error` : ''].filter(Boolean).join(' ') || undefined;
   return (
-    <DialogFrame title={opts.title} className="alias" onCancel={props.onCancel}>
+    <DialogFrame title={opts.title ?? t('alias.title')} className="alias" onCancel={opts.back ? () => props.onDone(ALIAS_BACK) : props.onCancel} onClose={props.onCancel}>
       {opts.about ? <p className="alias-about">{opts.about}</p> : null}
       {opts.description ? <p className="alias-description">{opts.description}</p> : null}
       <div className="alias-row">
@@ -101,6 +103,11 @@ export function AliasDialog(props: {
         </p>
       ) : null}
       <div className="dialog-actions">
+        {opts.back ? (
+          <button type="button" className="alias-back" onClick={() => props.onDone(ALIAS_BACK)}>
+            {t('alias.back')}
+          </button>
+        ) : null}
         <button type="button" className="primary" onClick={submit}>
           {t('dialog.ok')}
         </button>

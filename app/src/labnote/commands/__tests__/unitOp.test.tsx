@@ -12,6 +12,8 @@ import { clearCommandsForTest, commandById } from '../registry';
 import { registerAllCommands } from '../registerAll';
 import { runCommand } from '../runCommand';
 import { insertUnitOp, type ChosenUnitOp } from '../unitOp';
+import { ALIAS_BACK } from '../../host/dialogStore';
+import { rankPickItems } from '../../port/rankPickItems';
 
 const DIR = 'labnote/001_단백질_발현';
 const README_PATH = `${DIR}/README.labnote.md`;
@@ -99,6 +101,33 @@ describe('insert-unit-operation', () => {
 
     expect(m.view().state.selection.main.head).toBe(added);
     expect(h.notes).toEqual([{ kind: 'info', message: expect.stringContaining('USW010') }]);
+  });
+
+  it('the picker groups HW/SW, finds equipment; Back on the alias step reopens it with the query (UI redesign Task 11)', async () => {
+    const m = await openWorkflow();
+    cursorAt(m, '### [UHW010 Mixing]', 5);
+    h.answer.pick((items, opts) => {
+      opts?.onQuery?.('plate reader');
+      return pickOp('UHW380')(items);
+    }, pickOp('USW010'));
+    let hint: unknown = 'unset';
+    h.answer.alias(ALIAS_BACK, (opts) => {
+      hint = opts.hint?.('1차');
+      return '1차';
+    });
+    await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx)));
+    const [first, second] = h.asked.pick;
+    expect(first.opts).toMatchObject({ catalog: true, recentKey: 'unitOp', query: '' });
+    expect(second.opts?.query).toBe('plate reader');
+    const groups = new Set(first.items.map((i) => first.opts?.groupOf?.(i)));
+    expect([...groups]).toEqual(['HW UO', 'SW UO']);
+    expect(rankPickItems(first.items, 'plate reader').map((i) => (i.value as ChosenUnitOp).op.id)).toContain('UHW380');
+    expect(h.asked.alias.map((a) => a.back)).toEqual([true, true]);
+    // UO 별칭에는 길이 제한이 없다: 글자 수 안내는 보이지 않는다
+    expect(hint).toBeUndefined();
+    const doc = m.view().state.doc.toString();
+    expect(doc).toContain('### [USW010 ');
+    expect(doc).not.toContain('### [UHW380 ');
   });
 
   it('a single undo removes the block and the TOC entry together and restores the exact original text', async () => {

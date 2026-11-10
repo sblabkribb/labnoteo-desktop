@@ -14,7 +14,8 @@ export function Popover(p: {
   anchor: HTMLElement;
   label: string;
   onClose: (opts: { restoreFocus: boolean }) => void;
-  placement?: 'above' | 'below';
+  /** 'right': 기준 요소(트리 줄)의 오른쪽에, 위 끝을 맞춰 뜬다. 자리가 없으면 아래로. */
+  placement?: 'above' | 'below' | 'right';
   className?: string;
   children: ReactNode;
 }) {
@@ -32,8 +33,13 @@ export function Popover(p: {
     const above = a.top - GAP - b.height;
     const below = a.bottom + GAP;
     const fitsBelow = below + b.height <= window.innerHeight - MARGIN;
-    const top = placement === 'above' ? (above >= MARGIN ? above : below) : fitsBelow ? below : Math.max(MARGIN, above);
-    el.style.setProperty('left', `${Math.round(left)}px`);
+    let top = placement === 'above' ? (above >= MARGIN ? above : below) : fitsBelow ? below : Math.max(MARGIN, above);
+    let x = left;
+    if (placement === 'right' && a.right + GAP + b.width <= window.innerWidth - MARGIN) {
+      x = a.right + GAP;
+      top = Math.max(MARGIN, Math.min(a.top, window.innerHeight - MARGIN - b.height));
+    }
+    el.style.setProperty('left', `${Math.round(x)}px`);
     el.style.setProperty('top', `${Math.round(top)}px`);
     el.querySelector<HTMLElement>('[role="radio"][tabindex="0"], button:not(:disabled)')?.focus();
   }, [p.anchor, placement]);

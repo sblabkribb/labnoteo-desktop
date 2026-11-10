@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { PickItem } from '@labnoteo/core';
 import { t } from '../../i18n/t';
 import { rankPickItems, withSelectedFirst } from '../port/rankPickItems';
@@ -19,6 +19,79 @@ function ItemText({ item }: { item: PickItem<unknown> }) {
   );
 }
 
+/** 카탈로그 코드가 앞에 붙은 이름(`WB030: DNA Assembly`). */
+const CODE = /^([A-Za-z]{1,4}\d{2,4}[A-Za-z]?)\s*:\s*(.*)$/;
+/** "최근" 묶음에 두는 가장 많은 수. */
+export const PICKER_RECENT_MAX = 5;
+const RECENT_PREFIX = 'labnoteo.recent.';
+
+/** 최근 고른 항목의 열쇠(코드, 없으면 이름). 저장소가 없거나 깨졌으면 빈 목록. */
+function readRecent(key: string): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(RECENT_PREFIX + key) ?? '[]');
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecent(key: string, id: string): void {
+  try {
+    const next = [id, ...readRecent(key).filter((v) => v !== id)].slice(0, PICKER_RECENT_MAX);
+    localStorage.setItem(RECENT_PREFIX + key, JSON.stringify(next));
+  } catch {
+    // 저장소를 쓸 수 없다(사생활 창 등): 최근 목록 없이 쓴다
+  }
+}
+
+const itemKey = (item: PickItem<unknown>) => CODE.exec(item.label)?.[1] ?? item.label;
+
+/** 카탈로그 행: 고정폭 코드, 영어 이름, 흐린 한 줄 설명. 상세 줄은 고른 행에만. */
+function CatalogText({ item, active }: { item: PickItem<unknown>; active: boolean }) {
+  const m = CODE.exec(item.label);
+  return (
+    <>
+      {m ? <span className="picker-code">{m[1]}</span> : null}
+      <span className="picker-label">{m ? m[2] : item.label}</span>
+      {item.description ? <small className="picker-desc">{item.description}</small> : null}
+      {active && item.detail ? <small className="picker-detail">{item.detail}</small> : null}
+    </>
+  );
+}
+
+/**
+ * 보이는 차례와 묶음 머리. 검색어가 있으면 순위 그대로(머리 없음). 없으면 최근 고른 것을 맨 위 "최근" 묶음에, 나머지는
+ * groupOf 의 묶음(처음 나온 차례)으로 모은다.
+ */
+function arrange(
+  ranked: PickItem<unknown>[],
+  query: string,
+  recent: readonly string[],
+  groupOf: ((item: PickItem<unknown>) => string | undefined) | undefined,
+): { items: PickItem<unknown>[]; heads: Map<number, string> } {
+  const heads = new Map<number, string>();
+  if (query.trim() || (!groupOf && recent.length === 0)) return { items: ranked, heads };
+  const recentItems = recent.flatMap((id) => ranked.filter((item) => itemKey(item) === id).slice(0, 1));
+  const rest = ranked.filter((item) => !recentItems.includes(item));
+  const order: string[] = [];
+  const byGroup = new Map<string, PickItem<unknown>[]>();
+  for (const item of rest) {
+    const g = groupOf?.(item) ?? '';
+    if (!byGroup.has(g)) {
+      order.push(g);
+      byGroup.set(g, []);
+    }
+    byGroup.get(g)!.push(item);
+  }
+  const items = [...recentItems];
+  if (recentItems.length > 0) heads.set(0, t('picker.recent'));
+  for (const g of order) {
+    if (g) heads.set(items.length, g);
+    items.push(...byGroup.get(g)!);
+  }
+  return { items, heads };
+}
+
 function MoreOrEmpty({ shown, total }: { shown: number; total: number }) {
   if (total === 0) return <p className="picker-note">{t('picker.empty')}</p>;
   if (total > shown) return <p className="picker-note">{t('picker.more', total - shown)}</p>;
@@ -32,14 +105,16 @@ export function Picker(props: {
   onCancel: () => void;
 }) {
   const { spec } = props;
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(spec.query ?? '');
   const [active, setActive] = useState(0);
+  // 연 순간의 최근 목록: 고르는 동안 바뀌지 않는다
+  const [recent] = useState(() => (spec.recentKey ? readRecent(spec.recentKey) : []));
   const input = useRef<HTMLInputElement>(null);
-  const list = useRef<HTMLUListElement>(null);
+  const optionEls = useRef<(HTMLLIElement | null)[]>([]);
   const id = useId();
-  const ranked = useMemo(
-    () => withSelectedFirst(rankPickItems(spec.items, query), query, spec.selected),
-    [spec.items, spec.selected, query],
+  const { items: ranked, heads } = useMemo(
+    () => arrange(withSelectedFirst(rankPickItems(spec.items, query), query, spec.selected), query, recent, spec.groupOf),
+    [spec.items, spec.selected, spec.groupOf, query, recent],
   );
   const shown = ranked.slice(0, PICKER_MAX_ROWS);
   const current = Math.min(active, shown.length - 1);
@@ -48,10 +123,13 @@ export function Picker(props: {
   useEffect(() => input.current?.focus(), []);
   useEffect(() => {
     if (current < 0) return;
-    const el = list.current?.children[current] as HTMLElement | undefined;
-    el?.scrollIntoView?.({ block: 'nearest' });
+    optionEls.current[current]?.scrollIntoView?.({ block: 'nearest' });
   }, [current]);
 
+  const choose = (item: PickItem<unknown>) => {
+    if (spec.recentKey) writeRecent(spec.recentKey, itemKey(item));
+    props.onDone(item.value);
+  };
   const move = (delta: number) => setActive(Math.max(0, Math.min(shown.length - 1, current + delta)));
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (isComposing(e)) return;
@@ -61,12 +139,12 @@ export function Picker(props: {
       move(step);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (current >= 0) props.onDone(shown[current].value);
+      if (current >= 0) choose(shown[current]);
     }
   };
 
   return (
-    <DialogFrame title={spec.title} className="picker" onCancel={props.onCancel} unsolicited={spec.unsolicited}>
+    <DialogFrame title={spec.title} className={spec.catalog ? 'picker catalog' : 'picker'} onCancel={props.onCancel} unsolicited={spec.unsolicited}>
       <input
         ref={input}
         type="text"
@@ -80,24 +158,34 @@ export function Picker(props: {
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
+          spec.onQuery?.(e.target.value);
           setActive(0);
         }}
         onKeyDown={onKeyDown}
       />
-      <ul ref={list} id={`${id}-list`} role="listbox" aria-label={spec.title ?? t('picker.list')} className="picker-list">
+      <ul id={`${id}-list`} role="listbox" aria-label={spec.title ?? t('picker.list')} className="picker-list">
         {shown.map((item, i) => (
-          <li
-            key={i}
-            id={optionId(i)}
-            role="option"
-            aria-selected={i === current}
-            className={item.dimmed ? 'picker-option dimmed' : 'picker-option'}
-            onMouseDown={(e) => e.preventDefault()}
-            onMouseMove={() => i !== current && setActive(i)}
-            onClick={() => props.onDone(item.value)}
-          >
-            <ItemText item={item} />
-          </li>
+          <Fragment key={i}>
+            {heads.has(i) ? (
+              <li role="presentation" aria-hidden="true" className="picker-group">
+                {heads.get(i)}
+              </li>
+            ) : null}
+            <li
+              ref={(el) => {
+                optionEls.current[i] = el;
+              }}
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === current}
+              className={item.dimmed ? 'picker-option dimmed' : 'picker-option'}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseMove={() => i !== current && setActive(i)}
+              onClick={() => choose(item)}
+            >
+              {spec.catalog ? <CatalogText item={item} active={i === current} /> : <ItemText item={item} />}
+            </li>
+          </Fragment>
         ))}
       </ul>
       <MoreOrEmpty shown={shown.length} total={ranked.length} />

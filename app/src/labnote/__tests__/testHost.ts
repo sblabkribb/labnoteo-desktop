@@ -21,6 +21,7 @@ import type { CommandContext } from '../commands/context';
 import { editorAwareFs } from '../editorAwareFs';
 import { coreT } from '../i18n';
 import type { AliasOpts, AppHost } from '../host/createAppHost';
+import type { AliasBack, PickExtras } from '../host/dialogStore';
 import { activeEditTarget, openNote } from '../openNotes';
 import { fromPluginData, type AppSettings } from '../settings';
 import { editorConfigFrom } from '../../samples/editorConfig';
@@ -31,7 +32,7 @@ import { mountEditor } from './editorHarness';
 type Answer<A extends unknown[], R> = R | ((...args: A) => R);
 
 export interface Asked {
-  pick: Array<{ items: PickItem<unknown>[]; opts?: { title?: string; placeholder?: string; selected?: unknown } }>;
+  pick: Array<{ items: PickItem<unknown>[]; opts?: { title?: string; placeholder?: string; selected?: unknown } & PickExtras }>;
   prompt: PromptOpts[];
   confirm: Array<{ message: string; opts?: { confirmLabel?: string } }>;
   alias: AliasOpts[];
@@ -53,7 +54,7 @@ export interface TestHost {
     pick(...a: Array<string | undefined | ((items: PickItem<unknown>[], opts: Asked['pick'][number]['opts']) => unknown)>): void;
     prompt(...a: Array<Answer<[PromptOpts], string | undefined>>): void;
     confirm(...a: Array<Answer<[string], boolean>>): void;
-    alias(...a: Array<Answer<[AliasOpts], string | undefined>>): void;
+    alias(...a: Array<Answer<[AliasOpts], string | undefined | AliasBack>>): void;
     /** 고를 단추의 값, 또는 받은 글로 값을 고르는 함수. 답이 떨어지면 닫은 것(undefined)이다. */
     choose(...a: unknown[]): void;
   };
@@ -102,7 +103,7 @@ export function createTestHost(
 
   const host: AppHost = {
     fs,
-    pick: async <T>(items: PickItem<T>[], opts?: { title?: string; placeholder?: string; selected?: T }) => {
+    pick: async <T>(items: PickItem<T>[], opts?: { title?: string; placeholder?: string; selected?: T } & PickExtras) => {
       asked.pick.push({ items: items as PickItem<unknown>[], opts });
       return next<T | undefined>(queues.pick, undefined, items, opts);
     },
@@ -117,7 +118,7 @@ export function createTestHost(
     },
     alias: async (opts) => {
       asked.alias.push(opts);
-      return next<string | undefined>(queues.alias, undefined, opts);
+      return next<string | undefined | AliasBack>(queues.alias, undefined, opts);
     },
     choose: async <T>(message: string, choices: readonly { label: string; value: T }[], opts?: { title?: string }) => {
       asked.choose.push({ message, choices: [...choices], opts });

@@ -4,6 +4,9 @@
  */
 import type { PickItem } from '@labnoteo/core';
 import { rankPickItems, withSelectedFirst } from '../port/rankPickItems';
+import { catalogKoFields } from '../port/aliasHints';
+import workflows from '../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/workflows_en.json';
+import hw from '../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_hw_en.json';
 
 const op = (id: string, name: string, ko: string, detail: string): PickItem<string> => ({
   label: `${id}: ${name}`,
@@ -94,5 +97,43 @@ describe('withSelectedFirst', () => {
   it('leaves a searched list to its ranking', () => {
     const ranked = withSelectedFirst(rankPickItems(ITEMS, '배양'), '배양', 'UHW060');
     expect(ranked.map((i) => i.value)).toEqual(['UHW180', 'UHW190', 'UHW060', 'UHW130']);
+  });
+});
+
+describe('rankPickItems: catalog ranking (UI redesign Task 11)', () => {
+  // The real bundled catalog, built the way the pickers build it (Korean UI)
+  const wfItems = (workflows as { workflows: { id: string; name: string; description: string; category: string }[] }).workflows.map(
+    (wf): PickItem<string> => ({ label: `${wf.id}: ${wf.name}`, ...catalogKoFields(wf.id, wf.category, wf.description, 'ko'), value: wf.id }),
+  );
+  const hwItems = (hw as { unitOperations: { id: string; name: string; description: string; equipment?: string }[] }).unitOperations.map(
+    (op): PickItem<string> => {
+      const fields = catalogKoFields(op.id, 'HW', op.description, 'ko');
+      return { label: `${op.id}: ${op.name}`, ...fields, keywords: [...(fields.keywords ?? []), ...(op.equipment ? [op.equipment] : [])], value: op.id };
+    },
+  );
+  const ids = (items: PickItem<string>[], q: string) => rankPickItems(items, q).map((i) => i.value);
+
+  it('an exact code comes first', () => {
+    expect(ids(wfItems, 'wb030')[0]).toBe('WB030');
+    expect(ids(hwItems, 'UHW380')[0]).toBe('UHW380');
+  });
+
+  it('조립 ranks WB030 (ko name "DNA 조립") above WB010 (DNA 올리고머 조립)', () => {
+    const found = ids(wfItems, '조립');
+    expect(found.indexOf('WB030')).toBeGreaterThanOrEqual(0);
+    expect(found.indexOf('WB030')).toBeLessThan(found.indexOf('WB010'));
+  });
+
+  it('an exact English name beats a name that only starts with it', () => {
+    expect(ids(wfItems, 'dna assembly')[0]).toBe('WB030');
+  });
+
+  it('"plate reader" and "reader" find UHW380 Microplate Reading (token-AND across name, description and equipment)', () => {
+    expect(ids(hwItems, 'plate reader')).toContain('UHW380');
+    expect(ids(hwItems, 'reader')).toContain('UHW380');
+  });
+
+  it('every token must match somewhere', () => {
+    expect(ids(hwItems, 'plate zzzz')).toEqual([]);
   });
 });

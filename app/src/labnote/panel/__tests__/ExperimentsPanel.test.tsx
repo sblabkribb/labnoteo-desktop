@@ -11,7 +11,13 @@ import { ContextMenu } from '../../ui/ContextMenu';
 import { closeMenu } from '../../ui/menuStore';
 import { ExperimentsPanel } from '../ExperimentsPanel';
 import { WorkflowsPanel } from '../WorkflowsPanel';
-import { DONE, EXP, experimentVault, expReadme, PLAN, WF2 } from './experimentFixtures';
+import { DONE, EXP, experimentVault, expReadme, PLAN, WF1, WF2 } from './experimentFixtures';
+import workflowsJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/workflows_en.json';
+import hwJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_hw_en.json';
+import swJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_sw_en.json';
+
+const WORKFLOWS = workflowsJson.workflows.length;
+const UNIT_OPS = hwJson.unitOperations.length + swJson.unitOperations.length;
 
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }));
 vi.mock('../../commands/unitOp', () => ({ insertUnitOp: vi.fn(async () => undefined), unitOpCommands: [] }));
@@ -288,18 +294,93 @@ describe('ExperimentsPanel', () => {
     expect(await findRow(/끝난 실험 고침/)).toBeTruthy();
   });
 
-  it('the catalog tree still offers Insert unit operation', async () => {
+  it('the catalog sits collapsed at the bottom with its counts; expanded it splits into Workflows / HW UO / SW UO', async () => {
     const user = userEvent.setup();
     mount();
+    const head = await screen.findByRole('button', { name: /^카탈로그/ });
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain(`워크플로 ${WORKFLOWS} · UO ${UNIT_OPS}`);
+    expect(screen.queryByRole('tree', { name: '카탈로그' })).toBeNull();
+    await user.click(head);
     const catalog = await screen.findByRole('tree', { name: '카탈로그' });
-    const hwRoot = await within(catalog).findByRole('treeitem', { name: /^HW Unit Operations \[\d+\]$/ });
-    await user.click(hwRoot);
+    const roots = within(catalog)
+      .getAllByRole('treeitem')
+      .filter((li) => li.getAttribute('aria-level') === '1')
+      .map((li) => li.querySelector('.wf-tree-label')?.textContent);
+    expect(roots).toEqual(['워크플로', 'HW UO', 'SW UO']);
+  });
+
+  it('the catalog tree still offers Insert unit operation from its menu', async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole('button', { name: /^카탈로그/ }));
+    const catalog = await screen.findByRole('tree', { name: '카탈로그' });
+    await user.click(within(catalog).getByRole('treeitem', { name: /^HW UO/ }));
     const op = within(catalog)
       .getAllByRole('treeitem')
-      .find((li) => li.getAttribute('aria-level') === '2' && /^U?HW/.test(li.textContent ?? ''))!;
+      .find((li) => li.getAttribute('aria-level') === '2')!;
+    const code = op.querySelector('.meta.code')?.textContent;
+    expect(code).toMatch(/^UHW\d+$/);
     fireEvent.contextMenu(op);
     await user.click(screen.getByRole('menuitem', { name: coreT('Insert unit operation') }));
     await waitFor(() => expect(insertUnitOp).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(insertUnitOp).mock.calls[0][1]).toEqual({ op: expect.objectContaining({ id: op.textContent!.split(':')[0] }), kind: 'hw' });
+    expect(vi.mocked(insertUnitOp).mock.calls[0][1]).toEqual({ op: expect.objectContaining({ id: code }), kind: 'hw' });
+  });
+
+  async function openCatalogEntry(user: ReturnType<typeof userEvent.setup>, root: RegExp, path: RegExp[], code: string) {
+    await user.click(await screen.findByRole('button', { name: /^카탈로그/ }));
+    const catalog = await screen.findByRole('tree', { name: '카탈로그' });
+    await user.click(within(catalog).getByRole('treeitem', { name: root }));
+    for (const step of path) await user.click(within(catalog).getByRole('treeitem', { name: step }));
+    const entry = within(catalog)
+      .getAllByRole('treeitem')
+      .find((li) => li.querySelector('.meta.code')?.textContent === code)!;
+    await user.click(entry);
+    return screen.findByRole('dialog', { name: new RegExp(`^${code} `) });
+  }
+
+  it('a catalog workflow with an experiment open: the popover adds it to that experiment', async () => {
+    const user = userEvent.setup();
+    mount({ active: `${EXP}/README.labnote.md` });
+    const pop = await openCatalogEntry(user, /^워크플로/, [/^Build/], 'WB030');
+    expect(pop.textContent).toContain('DNA Assembly');
+    const add = within(pop).getByRole('button', { name: '현재 실험에 추가 (003 · 대장균 숙주 비교)' });
+    await user.click(add);
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createWorkflow).mock.calls[0][1]).toEqual(expect.objectContaining({ id: 'WB030' }));
+    expect(vi.mocked(createWorkflow).mock.calls[0][2]).toEqual({ experimentDir: EXP });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('with no experiment open, the add button is disabled and says why', async () => {
+    const user = userEvent.setup();
+    mount();
+    const pop = await openCatalogEntry(user, /^워크플로/, [/^Build/], 'WB030');
+    const add = within(pop).getByRole('button', { name: '현재 실험에 추가' }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    expect(pop.textContent).toContain('먼저 실험 노트를 여세요.');
+    expect(add.getAttribute('aria-describedby')).toBeTruthy();
+  });
+
+  it('a catalog UO with a workflow note open: the popover inserts into that workflow; Esc closes it', async () => {
+    const user = userEvent.setup();
+    mount({ active: WF1 });
+    let pop = await openCatalogEntry(user, /^HW UO/, [], 'UHW380');
+    await user.click(within(pop).getByRole('button', { name: '현재 워크플로에 삽입 (WB030 Gibson run)' }));
+    await waitFor(() => expect(insertUnitOp).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(insertUnitOp).mock.calls[0][1]).toEqual({ op: expect.objectContaining({ id: 'UHW380' }), kind: 'hw' });
+    const catalog = screen.getByRole('tree', { name: '카탈로그' });
+    await user.click(within(catalog).getAllByRole('treeitem').find((li) => li.querySelector('.meta.code')?.textContent === 'UHW380')!);
+    pop = await screen.findByRole('dialog', { name: /^UHW380 / });
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a catalog UO with only an experiment README open is disabled with the workflow reason', async () => {
+    const user = userEvent.setup();
+    mount({ active: `${EXP}/README.labnote.md` });
+    const pop = await openCatalogEntry(user, /^HW UO/, [], 'UHW380');
+    expect((within(pop).getByRole('button', { name: '현재 워크플로에 삽입' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(pop.textContent).toContain('먼저 워크플로 노트를 여세요.');
   });
 });

@@ -2,7 +2,17 @@ import type { EditTarget, LabnoteHost, NotifyKind, PickItem } from '@labnoteo/co
 import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { coreT } from '../i18n';
 import type { AliasOpts } from './AliasDialog';
-import { aliasDialog, choiceDialog, confirmDialog, pickDialog, pickManyDialog, promptDialog, type ChoiceItem } from './dialogStore';
+import {
+  aliasDialog,
+  choiceDialog,
+  confirmDialog,
+  pickDialog,
+  pickManyDialog,
+  promptDialog,
+  type AliasBack,
+  type ChoiceItem,
+  type PickExtras,
+} from './dialogStore';
 import { notify } from './toastStore';
 
 export type { AliasOpts } from './AliasDialog';
@@ -12,8 +22,8 @@ export interface AppHost extends LabnoteHost {
   readonly fs: AppFs;
   /** 코어의 알림에 `ms`(기본 시간 대신 사라질 때까지의 시간)를 더한다. 잠긴 파일 경고는 15 초 남는다. */
   notify(kind: NotifyKind, message: string, opts?: { ms?: number }): void;
-  /** '' = 빈 채로 냈다, undefined = 닫았다. */
-  alias(opts: AliasOpts): Promise<string | undefined>;
+  /** '' = 빈 채로 냈다, undefined = 닫았다, ALIAS_BACK = 다시 고르기(opts.back 일 때만). */
+  alias(opts: AliasOpts): Promise<string | undefined | AliasBack>;
   /** confirm 과 같지만 단추가 셋 이상이다. 고른 단추의 값, 닫으면 undefined. */
   choose<T>(
     message: string,
@@ -23,7 +33,7 @@ export interface AppHost extends LabnoteHost {
   /** 코어의 고르기에 `unsolicited`(A9, whenNotComposing.ts 의 unsolicitedHost 가 단다)를 더한다. */
   pick<T>(
     items: PickItem<T>[],
-    opts?: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean },
+    opts?: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean } & PickExtras,
   ): Promise<T | undefined>;
   /** 코어의 확인에 `unsolicited`(A9)를 더한다. */
   confirm(
@@ -49,7 +59,7 @@ export function createAppHost(deps: {
     pickMany: (items, opts) => pickManyDialog(items, opts),
     prompt: (opts) => promptDialog(opts),
     confirm: (message, opts) => confirmDialog(message, opts),
-    alias: (opts) => aliasDialog(opts),
+    alias: (opts) => aliasDialog(opts as AliasOpts & { back: true }),
     choose: (message, choices, opts) => choiceDialog(message, choices, opts),
     notify: (kind, message, opts) => notify(kind, message, opts),
     editTarget: () => deps.editTarget(),

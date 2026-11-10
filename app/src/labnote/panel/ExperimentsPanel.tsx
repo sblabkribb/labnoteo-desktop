@@ -41,6 +41,7 @@ import {
   type WfNode,
 } from './experimentTree';
 import { TreeView, type TreeAction, type TreeState } from './TreeView';
+import { CatalogPopover, type CatalogEntry, type CatalogTarget } from './CatalogPopover';
 import { touchesDir, useVaultChanges } from './useVaultChanges';
 
 export interface ExperimentsPanelProps {
@@ -81,6 +82,43 @@ async function loadCatalog(ctx: CommandContext): Promise<Catalog> {
   ]);
   return { workflows: catalog.workflows, hwUnitOps: hw.unitOperations, swUnitOps: sw.unitOperations };
 }
+
+/** 카탈로그 줄이 가리키는 항목(뿌리·분류 줄이면 undefined). */
+function catalogEntry(node: TreeNode): CatalogEntry | undefined {
+  if (node.kind === 'workflow') return { kind: 'workflow', item: node.payload as WorkflowItem };
+  if (node.kind === 'unitOperation') {
+    const { opType, ...item } = node.payload as UnitOperationItem & { opType: 'hw' | 'sw' };
+    return { kind: 'uo', item, opType };
+  }
+  return undefined;
+}
+
+/** 코어 카탈로그 트리의 이름을 고친다: 뿌리는 지역화(워크플로 / HW UO / SW UO), 개수는 덧말로, 항목은 영어 이름만(코드는 오른쪽). */
+function relabelCatalog(nodes: readonly TreeNode[]): TreeNode[] {
+  const strip = (label: string) => label.replace(/\s*\[\d+\]$/, '');
+  const walk = (node: TreeNode): TreeNode => {
+    const children = node.children?.map(walk);
+    if (node.kind === 'workflowRoot') return { ...node, label: t('catalog.workflows'), children };
+    if (node.kind === 'unitOpRoot') {
+      const hw = (node.payload as { opType?: string } | undefined)?.opType === 'hw';
+      return { ...node, label: hw ? t('catalog.hw') : t('catalog.sw'), children };
+    }
+    if (node.kind === 'category') return { ...node, label: strip(node.label), children };
+    if (node.kind === 'workflow' || node.kind === 'unitOperation') {
+      const item = node.payload as { id: string; name: string };
+      return { ...node, label: item.name, children };
+    }
+    return { ...node, children };
+  };
+  return nodes.map(walk);
+}
+
+/** 카탈로그 줄의 오른쪽 코드. */
+const catalogCode = (node: TreeNode): string | undefined =>
+  node.kind === 'workflow' || node.kind === 'unitOperation' ? (node.payload as { id: string }).id : undefined;
+
+/** 카탈로그 뿌리·분류 줄의 개수. */
+const catalogMeta = (node: TreeNode): string | undefined => (node.children && node.children.length > 0 ? String(node.children.length) : undefined);
 
 /** 글에서 맞은 자리를 <mark> 로 감싼다. */
 function marked(text: string, ranges: readonly Range[] | undefined): ReactNode {
@@ -128,6 +166,9 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
   const wfCache = useMemo(() => new WorkflowNodeCache(), []);
   const [catalog, setCatalog] = useState<Catalog>();
   const [query, setQuery] = useState('');
+  /** 카탈로그 구역: 처음엔 접혀 있다. */
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [popover, setPopover] = useState<{ entry: CatalogEntry; anchor: HTMLElement }>();
   const [groupBy, setGroupBy] = useState<GroupBy>(groupByFromSetting(ctx.settings.workflowViewGroupBy));
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   /** 이 패널에서 바꾼 실험: 찾기에 더는 맞지 않아도 남긴다(다시 우클릭해 되돌릴 수 있게, 플러그인 #356). */
@@ -499,13 +540,39 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
   const newExperiment = () => void runCommand(ctx, commandById('create-experiment') ?? (() => createExperiment(ctx)));
   const collapseAll = () => setExpanded(new Set(treeNodes.map((g) => g.id)));
 
-  const catalogTree = catalog
-    ? buildWorkflowTree(catalog, {
-        describe: (id, d) => catalogDescription(id, d, coreLocale()),
-        equipment: coreT('Equipment'),
-        software: coreT('Software'),
-      })
-    : [];
+  const catalogTree = useMemo(
+    () =>
+      catalog
+        ? relabelCatalog(
+            buildWorkflowTree(catalog, {
+              describe: (id, d) => catalogDescription(id, d, coreLocale()),
+              equipment: coreT('Equipment'),
+              software: coreT('Software'),
+            }),
+          )
+        : [],
+    // lang: 뿌리 이름과 설명이 지역화된다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, lang],
+  );
+
+  /** 카탈로그 항목의 주 동작 대상: 워크플로는 열린 노트의 실험, UO 는 열린 워크플로 노트. 없으면 undefined(단추가 꺼진다). */
+  const catalogTarget = (entry: CatalogEntry): CatalogTarget | undefined => {
+    if (entry.kind === 'workflow') {
+      if (!activeExp) return undefined;
+      const exp = activeExp;
+      const item = entry.item;
+      return { label: experimentLabel(exp), run: () => void runCommand(ctx, () => createWorkflow(ctx, item, { experimentDir: exp.dir })) };
+    }
+    if (!activeWf) return undefined;
+    const chosen = { op: entry.item, kind: entry.opType };
+    return { label: `${activeWf.code} ${activeWf.alias}`.trim(), run: () => void runCommand(ctx, () => insertUnitOp(ctx, chosen)) };
+  };
+
+  const activateCatalog = (node: TreeNode, el?: HTMLElement) => {
+    const entry = catalogEntry(node);
+    if (entry && el) setPopover({ entry, anchor: el });
+  };
 
   return (
     <div className="workflows-panel experiments-panel">
@@ -581,7 +648,39 @@ export function ExperimentsPanel({ ctx, activePath }: ExperimentsPanelProps) {
         </>
       )}
       {catalog && (
-        <TreeView nodes={catalogTree} label={t('workflows.catalog')} expanded={expanded} onToggle={toggle} onActivate={() => undefined} onContext={context} />
+        <section className="catalog-section">
+          <button type="button" className="catalog-head" aria-expanded={catalogOpen} onClick={() => setCatalogOpen((v) => !v)}>
+            <Icon name="chevron-right" size={14} className="catalog-chevron" />
+            <Icon name="book-open" className="catalog-icon" />
+            <span className="catalog-title">{t('workflows.catalog')}</span>
+            <span className="tree-meta">{t('catalog.meta', String(catalog.workflows.length), String(catalog.hwUnitOps.length + catalog.swUnitOps.length))}</span>
+          </button>
+          {catalogOpen && (
+            <TreeView
+              nodes={catalogTree}
+              label={t('workflows.catalog')}
+              expanded={expanded}
+              onToggle={toggle}
+              onActivate={activateCatalog}
+              onContext={context}
+              code={catalogCode}
+              meta={catalogMeta}
+            />
+          )}
+        </section>
+      )}
+      {popover && (
+        <CatalogPopover
+          anchor={popover.anchor}
+          entry={popover.entry}
+          target={catalogTarget(popover.entry)}
+          locale={coreLocale()}
+          onClose={({ restoreFocus }) => {
+            const anchor = popover.anchor;
+            setPopover(undefined);
+            if (restoreFocus && anchor.isConnected) anchor.focus();
+          }}
+        />
       )}
     </div>
   );

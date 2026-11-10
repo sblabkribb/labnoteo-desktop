@@ -191,8 +191,9 @@ describe('하루의 흐름(앱 전체)', () => {
 
       // 4. Workflows 패널 → 카탈로그 워크플로 → 워크플로 생성, 별칭 "pET"
       await user.click(screen.getByRole('tab', { name: '실험' }));
+      await user.click(await screen.findByRole('button', { name: /^카탈로그/ }));
       const catalog = await screen.findByRole('tree', { name: '카탈로그' });
-      const root = await within(catalog).findByRole('treeitem', { name: /^Workflows \[\d+\]$/ });
+      const root = await within(catalog).findByRole('treeitem', { name: /^워크플로/ });
       await user.click(root);
       let wfRow: HTMLElement | undefined;
       await waitFor(async () => {
@@ -202,11 +203,13 @@ describe('하루의 흐름(앱 전체)', () => {
         }
         wfRow = within(catalog)
           .getAllByRole('treeitem')
-          .find((li) => (li.textContent ?? '').startsWith(`${WF.id}`));
+          .find((li) => li.querySelector('.meta.code')?.textContent === WF.id);
         expect(wfRow).toBeTruthy();
       });
-      fireEvent.contextMenu(wfRow!);
-      await user.click(await screen.findByRole('menuitem', { name: coreT('Create workflow') }));
+      // 카탈로그 항목의 작은 창: 열린 README 의 실험에 더한다
+      await user.click(wfRow!);
+      const pop = await screen.findByRole('dialog', { name: new RegExp(`^${WF.id} `) });
+      await user.click(within(pop).getByRole('button', { name: /^현재 실험에 추가 \(/ }));
       await answer('alias', () => 'pET');
 
       // 5. 워크플로 노트가 열린다. README 는 친 줄을 지키고 체크리스트 항목을 얻었다(바꿀 때 저장됐다)

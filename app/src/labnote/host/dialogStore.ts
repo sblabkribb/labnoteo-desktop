@@ -34,7 +34,7 @@ export type DialogSpec =
       selected?: unknown;
       /** 사용자가 부르지 않은 질문(A9): 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
       unsolicited?: boolean;
-    }
+    } & PickExtras
   | { kind: 'pickMany'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string }
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
@@ -63,6 +63,25 @@ export type DialogSpec =
   | { kind: 'scanUnmatched'; io: UnmatchedIo }
   // 새 노트(UI 재설계 Task 5): 리본·Ctrl+N·팔레트. 끝나면 만든 노트의 경로, 닫으면 undefined
   | { kind: 'newNote'; flush: () => Promise<boolean>; invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
+
+/**
+ * 고르기의 덧붙임(UI 재설계 Task 11). 카탈로그 고르기가 쓴다.
+ * - `catalog`: 한 줄 행(고정폭 코드, 영어 이름, 흐린 설명). 상세 줄은 고른 행에만 보인다.
+ * - `groupOf`: 검색어가 없을 때의 묶음 머리(Design / Build …, HW / SW). 묶음은 처음 나온 차례다.
+ * - `recentKey`: 최근에 고른 것을 그 이름으로 기억해(localStorage, 이 사람의 편의) 검색어가 없을 때 "최근" 묶음으로 맨 위에 둔다.
+ * - `query`, `onQuery`: 처음 검색어와 바뀔 때마다 알림. 별칭 단계에서 뒤로 오면 앞 검색어로 다시 연다(pickThen).
+ */
+export interface PickExtras {
+  catalog?: boolean;
+  groupOf?: (item: PickItem<unknown>) => string | undefined;
+  recentKey?: string;
+  query?: string;
+  onQuery?: (query: string) => void;
+}
+
+/** 별칭 대화상자의 "다시 고르기"(뒤로 단추, 또는 back 을 단 별칭 단계의 Esc). */
+export const ALIAS_BACK: unique symbol = Symbol('alias-back');
+export type AliasBack = typeof ALIAS_BACK;
 
 /** 여러 단추 확인의 단추 하나. 첫 단추가 주 단추다. */
 export interface ChoiceItem<T> {
@@ -175,9 +194,26 @@ export function useDialogOpen(): boolean {
 
 export function pickDialog<T>(
   items: readonly PickItem<T>[],
-  opts: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean } = {},
+  opts: { title?: string; placeholder?: string; selected?: T; unsolicited?: boolean } & PickExtras = {},
 ): Promise<T | undefined> {
   return openDialog<T | undefined>({ kind: 'pick', items, ...opts }, undefined);
+}
+
+/**
+ * 두 단계 고르기(고르기 → 별칭)의 단계 쌓기. `pick` 이 고른 값으로 `next` 를 부르고, `next` 가 ALIAS_BACK 을 돌려주면
+ * (뒤로 단추, 별칭 단계의 Esc) 앞 검색어로 고르기를 다시 연다. 고르기를 닫으면 undefined, 끝나면 고른 값과 `next` 의 결과.
+ */
+export async function pickThen<T, R>(
+  pick: (step: { query: string; onQuery: (query: string) => void }) => Promise<T | undefined>,
+  next: (value: T) => Promise<R | AliasBack>,
+): Promise<{ value: T; result: R } | undefined> {
+  let query = '';
+  for (;;) {
+    const value = await pick({ query, onQuery: (q) => (query = q) });
+    if (value === undefined) return undefined;
+    const result = await next(value);
+    if (result !== ALIAS_BACK) return { value, result: result as R };
+  }
 }
 
 export function pickManyDialog<T>(items: readonly PickItem<T>[], opts: { title?: string; placeholder?: string } = {}): Promise<T[]> {
@@ -188,9 +224,11 @@ export function promptDialog(opts: PromptOpts): Promise<string | undefined> {
   return openDialog<string | undefined>({ kind: 'prompt', opts }, undefined);
 }
 
-/** 별칭 입력(AppHost.alias). '' = 빈 채로 냈다, undefined = 닫았다. */
-export function aliasDialog(opts: AliasOpts): Promise<string | undefined> {
-  return openDialog<string | undefined>({ kind: 'alias', opts }, undefined);
+/** 별칭 입력(AppHost.alias). '' = 빈 채로 냈다, undefined = 닫았다, ALIAS_BACK = 다시 고르기(opts.back 일 때만). */
+export function aliasDialog(opts: AliasOpts & { back: true }): Promise<string | undefined | AliasBack>;
+export function aliasDialog(opts: AliasOpts): Promise<string | undefined>;
+export function aliasDialog(opts: AliasOpts): Promise<string | undefined | AliasBack> {
+  return openDialog<string | undefined | AliasBack>({ kind: 'alias', opts }, undefined);
 }
 
 export function confirmDialog(

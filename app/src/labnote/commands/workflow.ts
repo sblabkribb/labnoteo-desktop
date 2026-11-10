@@ -22,6 +22,8 @@ import {
   insertWorkflowChecklistEntries,
   parseExperimenterFromReadme,
   workflowChecklistEntryLink,
+  workflowAliasBudget,
+  workflowAliasLength,
   workflowChecklistSectionRange,
 } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
@@ -37,6 +39,7 @@ import {
   workflowAliasValidator,
   workflowConcept,
 } from '../port/aliasHints';
+import { ALIAS_BACK, pickThen, type AliasBack } from '../host/dialogStore';
 import { ensureVaultCatalogs } from '../port/catalogUpdate';
 import { resolveLabnoteDir, warnIfWindowsPathTooLong } from '../port/experiments';
 import type { CommandContext } from './context';
@@ -60,7 +63,7 @@ export interface CreatedWorkflow {
 }
 
 /** 카탈로그 고르기(먼저 보관함에 카탈로그 파일을 채운다). 루트는 늘 VAULT_ROOT('.')다. */
-export async function pickWorkflow(ctx: CommandContext): Promise<WorkflowItem | undefined> {
+export async function pickWorkflow(ctx: CommandContext, step?: PickStep): Promise<WorkflowItem | undefined> {
   const { host } = ctx;
   await ensureVaultCatalogs(host);
   const catalog = await loadWorkflows(host.fs, VAULT_ROOT);
@@ -71,9 +74,23 @@ export async function pickWorkflow(ctx: CommandContext): Promise<WorkflowItem | 
       ...catalogKoFields(wf.id, wf.category, wf.description, locale),
       value: wf,
     })),
-    { title: host.t('Select workflow'), placeholder: host.t('Search workflows') },
+    {
+      title: host.t('Select workflow'),
+      placeholder: host.t('Search workflows'),
+      // 한 줄 행, Design / Build / Test / Learn 묶음, 최근 고른 것 먼저(UI 재설계 Task 11)
+      catalog: true,
+      groupOf: (item) => (item.value as WorkflowItem).category || undefined,
+      recentKey: 'workflow',
+      ...step,
+    },
   );
 }
+
+/** 고르기 → 별칭 단계에서 고르기가 받는 것: 다시 열 때의 검색어와 그 알림(dialogStore.pickThen). */
+export type PickStep = { query: string; onQuery: (query: string) => void };
+
+/** 별칭 안내의 글자 수는 남은 자리가 이만큼 이하일 때만 보인다(같은 별칭 경고와 넘침 경고는 늘 보인다). */
+export const ALIAS_COUNTER_NEAR = 10;
 
 /** "만들었다" 알림, 그리고 README 체크리스트에 넣지 못했으면 그 경고. */
 function notifyWorkflowCreated(ctx: CommandContext, created: CreatedWorkflow): void {
@@ -95,6 +112,33 @@ function notifyWorkflowCreated(ctx: CommandContext, created: CreatedWorkflow): v
 }
 
 /**
+ * 별칭을 묻는다. 닫으면 undefined, `back` 이면 "다시 고르기"에 ALIAS_BACK.
+ * 글자 수 안내는 파일 이름 자리의 끝에서 ALIAS_COUNTER_NEAR 글자 안일 때만 보인다(같은 별칭·넘침 경고는 늘).
+ */
+async function askWorkflowAlias(ctx: CommandContext, labnoteDir: string, chosen: WorkflowItem, back: boolean): Promise<string | undefined | AliasBack> {
+  const { host } = ctx;
+  // 같은 별칭 경고를 위해 묻기 전에 읽는다
+  const existingFiles = await host.fs.list(labnoteDir);
+  const existingLabels = await readChecklistLabels(host.fs, labnoteDir);
+  const locale = coreLocale();
+  const fullHint = workflowAliasHint(host, chosen.id, chosen.name, existingFiles, existingLabels);
+  const budget = workflowAliasBudget(chosen.id, chosen.name);
+  return host.alias({
+    id: chosen.id,
+    catalogName: chosen.name,
+    placeholder: host.t('Enter a name for this workflow'),
+    about: workflowConcept(host),
+    description: chosen.description ? catalogDescription(chosen.id, chosen.description, locale) : undefined,
+    hint: (value) => {
+      const hint = fullHint(value);
+      return hint.warn || workflowAliasLength(value) >= budget - ALIAS_COUNTER_NEAR ? hint : undefined;
+    },
+    validate: workflowAliasValidator(host),
+    ...(back ? { back: true as const } : {}),
+  });
+}
+
+/**
  * 별칭을 묻고, 워크플로 노트를 쓰고, README 체크리스트에 등록한다. 노트를 열지는 않는다. 별칭을 닫으면 undefined.
  */
 export async function createWorkflowFile(
@@ -102,22 +146,28 @@ export async function createWorkflowFile(
   labnoteDir: string,
   chosen: WorkflowItem,
 ): Promise<CreatedWorkflow | undefined> {
+  const alias = await askWorkflowAlias(ctx, labnoteDir, chosen, false);
+  if (alias === undefined || alias === ALIAS_BACK) return undefined;
+  return writeWorkflowFile(ctx, labnoteDir, chosen, alias);
+}
+
+/**
+ * 카탈로그에서 고르고(`chosen` 이 없을 때) 별칭을 물어 만든다. 별칭 단계의 Esc·뒤로 단추는 앞 검색어로 고르기를 다시 연다.
+ */
+async function pickAndCreateWorkflow(ctx: CommandContext, labnoteDir: string, chosen?: WorkflowItem): Promise<CreatedWorkflow | undefined> {
+  if (chosen) return createWorkflowFile(ctx, labnoteDir, chosen);
+  const done = await pickThen(
+    (step) => pickWorkflow(ctx, step),
+    (item) => askWorkflowAlias(ctx, labnoteDir, item, true),
+  );
+  if (!done || done.result === undefined) return undefined;
+  return writeWorkflowFile(ctx, labnoteDir, done.value, done.result);
+}
+
+/** 워크플로 노트를 쓰고 README 체크리스트에 등록한다. */
+async function writeWorkflowFile(ctx: CommandContext, labnoteDir: string, chosen: WorkflowItem, alias: string): Promise<CreatedWorkflow> {
   const { host } = ctx;
-  // 같은 별칭 경고를 위해 묻기 전에 읽는다
-  const existingFiles = await host.fs.list(labnoteDir);
-  const existingLabels = await readChecklistLabels(host.fs, labnoteDir);
   const locale = coreLocale();
-  const alias = await host.alias({
-    id: chosen.id,
-    catalogName: chosen.name,
-    title: host.t('Workflow name'),
-    placeholder: host.t('Enter a name for this workflow'),
-    about: workflowConcept(host),
-    description: chosen.description ? catalogDescription(chosen.id, chosen.description, locale) : undefined,
-    hint: workflowAliasHint(host, chosen.id, chosen.name, existingFiles, existingLabels),
-    validate: workflowAliasValidator(host),
-  });
-  if (alias === undefined) return undefined;
   const cleanAlias = alias.trim();
 
   const readmePath = posix.join(labnoteDir, README);
@@ -222,9 +272,7 @@ export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: str
 
 /** 그 실험 폴더에 카탈로그 워크플로를 만들고 연다(파일 트리 메뉴: 열린 노트가 아니라 누른 폴더의 실험). */
 export async function createWorkflowIn(ctx: CommandContext, labnoteDir: string, chosen?: WorkflowItem): Promise<void> {
-  const item = chosen ?? (await pickWorkflow(ctx));
-  if (!item) return;
-  const created = await createWorkflowFile(ctx, labnoteDir, item);
+  const created = await pickAndCreateWorkflow(ctx, labnoteDir, chosen);
   if (!created) return;
   await ctx.openFile(created.path);
   notifyWorkflowCreated(ctx, created);
@@ -244,9 +292,7 @@ export function isExperimentReadme(path: string | undefined): boolean {
 export async function insertWorkflowOnReadme(ctx: CommandContext): Promise<void> {
   const labnoteDir = resolveLabnoteDir(ctx.host, ctx.activePath());
   if (!labnoteDir) return;
-  const chosen = await pickWorkflow(ctx);
-  if (!chosen) return;
-  const created = await createWorkflowFile(ctx, labnoteDir, chosen);
+  const created = await pickAndCreateWorkflow(ctx, labnoteDir);
   if (!created) return;
   notifyWorkflowCreated(ctx, created);
 }

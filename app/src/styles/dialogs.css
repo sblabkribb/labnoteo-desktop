@@ -305,3 +305,27 @@ button.sample-def-link:hover { text-decoration: underline; }
   .settings-nav { flex-direction: row; width: auto; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
   .setting-row { flex-wrap: wrap; }
 }
+
+/* 카탈로그 고르기(UI 재설계 Task 11): 한 줄 행 [코드][영어 이름][흐린 설명 …], 고른 행만 상세 줄을 펼친다. 묶음 머리와 "최근" */
+.picker-code {
+  flex: none;
+  padding: 0 var(--space-2);
+  background: var(--bg-hover);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-label);
+}
+.picker.catalog .picker-option { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-4); }
+.picker.catalog .picker-label { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker.catalog .picker-desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker.catalog .picker-detail { flex: 1 1 100%; margin-top: var(--space-1); line-height: 1.45; }
+.picker-group {
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+}
+.picker-group:first-child { padding-top: var(--space-1); }
+/* 별칭 단계의 "← 다시 고르기": 왼쪽 끝 */
+.alias-back { margin-right: auto; }

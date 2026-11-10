@@ -21,7 +21,9 @@ import { VAULT_ROOT, samePath } from '../paths';
 import { catalogDescription, catalogKoFields, unitOpAliasHint, workflowAliasValidator } from '../port/aliasHints';
 import { ensureVaultCatalogs } from '../port/catalogUpdate';
 import { insertUnitOpAndUpdateToc } from '../port/insertUnitOpAndUpdateToc';
+import { pickThen, type AliasBack } from '../host/dialogStore';
 import type { CommandContext } from './context';
+import type { PickStep } from './workflow';
 import type { Command } from './registry';
 
 /** 고른 단위 공정과 그 종류(HW/SW). */
@@ -31,25 +33,32 @@ export interface ChosenUnitOp {
 }
 
 /** 카탈로그에서 단위 공정을 고른다(먼저 보관함에 카탈로그 파일을 채운다). 루트는 늘 VAULT_ROOT('.')다. */
-async function pickUnitOp(ctx: CommandContext): Promise<ChosenUnitOp | undefined> {
+async function pickUnitOp(ctx: CommandContext, step?: PickStep): Promise<ChosenUnitOp | undefined> {
   const { host } = ctx;
   await ensureVaultCatalogs(host);
   const hw = await loadUnitOperations(host.fs, VAULT_ROOT, 'hw');
   const sw = await loadUnitOperations(host.fs, VAULT_ROOT, 'sw');
   const locale = coreLocale();
-  const items: PickItem<ChosenUnitOp>[] = [
-    ...hw.unitOperations.map((op) => ({
+  // 장비·소프트웨어 이름도 찾는다("plate reader" -> UHW380 Microplate Reading)
+  const row = (op: UnitOperationItem, kind: 'hw' | 'sw'): PickItem<ChosenUnitOp> => {
+    const fields = catalogKoFields(op.id, kind === 'hw' ? 'HW' : 'SW', op.description, locale);
+    const tools = [op.equipment, op.software].filter((x): x is string => !!x);
+    return {
       label: `${op.id}: ${op.name}`,
-      ...catalogKoFields(op.id, 'HW', op.description, locale),
-      value: { op, kind: 'hw' as const },
-    })),
-    ...sw.unitOperations.map((op) => ({
-      label: `${op.id}: ${op.name}`,
-      ...catalogKoFields(op.id, 'SW', op.description, locale),
-      value: { op, kind: 'sw' as const },
-    })),
-  ];
-  return host.pick(items, { title: host.t('Insert unit operation'), placeholder: host.t('Search unit operations') });
+      ...fields,
+      ...(tools.length > 0 || fields.keywords ? { keywords: [...(fields.keywords ?? []), ...tools] } : {}),
+      value: { op, kind },
+    };
+  };
+  const items = [...hw.unitOperations.map((op) => row(op, 'hw')), ...sw.unitOperations.map((op) => row(op, 'sw'))];
+  return host.pick(items, {
+    title: host.t('Insert unit operation'),
+    placeholder: host.t('Search unit operations'),
+    catalog: true,
+    groupOf: (item) => ((item.value as ChosenUnitOp).kind === 'hw' ? t('catalog.hw') : t('catalog.sw')),
+    recentKey: 'unitOp',
+    ...step,
+  });
 }
 
 /**
@@ -65,6 +74,11 @@ function viewOf(ctx: CommandContext, path: string) {
 /** UO 를 넣을 워크플로 노트(실험 탭의 줄): 없으면 열린 노트다. */
 export interface UnitOpTarget {
   workflowPath: string;
+}
+
+/** 코어의 넣기 입력. */
+function toInput({ op, kind }: ChosenUnitOp): InsertUnitOperationInput {
+  return { opId: op.id, opName: op.name, opDescription: op.description, opType: kind, equipment: op.equipment, software: op.software };
 }
 
 /** 편집기가 그 노트를 다 읽을 때까지 기다리는 가장 긴 시간(ms). */
@@ -136,34 +150,36 @@ export async function insertUnitOp(ctx: CommandContext, chosen?: ChosenUnitOp, i
     return;
   }
 
-  const picked = chosen ?? (await pickUnitOp(ctx));
-  if (!picked) return;
-  const { op, kind } = picked;
-  const input: InsertUnitOperationInput = {
-    opId: op.id,
-    opName: op.name,
-    opDescription: op.description,
-    opType: kind,
-    equipment: op.equipment,
-    software: op.software,
-  };
-
-  const shown = viewOf(ctx, path);
-  if (!shown) return;
-  const blocks = listUnitOpBlocks(shown.state.doc.toString());
-  const alias = await host.alias({
-    id: input.opId,
-    catalogName: input.opName,
-    title: host.t('Unit operation alias'),
-    placeholder: host.t('Run or condition of this step (optional)'),
-    about: host.t(
-      'A unit operation is a single task within a workflow (one step using a piece of equipment or software). The alias tells repeats of the same task apart by run or condition and appears in its heading and the table of contents. You can leave it empty.',
-    ),
-    description: input.opDescription ? catalogDescription(input.opId, input.opDescription, coreLocale()) : undefined,
-    hint: unitOpAliasHint(host, { id: input.opId, name: input.opName }, blocks),
-    validate: workflowAliasValidator(host),
-  });
-  if (alias === undefined) return;
+  // 고르기 → 별칭: 별칭 단계의 Esc·뒤로 단추는 앞 검색어로 고르기를 다시 연다(카탈로그에서 이미 고른 것이면 뒤로가 없다)
+  const done = await pickThen(
+    (step) => (chosen ? Promise.resolve(chosen) : pickUnitOp(ctx, step)),
+    async (picked): Promise<string | undefined | AliasBack> => {
+      const input = toInput(picked);
+      const shown = viewOf(ctx, path);
+      if (!shown) return undefined;
+      const blocks = listUnitOpBlocks(shown.state.doc.toString());
+      const fullHint = unitOpAliasHint(host, { id: input.opId, name: input.opName }, blocks);
+      return host.alias({
+        id: input.opId,
+        catalogName: input.opName,
+        placeholder: host.t('Run or condition of this step (optional)'),
+        about: host.t(
+          'A unit operation is a single task within a workflow (one step using a piece of equipment or software). The alias tells repeats of the same task apart by run or condition and appears in its heading and the table of contents. You can leave it empty.',
+        ),
+        description: input.opDescription ? catalogDescription(input.opId, input.opDescription, coreLocale()) : undefined,
+        // UO 별칭은 파일 이름에 들지 않아 길이 제한이 없다: 글자 수는 보이지 않고 같은 별칭 경고만 보인다
+        hint: (value) => {
+          const hint = fullHint(value);
+          return hint.warn ? hint : undefined;
+        },
+        validate: workflowAliasValidator(host),
+        ...(chosen ? {} : { back: true }),
+      });
+    },
+  );
+  if (!done || done.result === undefined) return;
+  const alias = done.result;
+  const input = toInput(done.value);
 
   const view = viewOf(ctx, path);
   if (!view) return;

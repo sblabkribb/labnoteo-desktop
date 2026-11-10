@@ -20,8 +20,8 @@ export interface TreeViewProps {
   /** 펼친 노드의 id. */
   expanded: ReadonlySet<string>;
   onToggle(id: string, open: boolean): void;
-  /** 클릭, Enter, Space. 묶음 노드는 그 전에 접히거나 펼쳐진다. */
-  onActivate(node: TreeNode): void;
+  /** 클릭, Enter, Space. 묶음 노드는 그 전에 접히거나 펼쳐진다. `row` 는 그 줄의 요소(작은 창을 그 옆에 띄울 때). */
+  onActivate(node: TreeNode, row?: HTMLElement): void;
   /** 우클릭, 메뉴 키, Shift+F10. */
   onContext?(node: TreeNode, anchor: MenuAnchor): void;
   /** 지금 열린 노트에 해당하는 노드(aria-current). */
@@ -148,10 +148,10 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     el?.focus();
   }, [focusRequest, rows]);
 
-  const activate = (row: Row) => {
+  const activate = (row: Row, el?: HTMLElement) => {
     setFocusKey(row.key);
     if (row.hasChildren && toggleOnActivate) onToggle(row.node.id, !row.expanded);
-    onActivate(row.node);
+    onActivate(row.node, el);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>, index: number) => {
@@ -174,7 +174,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
         onToggle(row.node.id, false);
         break;
       case 'activate':
-        activate(row);
+        activate(row, e.currentTarget);
         break;
       case 'menu':
         onContext?.(row.node, { element: e.currentTarget });
@@ -215,7 +215,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             tabIndex={row.key === tabStop ? 0 : -1}
             title={rowTitle(row.node)}
             className={rowClass}
-            onClick={() => activate(row)}
+            onClick={(e) => activate(row, e.currentTarget)}
             onKeyDown={(e) => onKeyDown(e, i)}
             onContextMenu={(e) => onContextMenu(e, row)}
             onFocus={(e) => {

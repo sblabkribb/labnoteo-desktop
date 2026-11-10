@@ -19,6 +19,8 @@ export function DialogFrame(props: {
   className?: string;
   describedBy?: string;
   onCancel: () => void;
+  /** 닫기 단추(×). 없으면 onCancel. 별칭 단계는 Esc 가 뒤로 가도 ×는 닫는다. */
+  onClose?: () => void;
   /** 사용자가 부르지 않은 질문(A9): 열린 뒤 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다(Escape 는 닫는다). */
   unsolicited?: boolean;
   children: ReactNode;
@@ -74,7 +76,7 @@ export function DialogFrame(props: {
     >
       <div className="dialog-head">
         {props.title ? <h2 id={titleId}>{props.title}</h2> : <span />}
-        <button type="button" className="dialog-close" aria-label={t('dialog.close')} onClick={props.onCancel} />
+        <button type="button" className="dialog-close" aria-label={t('dialog.close')} onClick={props.onClose ?? props.onCancel} />
       </div>
       {props.children}
     </div>

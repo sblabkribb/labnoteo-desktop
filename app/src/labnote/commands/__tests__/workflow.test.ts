@@ -8,6 +8,7 @@ import { openNote, registerOpenNote } from '../../openNotes';
 import { runCommand } from '../runCommand';
 import { createTestHost, type TestHost } from '../../__tests__/testHost';
 import { rankPickItems } from '../../port/rankPickItems';
+import { ALIAS_BACK } from '../../host/dialogStore';
 import { clearCommandsForTest, commandById } from '../registry';
 import { registerAllCommands } from '../registerAll';
 import { createWorkflow, insertWorkflowOnReadme, isExperimentReadme } from '../workflow';
@@ -91,7 +92,9 @@ describe('create-workflow', () => {
     expect(h.refreshes()).toBe(1);
     expect(h.notes).toEqual([{ kind: 'info', message: `워크플로가 생성되었습니다: ${fileName}` }]);
     // 별칭 대화상자: 카탈로그 머리와 한국어 안내
-    expect(h.asked.alias[0]).toMatchObject({ id: 'WD030', catalogName: 'Growth Media Design', title: '워크플로 이름' });
+    expect(h.asked.alias[0]).toMatchObject({ id: 'WD030', catalogName: 'Growth Media Design', back: true });
+    // 제목은 대화상자의 "별칭 (선택)"(UI 재설계 Task 11)
+    expect(h.asked.alias[0].title).toBeUndefined();
   });
 
   it('create-workflow with the README open and dirty registers the entry in the buffer and keeps the unsaved typing', async () => {
@@ -186,8 +189,42 @@ describe('create-workflow', () => {
     await createWorkflow(h.ctx);
     expect(hint?.warn).toBe(true);
     expect(hint?.text).toContain(twin);
-    expect(other?.text).not.toContain(twin);
+    expect(other?.text ?? '').not.toContain(twin);
     expect(Object.keys(h.vault.files()).filter((p) => p.startsWith(`${DIR}/`))).toHaveLength(2); // 닫았으니 만들지 않았다
+  });
+
+  it('the character counter shows only within 10 characters of the file-name budget', async () => {
+    h = createTestHost({ [README_PATH]: readme() });
+    h.setActive(README_PATH);
+    h.answer.pick(byId('WD030'));
+    let short: { text: string; warn?: boolean } | undefined;
+    let near: { text: string; warn?: boolean } | undefined;
+    h.answer.alias((opts) => {
+      short = opts.hint?.('A');
+      near = opts.hint?.('x'.repeat(200));
+      return undefined;
+    });
+    await createWorkflow(h.ctx);
+    expect(short).toBeUndefined();
+    expect(near?.warn).toBe(true);
+    expect(near?.text).toMatch(/\d+\/\d+/);
+  });
+
+  it('Back on the alias step reopens the picker with the previous query; a pick from the catalog has no Back', async () => {
+    h = createTestHost({ [README_PATH]: readme() });
+    h.setActive(README_PATH);
+    h.answer.pick((items, opts) => {
+      opts?.onQuery?.('배지');
+      return byId('WD030')(items);
+    }, byId('WD010'));
+    h.answer.alias(ALIAS_BACK, '');
+    await createWorkflow(h.ctx);
+    expect(h.asked.pick).toHaveLength(2);
+    expect(h.asked.pick[0].opts).toMatchObject({ catalog: true, recentKey: 'workflow', query: '' });
+    expect(h.asked.pick[1].opts?.query).toBe('배지');
+    expect(h.asked.alias.map((a) => a.id)).toEqual(['WD030', 'WD010']);
+    expect(Object.keys(h.vault.files()).some((p) => p.includes('_WD010_'))).toBe(true);
+    expect(Object.keys(h.vault.files()).some((p) => p.includes('_WD030_'))).toBe(false);
   });
 
   it("'#' in the alias is refused by validate", async () => {
