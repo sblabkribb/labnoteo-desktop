@@ -1,6 +1,6 @@
 // Ported from app/vendor/labnoteo/src/llm/agent.ts:31-186 sha256:099940c5b1620804
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: imports point at ./llmProvider. AgentDeps gains signal?: AbortSignal, passed to every provider.chat (which cancels the request in Rust through net_cancel). runAgent checks deps.signal?.aborted before each model turn, before each tool call of a turn, and again just before each runTool (so an approval answered after a Cancel never writes), and throws NetError('cancelled') (D11). The argument order stays the vendor's runAgent(messages, deps). Task 9 (spec §7.4): AgentDeps gains external?: ReadonlyMap<string, ExternalToolMeta> (the side map of external tools, ../../ai/externalTools) and confirm gains a 4th argument { tainted, reason? }; runAgent keeps tainted (true at start when an MCP tool is offered, and after any external result) and taintSources (MCP server ids, plus 'scholar', grown only by results), returned on AgentRun. Every mutating tool is still confirmed, now with the note; a read-only MCP tool is also confirmed when, after a result, its server is not a taint source (crossServer) or its serialised arguments exceed 2,000 chars (bigArgs); a denial of such a read answers 'User denied this call.'. Task 6 (assistant spec §6.2, app only): AgentDeps gains onDelta?(text); when it is set and the provider has chatStream, each model turn goes through provider.chatStream(history, opts, onDelta), so answer text arrives piece by piece in order; the turn's ChatResult and so the AgentRun are the same as with chat. The logic is otherwise verbatim.
+// Changes: imports point at ./llmProvider. AgentDeps gains signal?: AbortSignal, passed to every provider.chat (which cancels the request in Rust through net_cancel). runAgent checks deps.signal?.aborted before each model turn, before each tool call of a turn, and again just before each runTool (so an approval answered after a Cancel never writes), and throws NetError('cancelled') (D11). The argument order stays the vendor's runAgent(messages, deps). Task 9 (spec §7.4): AgentDeps gains external?: ReadonlyMap<string, ExternalToolMeta> (the side map of external tools, ../../ai/externalTools) and confirm gains a 4th argument { tainted, reason? }; runAgent keeps tainted (true at start when an MCP tool is offered, and after any external result) and taintSources (MCP server ids, plus 'scholar', grown only by results), returned on AgentRun. Every mutating tool is still confirmed, now with the note; a read-only MCP tool is also confirmed when, after a result, its server is not a taint source (crossServer) or its serialised arguments exceed 2,000 chars (bigArgs); a denial of such a read answers 'User denied this call.'. Task 6 (assistant spec §6.2, app only): AgentDeps gains onDelta?(text); when it is set and the provider has chatStream, each model turn goes through provider.chatStream(history, opts, onDelta), so answer text arrives piece by piece in order; the turn's ChatResult and so the AgentRun are the same as with chat. Task 7 (assistant spec §4.5, R11, app only): AgentDeps gains initialTaint?: string[] (taint carried over from earlier chat turns); a non-empty list starts the run tainted with those entries as taintSources, so the first write is confirmed with the taint note and a read-only MCP call on any server gets the crossServer check. The logic is otherwise verbatim.
 /**
  * The tool-calling loop that makes the built-in AI agentic.
  *
@@ -71,6 +71,12 @@ export interface AgentDeps {
    * `provider.chatStream` when the provider has one; the run's result does not change.
    */
   onDelta?: (text: string) => void;
+  /**
+   * Taint carried over from earlier turns of a chat (app only, assistant spec §4.5): a non-empty list starts
+   * the run tainted with these entries as its first taint sources (none is an MCP server id, so every
+   * read-only MCP call is asked as crossServer).
+   */
+  initialTaint?: readonly string[];
 }
 
 /**
@@ -161,8 +167,9 @@ export async function runAgent(
   const executed: AgentRun['executed'] = [];
   const external = deps.external;
   // Offered MCP tools' descriptions and schemas are server text the model reads unfenced (spec §7.4).
-  let tainted = tools.some(t => external?.get(t.name)?.kind === 'mcp');
-  const taintSources = new Set<string>();
+  const seeded = deps.initialTaint ?? [];
+  let tainted = seeded.length > 0 || tools.some(t => external?.get(t.name)?.kind === 'mcp');
+  const taintSources = new Set<string>(seeded);
   const taint = () => ({ tainted, taintSources: [...taintSources] });
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {

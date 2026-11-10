@@ -930,6 +930,10 @@ const ko: Record<string, string> = {
   'settings.assistant.size.desc': '도우미 그림을 몇 배로 크게 그릴지 골라요.',
   'settings.assistant.size.2': '보통 (2배)',
   'settings.assistant.size.3': '크게 (3배)',
+  'assistant.runtime.builtin': '앱 안의 AI',
+  'assistant.status.read': '노트 읽는 중: {0}',
+  'assistant.status.write': '노트 고치는 중: {0}',
+  'assistant.status.tool': '도구 쓰는 중: {0}',
 };
 
 // 영어: 짧고 평이하게, 문장형 대소문자. Obsidian 을 쓰는 사람이 아는 말(vault, note, Open folder)을 쓴다.
@@ -1859,6 +1863,10 @@ const en: Record<string, string> = {
   'settings.assistant.size.desc': 'How many times larger the helper is drawn.',
   'settings.assistant.size.2': 'Normal (2x)',
   'settings.assistant.size.3': 'Large (3x)',
+  'assistant.runtime.builtin': 'Built-in AI',
+  'assistant.status.read': 'Reading note: {0}',
+  'assistant.status.write': 'Updating note: {0}',
+  'assistant.status.tool': 'Using tool: {0}',
 };
 
 export const catalogs: Record<Lang, Readonly<Record<string, string>>> = { ko, en };

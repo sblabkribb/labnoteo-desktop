@@ -659,4 +659,44 @@ describe('runAgent: taint gate for external tools', () => {
     const run = await runAgent(go, { provider, ctx: ctx(), tools: extTools(), external, confirm: r.confirm });
     expect(run.taintSources).toEqual([]);
   });
+
+  // Assistant spec §4.5, R11: taint carried over from earlier turns of the chat.
+  it('initialTaint seeds the run: the first write asks tainted and an MCP read asks crossServer', async () => {
+    const { tools, ran } = makeTools();
+    const provider = new ScriptedProvider([turn([call('write_thing', {}, 'a'), call('mcp_a_search', {}, 'b')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, {
+      provider,
+      ctx: ctx(),
+      tools: [...tools, ext('mcp_a_search')],
+      external,
+      confirm: r.confirm,
+      initialTaint: ['history'],
+    });
+    expect(r.asked).toEqual([
+      { name: 'write_thing', note: { tainted: true } },
+      { name: 'mcp_a_search', note: { tainted: true, reason: 'crossServer' } },
+    ]);
+    expect(ran).toEqual(['write_thing']);
+    expect(run.tainted).toBe(true);
+    expect(run.taintSources).toEqual(['history', 'a']);
+  });
+
+  it('initialTaint without any external tool still marks the write tainted', async () => {
+    const { tools } = makeTools();
+    const provider = new ScriptedProvider([turn([call('write_thing')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools, confirm: r.confirm, initialTaint: ['scholar'] });
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: true } }]);
+    expect(run).toMatchObject({ tainted: true, taintSources: ['scholar'] });
+  });
+
+  it('an empty initialTaint changes nothing', async () => {
+    const { tools } = makeTools();
+    const provider = new ScriptedProvider([turn([call('write_thing')])]);
+    const r = recorder(true);
+    const run = await runAgent(go, { provider, ctx: ctx(), tools, confirm: r.confirm, initialTaint: [] });
+    expect(r.asked).toEqual([{ name: 'write_thing', note: { tainted: false } }]);
+    expect(run).toMatchObject({ tainted: false, taintSources: [] });
+  });
 });

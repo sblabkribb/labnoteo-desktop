@@ -116,6 +116,20 @@ Turn on the built-in MCP server to let an AI client read and work with your note
 
 ![Enable the MCP server in settings and copy the client setup](docs/images/en/labnoteo-mcp.gif)
 
+### Using another AI tool
+
+The floating assistant runs on the app's own AI (the provider you set in Settings → Integrations).
+Other AI tools, such as Claude Code or DeepSeek Harness (`dsh`), are not built into the app and
+the app ships no Node.js or other runtime for them. They connect from outside, on the same vault:
+
+1. In Settings → Integrations, turn on the MCP server and copy the client setup into your tool.
+2. Install the labnoteO skill (SKILL.md) with "Install for Claude Code", or save it with "Save as…"
+   and point your tool at it. It explains the vault layout and the MCP tools.
+3. Ask your tool to work on an experiment. Every change it makes goes through the MCP server's own
+   approvals, and its keys stay in that tool, not in labnoteO.
+
+The assistant does not relay these tools; they talk to the MCP server directly.
+
 ### Light, dark, English, Korean
 
 Choose a light or dark theme, or match Windows. Switch between English and Korean at any time;
