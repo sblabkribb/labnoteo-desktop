@@ -92,5 +92,8 @@
   "github_sign_in_wait": ["requestId"],
   "github_account": [],
   "github_sign_out": [],
-  "github_set_token": ["value"]
+  "github_set_token": ["value"],
+  "github_owners": ["requestId"],
+  "github_name_check": ["owner", "name"],
+  "github_resolve_repo": ["url"]
 }

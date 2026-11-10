@@ -325,6 +325,36 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("github_account", args("github_account", vec![])), Value::Null);
     assert!(call("github_set_token", json!({"token": FAKE_GITHUB_TOKEN})).is_err());
     assert!(call("github_sign_in_wait", json!({})).is_err());
+    // Destination checks, offline paths only (the network paths are tested in
+    // `net::github::repos` against a loopback fake): a bad name or a
+    // non-GitHub URL answers before anything is sent, and with no token the
+    // answer is "sign in" with nothing sent either.
+    for (owner, name) in [("kim-lab", ".."), ("kim-lab", "x.git"), ("../x", "exp"), ("kim-lab", "단백질")] {
+        assert_eq!(
+            ok("github_name_check", args("github_name_check", vec![json!(owner), json!(name)])),
+            json!({"outcome": "invalidName"})
+        );
+    }
+    for url in ["https://gitlab.com/o/r", "https://github.com.evil.example/o/r", "o/..", ""] {
+        assert_eq!(
+            ok("github_resolve_repo", args("github_resolve_repo", vec![json!(url)])),
+            json!({"outcome": "invalidUrl"})
+        );
+    }
+    assert_eq!(
+        ok("github_owners", args("github_owners", vec![json!("gh-owners-1")])),
+        json!({"outcome": "needsSignIn"})
+    );
+    assert_eq!(
+        ok("github_name_check", args("github_name_check", vec![json!("kim-lab"), json!("exp")])),
+        json!({"outcome": "needsSignIn"})
+    );
+    assert_eq!(
+        ok("github_resolve_repo", args("github_resolve_repo", vec![json!("kim-lab/exp")])),
+        json!({"outcome": "needsSignIn"})
+    );
+    assert!(call("github_owners", json!({})).is_err());
+    assert!(call("github_name_check", json!({"owner": "kim-lab"})).is_err());
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["github"], &status["set"]["githubRefresh"]), (&json!(false), &json!(false)));
     for r in responses.borrow()[first_github..].iter() {

@@ -124,6 +124,10 @@ macro_rules! register_commands {
             $crate::net::github::auth::github_account,
             $crate::net::github::auth::github_sign_out,
             $crate::net::github::auth::github_set_token,
+            // GitHub destination: owner list and repo-name check and linking an existing repo.
+            $crate::net::github::repos::github_owners,
+            $crate::net::github::repos::github_name_check,
+            $crate::net::github::repos::github_resolve_repo,
         ])
     };
 }

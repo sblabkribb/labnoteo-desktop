@@ -39,6 +39,10 @@ const PENDING_TS_WRAPPERS: readonly string[] = [
   'github_account',
   'github_sign_out',
   'github_set_token',
+  // Task 4: 올릴 곳(계정·조직) 목록, 저장소 이름 확인, 기존 저장소 주소 확인.
+  'github_owners',
+  'github_name_check',
+  'github_resolve_repo',
 ];
 
 /**
