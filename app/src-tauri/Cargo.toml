@@ -47,6 +47,10 @@ socket2 = "0.6"
 arboard = { version = "=3.6.1", default-features = false }
 # The GitHub token is held in `Zeroizing` while Rust uses it (already in the lock).
 zeroize = "1.9.1"
+# GitHub upload engine (gitsync): an app-owned bare repo, commit and push over
+# WinHTTP. No ssh, no vendored OpenSSL (OpenSSL is gated to non-Windows Unix),
+# libgit2 built from source (libgit2-sys 0.18.x = libgit2 1.9.x).
+git2 = { version = "=0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
 
 [features]
 # Test builds only (P-R7, P-R15): the GitHub endpoints may be overridden with a

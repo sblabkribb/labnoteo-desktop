@@ -4,3 +4,4 @@
 //! `github_*` commands, never through `integration_state_*`.
 
 pub mod state;
+pub mod walk;
