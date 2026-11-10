@@ -106,6 +106,38 @@ describe('parsePlanningReply', () => {
     expect(r.sections.get('Input')).toBe('DNA-1');
     expect(r.sections.get('Method')).toBe('- mix');
   });
+
+  it.each([
+    ['**Results:** text', '**Results:** yield was 80%'],
+    ['**Results**: text', '**Results**: yield was 80%'],
+    ['Korean **결과:** text', '**결과:** 수율 80%'],
+    ['# Results', '# Results\n- yield was 80%'],
+    ['*Results*', '*Results*\n- yield was 80%'],
+    ['__Results__', '__Results__\n- yield was 80%'],
+    ['_Results_', '_Results_\n- yield was 80%'],
+    ['bare Results line', 'Results\n- yield was 80%'],
+    ['bare QC Metrics line', 'QC Metrics\n- purity 99%'],
+  ])('drops a results label written as %s inside a planning section', (_label, results) => {
+    const reply = ['#### Method', '- Step one', '', results, '', '#### Output', '- PRT-1'].join('\n');
+    const r = parsePlanningReply(reply, ['Method', 'Output']);
+    expect(r.sections.get('Method')).toBe('- Step one');
+    expect(r.sections.get('Output')).toBe('- PRT-1');
+    expect([...r.sections.values()].join('\n')).not.toMatch(/80%|99%/);
+    expect(r.dropped.length).toBeGreaterThan(0);
+  });
+
+  it('keeps bold text that is not a section label and list items that mention results', () => {
+    const reply = ['#### Method', '**Note** keep on ice', '- Check results of the gel later', '*Mix gently*'].join('\n');
+    const r = parsePlanningReply(reply, ['Method']);
+    expect(r.sections.get('Method')).toBe('**Note** keep on ice\n- Check results of the gel later\n*Mix gently*');
+    expect(r.dropped).toEqual([]);
+  });
+
+  it('accepts an emphasised planning label with same-line text', () => {
+    const r = parsePlanningReply(['**Input:** DNA-1', '_Method_', '- mix'].join('\n'), HW);
+    expect(r.sections.get('Input')).toBe('DNA-1');
+    expect(r.sections.get('Method')).toBe('- mix');
+  });
 });
 
 // ------------------------------------------------------------------ applyPlanningDraft

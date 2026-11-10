@@ -3,6 +3,10 @@
 // target unit op only. Results & Discussions, QC Metrics, Discussion and Meta
 // are never kept and never written, under any heading style or label.
 import { listUnitOpBlocks, neutralizeIssueMarkers } from '@labnoteo/core';
+// stepFence/OpenFence are not re-exported from @labnoteo/core's entry point,
+// so they are imported from the core source file (spec §0 allows this outside
+// lib/; the submodule itself is never modified). Using the core's own fence
+// stepper keeps code-fence detection identical to the section editor's.
 import { stepFence, type OpenFence } from '../../../vendor/labnoteo/packages/labnoteo-core/src/sections/sectionEdit';
 import { toNoteCallout } from '../port/aiDraftMethod';
 import { canonicalSection, isPlaceholderBody, RESEARCHER_ONLY_SECTIONS, type UnitOpKind } from './chain';
@@ -17,25 +21,40 @@ import { draftableSectionsFor, planningOnly } from './planningPrompt';
 const RESEARCHER_LIKE_RE =
   /^(results?\b|outcomes?\b|findings?\b|observations?\b|qc\b|quality control|discussions?\b|conclusions?\b|meta(data)?\b|결과|논의|토의|고찰|결론|관찰|메타|qc\s*지표|품질)/i;
 
-const HASH_HEADING_RE = /^\s{0,3}#{2,6}\s+(.+?)\s*#*\s*$/;
-const BOLD_HEADING_RE = /^\s{0,3}\*\*(.+?)\*\*\s*:?\s*$/;
-const COLON_HEADING_RE = /^\s{0,3}([^\s:#*>`|-][^:]{0,60}?)\s*:\s*(.*)$/;
+const HASH_HEADING_RE = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/;
+/**
+ * An emphasised label (`**Name**`, `__Name__`, `*Name*`, `_Name_`), alone on
+ * the line or followed by a colon and same-line text: `**Name:** text`,
+ * `**Name**: text`.
+ */
+const EMPH_HEADING_RE = /^\s{0,3}(\*\*|__|\*|_)(?!\s)(.+?)\1\s*(:)?\s*(.*)$/;
+const COLON_HEADING_RE = /^\s{0,3}([^\s:#*_>`|-][^:]{0,60}?)\s*:\s*(.*)$/;
+/** A bare line of at most five words without a list marker or sentence end. */
+const BARE_HEADING_RE = /^\s{0,3}([^\s#*_>`|\-+\d][^.!?:]{0,60}?)\s*$/;
 const SOURCE_LINE_RE = /^\s*<\\?<\/?source\b.*$/i;
 const FENCE_OPEN_RE = /^\s*(`{3,}|~{3,})[^`]*$/;
 
-/** The name of a heading with numbering, bold markers and a trailing colon removed. */
+/** The name of a heading with numbering, emphasis markers and a trailing colon removed. */
 function cleanName(raw: string): string {
-  return raw
-    .replace(/^\*\*(.*)\*\*$/, '$1')
-    .replace(/^\d+[.)]\s*/, '')
-    .replace(/\s*:\s*$/, '')
-    .replace(/^\*\*(.*)\*\*$/, '$1')
-    .trim();
+  let name = raw.trim();
+  for (;;) {
+    const next = name
+      .replace(/^(\*\*|__|\*|_)(.+)\1$/, '$2')
+      .replace(/^\d+[.)]\s*/, '')
+      .replace(/\s*:\s*$/, '')
+      .trim();
+    if (next === name) return name;
+    name = next;
+  }
 }
 
 type HeadingHit = { name: string; canon: string | undefined; rest?: string };
 
-/** The section heading on `line`, or undefined. Weak styles (bold, `Name:`) count only for a known or researcher-like name. */
+/**
+ * The section heading on `line`, or undefined. Weak styles (emphasis, `Name:`,
+ * a bare line) count only for a known or researcher-like name, so a results
+ * label in any of these styles starts a dropped section.
+ */
 function headingOf(line: string): HeadingHit | undefined {
   const hash = HASH_HEADING_RE.exec(line);
   if (hash) {
@@ -43,21 +62,26 @@ function headingOf(line: string): HeadingHit | undefined {
     return { name, canon: canonicalSection(name) };
   }
   const known = (name: string) => canonicalSection(name) !== undefined || RESEARCHER_LIKE_RE.test(name.normalize('NFC'));
-  const bold = BOLD_HEADING_RE.exec(line);
-  if (bold) {
-    const name = cleanName(bold[1]);
-    if (known(name)) return { name, canon: canonicalSection(name) };
-    return undefined;
+  const hit = (name: string, rest?: string): HeadingHit => ({
+    name,
+    canon: canonicalSection(name),
+    rest: rest?.trim() || undefined,
+  });
+  const emph = EMPH_HEADING_RE.exec(line);
+  // Same-line text only after a colon, inside or after the emphasis.
+  if (emph && (emph[4] === '' || emph[3] === ':' || /:\s*$/.test(emph[2]))) {
+    const name = cleanName(emph[2]);
+    if (known(name)) return hit(name, emph[4]);
   }
   const colon = COLON_HEADING_RE.exec(line);
   if (colon) {
     const name = cleanName(colon[1]);
-    if (known(name))
-      return {
-        name,
-        canon: canonicalSection(name),
-        rest: colon[2].trim() || undefined,
-      };
+    if (known(name)) return hit(name, colon[2]);
+  }
+  const bare = BARE_HEADING_RE.exec(line);
+  if (bare && bare[1].trim().split(/\s+/).length <= 5) {
+    const name = cleanName(bare[1]);
+    if (known(name)) return hit(name);
   }
   return undefined;
 }
