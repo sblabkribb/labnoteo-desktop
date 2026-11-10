@@ -17,6 +17,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tauri::State;
 
 use crate::net::config::{ServiceConfig, DEFAULT_GITHUB_CLIENT_ID};
+use crate::net::github::GithubState;
 use crate::net::secrets::{clear_secret, SecretStore, Secrets, Slot};
 use crate::net::store::vault_dir;
 use crate::net::{IntegrationDirs, NetError, NetErrorKind};
@@ -167,7 +168,7 @@ pub struct GithubAppSettingsPatch {
 }
 
 /// Forgets the stored sign-in: both keychain slots and the account record.
-/// (The in-memory token of `forgetOnExit` joins this with the sign-in task.)
+/// `GithubState::sign_out` adds the in-memory token of `forgetOnExit`.
 pub(crate) fn sign_out_stored(dirs: &Path, store: &dyn SecretStore) -> Result<(), NetError> {
     // The GitHub slots have a fixed origin: the vault's config plays no part.
     let cfg = ServiceConfig::from_settings_json("{}");
@@ -186,10 +187,12 @@ pub fn app_settings_get_at(dirs: &Path) -> Result<GithubAppSettingsView, NetErro
 pub fn app_settings_set_at(
     dirs: &Path,
     store: &dyn SecretStore,
+    github: &GithubState,
     patch: GithubAppSettingsPatch,
 ) -> Result<GithubAppSettingsView, NetError> {
     let mut app: GithubAppSettings = read_doc(dirs, None, GithubDoc::App)?;
     let before = github_client_id(&app);
+    let forgot_before = app.forget_on_exit;
     if let Some(id) = patch.client_id {
         let id = id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         if id.as_deref().is_some_and(|s| !client_id_ok(s)) {
@@ -204,7 +207,13 @@ pub fn app_settings_set_at(
         app.forget_on_exit = flag;
     }
     if github_client_id(&app) != before {
-        sign_out_stored(dirs, store)?;
+        github.sign_out(dirs, store)?;
+    }
+    // Turning "sign out when the app closes" on while signed in moves the
+    // keychain token into memory (the keychain entries are deleted). Turning
+    // it off keeps a memory token in memory until the next sign-in.
+    if app.forget_on_exit && !forgot_before {
+        github.move_to_memory(store)?;
     }
     write_doc(dirs, None, GithubDoc::App, &app)?;
     Ok(view_of(&app))
@@ -221,9 +230,10 @@ pub fn github_app_settings_get(dirs: State<'_, IntegrationDirs>) -> Result<Githu
 pub fn github_app_settings_set(
     dirs: State<'_, IntegrationDirs>,
     secrets: State<'_, Secrets>,
+    github: State<'_, GithubState>,
     patch: GithubAppSettingsPatch,
 ) -> Result<GithubAppSettingsView, NetError> {
-    app_settings_set_at(&dirs.0, secrets.0.as_ref(), patch)
+    app_settings_set_at(&dirs.0, secrets.0.as_ref(), &github, patch)
 }
 
 #[cfg(test)]
@@ -297,25 +307,26 @@ mod tests {
     fn settings_view_and_patch() {
         let dir = scratch_dir("gh-app");
         let store = MemoryStore::default();
+        let gh = GithubState::default();
         let v = app_settings_get_at(&dir).unwrap();
         assert_eq!(
             serde_json::to_value(&v).unwrap(),
             serde_json::json!({"clientIdDefault": true, "forgetOnExit": false})
         );
-        let v = app_settings_set_at(&dir, &store, patch(r#"{"forgetOnExit":true}"#)).unwrap();
+        let v = app_settings_set_at(&dir, &store, &gh, patch(r#"{"forgetOnExit":true}"#)).unwrap();
         assert!(v.forget_on_exit && v.client_id_default);
-        let v = app_settings_set_at(&dir, &store, patch(r#"{"clientId":" Iv1.lab "}"#)).unwrap();
+        let v = app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":" Iv1.lab "}"#)).unwrap();
         assert_eq!(
             serde_json::to_value(&v).unwrap(),
             serde_json::json!({"clientId": "Iv1.lab", "clientIdDefault": false, "forgetOnExit": true})
         );
         assert_eq!(app_settings_get_at(&dir).unwrap(), v);
         assert_eq!(
-            app_settings_set_at(&dir, &store, patch(r#"{"clientId":"bad/id"}"#)).unwrap_err().kind,
+            app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":"bad/id"}"#)).unwrap_err().kind,
             NetErrorKind::BadInput
         );
         assert_eq!(app_settings_get_at(&dir).unwrap(), v, "a refused patch changes nothing");
-        let v = app_settings_set_at(&dir, &store, patch(r#"{"clientId":null}"#)).unwrap();
+        let v = app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":null}"#)).unwrap();
         assert!(v.client_id.is_none() && v.client_id_default && v.forget_on_exit);
         assert!(serde_json::from_str::<GithubAppSettingsPatch>(r#"{"token":"x"}"#).is_err());
         let _ = std::fs::remove_dir_all(&dir);
@@ -325,15 +336,16 @@ mod tests {
     fn a_different_client_id_signs_out() {
         let dir = scratch_dir("gh-signout");
         let store = MemoryStore::default();
+        let gh = GithubState::default();
         let cfg = ServiceConfig::from_settings_json("{}");
         store_secret(&store, Slot::Github, &cfg, FAKE).unwrap();
         store_secret(&store, Slot::GithubRefresh, &cfg, "ghr_FAKE").unwrap();
         write_doc(&dir, None, GithubDoc::Account, &serde_json::json!({"login": "me", "id": 1})).unwrap();
         // Same effective client ID (forget flag only): still signed in.
-        app_settings_set_at(&dir, &store, patch(r#"{"forgetOnExit":false}"#)).unwrap();
+        app_settings_set_at(&dir, &store, &gh, patch(r#"{"forgetOnExit":false}"#)).unwrap();
         assert!(status_of(&store, &cfg).set.github);
         // A new client ID: both slots and the account record are gone.
-        app_settings_set_at(&dir, &store, patch(r#"{"clientId":"Iv1.other"}"#)).unwrap();
+        app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":"Iv1.other"}"#)).unwrap();
         let st = status_of(&store, &cfg);
         assert!(!st.set.github && !st.set.github_refresh);
         assert!(!dir.join("github").join("account.json").exists());
@@ -342,7 +354,7 @@ mod tests {
         assert!(!text.contains("ghp_") && !text.contains("ghr_"));
         // Setting the same client ID again does not sign out.
         store_secret(&store, Slot::Github, &cfg, FAKE).unwrap();
-        app_settings_set_at(&dir, &store, patch(r#"{"clientId":"Iv1.other"}"#)).unwrap();
+        app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":"Iv1.other"}"#)).unwrap();
         assert!(status_of(&store, &cfg).set.github);
         let _ = std::fs::remove_dir_all(&dir);
     }

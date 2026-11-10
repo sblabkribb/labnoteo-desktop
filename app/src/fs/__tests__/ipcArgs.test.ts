@@ -33,6 +33,12 @@ const PENDING_TS_WRAPPERS: readonly string[] = [
   // feat/github-upload: Task 1 이 Rust 커맨드를 등록했다. githubIpc.ts 래퍼는 Task 11 이 만들며 이 목록을 비운다.
   'github_app_settings_get',
   'github_app_settings_set',
+  // Task 3: 로그인(기기 코드), 토큰 붙여넣기, 계정, 로그아웃.
+  'github_sign_in_start',
+  'github_sign_in_wait',
+  'github_account',
+  'github_sign_out',
+  'github_set_token',
 ];
 
 /**

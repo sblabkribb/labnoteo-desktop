@@ -68,6 +68,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::vault::watcher::WatcherState::inert())
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .manage(labnoteo_app_lib::net::NetState::default())
+        .manage(labnoteo_app_lib::net::github::GithubState::default())
         .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
         .manage(labnoteo_app_lib::scan::ScanFolderState::inert())
         .manage(labnoteo_app_lib::mcp::McpState::default())
@@ -296,6 +297,36 @@ fn ipc_argument_names_match_the_typescript_side() {
         json!({"clientIdDefault": true, "forgetOnExit": false})
     );
     assert!(dir.join("data").join("integrations").join("github").join("app.json").is_file());
+    // GitHub sign-in, offline paths only (the device flow itself is tested
+    // in `net::github::auth` against a loopback fake). This build must have
+    // no built-in client ID, or the start below would reach github.com.
+    assert!(
+        labnoteo_app_lib::net::config::DEFAULT_GITHUB_CLIENT_ID.is_empty()
+            && option_env!("LABNOTEO_GITHUB_CLIENT_ID").map_or(true, str::is_empty),
+        "this test must never reach GitHub: build it without a client ID"
+    );
+    assert_eq!(
+        ok("github_sign_in_start", args("github_sign_in_start", vec![])),
+        json!({"outcome": "notConfigured"})
+    );
+    // No started flow: `expired` (get a new code), nothing sent.
+    assert_eq!(
+        ok("github_sign_in_wait", args("github_sign_in_wait", vec![json!("gh-wait-1")])),
+        json!({"outcome": "expired"})
+    );
+    for bad in ["xyz", "ghr_FAKE", ""] {
+        assert_eq!(
+            ok("github_set_token", args("github_set_token", vec![json!(bad)])),
+            json!({"outcome": "badToken"})
+        );
+    }
+    assert_eq!(ok("github_account", args("github_account", vec![])), Value::Null);
+    assert_eq!(ok("github_sign_out", args("github_sign_out", vec![])), Value::Null);
+    assert_eq!(ok("github_account", args("github_account", vec![])), Value::Null);
+    assert!(call("github_set_token", json!({"token": FAKE_GITHUB_TOKEN})).is_err());
+    assert!(call("github_sign_in_wait", json!({})).is_err());
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!((&status["set"]["github"], &status["set"]["githubRefresh"]), (&json!(false), &json!(false)));
     for r in responses.borrow()[first_github..].iter() {
         assert_no_github_token(r);
     }

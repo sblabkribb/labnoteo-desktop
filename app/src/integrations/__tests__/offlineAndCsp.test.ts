@@ -150,7 +150,7 @@ function memoryStore(files: Record<string, string>): PartbankCatalogStore {
   };
 }
 
-const NETWORK = /^(partbank_(request|probe)|llm_|bfw_)/;
+const NETWORK = /^(partbank_(request|probe)|llm_|bfw_|github_(sign_in_start|sign_in_wait|set_token|owners|name_check|resolve_repo|upload|retry)$)/;
 
 let hosts: TestHost[] = [];
 beforeEach(() => setLang('en'));

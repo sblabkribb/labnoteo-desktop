@@ -118,6 +118,12 @@ macro_rules! register_commands {
             // GitHub upload: app-wide settings (offline and Rust-only state).
             $crate::gitsync::state::github_app_settings_get,
             $crate::gitsync::state::github_app_settings_set,
+            // GitHub sign-in (device flow and pasted token) plus account and sign-out.
+            $crate::net::github::auth::github_sign_in_start,
+            $crate::net::github::auth::github_sign_in_wait,
+            $crate::net::github::auth::github_account,
+            $crate::net::github::auth::github_sign_out,
+            $crate::net::github::auth::github_set_token,
         ])
     };
 }
@@ -143,6 +149,8 @@ pub fn run() {
         .manage(vault::VaultState::default())
         // Requests in flight (cancellable by id) and the PartBank web pacing gate.
         .manage(net::NetState::default())
+        // The GitHub sign-in: the device session and the forget-on-exit token.
+        .manage(net::github::GithubState::default())
         // The scan folder's watcher (SP7 B4); started by `scan_folder_watch` / `scan_folder_choose`.
         .manage(scan::ScanFolderState::default())
         // SP7 Part C: the MCP server's state (the in-memory token copy) and
@@ -200,8 +208,22 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running labnoteO");
+        .build(tauri::generate_context!())
+        .expect("error while running labnoteO")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                on_exit(app);
+            }
+        });
+}
+
+/// The exit hook: zeroizes the GitHub memory token ("sign out when the app
+/// closes"; the account record is forgotten too when that setting is on).
+fn on_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(github) = app.try_state::<net::github::GithubState>() {
+        let dirs = app.try_state::<net::IntegrationDirs>();
+        github.on_exit(dirs.as_ref().map(|d| d.0.as_path()));
+    }
 }
 
 #[cfg(test)]

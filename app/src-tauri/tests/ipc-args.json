@@ -87,5 +87,10 @@
   "skill_install": ["overwrite"],
   "skill_save_as": [],
   "github_app_settings_get": [],
-  "github_app_settings_set": ["patch"]
+  "github_app_settings_set": ["patch"],
+  "github_sign_in_start": [],
+  "github_sign_in_wait": ["requestId"],
+  "github_account": [],
+  "github_sign_out": [],
+  "github_set_token": ["value"]
 }

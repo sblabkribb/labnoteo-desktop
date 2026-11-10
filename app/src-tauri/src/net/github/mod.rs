@@ -8,6 +8,9 @@
 //!   `file://` URL for `git`) is used; anything else is ignored.
 
 pub mod api;
+pub mod auth;
+
+pub use auth::GithubState;
 
 use super::config::Url;
 #[cfg(any(test, feature = "github-test-endpoints"))]
