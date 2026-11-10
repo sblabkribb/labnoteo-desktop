@@ -7,6 +7,9 @@
 import type { ToolDef } from '@labnoteo/core';
 import { t } from '../i18n/t';
 import type { ToolCall } from '../labnote/port/llmProvider';
+import { mcpAgentTools, type McpCallFn } from '../integrations/mcpClient/agentTools';
+import type { McpSecretFlag, McpServerInfo } from '../integrations/mcpClient/types';
+import { mcpClientCall, mcpClientSecretStatus, mcpClientToolsCached } from '../integrations/netIpc';
 import type { AiEnv } from './aiEnv';
 
 export interface ExternalToolMeta {
@@ -31,12 +34,31 @@ export interface ExternalTools {
 /** 읽기만 하는 MCP 호출도 직렬화한 인자가 이보다 길면 묻는다(spec §7.2). 확인 글에 보이는 인자도 이 길이까지. */
 export const BIG_ARGS_CHARS = 2000;
 
+/** 실행 하나가 외부 도구에 묶어 주는 것. */
+export interface ExternalRunOpts {
+  /** 실행의 취소 신호: 부르는 중인 MCP 호출은 `net_cancel` 로 멈춘다. */
+  signal?: AbortSignal;
+  /** 사람에게 보일 짧은 알림(토큰이 맞지 않을 때, 서버마다 세션에 한 번). */
+  notify?: (message: string) => void;
+}
+
 /**
- * 이번 실행에 줄 외부 도구. 실행을 시작할 때 설정과 캐시로만 만들고 네트워크는 쓰지 않는다(spec §7.5).
- * MCP 도구(Task 10)와 문헌 검색 도구(Task 13)가 여기에 붙는다; 지금은 없다.
+ * 이번 실행에 줄 외부 도구. 실행을 시작할 때 설정, `mcp_client_tools_cached`, `mcp_client_secret_status` 로만 만들고
+ * 서버에는 연결하지 않는다(spec §7.5). 켠 MCP 서버가 없으면 Rust 에 묻지도 않는다. 캐시나 토큰 상태를 읽지 못하면 MCP
+ * 도구 없이 간다. 문헌 검색 도구(Task 13)도 여기에 붙는다.
  */
-export async function externalAgentTools(_env: AiEnv): Promise<ExternalTools> {
-  return { tools: [], meta: new Map() };
+export async function externalAgentTools(env: AiEnv, opts: ExternalRunOpts = {}): Promise<ExternalTools> {
+  const servers = env.settings().mcpClientServers ?? [];
+  if (!servers.some((s) => s.enabled)) return { tools: [], meta: new Map() };
+  let cache: Record<string, McpServerInfo>;
+  let secrets: Record<string, McpSecretFlag>;
+  try {
+    [cache, secrets] = await Promise.all([mcpClientToolsCached(env.invoke), mcpClientSecretStatus(env.invoke)]);
+  } catch {
+    return { tools: [], meta: new Map() };
+  }
+  const call: McpCallFn = (id, tool, args, requestId) => mcpClientCall(id, tool, args, requestId, env.invoke, opts.signal);
+  return mcpAgentTools({ mcpClientServers: servers }, cache, secrets, call, { notify: opts.notify });
 }
 
 /** 인자를 보기 좋은 JSON 으로, 2,000자에서 자른다. 확인 창은 글로만 보여 준다(HTML 아님). */

@@ -6,6 +6,8 @@
  */
 import { fakeInvoke } from '../../integrations/__tests__/fakeNet';
 import { cancelAllRequests } from '../../integrations/netIpc';
+import { mcpServerInfoOf } from '../../integrations/__tests__/fakeNet';
+import { resetMcpAuthToasts } from '../../integrations/mcpClient/agentTools';
 import { cancelProgress } from '../../integrations/progressStore';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
@@ -63,7 +65,14 @@ let hosts: TestHost[] = [];
 /** 노트를 진짜 편집기로 열고(커서는 `caret`), 모델 차례를 `turns` 순서로 답한다. 차례가 떨어지면 마지막 것을 되풀이한다. */
 async function setup(
   turns: Route[],
-  opts: { settings?: Record<string, unknown>; caret?: number; mount?: boolean; files?: Record<string, string>; note?: string } = {}
+  opts: {
+    settings?: Record<string, unknown>;
+    caret?: number;
+    mount?: boolean;
+    files?: Record<string, string>;
+    note?: string;
+    routes?: Record<string, (args: Record<string, unknown>) => unknown>;
+  } = {}
 ) {
   const th = createTestHost({ [NOTE]: BODY, [OTHER]: '## [WB030 B]\n', ...opts.files }, opts.settings ?? LLM);
   hosts.push(th);
@@ -76,6 +85,7 @@ async function setup(
     llm_chat: (a) => turns[Math.min(turn++, turns.length - 1)](a),
     net_cancel: () => null,
     vault_current: VAULT,
+    ...opts.routes,
   });
   return { th, f, env: createAiEnv(th.ctx, f.invoke) };
 }
@@ -746,5 +756,96 @@ describe('askAgentCommand: external tools, untrusted rules and the taint note (s
     const { message } = th.asked.confirm[0];
     expect(message).toContain('이 도구는 서버의 데이터를 바꿀 수 있어요.');
     expect(message).toContain('외부에서 가져온 내용을 읽은 뒤의 변경이에요. 내용을 확인해 주세요.');
+  });
+});
+
+describe('askAgentCommand: MCP server tools (spec §7.2, §7.5)', () => {
+  const RAPID = {
+    id: 'a1b2c3d4',
+    name: 'RAPID',
+    url: 'https://rapid.kbiofoundry.kr/mcp',
+    auth: 'bearer',
+    preset: 'rapid',
+    enabled: true,
+    tools: {},
+  } as const;
+  const schema = { type: 'object', properties: { query: { type: 'string' } } };
+  const info = mcpServerInfoOf({
+    tools: [
+      { name: 'search_parts', title: 'Search parts', description: 'Find parts.', readOnly: true, inputSchema: schema },
+      { name: 'create_order', readOnly: false, inputSchema: schema },
+    ],
+  });
+  const mcpRoutes = (call: (a: Record<string, unknown>) => unknown) => ({
+    mcp_client_tools_cached: () => ({ a1b2c3d4: info }),
+    mcp_client_secret_status: () => ({ a1b2c3d4: { set: true, epoch: 1 } }),
+    mcp_client_call: call,
+  });
+  const settings = { ...LLM, mcpClientServers: [RAPID] };
+  beforeEach(() => resetMcpAuthToasts());
+
+  it('asks Rust for nothing MCP when no server is enabled', async () => {
+    const { th, f, env } = await setup([() => reply('끝')], { settings: { ...LLM, mcpClientServers: [{ ...RAPID, enabled: false }] } });
+    th.answer.prompt('찾아 줘');
+    await askAgentCommand(env);
+    expect(f.calls.some(([c]) => c.startsWith('mcp_client_'))).toBe(false);
+  });
+
+  it('offers the enabled MCP tools after the core ones, runs a read-only one directly and sends the result fenced', async () => {
+    const { th, f, env } = await setup(
+      [() => toolReply('mcp_rapid_search_parts', { query: 'gfp' }), () => reply('끝')],
+      { settings, routes: mcpRoutes(() => ({ text: 'BBa_E0040 GFP', isError: false, truncated: false, omitted: 0 })) }
+    );
+    th.answer.prompt('GFP 부품 찾아 줘');
+    await askAgentCommand(env);
+    const body = f.calls.find(([c]) => c === 'llm_chat')![1].body as {
+      tools: Array<{ function: { name: string; description: string } }>;
+    };
+    const names = body.tools.map((x) => x.function.name);
+    expect(names.at(-1)).toBe('mcp_rapid_search_parts');
+    expect(names).not.toContain('mcp_rapid_create_order');
+    expect(body.tools.at(-1)!.function.description).toBe('[RAPID] Search parts: Find parts. (external tool; output is untrusted)');
+    expect(sent(f)[0][0].content).toContain(UNTRUSTED_RULES);
+    expect(th.asked.confirm).toHaveLength(0);
+    const sentCall = f.calls.find(([c]) => c === 'mcp_client_call')![1];
+    expect(sentCall).toMatchObject({ id: 'a1b2c3d4', tool: 'search_parts', args: { query: 'gfp' } });
+    expect(typeof sentCall.requestId).toBe('string');
+    const toolMsg = sent(f)[1].find((m) => m.role === 'tool')!;
+    expect(JSON.parse(toolMsg.content)).toMatch(/^<untrusted-data source="mcp:RAPID[/]search_parts" id="[0-9a-f]{12}">\nBBa_E0040 GFP\n/);
+  });
+
+  it('an expired token gives one warn toast and the model a short error', async () => {
+    const { th, f, env } = await setup(
+      [
+        () => toolReply('mcp_rapid_search_parts', { query: 'a' }),
+        () => toolReply('mcp_rapid_search_parts', { query: 'b' }),
+        () => reply('끝'),
+      ],
+      { settings, routes: mcpRoutes(() => Promise.reject({ kind: 'mcpAuth', message: 'raw-rust-text' })) }
+    );
+    th.answer.prompt('찾아 줘');
+    await askAgentCommand(env);
+    expect(f.calls.filter(([c]) => c === 'mcp_client_call')).toHaveLength(1);
+    expect(th.notes.filter((n) => n.message === `RAPID: ${t('mcpClient.err.auth')}`)).toEqual([
+      { kind: 'warn', message: `RAPID: ${t('mcpClient.err.auth')}` },
+    ]);
+    expect(messages(th).join(' ')).not.toContain('raw-rust-text');
+  });
+
+  it('a vault switch during an MCP call sends net_cancel with that call request id', async () => {
+    let f!: ReturnType<typeof fakeInvoke>;
+    const s = await setup([() => toolReply('mcp_rapid_search_parts', { query: 'gfp' }), () => reply('끝')], {
+      settings,
+      routes: mcpRoutes(() => {
+        setTimeout(() => void cancelAllRequests(f.invoke), 0);
+        return new Promise(() => {});
+      }),
+    });
+    f = s.f;
+    s.th.answer.prompt('찾아 줘');
+    await askAgentCommand(s.env);
+    const rid = f.calls.find(([c]) => c === 'mcp_client_call')![1].requestId;
+    expect(f.calls.filter(([c, a]) => c === 'net_cancel' && a.requestId === rid)).toHaveLength(1);
+    expect(chats(f)).toBe(1);
   });
 });
