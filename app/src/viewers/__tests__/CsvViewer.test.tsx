@@ -6,6 +6,7 @@ const invoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
 
 import { CsvViewer, ROW_PX, WINDOW_ROWS } from '../CsvViewer';
+import { COL_WINDOW, ROW_CAP } from '../csvLoad';
 import { StatusBar } from '../../ui/StatusBar';
 
 const bytes = (s: string) => new TextEncoder().encode(s).buffer;
@@ -98,6 +99,79 @@ describe('CsvViewer', () => {
     expect(within(table).queryByText('r10')).toBeNull();
     expect(table.querySelector<HTMLElement>('tr.csv-spacer-before')!.style.getPropertyValue('--csv-pad')).not.toBe('');
     expect(table.querySelectorAll('tr').length).toBeLessThan(2100);
+  });
+
+  it('keeps at most 5,000 rows, says how many there are, and the status bar counts them all', async () => {
+    const lines = ['i,v'];
+    for (let i = 0; i < 7000; i++) lines.push(`r${i},${i}`);
+    serve(lines.join('\n'));
+    render(
+      <>
+        <CsvViewer path="big.csv" />
+        <StatusBar viewerPath="big.csv" onReveal={() => {}} />
+      </>,
+    );
+    expect(await screen.findByText('처음 5,000행만 보여요 (전체 7,000행).')).toBeTruthy();
+    expect(screen.getByText('7000행 × 2열')).toBeTruthy();
+    const table = screen.getByRole('table');
+    const after = table.querySelector<HTMLElement>('tr.csv-spacer-after')!;
+    expect(after.style.getPropertyValue('--csv-pad')).toBe(`${(ROW_CAP - WINDOW_ROWS) * ROW_PX}px`);
+  });
+
+  it('windows 50 columns at a time with previous/next buttons', async () => {
+    const head = Array.from({ length: 120 }, (_, i) => `c${i}`);
+    serve(`${head.join(',')}\n${head.map((_, i) => `v${i}`).join(',')}\n`);
+    render(<CsvViewer path="wide.csv" />);
+    const table = await screen.findByRole('table');
+    expect(COL_WINDOW).toBe(50);
+    expect(table.querySelectorAll('th')).toHaveLength(50);
+    expect(screen.getByText('열 1–50 / 120')).toBeTruthy();
+    const prev = screen.getByRole('button', { name: '앞 열' }) as HTMLButtonElement;
+    const next = screen.getByRole('button', { name: '다음 열' }) as HTMLButtonElement;
+    expect(prev.disabled).toBe(true);
+    fireEvent.click(next);
+    expect(screen.getByText('열 51–100 / 120')).toBeTruthy();
+    expect(within(table).getByRole('columnheader', { name: 'c50' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: 'c0' })).toBeNull();
+    expect(within(table).getByText('v99')).toBeTruthy();
+    fireEvent.click(next);
+    expect(screen.getByText('열 101–120 / 120')).toBeTruthy();
+    expect(table.querySelectorAll('th')).toHaveLength(20);
+    expect(next.disabled).toBe(true);
+    fireEvent.click(prev);
+    expect(screen.getByText('열 51–100 / 120')).toBeTruthy();
+  });
+
+  it('a narrow table has no column buttons', async () => {
+    serve(CSV);
+    render(<CsvViewer path="p.csv" />);
+    await screen.findByRole('table');
+    expect(screen.queryByRole('button', { name: '다음 열' })).toBeNull();
+  });
+
+  it('unmounting terminates the worker', async () => {
+    const workers: { terminate: ReturnType<typeof vi.fn>; postMessage: ReturnType<typeof vi.fn> }[] = [];
+    class FakeWorker {
+      onmessage = null;
+      onerror = null;
+      terminate = vi.fn();
+      postMessage = vi.fn();
+      constructor() {
+        workers.push(this);
+      }
+    }
+    vi.stubGlobal('Worker', FakeWorker);
+    try {
+      serve(CSV);
+      const { unmount } = render(<CsvViewer path="w.csv" />);
+      await vi.waitFor(() => expect(workers).toHaveLength(1));
+      await vi.waitFor(() => expect(workers[0].postMessage).toHaveBeenCalled());
+      expect(screen.getByText('읽는 중…')).toBeTruthy();
+      unmount();
+      expect(workers[0].terminate).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a read failure falls back to the file card with the reason', async () => {

@@ -122,6 +122,21 @@
 .csv-table th.num { font-family: inherit; }
 .csv-table tr.csv-spacer { height: var(--csv-pad, 0px); }
 .csv-table tr.csv-spacer td { height: inherit; padding: 0; border: 0; background: transparent; }
+/* 열 창(50 개씩)의 위치와 "처음 5,000행만" 같은 알림 */
+.csv-cols {
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.csv-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-6);
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  border-bottom: 1px solid var(--border);
+}
 .csv-raw {
   flex: 1;
   min-height: 0;
