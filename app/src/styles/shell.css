@@ -241,6 +241,25 @@ button.chip.status:hover:not(:disabled) { background: var(--accent-soft); border
 .sidebar-panel > section > p { margin: var(--space-4) 0 0; }
 :where(.sidebar-panel > section) p { color: var(--text-muted); }
 .sidebar-panel > p { margin: 0; padding: 0 var(--space-5); color: var(--text-muted); }
+/* 탭 머리(파일 탭): 흐린 12px 이름과 26px 아이콘 단추들 */
+.nav-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-3) var(--space-5);
+}
+.nav-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+}
+.nav-header-actions { display: flex; flex: none; gap: var(--space-1); }
+.nav-header-actions .ibtn { min-width: 26px; min-height: 26px; }
 
 /* 독의 아이콘 탭(파일 / 실험 / 샘플): 고른 탭은 --bg-selected 채움만(알약·밑줄 없음). 이름은 aria-label 과 title, 줄은 넘기지 않는다 */
 .dock-tabs {

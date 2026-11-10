@@ -158,7 +158,9 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
           return vault;
         case 'vault_tree': {
           const dirs = allDirs();
-          const out: { path: string; name: string; isDir: boolean; depth: number }[] = [];
+          // Rust 처럼 모든 파일(노트와 첨부)을 싣고 확장자(ext)를 단다
+          const out: { path: string; name: string; isDir: boolean; depth: number; ext: string }[] = [];
+          const extOf = (n: string) => (n.lastIndexOf('.') > 0 && n.lastIndexOf('.') < n.length - 1 ? n.slice(n.lastIndexOf('.') + 1).toLowerCase() : '');
           const hidden = (n: string) => n.startsWith('.') || n.toLowerCase() === 'node_modules';
           const walk = (dir: string, depth: number) => {
             const kids = (set: Iterable<string>) =>
@@ -166,11 +168,12 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
                 .filter((p) => parentOf(p) === dir && !hidden(p.slice(p.lastIndexOf('/') + 1)))
                 .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
             for (const d of kids(dirs)) {
-              out.push({ path: d, name: d.slice(d.lastIndexOf('/') + 1), isDir: true, depth });
+              out.push({ path: d, name: d.slice(d.lastIndexOf('/') + 1), isDir: true, depth, ext: '' });
               walk(d, depth + 1);
             }
-            for (const f of kids(Object.keys(files()).filter((p) => /.\.md$/i.test(p)))) {
-              out.push({ path: f, name: f.slice(f.lastIndexOf('/') + 1), isDir: false, depth });
+            for (const f of kids(Object.keys(files()))) {
+              const name = f.slice(f.lastIndexOf('/') + 1);
+              out.push({ path: f, name, isDir: false, depth, ext: extOf(name) });
             }
           };
           walk('', 0);

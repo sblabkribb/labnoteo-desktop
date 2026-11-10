@@ -141,8 +141,8 @@ describe('경고 글자색은 둘러싼 규칙에 지지 않는다', () => {
   });
 });
 
-describe('열린 노트의 강조 막대', () => {
-  it('보관함 맨 위(깊이 0)의 열린 노트도 막대가 보인다: 막대는 줄(treeitem)에 그린다', () => {
+describe('열린 노트의 줄', () => {
+  it('보관함 맨 위(깊이 0)의 열린 노트도 회색 채움을 받고, 강조 막대는 없다', () => {
     render(
       <aside className="sidebar">
         <NoteTree entries={[{ path: 'a.labnote.md', name: 'a', isDir: false, depth: 0 }]} selected="a.labnote.md" onSelect={() => {}} />
@@ -150,11 +150,11 @@ describe('열린 노트의 강조 막대', () => {
     );
     const row = screen.getByRole('treeitem', { name: 'a' });
     expect(row.getAttribute('data-depth')).toBe('0'); // 깊이 0 은 들여쓰기 규칙이 없다
-    expect(winning(row, 'box-shadow')).toBe('inset 3px 0 0 var(--accent)');
+    expect(winning(row, 'box-shadow')).toBeUndefined();
     expect(winning(row, 'background')).toBe('var(--bg-selected)');
   });
 
-  it('열린 줄의 hover 규칙은 막대(box-shadow)를 건드리지 않는다', () => {
+  it('열린 줄의 hover 규칙은 채움만 바꾼다(box-shadow 없음)', () => {
     const hover = APP_RULES.filter((r) => r.selectors.includes('.note-tree [role="treeitem"][aria-current="true"]:hover'));
     expect(hover.length).toBe(1);
     expect(hover[0].body).not.toMatch(/box-shadow/);

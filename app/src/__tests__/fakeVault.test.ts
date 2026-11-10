@@ -36,15 +36,16 @@ describe('fakeVault', () => {
   });
 
   it('lists, makes folders, builds the tree and records every call', async () => {
-    const v = createFakeVault({ 'b/n.md': 'n', 'a.md': 'a', '.obsidian/x.json': '{}' });
+    const v = createFakeVault({ 'b/n.md': 'n', 'b/pic.PNG': 'p', 'a.md': 'a', '.obsidian/x.json': '{}' });
     await v.invoke('vault_mkdir', { path: 'empty' });
     expect((await v.invoke<string[]>('vault_list', { dir: '' })).sort()).toEqual(['.obsidian', 'a.md', 'b', 'empty']);
     expect(await v.invoke('vault_list', { dir: 'missing' })).toEqual([]);
     expect(await v.invoke('vault_tree', {})).toEqual([
-      { path: 'b', name: 'b', isDir: true, depth: 0 },
-      { path: 'b/n.md', name: 'n.md', isDir: false, depth: 1 },
-      { path: 'empty', name: 'empty', isDir: true, depth: 0 },
-      { path: 'a.md', name: 'a.md', isDir: false, depth: 0 },
+      { path: 'b', name: 'b', isDir: true, depth: 0, ext: '' },
+      { path: 'b/n.md', name: 'n.md', isDir: false, depth: 1, ext: 'md' },
+      { path: 'b/pic.PNG', name: 'pic.PNG', isDir: false, depth: 1, ext: 'png' },
+      { path: 'empty', name: 'empty', isDir: true, depth: 0, ext: '' },
+      { path: 'a.md', name: 'a.md', isDir: false, depth: 0, ext: 'md' },
     ]);
     expect(v.log.map((c) => c.cmd)).toEqual(['vault_mkdir', 'vault_list', 'vault_list', 'vault_tree']);
   });

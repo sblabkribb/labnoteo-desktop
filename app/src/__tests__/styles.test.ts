@@ -90,6 +90,20 @@ describe('styles/*.css', () => {
       '.editor-actions .editor-qr',
       '.status-notes',
       '@media print .editor-path button',
+      // 파일 탭(Task 9)이 일부러 없앤 것: CSS 글리프 아이콘과 접기 표시(이제 Lucide 아이콘), 펼친 줄의 굵은 글씨(폴더는 보통 굵기)
+      '.wf-tree-row[aria-expanded]',
+      '.wf-tree-row[aria-expanded]::before',
+      '.wf-tree-row[aria-expanded="false"]::before',
+      '.wf-tree-row:not([aria-expanded])::before',
+      '.ti-none::before',
+      '.ti-beaker::before',
+      '.ti-folder::before',
+      '.ti-file::before',
+      '.ti-warning::before',
+      '.ti-discuss::before',
+      '.ti-class::before',
+      '.ti-method::before',
+      '.ti-function::before',
     ];
     expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);

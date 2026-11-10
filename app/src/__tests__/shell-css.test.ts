@@ -77,17 +77,38 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.sidebar')!.body).toMatch(/overflow-x:\s*hidden/);
   });
 
-  it('열린 노트는 색조 말고 모양(왼쪽 3px 강조 막대)으로도 드러난다', () => {
-    // 막대는 줄(treeitem)에 그린다: 줄을 덮는 안쪽 단추가 없으니 깊이 0 의 열린 노트에서도 보인다.
+  it('열린 노트는 회색 채움만 받는다: 강조 막대는 없다 (spec 4.1)', () => {
     const rule = ruleFor('.note-tree [role="treeitem"][aria-current="true"]');
     expect(rule).not.toBeNull();
-    expect(rule!.body).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--accent\)/);
+    expect(rule!.decls['background']).toBe('var(--bg-selected)');
+    expect(rule!.body).not.toMatch(/box-shadow/);
+    expect(ruleFor('.wf-tree-row[aria-current="true"]')!.body).not.toMatch(/box-shadow/);
+  });
+
+  it('tree rows sit on --row-h with a small radius; folders are regular weight', () => {
+    const row = ruleFor('.wf-tree-row')!;
+    expect(row.decls['min-height']).toBe('var(--row-h)');
+    expect(row.decls['border-radius']).toBe('var(--radius-s)');
+    expect(parseRules(css).filter((r) => r.selectors.some((sel) => sel.startsWith('.wf-tree-row[aria-expanded]')) && /font-weight/.test(r.body))).toEqual([]);
+    expect(ruleFor(':root[data-density="compact"]')!.decls['--row-h']).toBe('24px');
+  });
+
+  it('indent guides are drawn per depth and show only while the dock is hovered or focused', () => {
+    for (let d = 1; d <= MAX_DEPTH; d++) expect(ruleFor(`[data-depth="${d}"]`)!.decls['--depth'], `depth ${d}`).toBe(String(d));
+    expect(ruleFor('.sidebar .deep')!.decls['--depth']).toBe(String(INDENT_CAP));
+    const guide = ruleFor('.wf-tree-row::before')!;
+    expect(guide.decls['width']).toBe('calc(var(--indent) * var(--depth, 0))');
+    expect(guide.body).toMatch(/var\(--guide\)/);
+    expect(guide.decls['opacity']).toBe('0');
+    const shown = ruleFor('.dock:hover .wf-tree-row::before')!;
+    expect(shown.selectors).toContain('.dock:focus-within .wf-tree-row::before');
+    expect(shown.decls['opacity']).toBe('1');
   });
 
   it('트리 줄은 단추가 아니라 treeitem 이고, 테두리가 없다 (--border-strong 은 선택 배경에서 2.43:1)', () => {
     const row = ruleFor('.note-tree [role="treeitem"]')!;
     expect(row.body).not.toMatch(/border/);
-    expect(ruleFor('.wf-tree-row')!.body).not.toMatch(/border/);
+    expect(ruleFor('.wf-tree-row')!.body).not.toMatch(/border(?!-radius)/);
     expect(parseRules(css).flatMap((r) => r.selectors).filter((sel) => sel.includes('.note-tree') && /button|li\b/.test(sel))).toEqual([]);
   });
 
@@ -114,11 +135,10 @@ describe('앱 셸 CSS 계약', () => {
     expect(parseRules(css).flatMap((r) => r.selectors).filter((sel) => sel.includes('.note-tree') && sel.includes(':has('))).toEqual([]);
   });
 
-  it('접기 표시는 대체 텍스트 문법을 못 읽어도 남는다 (content 선언이 둘)', () => {
-    // 노트 트리의 줄도 .wf-tree-row 다(TreeView): 접기 표시는 그 규칙이 그린다
-    const open = ruleFor('.wf-tree-row[aria-expanded]::before')!.body;
-    expect(open).toMatch(/content:\s*"▾";/);
-    expect(open).toMatch(/content:\s*"▾" \/ "";/);
+  it('chevrons are Lucide icons that turn when open, not ::before glyphs', () => {
+    expect(ruleFor('.wf-tree-row[aria-expanded]::before')).toBeNull();
+    expect(ruleFor('.wf-tree-row[aria-expanded="true"] > .tree-chevron svg')!.decls['transform']).toBe('rotate(90deg)');
+    expect(ruleFor('.tree-chevron svg')!.decls['color']).toBe('var(--text-faint)');
   });
   it('shell regions are styled through class hooks, not child chains', () => {
     const sels = parseRules(css).flatMap((r) => r.selectors);

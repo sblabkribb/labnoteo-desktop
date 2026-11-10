@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { NoteTree } from '../NoteTree';
 import type { TreeEntry } from '../useTree';
 
+const file = (path: string, depth: number): TreeEntry => ({ path, name: path.split('/').pop()!, isDir: false, depth });
+const dir = (path: string, depth: number): TreeEntry => ({ path, name: path.split('/').pop()!, isDir: true, depth });
+
 const entries: TreeEntry[] = [
   { path: 'labnote', name: 'labnote', isDir: true, depth: 0 },
   { path: 'labnote/001', name: '001', isDir: true, depth: 1 },
@@ -15,23 +18,23 @@ describe('노트 트리', () => {
   it('폴더를 접고 펼 수 있다', async () => {
     const user = userEvent.setup();
     render(<NoteTree entries={entries} onSelect={() => {}} />);
-    expect(screen.getByText('02.md')).toBeTruthy();
+    expect(screen.getByText('02')).toBeTruthy();
 
     await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
     // 하위 폴더와 노트가 모두 사라지고, 같은 깊이의 다른 노트는 남는다.
-    expect(screen.queryByText('02.md')).toBeNull();
+    expect(screen.queryByText('02')).toBeNull();
     expect(screen.queryByText('001')).toBeNull();
-    expect(screen.getByText('top.md')).toBeTruthy();
+    expect(screen.getByText('top')).toBeTruthy();
 
     await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
-    expect(screen.getByText('02.md')).toBeTruthy();
+    expect(screen.getByText('02')).toBeTruthy();
   });
 
   it('깊이는 style 속성이 아니라 data-depth 로 표시한다 (CSP 가 인라인 style 을 막는다)', () => {
     const { container } = render(<NoteTree entries={entries} onSelect={() => {}} />);
     const row = (name: string) => screen.getByText(name).closest('li') as HTMLElement;
-    expect(row('02.md').getAttribute('data-depth')).toBe('2');
-    expect(row('top.md').getAttribute('data-depth')).toBe('0');
+    expect(row('02').getAttribute('data-depth')).toBe('2');
+    expect(row('top').getAttribute('data-depth')).toBe('0');
     expect(container.querySelector('[style]')).toBeNull();
   });
 
@@ -54,7 +57,7 @@ describe('노트 트리', () => {
     const user = userEvent.setup();
     const picked: string[] = [];
     render(<NoteTree entries={entries} onSelect={(p) => picked.push(p)} />);
-    await user.click(screen.getByText('02.md'));
+    await user.click(screen.getByText('02'));
     expect(picked).toEqual(['labnote/001/02.md']);
     // 폴더를 누르는 것은 노트를 고르는 것이 아니다.
     await user.click(screen.getByRole('treeitem', { name: '001' }));
@@ -63,8 +66,8 @@ describe('노트 트리', () => {
 
   it('선택된 노트는 철자의 대소문자가 달라도 같은 노트로 표시된다', () => {
     render(<NoteTree entries={entries} selected="LABNOTE/001/02.MD" onSelect={() => {}} />);
-    expect(screen.getByText('02.md').closest('[aria-current]')?.getAttribute('aria-current')).toBe('true');
-    expect(screen.getByText('top.md').closest('[aria-current]')).toBeNull();
+    expect(screen.getByText('02').closest('[aria-current]')?.getAttribute('aria-current')).toBe('true');
+    expect(screen.getByText('top').closest('[aria-current]')).toBeNull();
   });
 
   it('열린 노트의 줄은 styles/tree.css 의 강조 막대 선택자와 맞는다: 열린 줄 하나만 걸린다', () => {
@@ -72,7 +75,7 @@ describe('노트 트리', () => {
     const { container } = render(<NoteTree entries={entries} selected="labnote/001/02.md" onSelect={() => {}} />);
     const rows = container.querySelectorAll('.note-tree [role="treeitem"][aria-current="true"]');
     expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toBe('02.md');
+    expect(rows[0].textContent).toBe('02');
   });
 
   it('말줄임으로 잘리는 긴 이름은 title 로 전체 이름(경로가 아니라)을 보여 준다', () => {
@@ -86,8 +89,8 @@ describe('노트 트리', () => {
         onSelect={() => {}}
       />,
     );
-    const folder = screen.getByRole('treeitem', { name: long });
-    const note = screen.getByRole('treeitem', { name: `${long}.labnote.md` });
+    // 노트 이름은 .labnote.md 를 뗀 것이라 폴더와 같은 이름으로 보인다: title 이 둘을 가른다
+    const [folder, note] = screen.getAllByRole('treeitem', { name: long });
     expect(folder.getAttribute('title')).toBe(long);
     expect(note.getAttribute('title')).toBe(`${long}.labnote.md`);
   });
@@ -119,7 +122,7 @@ describe('노트 트리', () => {
   it('Alt, Ctrl or Meta with an arrow is left to the app (history navigation), not taken as tree movement', () => {
     render(<NoteTree entries={entries} onSelect={() => {}} />);
     const items = () => screen.getAllByRole('treeitem');
-    const note = screen.getByRole('treeitem', { name: '02.md' });
+    const note = screen.getByRole('treeitem', { name: '02' });
     act(() => note.focus());
     for (const mod of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
       for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
@@ -136,7 +139,7 @@ describe('노트 트리', () => {
     const user = userEvent.setup();
     const picked: string[] = [];
     render(<NoteTree entries={entries} onSelect={(p) => picked.push(p)} />);
-    const note = screen.getByRole('treeitem', { name: '02.md' });
+    const note = screen.getByRole('treeitem', { name: '02' });
     expect(note.getAttribute('aria-level')).toBe('3');
     expect(note.hasAttribute('aria-expanded')).toBe(false);
     act(() => note.focus());
@@ -148,13 +151,98 @@ describe('노트 트리', () => {
     const user = userEvent.setup();
     const { rerender } = render(<NoteTree entries={entries} onSelect={() => {}} />);
     await user.click(screen.getByRole('treeitem', { name: 'labnote' }));
-    expect(screen.queryByText('02.md')).toBeNull();
+    expect(screen.queryByText('02')).toBeNull();
     rerender(<NoteTree entries={entries} selected="labnote/001/02.md" onSelect={() => {}} />);
-    expect(screen.getByRole('treeitem', { name: '02.md' }).getAttribute('aria-current')).toBe('true');
+    expect(screen.getByRole('treeitem', { name: '02' }).getAttribute('aria-current')).toBe('true');
   });
 
   it('노트가 없으면 빈 상태 문구를 보여준다', () => {
     render(<NoteTree entries={[]} onSelect={() => {}} />);
     expect(screen.getByText('노트가 없습니다')).toBeTruthy();
+  });
+
+  describe('every file kind (UI redesign Task 9)', () => {
+    const vault: TreeEntry[] = [
+      dir('labnote', 0),
+      dir('labnote/001_PCR', 1),
+      dir('labnote/001_PCR/images', 2),
+      file('labnote/001_PCR/images/gel.png', 3),
+      dir('labnote/001_PCR/resources', 2),
+      file('labnote/001_PCR/resources/paper.pdf', 3),
+      file('labnote/001_PCR/resources/plate.csv', 3),
+      file('labnote/001_PCR/resources/raw.zip', 3),
+      file('labnote/001_PCR/01_WD010_Design.labnote.md', 2),
+      file('labnote/001_PCR/README.labnote.md', 2),
+      file('Plan.md', 0),
+    ];
+    const row = (name: string) => screen.getByRole('treeitem', { name });
+    const icon = (name: string) => row(name).querySelector('svg.tree-icon')!.getAttribute('class')!;
+
+    it('names hide .labnote.md and .md; the title keeps the full file name', () => {
+      render(<NoteTree entries={vault} onSelect={() => {}} />);
+      expect(row('01_WD010_Design').getAttribute('title')).toBe('01_WD010_Design.labnote.md');
+      expect(row('README').getAttribute('title')).toBe('README.labnote.md');
+      expect(row('Plan').getAttribute('title')).toBe('Plan.md');
+      expect(row('gel.png').getAttribute('title')).toBe('gel.png');
+    });
+
+    it('draws a Lucide icon per kind, folder-open while a folder is expanded', async () => {
+      const user = userEvent.setup();
+      render(<NoteTree entries={vault} onSelect={() => {}} />);
+      expect(icon('001_PCR')).toContain('lucide-flask-conical');
+      expect(icon('README')).toContain('lucide-flask-conical');
+      expect(icon('01_WD010_Design')).toContain('lucide-workflow');
+      expect(icon('Plan')).toContain('lucide-file-text');
+      expect(icon('gel.png')).toContain('lucide-image');
+      expect(icon('plate.csv')).toContain('lucide-sheet');
+      expect(icon('paper.pdf')).toContain('lucide-file-type');
+      expect(icon('raw.zip')).toContain('lucide-paperclip');
+      expect(icon('images')).toContain('lucide-folder-open');
+      await user.click(row('images'));
+      expect(icon('images')).not.toContain('lucide-folder-open');
+      expect(icon('images')).toContain('lucide-folder');
+    });
+
+    it('chevrons are Lucide icons on folders only; leaves keep an empty slot', () => {
+      const { container } = render(<NoteTree entries={vault} onSelect={() => {}} />);
+      expect(row('images').querySelector('.tree-chevron svg')).not.toBeNull();
+      expect(row('gel.png').querySelector('.tree-chevron')).not.toBeNull();
+      expect(row('gel.png').querySelector('.tree-chevron svg')).toBeNull();
+      expect(container.querySelector('[style]')).toBeNull();
+    });
+
+    it('attachments without an in-app viewer are dimmed; images and sheets are not', () => {
+      render(<NoteTree entries={vault} onSelect={() => {}} />);
+      expect(row('paper.pdf').classList.contains('dim')).toBe(true);
+      expect(row('raw.zip').classList.contains('dim')).toBe(true);
+      expect(row('gel.png').classList.contains('dim')).toBe(false);
+      expect(row('plate.csv').classList.contains('dim')).toBe(false);
+      expect(row('Plan').classList.contains('dim')).toBe(false);
+    });
+
+    it('a note opens in the editor; any other file goes to onView with its kind, never onSelect', async () => {
+      const user = userEvent.setup();
+      const selected: string[] = [];
+      const viewed: [string, string][] = [];
+      render(<NoteTree entries={vault} onSelect={(p) => selected.push(p)} onView={(p, k) => viewed.push([p, k])} />);
+      await user.click(row('gel.png'));
+      await user.click(row('plate.csv'));
+      await user.click(row('paper.pdf'));
+      await user.click(row('Plan'));
+      expect(selected).toEqual(['Plan.md']);
+      expect(viewed).toEqual([
+        ['labnote/001_PCR/images/gel.png', 'image'],
+        ['labnote/001_PCR/resources/plate.csv', 'sheet'],
+        ['labnote/001_PCR/resources/paper.pdf', 'pdf'],
+      ]);
+    });
+
+    it('collapse all folds every folder', () => {
+      const ref = { current: undefined as undefined | (() => void) };
+      render(<NoteTree entries={vault} onSelect={() => {}} collapseAllRef={ref} />);
+      expect(screen.getAllByRole('treeitem')).toHaveLength(vault.length);
+      act(() => ref.current!());
+      expect(screen.getAllByRole('treeitem').map((e) => e.textContent)).toEqual(['labnote', 'Plan']);
+    });
   });
 });

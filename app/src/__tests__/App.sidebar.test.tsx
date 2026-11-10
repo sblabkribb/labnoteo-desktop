@@ -211,9 +211,9 @@ describe('사이드바 탭', () => {
     await vaultShown();
     await user.click(within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '오른쪽 사이드바 보이기/숨기기' }));
     const right = () => within(screen.getByRole('complementary', { name: '오른쪽 사이드바' }));
-    await user.click(await screen.findByText('A.labnote.md'));
+    await user.click(await screen.findByRole('treeitem', { name: 'A' }));
     expect(await right().findByRole('treeitem', { name: /Alpha heading/ })).toBeTruthy();
-    await user.click(screen.getByText('B.labnote.md'));
+    await user.click(screen.getByRole('treeitem', { name: 'B' }));
     expect(await right().findByRole('treeitem', { name: /Beta heading/ })).toBeTruthy();
     expect(right().queryByRole('treeitem', { name: /Alpha heading/ })).toBeNull();
   });
@@ -223,7 +223,7 @@ describe('사이드바 탭', () => {
     installFakeVault({ 'Day 1.labnote.md': '# Top\nx\ny\n## Deep\nz\n' });
     render(<App />);
     await vaultShown();
-    await user.click(await screen.findByText('Day 1.labnote.md'));
+    await user.click(await screen.findByRole('treeitem', { name: 'Day 1' }));
     await user.click(within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '오른쪽 사이드바 보이기/숨기기' }));
     await user.click(await screen.findByRole('treeitem', { name: /Deep/ }));
     const root = (document.querySelector('.editor-frame') as HTMLElement).shadowRoot!;

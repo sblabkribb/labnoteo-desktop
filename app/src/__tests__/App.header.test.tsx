@@ -114,7 +114,8 @@ async function openVault(user: ReturnType<typeof userEvent.setup>, name = WF_NAM
   installFakeVault(FILES);
   render(<App />);
   await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-  await user.click(await screen.findByText(name));
+  // 파일 탭은 .labnote.md / .md 를 뗀 이름을 그린다(전체 이름은 title)
+  await user.click(await screen.findByTitle(name));
 }
 
 describe('view header and status bar', () => {

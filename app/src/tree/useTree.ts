@@ -7,11 +7,28 @@ export interface TreeEntry {
   name: string;
   isDir: boolean;
   depth: number;
+  /** 마지막 점 뒤의 확장자(소문자, 점 없이). 폴더나 확장자 없는 이름은 ''. 옛 Rust 나 테스트 픽스처에는 없을 수 있다. */
+  ext?: string;
+}
+
+/**
+ * 앱과 플러그인이 쓰는 시스템 파일: 보관함 뿌리의 `resources/workflows`(카탈로그 JSON)와 어느 깊이든 `resources/labsamples`
+ * (샘플 등록부). 그 폴더 자체와 그 아래 모두. 대소문자는 가리지 않는다(NTFS).
+ */
+export function isSystemPath(rel: string): boolean {
+  const parts = rel.toLowerCase().split('/');
+  if (parts[0] === 'resources' && parts[1] === 'workflows') return true;
+  return parts.some((p, i) => p === 'labsamples' && i > 0 && parts[i - 1] === 'resources');
+}
+
+/** 파일 탭에 보일 줄: 시스템 파일은 `showSystem` 이 켜져 있을 때만. 켜져 있으면 받은 배열을 그대로 돌려준다. */
+export function visibleEntries(entries: TreeEntry[], showSystem: boolean): TreeEntry[] {
+  return showSystem ? entries : entries.filter((e) => !isSystemPath(e.path));
 }
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-/** 보관함의 노트 트리를 평평한 깊이 우선 목록으로 가져온다. */
+/** 보관함의 파일 트리(노트와 첨부)를 평평한 깊이 우선 목록으로 가져온다. */
 export function fetchTree(invoke: InvokeFn = tauriInvoke): Promise<TreeEntry[]> {
   return invoke<TreeEntry[]>('vault_tree', {});
 }

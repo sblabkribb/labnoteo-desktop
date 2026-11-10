@@ -1,5 +1,6 @@
-//! The vault's note tree: every `.md` file under the vault, with the folders
-//! that lead to it, as one flat depth-first list.
+//! The vault's file tree: every file under the vault (notes and attachments),
+//! with the folders that lead to it, as one flat depth-first list. Dot-folders
+//! (`.obsidian`, `.git`, `.trash`, ...) and `node_modules` are never listed.
 
 use std::path::Path;
 
@@ -18,6 +19,17 @@ pub struct TreeEntry {
     pub name: String,
     pub is_dir: bool,
     pub depth: u32,
+    /// The extension after the last dot, ASCII lower-cased, without the dot;
+    /// empty for a folder or a name without one (`one.labnote.md` -> `md`).
+    pub ext: String,
+}
+
+/// `ext` of a file name: the part after the last dot (not a leading dot), lower-cased.
+fn ext_of(name: &str) -> String {
+    match name.rfind('.') {
+        Some(i) if i > 0 && i + 1 < name.len() => name[i + 1..].to_ascii_lowercase(),
+        _ => String::new(),
+    }
 }
 
 /// Names that are never vault content, as a file or a folder: `.obsidian`,
@@ -38,22 +50,22 @@ fn has_md_extension(name: &str) -> bool {
 }
 
 /// Whether the vault-relative POSIX path `rel` belongs in the tree: every
-/// component is a name `confine` accepts and is not excluded, and a file
-/// (`is_dir == false`) ends in `.md`. This is the single definition of "what is
-/// in the vault"; the walk uses its pieces and the file watcher must call this
-/// on each event path rather than restate the rule. It looks at names only: a
-/// watcher must also skip links (the walk does not follow them), which needs the
-/// file system.
-pub fn is_listed_path(rel: &str, is_dir: bool) -> bool {
-    let mut parts = rel.split('/').peekable();
-    while let Some(part) = parts.next() {
-        let last = parts.peek().is_none();
-        let ok = is_listed_name(part) && (!last || is_dir || has_md_extension(part));
-        if !ok {
-            return false;
-        }
-    }
-    true
+/// component is a name `confine` accepts and is not excluded (so nothing under
+/// `.obsidian`, `.git`, `.trash` or any other dot-folder). Every regular file
+/// is listed, notes and attachments alike. This is the single definition of
+/// "what is in the vault"; the walk uses its pieces and the file watcher must
+/// call this on each event path rather than restate the rule. It looks at names
+/// only: a watcher must also skip links (the walk does not follow them), which
+/// needs the file system. The rule is the same for files and folders.
+pub fn is_listed_path(rel: &str) -> bool {
+    rel.split('/').all(is_listed_name)
+}
+
+/// Whether `rel` is a note: a listed file (`is_listed_path`) whose name ends in
+/// `.md` (any case) after at least one character. The search index reads these
+/// and nothing else.
+pub fn is_note_path(rel: &str) -> bool {
+    is_listed_path(rel) && rel.rsplit('/').next().is_some_and(has_md_extension)
 }
 
 /// Whether `rel` is a sample registry, `<…>/labsamples/<name>.json`: every
@@ -65,7 +77,7 @@ pub fn is_sample_registry_path(rel: &str) -> bool {
     let Some((dir, name)) = rel.rsplit_once('/') else { return false };
     let parent = dir.rsplit('/').next().unwrap_or(dir);
     parent.eq_ignore_ascii_case("labsamples")
-        && is_listed_path(dir, true)
+        && is_listed_path(dir)
         && is_listed_name(name)
         && name.len() > 5
         && name.get(name.len() - 5..).is_some_and(|e| e.eq_ignore_ascii_case(".json"))
@@ -78,7 +90,7 @@ enum Kind {
     Link,
 }
 
-/// Split directory entries into listed folder names and listed note names.
+/// Split directory entries into listed folder names and listed file names.
 /// An entry that cannot be read, whose type cannot be read, whose name is not
 /// UTF-8, or that is a link is skipped on its own: one bad entry must never
 /// make its siblings (or the whole tree) disappear.
@@ -95,7 +107,7 @@ fn partition(
         }
         match kind {
             Ok(Kind::Dir) => dirs.push(name),
-            Ok(Kind::File) if has_md_extension(&name) => files.push(name),
+            Ok(Kind::File) => files.push(name),
             _ => {}
         }
     }
@@ -109,7 +121,7 @@ fn partition(
 /// listed and a link cannot create a cycle. What is listed follows
 /// `is_listed_path`, so every row offered can be opened. A subfolder that
 /// cannot be read is shown but empty; only an unreadable root is an error.
-/// Folders are kept even when they hold no notes, so a folder the user just
+/// Folders are kept even when they hold no files, so a folder the user just
 /// made shows up.
 pub fn walk(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
     fn visit(dir: &Path, prefix: &str, depth: u32, out: &mut Vec<TreeEntry>) -> std::io::Result<()> {
@@ -130,13 +142,14 @@ pub fn walk(root: &Path) -> Result<Vec<TreeEntry>, FsError> {
         files.sort_by_cached_key(|n| (n.to_lowercase(), n.clone()));
         for name in dirs {
             let path = format!("{prefix}{name}");
-            out.push(TreeEntry { path: path.clone(), name: name.clone(), is_dir: true, depth });
+            out.push(TreeEntry { path: path.clone(), name: name.clone(), is_dir: true, depth, ext: String::new() });
             // A folder that cannot be read (permissions, removed mid-walk) is
             // shown but empty rather than failing the whole tree.
             let _ = visit(&dir.join(&name), &format!("{path}/"), depth + 1, out);
         }
         for name in files {
-            out.push(TreeEntry { path: format!("{prefix}{name}"), name, is_dir: false, depth });
+            let ext = ext_of(&name);
+            out.push(TreeEntry { path: format!("{prefix}{name}"), name, is_dir: false, depth, ext });
         }
         Ok(())
     }
@@ -195,25 +208,41 @@ mod tests {
     }
 
     #[test]
-    fn lists_markdown_files_recursively() {
+    fn lists_every_file_recursively_with_its_extension() {
         let s = Scratch::new();
         s.file("top.md");
         s.file("a/one.labnote.md");
         s.file("a/b/two.md");
         s.file("a/readme.txt");
-        s.file("a/pic.png");
+        s.file("a/pic.PNG");
+        s.file("a/noext");
         let tree = walk(&s.0).unwrap();
-        let rows: Vec<_> = tree.iter().map(|e| (e.path.as_str(), e.name.as_str(), e.is_dir, e.depth)).collect();
+        let rows: Vec<_> =
+            tree.iter().map(|e| (e.path.as_str(), e.name.as_str(), e.is_dir, e.depth, e.ext.as_str())).collect();
         assert_eq!(
             rows,
             [
-                ("a", "a", true, 0),
-                ("a/b", "b", true, 1),
-                ("a/b/two.md", "two.md", false, 2),
-                ("a/one.labnote.md", "one.labnote.md", false, 1),
-                ("top.md", "top.md", false, 0),
+                ("a", "a", true, 0, ""),
+                ("a/b", "b", true, 1, ""),
+                ("a/b/two.md", "two.md", false, 2, "md"),
+                ("a/noext", "noext", false, 1, ""),
+                ("a/one.labnote.md", "one.labnote.md", false, 1, "md"),
+                ("a/pic.PNG", "pic.PNG", false, 1, "png"),
+                ("a/readme.txt", "readme.txt", false, 1, "txt"),
+                ("top.md", "top.md", false, 0, "md"),
             ]
         );
+    }
+
+    #[test]
+    fn attachments_are_listed_and_system_folders_are_not() {
+        let s = Scratch::new();
+        s.file("a/images/x.png");
+        s.file("a/resources/d.csv");
+        s.file(".obsidian/x");
+        s.file(".git/x");
+        s.file(".trash/x");
+        assert_eq!(paths(&s), ["a", "a/images", "a/images/x.png", "a/resources", "a/resources/d.csv"]);
     }
 
     #[test]
@@ -287,28 +316,36 @@ mod tests {
 
     #[test]
     fn is_listed_path_is_the_one_rule_the_walk_and_the_watcher_share() {
-        // Files: every ancestor must be a listed folder, the name must be a safe `.md` that is not hidden.
-        for ok in ["a.md", "A.MD", "labnote/001/02.md", "x.labnote.md"] {
-            assert!(is_listed_path(ok, false), "{ok}");
+        // Every component must be a safe name that is not hidden: notes and attachments alike.
+        for ok in ["a.md", "A.MD", "labnote/001/02.md", "x.labnote.md", "a.txt", "a/images/x.png", "a/resources/d.csv", "noext"] {
+            assert!(is_listed_path(ok), "{ok}");
         }
         for no in [
-            "", "a.txt", ".draft.md", "sub/.draft.md", ".obsidian/a.md", "a/.git/b.md", "node_modules/p/r.md",
+            "", ".obsidian/x", ".git/x", ".trash/x", ".draft.md", "sub/.draft.md", ".obsidian/a.md", "a/.git/b.md", "node_modules/p/r.md",
             "Node_Modules/r.md", "a//b.md", "a/../b.md", "./a.md", "/a.md", "con.md", "a/nul.md", "a./b.md", "dir/b .md ",
         ] {
-            assert!(!is_listed_path(no, false), "{no}");
+            assert!(!is_listed_path(no), "{no}");
         }
-        // Folders: same ancestors, no `.md` requirement.
-        assert!(is_listed_path("a/b", true) && is_listed_path("notes.md", true));
-        assert!(!is_listed_path(".obsidian", true) && !is_listed_path("a/node_modules", true));
-        assert!(!is_listed_path("a/.cache", true) && !is_listed_path("aux", true));
+        // Folders follow the same rule.
+        assert!(is_listed_path("a/b") && is_listed_path("notes.md"));
+        assert!(!is_listed_path(".obsidian") && !is_listed_path("a/node_modules"));
+        assert!(!is_listed_path("a/.cache") && !is_listed_path("aux"));
+        // Notes (what the search index reads) are the listed files that end in `.md`.
+        for ok in ["a.md", "A.MD", "labnote/001/02.md", "x.labnote.md"] {
+            assert!(is_note_path(ok), "{ok}");
+        }
+        for no in ["", "a.txt", "a/images/x.png", ".obsidian/a.md", "a/.x.md", "md", ".md", "a/b"] {
+            assert!(!is_note_path(no), "{no}");
+        }
         // Every row the walk returns satisfies it.
         let s = Scratch::new();
         s.file("a/b/c.md");
         s.file("z.md");
         s.file(".hid/x.md");
         s.file("a/.x.md");
+        s.file("a/pic.png");
         for e in walk(&s.0).unwrap() {
-            assert!(is_listed_path(&e.path, e.is_dir), "{}", e.path);
+            assert!(is_listed_path(&e.path), "{}", e.path);
         }
     }
 

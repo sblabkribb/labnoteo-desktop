@@ -73,4 +73,16 @@ describe('검색 패널', () => {
     await screen.findByRole('button', { name: /형질전환 실험/ });
     expect(screen.queryByText(/개 이상 일치/)).toBeNull();
   });
+
+  it('skips system files (catalog, sample registries) unless they are shown', async () => {
+    const user = userEvent.setup();
+    const sys: SearchHit = { path: 'resources/labsamples/notes.md', title: '등록부 메모', snippet: '…형질전환…' };
+    const { invoke } = fake([sys, hit]);
+    const { rerender } = render(<SearchPanel invoke={invoke} onOpen={() => {}} />);
+    await user.type(screen.getByRole('searchbox'), '형질전환');
+    await screen.findByRole('button', { name: /형질전환 실험/ });
+    expect(screen.queryByRole('button', { name: /등록부 메모/ })).toBeNull();
+    rerender(<SearchPanel invoke={invoke} onOpen={() => {}} showSystem />);
+    expect(screen.getByRole('button', { name: /등록부 메모/ })).toBeTruthy();
+  });
 });

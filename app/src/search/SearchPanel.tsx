@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
+import { isSystemPath } from '../tree/useTree';
 import { searchNotes, type SearchResults } from './indexApi';
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -12,12 +13,14 @@ const DEBOUNCE_MS = 150;
 interface Props {
   /** 결과를 고르면 그 노트의 vault-relative 경로로 부른다. */
   onOpen: (path: string) => void;
+  /** 시스템 파일(resources/workflows, resources/labsamples 아래)의 결과도 보인다. 기본은 거른다. */
+  showSystem?: boolean;
   invoke?: InvokeFn;
 }
 
 type Result = { status: 'idle' } | ({ status: 'ok' } & SearchResults) | { status: 'failed' };
 
-export function SearchPanel({ onOpen, invoke = tauriInvoke }: Props) {
+export function SearchPanel({ onOpen, showSystem = false, invoke = tauriInvoke }: Props) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<Result>({ status: 'idle' });
 
@@ -40,6 +43,8 @@ export function SearchPanel({ onOpen, invoke = tauriInvoke }: Props) {
     };
   }, [query, invoke]);
 
+  const hits = result.status === 'ok' ? (showSystem ? result.hits : result.hits.filter((h) => !isSystemPath(h.path))) : [];
+
   return (
     <section aria-label={t('search.label')}>
       <input
@@ -51,11 +56,11 @@ export function SearchPanel({ onOpen, invoke = tauriInvoke }: Props) {
         onChange={(e) => setQuery(e.target.value)}
       />
       {result.status === 'failed' && <p role="alert">{t('search.error')}</p>}
-      {result.status === 'ok' && result.hits.length === 0 && <p>{t('search.none')}</p>}
-      {result.status === 'ok' && result.truncated && <p>{t('search.truncated', result.hits.length)}</p>}
-      {result.status === 'ok' && result.hits.length > 0 && (
+      {result.status === 'ok' && hits.length === 0 && <p>{t('search.none')}</p>}
+      {result.status === 'ok' && result.truncated && <p>{t('search.truncated', hits.length)}</p>}
+      {hits.length > 0 && (
         <ul className="plain-list search-results">
-          {result.hits.map((h) => (
+          {hits.map((h) => (
             <li key={h.path.toLowerCase()}>
               <button type="button" onClick={() => onOpen(h.path)}>
                 <strong>{h.title}</strong> <small>{h.path}</small>

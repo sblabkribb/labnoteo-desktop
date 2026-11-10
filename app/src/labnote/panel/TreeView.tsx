@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEve
 import type { TreeNode } from '@labnoteo/core';
 import { treeKeyAction, type KeyRow } from '../../../vendor/labnoteo/src/views/treeKeys';
 import type { MenuAnchor } from '../ui/menuStore';
-import { iconClass } from './treeIcons';
+import { treeIcon } from './treeIcons';
 import { depthAttrs } from '../../tree/depth';
-
+import { Icon } from '../../ui/Icon';
 
 interface Row extends KeyRow {
   node: TreeNode;
@@ -34,6 +34,10 @@ export interface TreeViewProps {
   className?: string;
   /** 줄의 아이콘 뒤에 그릴 표시(견본)의 클래스. 없으면 그리지 않는다. 색은 styles/tokens.css 의 토큰으로만 칠한다(Samples 패널의 종류 색). */
   nodeClass?(node: TreeNode): string | undefined;
+  /** 줄(treeitem) 자체에 더할 클래스. 파일 탭은 앱 안 보기 화면이 없는 첨부에 'dim' 을 단다. */
+  rowClass?(node: TreeNode): string | undefined;
+  /** 이름 뒤 오른쪽에 붙는 흐린 덧말(개수 등, 괄호 없이). 없으면 그리지 않는다. */
+  meta?(node: TreeNode): string | undefined;
 }
 
 /**
@@ -83,9 +87,11 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
 /**
  * 코어 TreeNode 를 그리는 트리(role=tree). 펼친 줄만 그리는 평평한 목록이고 각 줄이 treeitem 이다(aria-level).
  * - 키보드는 vendor 의 treeKeyAction(WAI-ARIA 트리 패턴)을 따른다. 탭 정지는 한 줄(roving tabindex).
- * - 들여쓰기는 data-depth(styles/tree.css 의 NoteTree 와 같은 규칙), 아이콘은 TREE_ICON_CLASS, tooltip 은 title. color 는 쓰지 않는다.
+ * - 줄: [접기 표시 14][아이콘 16][이름 …][덧말]. 접기 표시와 아이콘은 Lucide(ui/Icon.tsx, treeIcon 이 이름을 고른다)이고 장식이다.
+ *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
+ * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -153,8 +159,10 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     <ul role="tree" aria-label={label} className={className}>
       {rows.map((row, i) => {
         const { className: deep, ...depth } = depthAttrs(row.depth);
-        const rowClass = ['wf-tree-row', row.node.dimmed ? 'dimmed' : '', deep ?? ''].filter(Boolean).join(' ');
+        const rowClass = ['wf-tree-row', row.node.dimmed ? 'dimmed' : '', deep ?? '', extraClass?.(row.node) ?? ''].filter(Boolean).join(' ');
         const mark = nodeClass?.(row.node);
+        const icon = treeIcon(row.node.icon, row.expanded);
+        const note = meta?.(row.node);
         return (
           <li
             key={row.key}
@@ -177,9 +185,13 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
               if (e.target === e.currentTarget) setFocusKey(row.key);
             }}
           >
-            <span className={`tree-icon ${iconClass(row.node.icon)}`} aria-hidden="true" />
+            <span className="tree-chevron" aria-hidden="true">
+              {row.hasChildren && <Icon name="chevron-right" size={14} />}
+            </span>
+            {icon ? <Icon name={icon} className={`tree-icon ti-${row.node.icon}`} /> : <span className="tree-icon" aria-hidden="true" />}
             {mark && <span className={mark} aria-hidden="true" />}
             <span className="wf-tree-label">{row.node.label}</span>
+            {note && <span className="tree-meta">{note}</span>}
           </li>
         );
       })}

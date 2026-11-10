@@ -417,7 +417,7 @@ describe('NoteTree context menu', () => {
     const { NoteTree } = await import('../../tree/NoteTree');
     const onContextMenu = vi.fn();
     render(<NoteTree entries={ENTRIES} onSelect={() => undefined} onContextMenu={onContextMenu} />);
-    const row = screen.getByRole('treeitem', { name: 'a.labnote.md' });
+    const row = screen.getByRole('treeitem', { name: 'a' });
     fireEvent.contextMenu(row, { clientX: 12, clientY: 34 });
     expect(onContextMenu).toHaveBeenLastCalledWith(ENTRIES[6], { x: 12, y: 34 });
     fireEvent.keyDown(row, { key: 'F10', shiftKey: true });

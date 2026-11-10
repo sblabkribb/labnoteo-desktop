@@ -1,15 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
 import type { TreeNode } from '@labnoteo/core';
 import { t } from '../i18n/t';
 import { TreeView } from '../labnote/panel/TreeView';
+import { displayName, fileKind, hasViewer, type FileKind } from '../labnote/panel/treeIcons';
 import type { MenuAnchor } from '../labnote/ui/menuStore';
 import type { TreeEntry } from './useTree';
 
 interface Props {
   entries: TreeEntry[];
-  /** 지금 열려 있는 노트의 vault-relative 경로. 철자의 대소문자는 달라도 된다. */
+  /** 지금 열려 있는 노트(또는 보고 있는 파일)의 vault-relative 경로. 철자의 대소문자는 달라도 된다. */
   selected?: string;
+  /** 노트(.md)를 고르면: 편집기로 연다. */
   onSelect: (path: string) => void;
+  /** 노트가 아닌 파일(그림, 표, 그 밖의 첨부)을 고르면: 보기 화면이나 파일 카드. 텍스트로 읽지 않는다. 없으면 아무것도 하지 않는다. */
+  onView?: (path: string, kind: FileKind) => void;
+  /** 이 ref 에 "모두 접기" 함수를 걸어 둔다(파일 탭 머리의 단추). */
+  collapseAllRef?: MutableRefObject<(() => void) | undefined>;
   /**
    * 줄의 맥락 메뉴를 연다: 오른쪽 클릭(누른 좌표), 또는 Shift+F10 / 메뉴 키(그 줄 아래). 없으면 기본 동작 그대로.
    */
@@ -25,7 +31,8 @@ const fold = (path: string) => path.toLowerCase();
 
 /**
  * 걸음이 준 평평한 목록(깊이 포함, 부모가 자식보다 앞)을 코어 TreeNode 숲으로 엮는다. 깊이 스택으로 부모를 찾는다.
- * 폴더와 노트 모두 코어의 'category' 종류이고 아이콘으로 구분한다. payload 는 원래 줄(TreeEntry)이다.
+ * 모든 줄은 코어의 'category' 종류이고 아이콘(파일 종류, treeIcons.fileKind)으로 구분한다. 이름은 `.labnote.md`·`.md` 를 뗀 것,
+ * title 은 파일 이름 전체다. payload 는 원래 줄(TreeEntry)이다.
  */
 function nest(entries: readonly TreeEntry[]): TreeNode[] {
   const roots: TreeNode[] = [];
@@ -33,10 +40,10 @@ function nest(entries: readonly TreeEntry[]): TreeNode[] {
   for (const e of entries) {
     const node: TreeNode = {
       id: fold(e.path),
-      label: e.name,
+      label: e.isDir ? e.name : displayName(e.name),
       kind: 'category',
-      icon: e.isDir ? 'folder' : 'file',
-      tooltip: e.name, // 말줄임으로 잘린 긴 이름은 title 로 본다(경로가 아니라 이름)
+      icon: fileKind(e.path, e.isDir),
+      tooltip: e.name, // 말줄임으로 잘린 긴 이름과 뗀 확장자는 title 로 본다(경로가 아니라 이름)
       payload: e,
       ...(e.isDir ? { children: [] } : {}),
     };
@@ -50,12 +57,21 @@ function nest(entries: readonly TreeEntry[]): TreeNode[] {
 
 const entryOf = (node: TreeNode) => node.payload as TreeEntry;
 
+const NOTE_KINDS: readonly FileKind[] = ['note', 'readme', 'workflow'];
+const FOLDER_KINDS: readonly FileKind[] = ['folder', 'experiment'];
+
+/** 앱 안 보기 화면이 없는 첨부(pdf, json, 그 밖의 것): 줄을 흐리게. 폴더와 노트는 그대로. */
+const dimClass = (node: TreeNode) => {
+  const kind = node.icon as FileKind;
+  return NOTE_KINDS.includes(kind) || FOLDER_KINDS.includes(kind) || hasViewer(kind) ? undefined : 'dim';
+};
+
 /**
  * 보관함의 노트 트리. WAI-ARIA 트리(role=tree, treeitem, roving tabindex)는 TreeView 가 그린다: 화살표·Home·End 로 움직이고,
  * 왼쪽·오른쪽으로 접고 펴고, Enter·Space 로 노트를 연다. 폴더는 처음에 모두 펼쳐져 있고, 지금 열린 노트의 조상은
  * 그 노트가 열릴 때 다시 펼쳐진다.
  */
-export function NoteTree({ entries, selected, onSelect, onContextMenu }: Props) {
+export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, collapseAllRef }: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const nodes = useMemo(() => nest(entries), [entries]);
   const expanded = useMemo(
@@ -75,6 +91,15 @@ export function NoteTree({ entries, selected, onSelect, onContextMenu }: Props) 
       return next;
     });
   }, [selectedKey]);
+
+  // 파일 탭 머리의 "모두 접기": 지금 목록의 모든 폴더를 접는다.
+  useEffect(() => {
+    if (!collapseAllRef) return;
+    collapseAllRef.current = () => setCollapsed(new Set(entries.filter((e) => e.isDir).map((e) => fold(e.path))));
+    return () => {
+      collapseAllRef.current = undefined;
+    };
+  }, [collapseAllRef, entries]);
 
   if (entries.length === 0) return <p>{t('tree.empty')}</p>;
 
@@ -97,8 +122,12 @@ export function NoteTree({ entries, selected, onSelect, onContextMenu }: Props) 
         onToggle={toggle}
         onActivate={(node) => {
           const e = entryOf(node);
-          if (!e.isDir) onSelect(e.path);
+          if (e.isDir) return;
+          const kind = node.icon as FileKind;
+          if (NOTE_KINDS.includes(kind)) onSelect(e.path);
+          else onView?.(e.path, kind);
         }}
+        rowClass={dimClass}
         onContext={
           onContextMenu &&
           ((node, anchor) => {

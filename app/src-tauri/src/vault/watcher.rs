@@ -226,7 +226,7 @@ fn flush(root: &Path, pending: Pending, stopped: &AtomicBool, sink: &mut dyn FnM
 /// is tagged `Delta::Labsamples` instead, also when it is gone.
 fn classify(root: &Path, abs: &Path, appeared: bool, links: &mut HashMap<String, bool>) -> Option<Delta> {
     let rel = to_rel(root, abs).ok()?;
-    if rel.is_empty() || !is_listed_path(&rel, true) {
+    if rel.is_empty() || !is_listed_path(&rel) {
         return None;
     }
     let registry = is_sample_registry_path(&rel);
@@ -252,7 +252,7 @@ fn classify(root: &Path, abs: &Path, appeared: bool, links: &mut HashMap<String,
         // A folder's own timestamp moves whenever something inside it does:
         // only its appearing matters (its notes are reported on their own).
         Ok(m) if m.is_dir() => appeared.then(|| Delta::Change(Change { path: rel, kind: Kind::Created })),
-        Ok(m) if m.is_file() && (registry || is_listed_path(&rel, false)) => {
+        Ok(m) if m.is_file() => {
             let c = Change { path: rel, kind: if appeared { Kind::Created } else { Kind::Modified } };
             Some(if registry { Delta::Labsamples(c) } else { Delta::Change(c) })
         }
@@ -493,6 +493,30 @@ mod tests {
     }
 
     #[test]
+    fn attachments_are_reported_like_notes_and_the_walk_agrees() {
+        let s = Scratch::new();
+        s.write("a/x.md", "0");
+        let (_w, rx) = watch(&s.0);
+        std::thread::sleep(Duration::from_millis(100));
+        s.write("a/images/x.png", "png");
+        s.write("a/resources/d.csv", "a,b");
+        s.write(".trash/old.png", "png");
+        let got = drain(&rx, Duration::from_millis(700));
+        assert!(got.contains(&change("a/images/x.png", Kind::Created)), "{got:?}");
+        assert!(got.contains(&change("a/resources/d.csv", Kind::Created)), "{got:?}");
+        for d in &got {
+            let Delta::Change(c) = d else { panic!("unexpected {d:?}") };
+            assert!(!c.path.contains(".trash"), "{d:?}");
+        }
+        // Every file the watcher reported is a row of the walk.
+        let walked: Vec<String> = super::super::tree::walk(&s.0).unwrap().into_iter().map(|e| e.path).collect();
+        for d in &got {
+            let Delta::Change(c) = d else { continue };
+            assert!(walked.contains(&c.path), "{} not in {walked:?}", c.path);
+        }
+    }
+
+    #[test]
     fn ignores_changes_under_dot_obsidian() {
         let s = Scratch::new();
         s.write(".obsidian/workspace.md", "0");
@@ -705,14 +729,14 @@ mod tests {
     #[test]
     fn a_git_pull_inside_the_vault_costs_nothing() {
         let s = Scratch::new();
-        // Thousands of writes under `.git/`, `node_modules/` and non-notes: none is
+        // Thousands of writes under `.git/`, `node_modules/` and `.trash/`: none is
         // part of the vault, so no change, no rescan, no sink call at all.
         let mut events = Vec::new();
         for i in 0..RESCAN_ABOVE * 3 {
             let rel = match i % 3 {
                 0 => format!(".git/objects/{i}"),
                 1 => format!("node_modules/p/{i}.md"),
-                _ => format!("data/{i}.csv"),
+                _ => format!(".trash/{i}.csv"),
             };
             s.write(&rel, "x");
             events.push(file_event(&s.0.join(rel)));

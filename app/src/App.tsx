@@ -6,7 +6,9 @@ import { useVaultEvents } from './vault/useVaultEvents';
 import { vaultImages } from './editor/live/vaultImages';
 import { NoteTree } from './tree/NoteTree';
 import { newNoteDialog } from './tree/NewNoteDialog';
-import { useTree } from './tree/useTree';
+import { useTree, visibleEntries } from './tree/useTree';
+import { fileKind, isNotePath, type FileKind } from './labnote/panel/treeIcons';
+import { FileCard } from './viewers/FileCard';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { useLinkIndex } from './links/useLinkIndex';
@@ -68,7 +70,7 @@ import { LinksPanel } from './links/LinksPanel';
 import { createFromLink } from './links/createFromLink';
 import { NavHistory, type NavEntry } from './links/navHistory';
 import { renameEvents } from './links/renameWithLinks';
-import { deleteEvents } from './labnote/commands/fileOps';
+import { deleteEvents, newFolder } from './labnote/commands/fileOps';
 import { currentDialog } from './labnote/host/dialogStore';
 import { subscribeVaultChanges, type ListenFn } from './vault/useVaultEvents';
 import { useVaultChanges } from './labnote/panel/useVaultChanges';
@@ -160,6 +162,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   // 링크, 링크 탭, 팔레트의 명령, 파일 트리, 검색이 여는 노트는 모두 아래 openFile(=navigate)을 지난다.
   const nav = useRef<NavHistory>();
   nav.current ??= new NavHistory();
+  // 노트가 아닌 파일(그림, 표, 그 밖의 첨부)을 보고 있으면 그 경로와 종류. 편집기는 그동안 뒤에 숨어 있다(편집은 그대로 남는다).
+  const [viewing, setViewing] = useState<{ path: string; kind: FileKind }>();
   // 기록이 바뀌면 보기 머리의 뒤로·앞으로 단추를 다시 그린다.
   const [, setNavTick] = useState(0);
   const navFns = useRef({
@@ -186,6 +190,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       el.blur();
     },
     async navigate(path: string, at?: { line: number; ch?: number }): Promise<void> {
+      // 노트가 아닌 파일은 텍스트로 읽지 않는다: 본문에 파일 카드를 보인다(기록에는 쌓지 않는다)
+      if (!isNotePath(path)) {
+        setViewing({ path, kind: fileKind(path) });
+        return;
+      }
+      setViewing(undefined);
       navFns.commitPending();
       const from = navFns.here();
       await notes.openFile(path, at);
@@ -204,6 +214,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
         const from = navFns.here();
         const to = dir === 'back' ? history.back(from) : history.forward(from);
         if (!to) return;
+        setViewing(undefined);
         const same = from !== undefined && (to.path === from.path || (editor.current !== null && openEditor(to.path) === editor.current));
         await notes.openFile(to.path, { line: to.line });
         if (from && !same && notes.activePath() === from.path) {
@@ -255,6 +266,8 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     });
     const offWatch = subscribeVaultChanges(tauriListen as ListenFn, (change) => {
       if (change.kind !== 'removed' || change.path === '') return;
+      const gone = change.path.toLowerCase();
+      setViewing((v) => (v && (v.path.toLowerCase() === gone || v.path.toLowerCase().startsWith(`${gone}/`)) ? undefined : v));
       nav.current!.drop(change.path);
       navFns.changed();
     });
@@ -273,6 +286,9 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   // 화면 배치(왼쪽 독의 탭·너비·숨김, 오른쪽 사이드바): 앱 전체에서 하나, Rust 의 ui.json 이 기준이다.
   const layout = useLayout();
   const tab = layout.leftTab;
+  // 파일 탭: 시스템 파일(카탈로그 JSON, 샘플 등록부)은 켜 두었을 때만 보인다. 이름 바꾸기 등은 늘 전체 목록을 쓴다.
+  const shownEntries = useMemo(() => visibleEntries(entries, layout.showSystemFiles), [entries, layout.showSystemFiles]);
+  const collapseFiles = useRef<() => void>();
   const hasLabnote = entries.some((e) => e.isDir && e.depth === 0 && e.path.toLowerCase() === 'labnote');
   // 탭을 고른 적 없는 보관함에 labnote/ 가 있으면 처음 한 번 실험 탭을 보인다(실험 → 워크플로 → UO 가 이 보관함의 길이다).
   useEffect(() => {
@@ -652,9 +668,51 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
         <Dock tab={tab} onTab={showLeft} footer={<VaultBar name={vault.name} root={vault.root} ctx={ctx} onSwitchVault={switchVault} onOpenSettings={openSettings} />}>
           {/* 파일 탭은 숨겨도 내리지 않는다: 접어 둔 폴더와 찾던 말이 남는다 */}
           <div role="tabpanel" id="sidebar-panel-files" className="sidebar-panel" aria-labelledby="sidebar-tab-files" hidden={tab !== 'files'}>
-            <SearchPanel onOpen={openNote} />
+            <div className="nav-header">
+              <span className="nav-header-title">{t('files.title')}</span>
+              <div className="nav-header-actions">
+                <button type="button" className="ibtn" aria-label={t('files.newNote')} title={t('ribbon.withKey', t('files.newNote'), 'Ctrl+N')} onClick={() => void newNote()}>
+                  <Icon name="file-plus" />
+                </button>
+                <button
+                  type="button"
+                  className="ibtn"
+                  aria-label={t('files.newFolder')}
+                  title={t('files.newFolder')}
+                  disabled={!ctx}
+                  onClick={() => {
+                    if (ctx) void runCommand(ctx, () => newFolder(ctx, ''));
+                  }}
+                >
+                  <Icon name="folder-plus" />
+                </button>
+                <button
+                  type="button"
+                  className="ibtn"
+                  aria-label={t('settings.systemFiles')}
+                  title={t('settings.systemFiles')}
+                  aria-pressed={layout.showSystemFiles}
+                  onClick={() => layoutStore.update({ showSystemFiles: !layout.showSystemFiles })}
+                >
+                  <Icon name="eye" />
+                </button>
+                <button type="button" className="ibtn" aria-label={t('files.collapseAll')} title={t('files.collapseAll')} onClick={() => collapseFiles.current?.()}>
+                  <Icon name="chevrons-up-down" />
+                </button>
+              </div>
+            </div>
+            <SearchPanel onOpen={openNote} showSystem={layout.showSystemFiles} />
             {/* 다시 읽기만 실패했다면 보이던 줄은 그대로 둔다. 읽은 적이 없을 때만 알림만 보인다. */}
-            {!(failed && entries.length === 0) && <NoteTree entries={entries} selected={selected} onSelect={openNote} onContextMenu={onTreeMenu} />}
+            {!(failed && entries.length === 0) && (
+              <NoteTree
+                entries={shownEntries}
+                selected={viewing?.path ?? selected}
+                onSelect={openNote}
+                onView={(path, kind) => setViewing({ path, kind })}
+                onContextMenu={onTreeMenu}
+                collapseAllRef={collapseFiles}
+              />
+            )}
           </div>
           {tab === 'experiments' && (
             <div role="tabpanel" id="sidebar-panel-experiments" className="sidebar-panel" aria-labelledby="sidebar-tab-experiments">
@@ -667,7 +725,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
             </div>
           )}
         </Dock>
-        <main className="content">
+        <main className={viewing ? 'content viewing-file' : 'content'}>
+          {viewing && (
+            <section className="file-view" data-path={viewing.path}>
+              <ViewHeader lead={navButtons} actions={rightToggle} />
+              <FileCard path={viewing.path} kind={viewing.kind} />
+            </section>
+          )}
           {selected ? (
             <Editor
               key={selected}

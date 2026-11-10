@@ -220,7 +220,7 @@ impl Index {
         let root = std::fs::canonicalize(root).map_err(FsError::Io)?;
         let files: Vec<String> = crate::vault::tree::walk(&root)?
             .into_iter()
-            .filter(|e| !e.is_dir && crate::vault::tree::is_listed_path(&e.path, false))
+            .filter(|e| !e.is_dir && crate::vault::tree::is_note_path(&e.path))
             .map(|e| e.path)
             .collect();
         // Every path the walk listed counts as present, readable or not: a note that
@@ -311,14 +311,14 @@ impl Index {
     }
 
     /// Decide what one path means for the index (no lock held). What is not
-    /// part of the vault (`is_listed_path`, or reached through a link) is
+    /// a note (`is_note_path`, or is reached through a link) is
     /// ignored, so the index and the tree agree on what exists; a note that is
     /// gone is dropped; a path that escapes the vault is refused like in every
     /// file command. `root` must be canonical.
     fn prepare(root: &Path, rel: &str) -> Result<Prepared, FsError> {
         use crate::vault::path::{confine, to_rel};
         let abs = confine(root, rel)?;
-        if !crate::vault::tree::is_listed_path(rel, false) {
+        if !crate::vault::tree::is_note_path(rel) {
             return Ok(Prepared::Ignore);
         }
         let meta = match std::fs::symlink_metadata(&abs) {

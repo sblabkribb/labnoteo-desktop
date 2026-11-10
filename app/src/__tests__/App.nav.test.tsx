@@ -59,7 +59,7 @@ describe('navigation history', () => {
     installFakeVault({ 'n.md': 'a\nb\n[[Home]]', 'Home.md': '# H' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('n.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'n' }));
     await docIs('a\nb\n[[Home]]');
     const v = await editorView();
     await waitFor(() => expect(linkIndex.ready()).toBe(true));
@@ -82,7 +82,7 @@ describe('navigation history', () => {
     const vault = installFakeVault({ 'exp/A.labnote.md': 'a\nb\n[[New note]]' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('A.labnote.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'A' }));
     await docIs('a\nb\n[[New note]]');
     const v = await editorView();
     await waitFor(() => expect(linkIndex.ready()).toBe(true));
@@ -117,7 +117,7 @@ describe('navigation history', () => {
     const vault = installFakeVault({ 'exp/n.labnote.md': 'x\n[[a]]', 'exp/a.labnote.md': 'AAA' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('n.labnote.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'n' }));
     await docIs('x\n[[a]]');
     const v = await editorView();
     await waitFor(() => expect(linkIndex.ready()).toBe(true));
@@ -138,9 +138,9 @@ describe('navigation history', () => {
     installFakeVault({ 'a.md': 'alpha beta gamma', 'b.md': 'delta epsilon zeta' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('a.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'a' }));
     await docIs('alpha beta gamma');
-    await userEvent.click(await screen.findByText('b.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'b' }));
     await docIs('delta epsilon zeta');
     const v = await editorView();
     v.dispatch({ selection: { anchor: 8 } });
@@ -156,11 +156,11 @@ describe('navigation history', () => {
     const vault = installFakeVault({ 'a.md': 'A', 'b.md': 'B', 'c.md': 'C' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('a.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'a' }));
     await docIs('A');
-    await userEvent.click(await screen.findByText('b.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'b' }));
     await docIs('B');
-    await userEvent.click(await screen.findByText('c.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'c' }));
     await docIs('C');
     await vault.emitChange('b.md', 'removed');
     fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
@@ -182,9 +182,9 @@ describe('navigation history', () => {
     const vault = installFakeVault({ 'a.md': 'A', 'n.md': '---\ntitle: old\n---\nbody' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('a.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'a' }));
     await docIs('A');
-    await userEvent.click(await screen.findByText('n.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'n' }));
     await docIs('---\ntitle: old\n---\nbody');
     const input = await titleInput();
     input.focus();
@@ -223,9 +223,9 @@ describe('navigation history', () => {
     const vault = installFakeVault({ 'a.md': 'A', 'b.md': 'B' });
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
-    await userEvent.click(await screen.findByText('a.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'a' }));
     await docIs('A');
-    await userEvent.click(await screen.findByText('b.md'));
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'b' }));
     await docIs('B');
     const v = await editorView();
     v.dispatch({ changes: { from: 1, insert: '2' } });

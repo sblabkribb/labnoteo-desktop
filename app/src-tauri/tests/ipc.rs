@@ -422,8 +422,8 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(
         ok("vault_tree", args("vault_tree", vec![])),
         json!([
-            {"path": "notes", "name": "notes", "isDir": true, "depth": 0},
-            {"path": "notes/a.md", "name": "a.md", "isDir": false, "depth": 1},
+            {"path": "notes", "name": "notes", "isDir": true, "depth": 0, "ext": ""},
+            {"path": "notes/a.md", "name": "a.md", "isDir": false, "depth": 1, "ext": "md"},
         ])
     );
     // `expectedBefore` (camelCase on the wire) must reach `expected_before`.

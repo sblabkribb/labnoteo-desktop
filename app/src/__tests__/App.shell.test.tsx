@@ -237,7 +237,7 @@ describe('셸: 리본, 왼쪽 독, 보관함 줄 (상단 바 없음)', () => {
   it('Ctrl+Shift+\\ in the editor toggles the right sidebar even with the cursor on a bracket (no CodeMirror binding shadows it)', async () => {
     const user = userEvent.setup();
     await openVault({ 'Day 1.labnote.md': '(a) [b]\n' });
-    await user.click(await screen.findByText('Day 1.labnote.md'));
+    await user.click(await screen.findByRole('treeitem', { name: 'Day 1' }));
     const root = await waitFor(() => (document.querySelector('.editor-frame') as HTMLElement).shadowRoot!);
     const content = await waitFor(() => root.querySelector('.cm-content') as HTMLElement);
     const view = EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;

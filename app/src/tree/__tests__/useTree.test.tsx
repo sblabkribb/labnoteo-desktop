@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useTree, type TreeEntry } from '../useTree';
+import { isSystemPath, useTree, visibleEntries, type TreeEntry } from '../useTree';
 
 const row = (path: string): TreeEntry => ({ path, name: path, isDir: false, depth: 0 });
 
@@ -60,5 +60,42 @@ describe('트리 훅', () => {
     act(() => result.current.reload());
     await waitFor(() => expect(result.current.failed).toBe(false));
     expect(result.current.entries).toHaveLength(1);
+  });
+});
+
+describe('system files (catalog JSON, sample registries)', () => {
+  it('isSystemPath is resources/workflows at the root and every resources/labsamples, any case', () => {
+    for (const p of [
+      'resources/workflows',
+      'resources/workflows/catalog.json',
+      'Resources/Workflows/x.json',
+      'resources/labsamples',
+      'resources/labsamples/DNA.json',
+      'labnote/001_PCR/resources/labsamples/Primer.json',
+    ]) expect(isSystemPath(p), p).toBe(true);
+    for (const p of [
+      'resources',
+      'resources/plate.csv',
+      'labnote/001_PCR/resources/workflows/x.json',
+      'labnote/001_PCR/resources/gel.png',
+      'labsamples/x.json',
+      'notes/resources/workflowsX/a.json',
+    ]) expect(isSystemPath(p), p).toBe(false);
+  });
+
+  it('are hidden by default and shown with the toggle', () => {
+    const d = (path: string, depth: number): TreeEntry => ({ path, name: path.split('/').pop()!, isDir: true, depth });
+    const f = (path: string, depth: number): TreeEntry => ({ ...d(path, depth), isDir: false });
+    const all = [
+      d('resources', 0),
+      d('resources/labsamples', 1),
+      f('resources/labsamples/DNA.json', 2),
+      d('resources/workflows', 1),
+      f('resources/workflows/catalog.json', 2),
+      f('resources/plate.csv', 1),
+      f('a.md', 0),
+    ];
+    expect(visibleEntries(all, false).map((e) => e.path)).toEqual(['resources', 'resources/plate.csv', 'a.md']);
+    expect(visibleEntries(all, true)).toBe(all);
   });
 });
