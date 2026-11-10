@@ -18,6 +18,7 @@ import { ResultsDialog } from '../scan/ResultsDialog';
 import { UnmatchedDialog } from '../scan/UnmatchedDialog';
 import { NewNoteDialog } from '../../tree/NewNoteDialog';
 import { NewExperimentDialog } from '../ui/NewExperimentDialog';
+import { ContextSourcesDialog } from '../context/ContextSourcesDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -60,6 +61,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <NewNoteDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'newExperiment':
       return <NewExperimentDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'aiContextSources':
+      return <ContextSourcesDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

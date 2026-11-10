@@ -9,6 +9,7 @@ import { cancelAllRequests } from '../../integrations/netIpc';
 import { cancelProgress } from '../../integrations/progressStore';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
+import { scopeErrorText } from '../../labnote/context/appTools';
 import { closeAllDialogs, currentDialog } from '../../labnote/host/dialogStore';
 import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
@@ -53,11 +54,14 @@ type Route = (args: Record<string, unknown>) => unknown;
 let hosts: TestHost[] = [];
 
 /** 노트를 진짜 편집기로 열고(커서는 `caret`), 모델 차례를 `turns` 순서로 답한다. 차례가 떨어지면 마지막 것을 되풀이한다. */
-async function setup(turns: Route[], opts: { settings?: Record<string, unknown>; caret?: number; mount?: boolean } = {}) {
-  const th = createTestHost({ [NOTE]: BODY, [OTHER]: '## [WB030 B]\n' }, opts.settings ?? LLM);
+async function setup(
+  turns: Route[],
+  opts: { settings?: Record<string, unknown>; caret?: number; mount?: boolean; files?: Record<string, string>; note?: string } = {}
+) {
+  const th = createTestHost({ [NOTE]: BODY, [OTHER]: '## [WB030 B]\n', ...opts.files }, opts.settings ?? LLM);
   hosts.push(th);
   if (opts.mount !== false) {
-    await th.mount(NOTE);
+    await th.mount(opts.note ?? NOTE);
     if (opts.caret !== undefined) openNote(NOTE)!.view()!.dispatch({ selection: { anchor: opts.caret } });
   }
   let turn = 0;
@@ -509,5 +513,89 @@ describe('askAgentCommand (#77)', () => {
     expect(docOf(NOTE)).toBe(BODY);
     expect(th.vault.files()[NOTE]).toBe(BODY);
     expect(chats(f)).toBe(1);
+  });
+});
+
+describe('askAgentCommand: read-only context tools (spec §9)', () => {
+  const ELSEWHERE = 'labnote/002_Other';
+  const ELSEWHERE_NOTE = `${ELSEWHERE}/001_WD010_X.labnote.md`;
+  const files = {
+    [`${ELSEWHERE}/README.labnote.md`]: '---\ntitle: Other run\n---\n',
+    [ELSEWHERE_NOTE]: '## [WD010 X]\n\n비밀 메모\n',
+  };
+  const toolNames = (f: ReturnType<typeof fakeInvoke>) =>
+    (f.calls.find(([c]) => c === 'llm_chat')![1].body as { tools: Array<{ function: { name: string } }> }).tools.map((x) => x.function.name);
+
+  it('gives the model the context tools and names them and the experiment in the system prompt', async () => {
+    const { th, f, env } = await setup([() => reply('끝')]);
+    th.answer.prompt('요약해 줘');
+    await askAgentCommand(env);
+    const names = ['update_section', 'list_experiment', 'search_experiment', 'read_note'];
+    expect(toolNames(f)).toEqual(expect.arrayContaining(names));
+    const system = sent(f)[0][0].content;
+    for (const name of names) expect(system).toContain(name);
+    expect(system).toContain(DIR);
+  });
+
+  it('searches and reads inside the experiment, and the end notice counts the lookups', async () => {
+    const { th, f, env } = await setup(
+      [
+        () => toolReply('search_experiment', { query: '메모 줄' }),
+        () => toolReply('read_note', { path: NOTE, section: '결과' }),
+        () => reply('끝'),
+      ],
+      { files }
+    );
+    th.answer.prompt('메모를 찾아 줘');
+    await askAgentCommand(env);
+    const [, second, third] = sent(f);
+    expect(second.at(-1)!.content).toContain(NOTE);
+    expect(second.at(-1)!.content).not.toContain(ELSEWHERE);
+    expect(third.at(-1)!.content).toContain('결과 문단');
+    expect(messages(th)).toContain('AI tool calls: 2 lookup(s). Nothing in the vault changed.');
+  });
+
+  it('refuses another experiment the request did not name, before any approval, worded for the user', async () => {
+    const { th, env } = await setup(
+      [
+        () => toolReply('read_note', { path: ELSEWHERE_NOTE }),
+        () => toolReply('update_section', { documentPath: ELSEWHERE_NOTE, heading: 'WD010 X', content: '덮어씀' }),
+        () => reply('끝'),
+      ],
+      { files }
+    );
+    th.answer.prompt('메모를 고쳐 줘');
+    th.answer.confirm(true);
+    await askAgentCommand(env);
+    expect(th.asked.confirm).toHaveLength(0);
+    expect(th.vault.files()[ELSEWHERE_NOTE]).toBe(files[ELSEWHERE_NOTE]);
+    const notice = messages(th).find((m) => m.startsWith('AI tool calls:'))!;
+    expect(notice).toContain('2 failed');
+    expect(notice).toContain(scopeErrorText('outOfScope', [ELSEWHERE_NOTE, DIR])!.slice(0, 40));
+  });
+
+  it('reads another experiment the request names', async () => {
+    const { th, f, env } = await setup([() => toolReply('read_note', { path: ELSEWHERE_NOTE, experiment: '002' }), () => reply('끝')], {
+      files,
+    });
+    th.answer.prompt('002 실험의 메모와 비교해 줘');
+    await askAgentCommand(env);
+    expect(sent(f)[1].at(-1)!.content).toContain('비밀 메모');
+    expect(messages(th)).toContain('AI tool calls: 1 lookup(s). Nothing in the vault changed.');
+  });
+
+  it('outside an experiment adds only the unscoped list_experiment', async () => {
+    const loose = 'notes/free.md';
+    const { th, f, env } = await setup([() => toolReply('list_experiment', {}), () => reply('끝')], {
+      files: { ...files, [loose]: '# Free\n' },
+      note: loose,
+    });
+    th.answer.prompt('실험 목록');
+    await askAgentCommand(env);
+    const names = toolNames(f);
+    expect(names).toContain('list_experiment');
+    expect(names).not.toContain('read_note');
+    expect(names).not.toContain('search_experiment');
+    expect(sent(f)[1].at(-1)!.content).toContain(ELSEWHERE);
   });
 });

@@ -62,6 +62,7 @@ describe('보관함별 설정', () => {
         'imageFolder',
         'legacyNotesOfferDismissed',
         'llmEndpointOllama',
+        'llmContextWindow',
         'llmEndpointOpenai',
         'llmModel',
         'llmProvider',
@@ -218,6 +219,24 @@ describe('보관함별 설정', () => {
     await saveVaultSettings({ ...settings, defaultExperimenter: '박예성', imageFolder: 'resources' }, store.invoke);
     expect(JSON.parse(store.stored()!)).toMatchObject({ defaultExperimenter: '박예성', imageFolder: 'resources' });
     expect((await loadVaultSettings(store.invoke)).settings).toMatchObject({ defaultExperimenter: '박예성', imageFolder: 'resources' });
+  });
+
+  it('llmContextWindow (app-only key) defaults to 8192, is clamped to 2048-1,000,000 and survives a save and reload', async () => {
+    expect(fromPluginData(undefined).llmContextWindow).toBe(8192);
+    expect(fromPluginData({ llmContextWindow: 32768 }).llmContextWindow).toBe(8192); // not a plugin key
+    expect(fromStored({}).llmContextWindow).toBe(8192);
+    expect(fromStored({ llmContextWindow: 32768 }).llmContextWindow).toBe(32768);
+    expect(fromStored({ llmContextWindow: 2047 }).llmContextWindow).toBe(2048);
+    expect(fromStored({ llmContextWindow: 2_000_000 }).llmContextWindow).toBe(1_000_000);
+    for (const odd of ['x', '4096', 4096.5, NaN, Infinity, null, true, [8192]]) {
+      expect(fromStored({ llmContextWindow: odd }).llmContextWindow).toBe(8192);
+    }
+    const store = fakeStore({ stored: JSON.stringify({ schemaVersion: 3 }) });
+    const { settings } = await loadVaultSettings(store.invoke);
+    expect(settings.llmContextWindow).toBe(8192);
+    await saveVaultSettings({ ...settings, llmContextWindow: 4096 }, store.invoke);
+    expect(JSON.parse(store.stored()!).llmContextWindow).toBe(4096);
+    expect((await loadVaultSettings(store.invoke)).settings.llmContextWindow).toBe(4096);
   });
 
   it('integration settings get the plugin defaults, with usage sending off', () => {

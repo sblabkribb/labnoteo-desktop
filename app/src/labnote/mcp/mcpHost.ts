@@ -1,37 +1,75 @@
-import { createLabnoteTools, runTool, type ToolDef } from '@labnoteo/core';
+import { runTool, type ToolDef } from '@labnoteo/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { createAiEnv } from '../../ai/aiEnv';
 import { vaultGuard, type InvokeFn, type ListenFn, type VaultGuard } from '../../integrations/netIpc';
+import { searchNotesIn } from '../../search/indexApi';
 import type { CommandContext } from '../commands/context';
+import { appTools } from '../context/appTools';
 import { toolContext } from '../port/aiCommon';
+import { experimentReadmes } from '../port/experiments';
 import { CLOSED_REPLY, callMutating, type McpCall } from '../port/mcpCall';
 import { TaskQueue, buildToolCallResult } from '../port/mcpApproval';
+import { fillPrompt } from './mcpPrompts';
 import { MCP_CALL, MCP_CANCEL, mcpClaim, mcpReply, type McpCallEvent, type McpCancelEvent, type McpReplyIn, type ToolInfo } from './mcpIpc';
 
 /**
  * 웹뷰의 MCP 호스트(C4, Task 36). Rust 서버가 `tools/call` 을 `mcp://call` 로 넘기면 여기서 core 도구를 돌리고
  * `mcp_reply` 로 답한다.
- * - 도구가 무엇을 바꾸는지는 이 목록(`createLabnoteTools()`)이 정한다. 목록에 없는 이름은 읽기처럼 `runTool` 이
+ * - 도구가 무엇을 바꾸는지는 이 목록(`appTools()`: core 도구 + 읽기 전용 문맥 도구)이 정한다. 목록에 없는 이름은 읽기처럼 `runTool` 이
  *   `isError` 결과로 답한다(플러그인과 같다).
  * - 어떤 도구든 돌리기 직전에 `guard.check()` 다음 `mcp_claim` 을 부른다. false 면 아무것도 돌리지도 답하지도 않는다.
  * - 바꾸는 도구는 한 번에 하나씩(TaskQueue) 미리 보기 → 승인(A9, 조합이 끝난 뒤 `unsolicited`) → 실행이다.
  *   `mcp://cancel` 이 그 호출의 신호를 끊는다: 열린 질문은 거둬지고 늦은 허용은 아무것도 쓰지 않는다.
+ * - `prompt:<name>` 은 `prompts/get` 이다(spec §10.2): 같은 가드와 claim 뒤에 `fillPrompt` 가 읽기로 채운다(승인 없음).
  * - 보관함이 없거나 바뀌면 -32002 로 답한다.
  */
 
-/** Rust 에 넘기는 도구 목록(비밀 아님). */
+/** Context tools whose experiment comes from `experiment` or `notePath` on MCP (spec §10.1). */
+const NOTE_SCOPED = new Set(['list_experiment', 'search_experiment', 'read_note']);
+
+const MCP_EXPERIMENT_ARG = {
+  type: 'string',
+  description: 'Experiment number, folder name or title. Required unless notePath is given; name another experiment only when the user did.',
+};
+const MCP_NOTE_PATH_ARG = { type: 'string', description: 'A vault-relative note inside the experiment; its experiment is used.' };
+
+/**
+ * The schema MCP clients see. MCP has no current experiment, so the
+ * list/search/read tools say `experiment` is required unless `notePath`
+ * names a note of the experiment (the handlers accept both).
+ */
+function mcpSchema(tool: ToolDef): unknown {
+  if (!NOTE_SCOPED.has(tool.name)) return tool.inputSchema;
+  const schema = tool.inputSchema;
+  return { ...schema, properties: { ...schema.properties, experiment: MCP_EXPERIMENT_ARG, notePath: MCP_NOTE_PATH_ARG } };
+}
+
+/**
+ * Rust 에 넘기는 도구 목록(비밀 아님): core 도구와 읽기 전용 문맥 도구(`appTools()`, 폴더로 감싸지 않음; spec §10.1).
+ * 문맥 도구는 MCP 에서 범위를 인자(`experiment`/`notePath`)로만 받는다.
+ */
 export function toolCatalog(): ToolInfo[] {
-  return createLabnoteTools().map((t) => ({
+  return appTools().map((t) => ({
     name: t.name,
     description: t.description,
-    inputSchema: t.inputSchema,
+    inputSchema: mcpSchema(t),
     mutates: t.mutates === true,
   }));
 }
 
 function argsOf(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+/** The bridge-call prefix of a forwarded `prompts/get` (Rust `PROMPT_PREFIX`). */
+const PROMPT_PREFIX = 'prompt:';
+
+/** Prompt arguments: Rust admits only strings; anything else is dropped here too. */
+function stringArgs(args: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(args)) if (typeof v === 'string') out[k] = v;
+  return out;
 }
 
 /**
@@ -41,7 +79,7 @@ function argsOf(raw: unknown): Record<string, unknown> {
 export function startMcpHost(ctx: CommandContext, deps: { invoke?: InvokeFn; listen?: ListenFn } = {}): () => void {
   const invoke = deps.invoke ?? (tauriInvoke as InvokeFn);
   const listen = deps.listen ?? tauriListen;
-  const tools: ToolDef[] = createLabnoteTools();
+  const tools: ToolDef[] = appTools();
   const writes = new TaskQueue();
   const calls = new Map<string, AbortController>();
   let stopped = false;
@@ -69,7 +107,9 @@ export function startMcpHost(ctx: CommandContext, deps: { invoke?: InvokeFn; lis
         vaultClosed: () => guard.signal.aborted,
       };
       const args = argsOf(event.args);
-      const tool = tools.find((t) => t.name === event.name);
+      // prompts/get (spec §10.2) arrives as `prompt:<name>`; no tool name contains ':'. It is always a read.
+      const prompt = event.name.startsWith(PROMPT_PREFIX) ? event.name.slice(PROMPT_PREFIX.length) : undefined;
+      const tool = prompt === undefined ? tools.find((t) => t.name === event.name) : undefined;
       if (tool?.mutates) return await writes.run(() => callMutating(call, tool, args, signal));
       if (signal.aborted) return guard.signal.aborted ? CLOSED_REPLY : { kind: 'noReply' };
       try {
@@ -77,7 +117,14 @@ export function startMcpHost(ctx: CommandContext, deps: { invoke?: InvokeFn; lis
       } catch {
         return CLOSED_REPLY;
       }
-      const result = await runTool(tools, event.name, toolContext(env, { beforeWrite: call.beforeWrite }), args);
+      // MCP 는 현재 실험이 없다: 문맥 도구의 범위는 인자에서만 오고, 없으면 scopeRequired 다.
+      const context = toolContext(env, {
+        beforeWrite: call.beforeWrite,
+        experiments: async () => (await experimentReadmes(env.host)).map((e) => ({ folder: e.folder, title: e.title })),
+        searchIn: (query, prefix, limit) => searchNotesIn(query, prefix, limit, invoke),
+      });
+      if (prompt !== undefined) return await fillPrompt(prompt, stringArgs(args), { toolCtx: context });
+      const result = await runTool(tools, event.name, context, args);
       return { kind: 'result', result: buildToolCallResult(result) };
     } finally {
       guard.signal.removeEventListener('abort', abortOnClose);

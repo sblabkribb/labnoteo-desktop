@@ -3,7 +3,7 @@ import { TauriLabnoteFs } from '../tauriLabnoteFs';
 import { createVault, openVault, restoreVault } from '../../vault/useVault';
 import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
-import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
+import { indexBodies, rebuildIndex, removeNote, searchNotes, searchNotesIn, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
 import { listVaultImages, readVaultBytes, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultAttachment, writeVaultImage } from '../vaultImage';
 import { fileInfo, openWithDefaultApp, revealInFolder } from '../vaultOpen';
@@ -16,6 +16,7 @@ import * as scan from '../../labnote/scan/scanIpc';
 import * as mcp from '../../labnote/mcp/mcpIpc';
 import { readClipboardLink } from '../../partbank/clipboardIpc';
 import { DEFAULT_PREFS, readUiPrefs, writeUiPrefs } from '../../ui/layoutStore';
+import { skillInstall, skillSaveAs, skillStatus } from '../../labnote/skill/skillIpc';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -97,6 +98,7 @@ describe('IPC 인자 이름 계약', () => {
     await upsertNote('a.md', r.invoke);
     await removeNote('a.md', r.invoke);
     await searchNotes('q', 10, r.invoke);
+    await searchNotesIn('q', 'labnote/001_A', 10, r.invoke);
     await indexBodies(null, 1, r.invoke);
     await openVault(r.invoke, 'D:\\lab');
     await createVault(r.invoke, 'D:\\lab');
@@ -170,6 +172,10 @@ describe('IPC 인자 이름 계약', () => {
     await readClipboardLink(r.invoke);
     expect(await readUiPrefs(r.invoke)).toEqual(DEFAULT_PREFS);
     await writeUiPrefs({ ...DEFAULT_PREFS }, r.invoke);
+    // SKILL.md 설치: 내용이나 경로는 보내지 않는다
+    await skillStatus(r.invoke);
+    await skillInstall(false, r.invoke);
+    await skillSaveAs(r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

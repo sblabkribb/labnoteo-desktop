@@ -5,6 +5,7 @@ pub mod mcp;
 pub mod net;
 pub mod print;
 pub mod scan;
+pub mod skill;
 pub mod ui_prefs;
 pub mod vault;
 
@@ -56,6 +57,7 @@ macro_rules! register_commands {
             $crate::index::index_upsert,
             $crate::index::index_remove,
             $crate::index::search,
+            $crate::index::index_search_in,
             $crate::index::index_bodies,
             $crate::vault::journal::link_journal_read,
             $crate::vault::journal::link_journal_write_header,
@@ -108,6 +110,10 @@ macro_rules! register_commands {
             $crate::mcp::bridge::mcp_drain,
             // SP6-B1: "Open labnoteO link" reads a link off the clipboard from Rust.
             $crate::mcp::clipboard::clipboard_labnoteo_link,
+            // Steps 4 + 5: the labnoteO SKILL.md installer (explicit click only).
+            $crate::skill::skill_status,
+            $crate::skill::skill_install,
+            $crate::skill::skill_save_as,
         ])
     };
 }
@@ -139,6 +145,8 @@ pub fn run() {
         // the clipboard the token is copied to from Rust (C5).
         .manage(mcp::McpState::default())
         .manage(mcp::ClipState(std::sync::Arc::new(mcp::ArboardClipboard)))
+        // The skill installer's home folder (USERPROFILE, then HOME).
+        .manage(skill::SkillPaths::from_env())
         // SP7 Part C: a page load in the main webview (reload, navigation,
         // crash recovery) stops the MCP server and fails its pending calls,
         // from Rust, because JS cannot reliably invoke during unload (C3).
@@ -170,6 +178,8 @@ pub fn run() {
             app.manage(net::IntegrationDirs(data.join("integrations")));
             // Integration keys: Windows Credential Manager only, never a file (D6).
             app.manage(net::secrets::Secrets::keyring());
+            // Save as... for SKILL.md: Rust's own save dialog, modal to the main window.
+            app.manage(skill::SkillPicker::dialog(app.handle().clone()));
             // Watches the open vault for changes made outside the app; started
             // by `vault_open` / `vault_current`, moved when the vault changes.
             app.manage(vault::watcher::WatcherState::new(vault::watcher::app_starter(app.handle().clone())));

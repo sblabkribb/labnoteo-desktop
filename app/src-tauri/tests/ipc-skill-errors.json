@@ -1,0 +1,6 @@
+{
+  "exists": "exists",
+  "symlink": "symlink",
+  "noHome": "noHome",
+  "io": "io"
+}

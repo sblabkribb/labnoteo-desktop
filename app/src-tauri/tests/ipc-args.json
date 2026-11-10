@@ -36,6 +36,7 @@
   "index_upsert": ["path"],
   "index_remove": ["path"],
   "search": ["query", "limit"],
+  "index_search_in": ["query", "prefix", "limit"],
   "index_bodies": ["after", "limit"],
   "link_journal_read": [],
   "link_journal_write_header": ["content"],
@@ -81,5 +82,8 @@
   "mcp_status": [],
   "mcp_claim": ["callId"],
   "mcp_reply": ["callId", "reply"],
-  "mcp_drain": []
+  "mcp_drain": [],
+  "skill_status": [],
+  "skill_install": ["overwrite"],
+  "skill_save_as": []
 }

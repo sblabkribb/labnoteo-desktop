@@ -429,3 +429,10 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .dialog.picker.catalog { width: min(860px, 100%); }
 /* 별칭 단계의 "← 다시 고르기": 왼쪽 끝 */
 .alias-back { margin-right: auto; }
+/* ai-context (feat/ai-context) */
+/* Context sources before AI drafting: a budget bar whose fill width is set through CSSOM (--ai-ctx-fill) */
+.ai-ctx-bar { height: var(--space-2); background: var(--bg-hover); border-radius: var(--radius-s); overflow: hidden; }
+.ai-ctx-bar-fill { width: var(--ai-ctx-fill, 0%); height: 100%; background: var(--accent); }
+.ai-ctx-issues ul { margin: 0; padding-left: var(--space-7); }
+/* SKILL.md preview in Integration settings: a read-only, scrollable copy of the text */
+.skill-preview { max-height: 16em; overflow: auto; }

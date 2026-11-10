@@ -40,6 +40,19 @@ export function searchNotes(query: string, limit: number, invoke: InvokeFn = tau
   return invoke<SearchResults>('search', { query, limit });
 }
 
+/**
+ * vault-relative 폴더 `prefix`(예: `labnote/001_A`) 안의 노트만 찾는다. `labnote/001_AB` 는 포함되지 않는다.
+ * 빈 prefix, 앞의 `/`, `..`, 역슬래시, 드라이브는 Rust 가 `badInput` 으로 거부한다. `limit` 은 Rust 가 1..=200 으로 자른다.
+ */
+export function searchNotesIn(
+  query: string,
+  prefix: string,
+  limit: number,
+  invoke: InvokeFn = tauriInvoke,
+): Promise<SearchResults> {
+  return invoke<SearchResults>('index_search_in', { query, prefix, limit });
+}
+
 /** Rust 의 `BodyPage`. `next` 는 다음 쪽에 `after` 로 넘길 키(소문자 경로)이고, 마지막 쪽이면 `null` 이다. */
 export interface BodyPage {
   items: { path: string; body: string }[];

@@ -154,6 +154,30 @@ describe('provider.chat', () => {
     expect(chatBody(f.calls).options).toBeUndefined();
   });
 
+  it('ollama body gets options.num_ctx only when contextWindow is passed, beside temperature', async () => {
+    const f = replying({ message: { content: 'x' } });
+    const p = createLlmProvider(withProvider('ollama'), f.invoke)!;
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
+    await p.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
+    await p.chat(msgs, { contextWindow: 16384 });
+    await p.chat(msgs, { temperature: 0.2 });
+    await p.chat(msgs);
+    expect(chatBody(f.calls, 0).options).toEqual({ temperature: 0.2, num_ctx: 4096 });
+    expect(chatBody(f.calls, 1).options).toEqual({ num_ctx: 16384 });
+    expect(chatBody(f.calls, 2).options).toEqual({ temperature: 0.2 });
+    expect(chatBody(f.calls, 3).options).toBeUndefined();
+  });
+
+  it('openai body is identical with and without contextWindow', async () => {
+    const f = replying({ choices: [{ message: { content: 'x' } }] });
+    const p = createLlmProvider(withProvider('openai', { llmModel: 'm' }), f.invoke)!;
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
+    await p.chat(msgs, { temperature: 0.2 });
+    await p.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
+    expect(chatBody(f.calls, 1)).toEqual(chatBody(f.calls, 0));
+    expect(chatBody(f.calls, 0)).toEqual({ model: 'm', messages: [{ role: 'user', content: 'x' }], temperature: 0.2 });
+  });
+
   it('openai body: tool_call_id and arguments as JSON strings; never a key in the body', async () => {
     const f = replying({ choices: [{ message: { content: 'done' } }] });
     const history: ChatMessage[] = [
