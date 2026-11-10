@@ -8,7 +8,9 @@
 //!   frame and `[DONE]` ends the stream (not relayed). A 2xx that is plain
 //!   JSON (a server that ignored `stream: true`) comes back whole as `text`.
 //! - Ollama answers are NDJSON (`LineFramer`, 64 KiB per line); each line is
-//!   one frame and the line with `"done": true` ends the stream.
+//!   one frame and the line with `"done": true` ends the stream. A 2xx
+//!   `application/json` body that is one JSON value comes back whole as
+//!   `text`; one that is not (NDJSON mislabelled) is still framed by line.
 //! - Every chunk must arrive within `SSE_IDLE`, the whole stream within
 //!   `LLM_TIMEOUT` (`timeout`); a frame over `SSE_MAX_FRAME`, a line over
 //!   64 KiB or more than 8 MiB in all is `tooLarge`.
@@ -203,17 +205,29 @@ async fn read_stream(
         let excerpt = NetError::status(status, &String::from_utf8_lossy(&bytes), key).body.unwrap_or_default();
         return Ok(StreamEnd::text(status, excerpt));
     }
-    let json_answer = provider != LlmKind::Ollama
-        && resp
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("application/json"));
+    let json_answer = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("application/json"));
+    let mut relay = Relay { key, on_frame, count: 0 };
     if json_answer {
         let bytes = within(limits.idle, read_capped(resp, MAX_BODY)).await??;
-        return Ok(StreamEnd::text(status, redact_text(&String::from_utf8_lossy(&bytes), key)));
+        let text = String::from_utf8_lossy(&bytes);
+        // One JSON value (even pretty-printed) is a whole answer. Ollama NDJSON
+        // mislabelled `application/json` is still framed line by line.
+        if provider != LlmKind::Ollama || serde_json::from_str::<Value>(&text).is_ok() {
+            return Ok(StreamEnd::text(status, redact_text(&text, key)));
+        }
+        let mut lines = LineFramer::new(NDJSON_MAX_LINE);
+        for line in lines.push(&text)?.into_iter().chain(lines.finish()) {
+            relay.send(&line);
+            if ndjson_done(&line) {
+                break;
+            }
+        }
+        return Ok(StreamEnd::finished(relay.count));
     }
-    let mut relay = Relay { key, on_frame, count: 0 };
     let mut sse = SseParser::default();
     let mut lines = LineFramer::new(NDJSON_MAX_LINE);
     let mut stream = resp.bytes_stream();
@@ -531,6 +545,37 @@ mod tests {
         assert_eq!(end.text.as_deref(), Some(r#"{"choices":[{"message":{"content":"*** 한 번에"}}]}"#));
         assert_eq!(end.done, None);
         assert!(frames.is_empty());
+    }
+
+    #[test]
+    fn an_ollama_json_answer_is_text_even_pretty_printed() {
+        let body = "{
+  \"message\": {
+    \"content\": \"한 번에\"
+  },
+  \"done\": true
+}
+";
+        let s = serve(vec![Canned::ok(body)]);
+        let (r, frames) = run(&ollama(&s.url), &MemoryStore::default(), LlmKind::Ollama, json!({}), limits());
+        let end = r.unwrap();
+        assert_eq!(end.status, 200);
+        assert_eq!(end.text.as_deref(), Some(body));
+        assert!(frames.is_empty());
+    }
+
+    #[test]
+    fn ollama_ndjson_labelled_json_is_still_framed() {
+        let s = serve(vec![streamed(
+            "application/json",
+            vec![b"{\"message\":{\"content\":\"a\"},\"done\":false}
+{\"message\":{\"content\":\"b\"},\"done\":true}
+{\"late\":1}
+"],
+        )]);
+        let (r, frames) = run(&ollama(&s.url), &MemoryStore::default(), LlmKind::Ollama, json!({}), limits());
+        assert_eq!(r.unwrap(), done(2));
+        assert_eq!(frames.len(), 2);
     }
 
     #[test]

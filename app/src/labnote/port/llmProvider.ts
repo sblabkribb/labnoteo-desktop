@@ -210,13 +210,23 @@ async function post(
   }
 }
 
-/** Errors before the first frame that mean "this server will not stream", not "the network failed". */
-const STREAM_REFUSED: ReadonlySet<string> = new Set(['status', 'notJson']);
+/**
+ * HTTP statuses before the first frame that suggest the server refused `stream: true`. Others (401, 403, 429,
+ * 5xx) would fail the same way without streaming, so they are reported at once instead of sending a second request.
+ */
+const STREAM_REFUSED_STATUS: ReadonlySet<number> = new Set([400, 404, 405, 415, 422, 501]);
+
+/** An error before the first frame that means "this server will not stream", not "the network failed". */
+function streamRefused(e: unknown): boolean {
+  if (!(e instanceof NetError)) return false;
+  return e.kind === 'notJson' || (e.kind === 'status' && STREAM_REFUSED_STATUS.has(e.status ?? 0));
+}
 
 /**
  * `llm_chat_stream` through Rust (app only, spec §6.2). Frames go through `asm`; each content delta goes to
- * `onDelta`. A 2xx JSON text (the server ignored `stream: true`) is read by `read`. A non-2xx answer, or a
- * `status`/`notJson` error, before the first frame runs `fallback` (one non-streamed call) instead.
+ * `onDelta`. A 2xx JSON text (the server ignored `stream: true`) is read by `read`. A status in
+ * `STREAM_REFUSED_STATUS`, or a `notJson` error, before the first frame runs `fallback` (one non-streamed call)
+ * instead. An error frame mid-stream (the assembler throws) rejects with that error once the request stops.
  */
 async function streamPost(
   provider: 'ollama' | 'openai',
@@ -248,12 +258,12 @@ async function streamPost(
       listen
     );
   } catch (e) {
-    if (frames === 0 && e instanceof NetError && STREAM_REFUSED.has(e.kind)) return deliver(await fallback(), onDelta);
+    if (frames === 0 && streamRefused(e)) return deliver(await fallback(), onDelta);
     if (e instanceof NetError && e.kind === 'status') throw new LlmHttpError(errorName, e.status ?? 0, e.body ?? '');
     throw e;
   }
   if (end.status < 200 || end.status >= 300) {
-    if (frames === 0) return deliver(await fallback(), onDelta);
+    if (frames === 0 && STREAM_REFUSED_STATUS.has(end.status)) return deliver(await fallback(), onDelta);
     throw new LlmHttpError(errorName, end.status, end.text ?? '');
   }
   if (end.text !== undefined) {

@@ -316,7 +316,8 @@ const FRAME_WAIT_MS = 2000;
 /**
  * 스트리밍 채팅(spec §6.2). 이 요청 id 의 `llm://frame` 만 차례로 `onFrame` 에 넘긴다. Rust 가 답한 프레임 수보다
  * 받은 것이 적으면 `frameWaitMs` 까지 기다리고, 그래도 모자라면 `NetError('noResult')`. 끝나거나 취소되면 구독을
- * 풀고, 그 뒤 프레임은 버린다.
+ * 풀고, 그 뒤 프레임은 버린다. `onFrame` 이 던지면(예: 스트림 가운데 온 `{error}` 프레임) 첫 오류를 간직하고,
+ * 남은 프레임은 버리고, 요청을 멈춘 뒤 그 오류로 거절한다. 기다리는 동안 취소하면 곧바로 `cancelled`.
  */
 export async function llmChatStream(
   a: {
@@ -329,48 +330,88 @@ export async function llmChatStream(
   invoke: InvokeFn = tauriInvoke,
   listen: ListenFn = tauriListen,
 ): Promise<LlmStreamEnd> {
-  if (a.signal?.aborted || vaultSignal().aborted) throw cancelled();
+  const vault = vaultSignal();
+  if (a.signal?.aborted || vault.aborted) throw cancelled();
   let own: string | undefined;
   let open = true;
   let received = 0;
   let wake: (() => void) | undefined;
+  /** 첫 프레임 오류. 있으면 `stop` 으로 요청을 끊는다. */
+  let frameError: { error: unknown } | undefined;
+  const stop = new AbortController();
+  const forward = () => stop.abort();
+  a.signal?.addEventListener('abort', forward);
   let unlisten: () => void;
   try {
     unlisten = await listen<LlmFrame>(LLM_FRAME_EVENT, (e) => {
       const f = e.payload;
-      if (!open || own === undefined || !f || f.requestId !== own || typeof f.data !== 'string') return;
+      if (!open || frameError || own === undefined || !f || f.requestId !== own || typeof f.data !== 'string') return;
       received += 1;
-      a.onFrame(f.data);
+      try {
+        a.onFrame(f.data);
+      } catch (err) {
+        frameError = { error: err };
+        stop.abort();
+      }
       wake?.();
     });
   } catch (e) {
+    a.signal?.removeEventListener('abort', forward);
     throw toNetError(e);
   }
+  const userCancelled = () => a.signal?.aborted === true || vault.aborted;
   try {
-    const end = await trackRequest(
-      a.signal,
-      (requestId) => {
-        own = requestId;
-        return call<LlmStreamEnd>(invoke, 'llm_chat_stream', { requestId, provider: a.provider, body: a.body });
-      },
-      invoke,
-    );
+    let end: LlmStreamEnd;
+    try {
+      end = await trackRequest(
+        stop.signal,
+        (requestId) => {
+          own = requestId;
+          return call<LlmStreamEnd>(invoke, 'llm_chat_stream', { requestId, provider: a.provider, body: a.body });
+        },
+        invoke,
+      );
+    } catch (e) {
+      if (frameError && !userCancelled()) throw frameError.error;
+      throw e;
+    }
+    if (frameError) throw frameError.error;
     const expected = end.done ? (end.frames ?? 0) : 0;
     if (received < expected) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, a.frameWaitMs ?? FRAME_WAIT_MS);
+      await new Promise<void>((resolve, reject) => {
+        const done = () => {
+          clearTimeout(timer);
+          stop.signal.removeEventListener('abort', onAbort);
+          vault.removeEventListener('abort', onAbort);
+        };
+        const onAbort = () => {
+          done();
+          if (frameError && !userCancelled()) reject(frameError.error);
+          else reject(cancelled());
+        };
+        const timer = setTimeout(() => {
+          done();
+          resolve();
+        }, a.frameWaitMs ?? FRAME_WAIT_MS);
         wake = () => {
           if (received >= expected) {
-            clearTimeout(timer);
+            done();
             resolve();
           }
         };
+        stop.signal.addEventListener('abort', onAbort);
+        vault.addEventListener('abort', onAbort);
+        if (stop.signal.aborted || vault.aborted) onAbort();
       });
+      // 기다리는 동안 생긴 프레임 오류(위 onAbort 가 먼저 거절하지만, 좁혀진 타입을 다시 넓혀 확인한다).
+      const late = frameError as { error: unknown } | undefined;
+      if (late) throw late.error;
       if (received < expected) throw new NetError('noResult', 'some of the streamed answer did not arrive');
     }
     return end;
   } finally {
     open = false;
+    a.signal?.removeEventListener('abort', forward);
     unlisten();
   }
 }

@@ -116,6 +116,70 @@ describe('llmChatStream', () => {
     expect(f.calls).toContainEqual(['net_cancel', { requestId: id }]);
   });
 
+  it('an onFrame error stops the request, drops later frames and is the rejection', async () => {
+    const l = fakeListen();
+    let id = '';
+    const f = fakeInvoke({
+      llm_chat_stream: (args) => {
+        id = String(args.requestId);
+        l.emit(id, 'a');
+        l.emit(id, 'bad');
+        l.emit(id, 'c');
+        return new Promise(() => {}); // Rust would keep going until cancelled
+      },
+      net_cancel: () => true,
+    });
+    const seen: string[] = [];
+    const boom = new Error('boom');
+    const p = llmChatStream(
+      {
+        provider: 'openai',
+        body: {},
+        onFrame: (d) => {
+          if (d === 'bad') throw boom;
+          seen.push(d);
+        },
+      },
+      f.invoke,
+      l.listen,
+    );
+    await expect(p).rejects.toBe(boom);
+    expect(seen).toEqual(['a']);
+    expect(l.active).toBe(0);
+    expect(f.calls).toContainEqual(['net_cancel', { requestId: id }]);
+  });
+
+  it('an onFrame error rejects even when Rust ends the stream normally', async () => {
+    const l = fakeListen();
+    const f = fakeInvoke({
+      llm_chat_stream: (args) => {
+        l.emit(String(args.requestId), 'bad');
+        return { status: 200, done: true, frames: 1 };
+      },
+      net_cancel: () => true,
+    });
+    const boom = new Error('boom');
+    await expect(
+      llmChatStream({ provider: 'ollama', body: {}, onFrame: () => { throw boom; } }, f.invoke, l.listen),
+    ).rejects.toBe(boom);
+  });
+
+  it('cancel while waiting for overtaken frames rejects at once as cancelled', async () => {
+    const l = fakeListen();
+    const f = fakeInvoke({ llm_chat_stream: () => ({ status: 200, done: true, frames: 1 }) });
+    const ac = new AbortController();
+    const started = Date.now();
+    const p = llmChatStream(
+      { provider: 'openai', body: {}, signal: ac.signal, onFrame: () => undefined, frameWaitMs: 5000 },
+      f.invoke,
+      l.listen,
+    );
+    setTimeout(() => ac.abort(), 20);
+    await expect(p).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(l.active).toBe(0);
+  });
+
   it('a missing frame after the end is noResult', async () => {
     const l = fakeListen();
     const f = fakeInvoke({ llm_chat_stream: () => ({ status: 200, done: true, frames: 1 }) });
@@ -189,14 +253,82 @@ describe('LlmProvider.chatStream', () => {
   it('the fallback runs once: a non-streamed failure is an LlmHttpError', async () => {
     const l = fakeListen();
     const f = fakeInvoke({
-      llm_chat_stream: () => ({ status: 401, text: 'no key' }),
+      llm_chat_stream: () => ({ status: 404, text: 'no route' }),
       llm_chat: () => {
-        throw { kind: 'status', message: 'HTTP 401', status: 401, body: 'no key' };
+        throw { kind: 'status', message: 'HTTP 404', status: 404, body: 'no route' };
       },
     });
     const p = createLlmProvider({ ...settings, llmProvider: 'openai' }, f.invoke, l.listen)!;
     await expect(p.chatStream!([{ role: 'user', content: 'hi' }], {}, () => undefined)).rejects.toBeInstanceOf(LlmHttpError);
     expect(f.calls.map(([c]) => c)).toEqual(['llm_chat_stream', 'llm_chat']);
+  });
+
+  it.each([401, 403, 429, 500, 503])('HTTP %i before any frame is reported at once, without a second request', async (status) => {
+    const l = fakeListen();
+    const f = fakeInvoke({
+      llm_chat_stream: () => ({ status, text: 'nope' }),
+      llm_chat: () => ({ status: 200, text: '{}' }),
+    });
+    const p = createLlmProvider({ ...settings, llmProvider: 'openai' }, f.invoke, l.listen)!;
+    const err = await p.chatStream!([{ role: 'user', content: 'hi' }], {}, () => undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmHttpError);
+    expect((err as LlmHttpError).status).toBe(status);
+    expect(f.calls.map(([c]) => c)).toEqual(['llm_chat_stream']);
+  });
+
+  it('an OpenAI-compatible error frame mid-stream rejects with the server message, not a cut-off answer', async () => {
+    const l = fakeListen();
+    const f = fakeInvoke({
+      llm_chat_stream: (args) => {
+        const id = String(args.requestId);
+        l.emit(id, sse({ content: '반쯤 ' }));
+        l.emit(id, JSON.stringify({ error: { message: 'model overloaded' } }));
+        l.emit(id, sse({ content: '뒤' }));
+        return { status: 200, done: true, frames: 3 };
+      },
+      net_cancel: () => true,
+      llm_chat: () => ({ status: 200, text: '{}' }),
+    });
+    const p = createLlmProvider({ ...settings, llmProvider: 'openai' }, f.invoke, l.listen)!;
+    const deltas: string[] = [];
+    await expect(p.chatStream!([{ role: 'user', content: 'hi' }], {}, (d) => deltas.push(d))).rejects.toMatchObject({
+      kind: 'remote',
+      message: expect.stringContaining('model overloaded'),
+    });
+    expect(deltas).toEqual(['반쯤 ']);
+    expect(f.calls.map(([c]) => c)).not.toContain('llm_chat');
+  });
+
+  it('an Ollama error line (HTTP 200, no done) rejects with the server message', async () => {
+    const l = fakeListen();
+    const f = fakeInvoke({
+      llm_chat_stream: (args) => {
+        const id = String(args.requestId);
+        l.emit(id, JSON.stringify({ message: { content: '시작' }, done: false }));
+        l.emit(id, JSON.stringify({ error: 'out of memory' }));
+        return { status: 200, done: true, frames: 2 };
+      },
+      net_cancel: () => true,
+    });
+    const p = createLlmProvider({ ...settings, llmProvider: 'ollama' }, f.invoke, l.listen)!;
+    await expect(p.chatStream!([{ role: 'user', content: 'hi' }], {}, () => undefined)).rejects.toMatchObject({
+      kind: 'remote',
+      message: expect.stringContaining('out of memory'),
+    });
+  });
+
+  it('an onDelta that throws rejects the turn instead of being lost', async () => {
+    const l = fakeListen();
+    const f = fakeInvoke({
+      llm_chat_stream: (args) => {
+        l.emit(String(args.requestId), sse({ content: 'x' }));
+        return { status: 200, done: true, frames: 1 };
+      },
+      net_cancel: () => true,
+    });
+    const p = createLlmProvider({ ...settings, llmProvider: 'openai' }, f.invoke, l.listen)!;
+    const boom = new Error('render failed');
+    await expect(p.chatStream!([{ role: 'user', content: 'hi' }], {}, () => { throw boom; })).rejects.toBe(boom);
   });
 
   it('never falls back once a frame arrived', async () => {
