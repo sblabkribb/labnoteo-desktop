@@ -163,6 +163,14 @@ function contrastFailures(t: Record<string, string>, name: string): string[] {
   return out;
 }
 
+const ASTRYX_TOKENS = [
+  '--focus-outline-width', '--focus-outline-style', '--focus-outline-color', '--focus-outline-offset',
+  '--duration-fast-min', '--duration-fast', '--duration-fast-max', '--duration-medium',
+  '--ease-standard', '--ease-entrance', '--ease-exit',
+  '--shadow-low', '--shadow-med', '--shadow-high',
+  '--radius-inner', '--radius-element', '--radius-container', '--radius-full',
+];
+
 const REQUIRED = [
   '--bg', '--bg-side', '--bg-ribbon', '--bg-elevated', '--menu-bg', '--bg-hover', '--bg-selected', '--bg-selection', '--border',
   '--border-strong', '--guide', '--text', '--text-muted', '--text-faint', '--accent', '--accent-fill', '--accent-fill-hover', '--accent-text',
@@ -306,10 +314,64 @@ describe('디자인 토큰', () => {
     expect(all).not.toMatch(/@font-face/);
   });
 
-  it('포커스 링 규칙이 있다', () => {
-    const rule = parseRules(all).find((r) => !r.atRule && same(r.selectors, [':focus-visible']));
-    expect(rule).toBeDefined();
-    expect(rule!.body).toMatch(/outline:\s*2px solid var\(--accent\)/);
+  it('포커스 링 규칙이 있다: Astryx 식 --focus-outline-* 토큰을 긴 이름 속성으로 쓴다', () => {
+    for (const sel of [':focus-visible', '[data-focus-ring]:focus']) {
+      const rule = parseRules(all).find((r) => !r.atRule && same(r.selectors, [sel]));
+      expect(rule, sel).toBeDefined();
+      const d = Object.fromEntries(declarations(rule!.body.replace(/;\s*$/, '')).map((x) => [x.prop, x.value]));
+      expect(d, sel).toEqual({
+        'outline-width': 'var(--focus-outline-width)',
+        'outline-style': 'var(--focus-outline-style)',
+        'outline-color': 'var(--focus-outline-color)',
+        'outline-offset': 'var(--focus-outline-offset)',
+      });
+    }
+    // 값은 예전 고리와 같다(2px solid 강조색, 2px 띄움): 대비 표의 --accent 검사가 그대로 고리를 잰다
+    expect(statics['--focus-outline-width']).toBe('2px');
+    expect(statics['--focus-outline-style']).toBe('solid');
+    expect(statics['--focus-outline-color']).toBe('var(--accent)');
+    expect(statics['--focus-outline-offset']).toBe('2px');
+  });
+
+  it('Astryx-named focus, motion, shadow and radius tokens exist in every theme, as aliases of the existing values', () => {
+    for (const [name, t] of Object.entries(themes)) for (const k of ASTRYX_TOKENS) expect(t[k], `${name} ${k}`).toBeTruthy();
+    // aliases, not renames: the old names stay and the new ones point at them
+    expect(statics['--radius-inner']).toBe('var(--radius-s)');
+    expect(statics['--radius-element']).toBe('var(--radius-m)');
+    expect(statics['--radius-container']).toBe('var(--radius-l)');
+    expect(statics['--shadow-med']).toBe('var(--shadow-menu)');
+    expect(statics['--motion']).toBe('120ms ease-out');
+    expect(statics['--duration-fast']).toBe('120ms');
+    expect(statics['--ease-standard']).toBe('ease-out');
+    // shadows reuse the theme's --shadow colour, so they are theme-free (no colour literal in the static block)
+    for (const k of ['--shadow-low', '--shadow-high']) expect(statics[k], k).toContain('var(--shadow)');
+  });
+
+  it('reduced motion sets every --duration-* and --motion to 0s, by media query and by the html[data-reduced-motion] mirror', () => {
+    const durations = Object.keys(statics).filter((k) => k.startsWith('--duration-'));
+    expect(durations).toEqual(['--duration-fast-min', '--duration-fast', '--duration-fast-max', '--duration-medium']);
+    const rules = parseRules(css);
+    const media = rules.filter((r) => r.atRule === '@media (prefers-reduced-motion: reduce)' && same(r.selectors, [':root']));
+    const mirror = rules.filter((r) => !r.atRule && same(r.selectors, ['html[data-reduced-motion]']));
+    expect(media).toHaveLength(1);
+    expect(mirror).toHaveLength(1);
+    for (const r of [media[0], mirror[0]]) {
+      const p = props(r.body);
+      for (const k of [...durations, '--motion']) expect(p[k], k).toBe('0s');
+      // later than the static block, so it wins at equal (media) or higher (mirror) specificity
+      expect(r.order).toBeGreaterThan(blocks.statics.order);
+    }
+  });
+
+  it('THIRD_PARTY_NOTICES.md credits Astryx (MIT) with its copyright line', () => {
+    const notices = readFileSync('../THIRD_PARTY_NOTICES.md', 'utf-8');
+    const at = notices.indexOf('## Astryx');
+    expect(at).toBeGreaterThan(-1);
+    const next = notices.indexOf('\n## ', at + 1);
+    const section = notices.slice(at, next === -1 ? undefined : next);
+    expect(section).toContain('MIT License');
+    expect(section).toContain('Copyright (c) 2026 Meta Platforms, Inc.');
+    expect(section).toMatch(/naming and patterns only/);
   });
 
   it('print forces the light colour tokens over every dark block', () => {

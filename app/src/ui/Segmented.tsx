@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent } from 'react';
+import { rovingStop } from './roving';
 
 export interface SegmentedOption<T extends string> {
   value: T;
@@ -16,8 +17,10 @@ export function Segmented<T extends string>(p: {
   label: string;
 }) {
   const group = useRef<HTMLDivElement>(null);
+  // 고른 값이 목록에 없으면(옵션이 바뀐 뒤) 첫 단추가 Tab 자리다: 묶음이 Tab 순서에서 빠지지 않는다(rovingGuard.test.tsx)
+  const stop = rovingStop(p.options.map((o) => o.value), p.value);
   const move = (e: KeyboardEvent<HTMLDivElement>) => {
-    const at = p.options.findIndex((o) => o.value === p.value);
+    const at = p.options.findIndex((o) => o.value === stop);
     const n = p.options.length;
     const to =
       e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (at + 1) % n
@@ -38,7 +41,7 @@ export function Segmented<T extends string>(p: {
           type="button"
           role="radio"
           aria-checked={o.value === p.value}
-          tabIndex={o.value === p.value ? 0 : -1}
+          tabIndex={o.value === stop ? 0 : -1}
           onClick={() => p.onChange(o.value)}
         >
           {o.label}

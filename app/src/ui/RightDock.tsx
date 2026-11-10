@@ -34,7 +34,7 @@ export function RightDock({ outline, links }: Props) {
   const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const order = RIGHT_TABS.map((x) => x.id);
-    const at = order.indexOf(tab);
+    const at = order.indexOf(current.id);
     const next =
       e.key === 'ArrowRight' ? order[(at + 1) % order.length]
       : e.key === 'ArrowLeft' ? order[(at - 1 + order.length) % order.length]
@@ -58,10 +58,10 @@ export function RightDock({ outline, links }: Props) {
               role="tab"
               id={`sidebar-tab-${x.id}`}
               aria-controls={`sidebar-panel-${x.id}`}
-              aria-selected={tab === x.id}
+              aria-selected={current.id === x.id}
               aria-label={label}
               title={label}
-              tabIndex={tab === x.id ? 0 : -1}
+              tabIndex={current.id === x.id ? 0 : -1}
               className="ibtn dock-tab"
               onClick={() => show(x.id)}
             >

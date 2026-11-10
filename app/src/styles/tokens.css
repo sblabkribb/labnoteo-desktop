@@ -183,6 +183,29 @@
   --font-size-lg: 1.15rem;
   /* 움직임: 접기 표시, 독 접기, 메뉴 나타남. prefers-reduced-motion 이면 0 */
   --motion: 120ms ease-out;
+  /* Astryx(meta/astryx, MIT) 식 이름의 토큰: 이름만 따랐고 값은 이 앱의 것이다. 기존 이름은 그대로 두고 새 이름이 그것을 가리킨다.
+     포커스 고리: shell.css 의 :focus-visible 과 [data-focus-ring] 이 긴 이름 속성으로 쓴다(값은 예전 2px solid 강조색, 2px 띄움) */
+  --focus-outline-width: 2px;
+  --focus-outline-style: solid;
+  --focus-outline-color: var(--accent);
+  --focus-outline-offset: 2px;
+  /* 움직임 길이와 곡선. --duration-fast 와 --ease-standard 는 --motion 과 같은 값이다. 줄인 움직임에서는 길이가 모두 0s */
+  --duration-fast-min: 80ms;
+  --duration-fast: 120ms;
+  --duration-fast-max: 160ms;
+  --duration-medium: 240ms;
+  --ease-standard: ease-out;
+  --ease-entrance: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  /* 그림자 세 단계: 색은 테마의 --shadow 를 쓴다(그래서 이 테마 무관 블록에 둘 수 있다). 가운데 단계는 메뉴 그림자다 */
+  --shadow-low: 0 1px 3px var(--shadow);
+  --shadow-med: var(--shadow-menu);
+  --shadow-high: 0 12px 32px var(--shadow);
+  /* 둥글기 역할 이름: 안쪽 조각 / 단추·입력 / 상자·대화상자 / 알약 */
+  --radius-inner: var(--radius-s);
+  --radius-element: var(--radius-m);
+  --radius-container: var(--radius-l);
+  --radius-full: 9999px;
   /* 쌓임 순서: 편집기 그림자 루트 안(--z-widget, --z-widget-menu, --z-popover)은 .editor-frame 의 isolation 으로 그 틀 안에 갇힌다. 앱 층(대화상자·메뉴·알림)은 밝은 DOM 에 있다 */
   --z-widget: 5;
   --z-widget-menu: 10;
@@ -193,8 +216,23 @@
 }
 :root[data-density="compact"] { --row-h: 24px; }
 
+/* 줄인 움직임: 모든 길이를 0 으로. html[data-reduced-motion] 은 같은 것을 속성으로 비춘다(reducedMotion.ts 가 matchMedia 를 따라 단다):
+   미디어 쿼리를 쓸 수 없는 코드(스크립트로 움직이는 것)도 같은 답을 읽는다. 둘 다 위 :root 블록보다 뒤에 있어 이긴다 */
 @media (prefers-reduced-motion: reduce) {
-  :root { --motion: 0s; }
+  :root {
+    --motion: 0s;
+    --duration-fast-min: 0s;
+    --duration-fast: 0s;
+    --duration-fast-max: 0s;
+    --duration-medium: 0s;
+  }
+}
+html[data-reduced-motion] {
+  --motion: 0s;
+  --duration-fast-min: 0s;
+  --duration-fast: 0s;
+  --duration-fast-max: 0s;
+  --duration-medium: 0s;
 }
 
 /* 고대비(Windows 대비 테마): 강조색과 테두리는 운영체제의 시스템 색을 쓴다. 테마 블록(특이도 0,2,0)을 이기도록 같은 특이도로 뒤에 둔다. */

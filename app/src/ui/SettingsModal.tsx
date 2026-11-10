@@ -13,6 +13,7 @@ import { ExperimentsPage } from './settings/ExperimentsPage';
 import { GeneralPage } from './settings/GeneralPage';
 import { SamplesPage, type SamplesDeps } from './settings/SamplesPage';
 import { ShortcutsPage } from './settings/ShortcutsPage';
+import { rovingStop } from './roving';
 
 /** 설정 창의 쪽들. 왼쪽 목록의 순서다. */
 export const SETTINGS_PAGES = ['general', 'editor', 'experiments', 'samples', 'integrations', 'shortcuts', 'about'] as const;
@@ -92,8 +93,10 @@ export function SettingsModal(props: {
   useLang();
   const { deps } = props.spec;
   const id = useId();
-  const [page, setPage] = useState<SettingsPage>(props.spec.page);
-  const [seen, setSeen] = useState<ReadonlySet<SettingsPage>>(() => new Set([props.spec.page]));
+  // 모르는 쪽 이름이 오면 첫 쪽(일반)을 연다: 고른 탭이 하나도 없으면 탭 목록이 Tab 순서에서 빠진다(rovingGuard.test.tsx)
+  const start = rovingStop(SETTINGS_PAGES, props.spec.page) ?? 'general';
+  const [page, setPage] = useState<SettingsPage>(start);
+  const [seen, setSeen] = useState<ReadonlySet<SettingsPage>>(() => new Set([start]));
   const nav = useRef<HTMLDivElement>(null);
   const integrationCommit = useRef<(() => Promise<void>) | null>(null);
   const closing = useRef(false);

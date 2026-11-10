@@ -4,6 +4,7 @@ import { useLang } from '../i18n/useLang';
 import { Icon, type IconName } from './Icon';
 import { LEFT_RANGE, layoutStore, useLayout, type LeftTab } from './layoutStore';
 import { Resizer } from './Resizer';
+import { rovingStop } from './roving';
 
 /** 독의 세 탭: 순서, 아이콘, 이름 키. id 는 탭 단추의 `sidebar-tab-<id>` 와 패널의 `sidebar-panel-<id>` 에 쓴다. */
 export const DOCK_TABS: readonly { id: LeftTab; icon: IconName; labelKey: string }[] = [
@@ -29,12 +30,14 @@ interface Props {
 export function Dock({ tab, onTab, children, footer }: Props) {
   useLang();
   const layout = useLayout();
+  // 탭 순서에 남는 하나(rovingGuard.test.tsx): 없는 탭이 오면 첫 탭
+  const stop = rovingStop(DOCK_TABS.map((x) => x.id), tab);
   // WAI-ARIA 탭 패턴: 고른 탭만 Tab 순서에 있으니 ←/→·Home·End 로 탭을 옮기고 초점도 함께 옮긴다.
   const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     // Alt/Ctrl/Meta+화살표는 앱의 것이다(Alt+←/→ 는 뒤로·앞으로)
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const order = DOCK_TABS.map((x) => x.id);
-    const at = order.indexOf(tab);
+    const at = order.indexOf(stop ?? tab);
     const next =
       e.key === 'ArrowRight' ? order[(at + 1) % order.length]
       : e.key === 'ArrowLeft' ? order[(at - 1 + order.length) % order.length]
@@ -63,7 +66,7 @@ export function Dock({ tab, onTab, children, footer }: Props) {
                 aria-selected={tab === x.id}
                 aria-label={label}
                 title={label}
-                tabIndex={tab === x.id ? 0 : -1}
+                tabIndex={stop === x.id ? 0 : -1}
                 className="ibtn dock-tab"
                 onClick={() => onTab(x.id)}
               >

@@ -15,10 +15,16 @@ const forced = rules.filter(inForced);
 const STATE = /:focus-visible|:focus-within|:focus|:hover|:not\((?:[^()]|\([^()]*\))*\)|\[aria-expanded="true"\]/g;
 const base = (sel: string) => sel.replace(STATE, '').trim();
 
+/** 테마와 무관한 토큰 값(--focus-outline-style 등): 긴 이름 속성이 var(--…) 로 쓰는 값을 풀어 읽는다. */
+const TOKEN_VALUES = Object.fromEntries(
+  rules.filter((r) => !r.atRule && r.selectors.length === 1 && r.selectors[0] === ':root').flatMap((r) => declarations(r.body).map((d) => [d.prop, d.value])),
+);
+const resolveVar = (v: string) => v.replace(/var\((--[\w-]+)\)/g, (m, name: string) => TOKEN_VALUES[name] ?? m);
+
 function outlineOf(r: Rule): string | undefined {
   let out: string | undefined;
   for (const d of declarations(r.body)) {
-    if (d.prop === 'outline' || d.prop === 'outline-style') out = d.value;
+    if (d.prop === 'outline' || d.prop === 'outline-style') out = resolveVar(d.value);
   }
   return out;
 }
