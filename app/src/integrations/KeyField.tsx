@@ -2,7 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefOb
 import { t } from '../i18n/t';
 import { isComposing } from '../labnote/host/DialogFrame';
 import type { IntegrationDeps } from './IntegrationSettingsDialog';
-import type { SecretStatus, Slot } from './netIpc';
+import type { KeySlot, SecretStatus } from './netIpc';
 import { notifySecretsChange } from './secretsEvents';
 
 /**
@@ -13,7 +13,7 @@ import { notifySecretsChange } from './secretsEvents';
  */
 export function KeyField(props: {
   deps: Pick<IntegrationDeps, 'setSecret' | 'clearSecret' | 'status'>;
-  slot: Slot;
+  slot: KeySlot;
   label: string;
   hints?: readonly string[];
   isSet: boolean;

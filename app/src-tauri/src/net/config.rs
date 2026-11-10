@@ -44,6 +44,10 @@ pub const DEFAULT_PARTBANK_WEB: &str = "https://partbank.kbiofoundry.kr";
 pub const DEFAULT_LLM_OLLAMA: &str = "http://localhost:11434";
 pub const DEFAULT_LLM_OPENAI: &str = "https://api.openai.com";
 pub const DEFAULT_BFW_URL: &str = "https://workflow.kbiofoundry.kr";
+/// The GitHub OAuth App client ID built in: empty until the maintainer
+/// registers the app. The app-wide setting and the build's
+/// `LABNOTEO_GITHUB_CLIENT_ID` come first (`gitsync::state::github_client_id`).
+pub const DEFAULT_GITHUB_CLIENT_ID: &str = "";
 
 /// Longest path an LLM endpoint may carry (after the leading `/`).
 const MAX_LLM_PATH: usize = 64;
@@ -59,6 +63,9 @@ pub struct ServiceConfig {
     pub bfw_connection: BfwConnection,
     /// `allowHttpOrigins` entries that are `http://` origins, normalized by `origin`.
     pub allow_http: Vec<String>,
+    /// `githubReadmeOverlay`: write a GitHub front-page README into the
+    /// upload (never into the vault). On unless the setting is `false`.
+    pub github_readme_overlay: bool,
 }
 
 /// A string setting: missing or `null` gives `default`, anything else is
@@ -108,6 +115,7 @@ impl ServiceConfig {
             bfw_url: url_setting(&settings, "bfwUrl", DEFAULT_BFW_URL, parse_origin_url),
             bfw_connection,
             allow_http,
+            github_readme_overlay: settings.get("githubReadmeOverlay").and_then(Value::as_bool).unwrap_or(true),
         }
     }
 
@@ -370,6 +378,17 @@ pub mod tests {
         let c = ServiceConfig::from_settings_json(r#"{"llmProvider":"ollama","bfwConnection":"desktop"}"#);
         assert_eq!(c.llm_provider, LlmKind::Ollama);
         assert_eq!(c.bfw_connection, BfwConnection::Desktop);
+    }
+
+    #[test]
+    fn github_readme_overlay_defaults_on() {
+        assert!(ServiceConfig::from_settings_json("{}").github_readme_overlay);
+        assert!(ServiceConfig::from_settings_json("not json").github_readme_overlay);
+        assert!(ServiceConfig::from_settings_json(r#"{"githubReadmeOverlay":"no"}"#).github_readme_overlay);
+        assert!(!ServiceConfig::from_settings_json(r#"{"githubReadmeOverlay":false}"#).github_readme_overlay);
+        assert!(ServiceConfig::from_settings_json(r#"{"githubReadmeOverlay":true}"#).github_readme_overlay);
+        // Until the maintainer registers the OAuth App, the built-in client ID is empty.
+        assert!(DEFAULT_GITHUB_CLIENT_ID.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.'));
     }
 
     #[test]

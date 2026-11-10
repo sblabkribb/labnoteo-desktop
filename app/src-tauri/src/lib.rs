@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+pub mod gitsync;
 pub mod index;
 pub mod mcp;
 pub mod net;
@@ -114,6 +115,9 @@ macro_rules! register_commands {
             $crate::skill::skill_status,
             $crate::skill::skill_install,
             $crate::skill::skill_save_as,
+            // GitHub upload: app-wide settings (offline and Rust-only state).
+            $crate::gitsync::state::github_app_settings_get,
+            $crate::gitsync::state::github_app_settings_set,
         ])
     };
 }

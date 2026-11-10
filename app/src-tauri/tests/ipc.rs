@@ -41,6 +41,16 @@ fn has_48_hex(s: &str) -> bool {
     false
 }
 
+/// The fixed fake GitHub token the tests use (never a real one).
+const FAKE_GITHUB_TOKEN: &str = "ghp_FAKEipc000000000000000000000000000000";
+
+/// Fails when `s` holds anything shaped like a GitHub token, or the fake one.
+fn assert_no_github_token(s: &str) {
+    for shape in ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", FAKE_GITHUB_TOKEN] {
+        assert!(!s.contains(shape), "a response holds a GitHub token ({shape}): {s}");
+    }
+}
+
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
     let dir = std::env::temp_dir().join(format!("labnoteo-ipc-{}", std::process::id()));
@@ -253,6 +263,42 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("partbankWeb")])), Value::Null);
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));
+
+    // GitHub keys: only the GitHub sign-in (Rust) writes them. The webview's
+    // key commands refuse both slots before touching the store.
+    let first_github = responses.borrow().len();
+    for slot in ["github", "githubRefresh"] {
+        let e = call("secret_set", args("secret_set", vec![json!(slot), json!(FAKE_GITHUB_TOKEN)])).unwrap_err();
+        assert_eq!(e["kind"], "badInput");
+        assert_eq!(e["message"], "GitHub keys are managed by the GitHub settings");
+        assert_eq!(call("secret_clear", args("secret_clear", vec![json!(slot)])).unwrap_err()["kind"], "badInput");
+    }
+    let status = ok("secret_status", args("secret_status", vec![]));
+    for slot in ["github", "githubRefresh"] {
+        assert_eq!((&status["set"][slot], &status["epoch"][slot]), (&json!(false), &json!(0)), "{status}");
+    }
+    // App-wide GitHub settings: no vault needed, offline, Rust-only files.
+    assert_eq!(
+        ok("github_app_settings_get", args("github_app_settings_get", vec![])),
+        json!({"clientIdDefault": true, "forgetOnExit": false})
+    );
+    assert_eq!(
+        ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": "Iv1.lab", "forgetOnExit": true})])),
+        json!({"clientId": "Iv1.lab", "clientIdDefault": false, "forgetOnExit": true})
+    );
+    assert_eq!(
+        call("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": "no/way"})])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert!(call("github_app_settings_set", json!({"patch": {"token": FAKE_GITHUB_TOKEN}})).is_err());
+    assert_eq!(
+        ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": null, "forgetOnExit": false})])),
+        json!({"clientIdDefault": true, "forgetOnExit": false})
+    );
+    assert!(dir.join("data").join("integrations").join("github").join("app.json").is_file());
+    for r in responses.borrow()[first_github..].iter() {
+        assert_no_github_token(r);
+    }
 
     // Plugin import (D9): the returned JSON holds no key, and an LLM key in
     // data.json is only offered. Storing it re-reads data.json in Rust, so the

@@ -29,7 +29,11 @@ const fixture: Record<string, string[]> = JSON.parse(
  * SP7 Part B: 스캔 폴더 커맨드 아홉 개는 Task 18 이 scanIpc.ts 래퍼로 비웠다.
  * SP7 Part C 의 mcp_* 커맨드 아홉은 Task 36 의 mcpIpc.ts 래퍼로 비웠다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [];
+const PENDING_TS_WRAPPERS: readonly string[] = [
+  // feat/github-upload: Task 1 이 Rust 커맨드를 등록했다. githubIpc.ts 래퍼는 Task 11 이 만들며 이 목록을 비운다.
+  'github_app_settings_get',
+  'github_app_settings_set',
+];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.

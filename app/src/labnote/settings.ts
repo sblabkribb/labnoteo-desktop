@@ -57,6 +57,11 @@ export type AppSettings = Pick<
    * 2048-1,000,000 정수(벗어나면 잘라 맞춘다), 정수가 아니면 기본 8192.
    */
   llmContextWindow: number;
+  /**
+   * 앱에만 있는 키(GitHub 올리기): 올릴 때 GitHub 첫 화면용 README 를 만들어 함께 올린다(보관함에는 쓰지 않는다).
+   * 기본 켬. 저장된 값이 꼭 false 일 때만 끈다. Rust `ServiceConfig::github_readme_overlay` 도 같은 규칙이다.
+   */
+  githubReadmeOverlay?: boolean;
 };
 
 /** 그림 저장 폴더: 실험의 resources/(기본) 또는 노트 폴더의 images/. */
@@ -172,6 +177,8 @@ const KEYS = [
   'imageFolder',
   // feat/ai-context(Task 8): 모델의 컨텍스트 창. 앱 키다.
   'llmContextWindow',
+  // feat/github-upload(Task 1): GitHub 첫 화면용 README. 앱 키다. clientId·forgetOnExit 는 앱 전체 설정이라 Rust 에만 있다.
+  'githubReadmeOverlay',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -183,6 +190,7 @@ const APP_DEFAULTS = {
   defaultExperimenter: '',
   imageFolder: 'resources',
   llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
+  githubReadmeOverlay: true,
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -231,6 +239,8 @@ export function fromStored(raw: unknown): AppSettings {
     if (o.imageFolder === 'images' || o.imageFolder === 'resources') settings.imageFolder = o.imageFolder;
     // feat/ai-context(Task 8): 컨텍스트 창은 정수만 살리고 범위로 잘라 맞춘다.
     settings.llmContextWindow = clampContextWindow((raw as { llmContextWindow?: unknown }).llmContextWindow);
+    // feat/github-upload(Task 1): 저장된 값이 꼭 false 일 때만 끈다.
+    if ((raw as { githubReadmeOverlay?: unknown }).githubReadmeOverlay === false) settings.githubReadmeOverlay = false;
   }
   return settings;
 }

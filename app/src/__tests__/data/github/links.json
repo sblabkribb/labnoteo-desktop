@@ -1,0 +1,20 @@
+{
+  "defaultOwner": "kim-lab",
+  "links": {
+    "labnote/001_효모 형질전환": {
+      "linkId": "3f9a0c1e5b7d2468ace013579bdf2468",
+      "repoId": 812345678,
+      "owner": "kim-lab",
+      "name": "001-yeast-transformation",
+      "htmlUrl": "https://github.com/kim-lab/001-yeast-transformation",
+      "branch": "main",
+      "private": true,
+      "state": "linked",
+      "lastPushedCommit": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+      "lastPushedAt": "2026-11-10T09:30:00Z",
+      "excluded": ["raw/plate-scan.tif"],
+      "allowedHits": [{ "path": "protocol.md", "line": 12, "kind": "password", "hash": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" }],
+      "sentDescription": "효모 형질전환 실험 노트"
+    }
+  }
+}

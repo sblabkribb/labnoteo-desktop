@@ -12,6 +12,9 @@
 //! - `send_raw` follows the same rules but answers raw bytes and a few
 //!   headers, and treats a 429 as an answer (Slack's rate limit carries
 //!   `Retry-After`); `send` is `send_raw` plus UTF-8 text and redaction.
+//! - `send_answer` (the GitHub client) follows the same rules but answers
+//!   every status as `IncomingRaw`, a 3xx with its `location` (still never
+//!   followed), so the caller can classify 401/403/404/422/451/301 itself.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -87,9 +90,11 @@ pub struct Incoming {
     pub text: String,
 }
 
-/// A 2xx or 429 answer as raw bytes. `headers` holds only `content-type`,
-/// `retry-after` and `x-oauth-scopes` (names lower-cased), when present. The
-/// bytes are not redacted: callers that turn them into text redact it.
+/// An answer as raw bytes: a 2xx or 429 from `send_raw`, any status from
+/// `send_answer`. `headers` holds only the `KEPT_HEADERS` (names lower-cased)
+/// that are present, plus `location` on a 3xx from `send_answer` (redacted).
+/// Never `authorization` or a cookie. The bytes are not redacted: callers
+/// that turn them into text redact it.
 #[derive(Debug, Clone)]
 pub struct IncomingRaw {
     pub status: u16,
@@ -97,8 +102,18 @@ pub struct IncomingRaw {
     pub bytes: Vec<u8>,
 }
 
-/// The response headers `IncomingRaw` keeps.
-const KEPT_HEADERS: [&str; 3] = ["content-type", "retry-after", "x-oauth-scopes"];
+/// The response headers `IncomingRaw` keeps. `link` is GitHub's pagination,
+/// `x-github-sso` its SAML hint, the rate-limit pair its back-off. Never
+/// `authorization` (pinned by a test).
+const KEPT_HEADERS: [&str; 7] = [
+    "content-type",
+    "retry-after",
+    "x-oauth-scopes",
+    "link",
+    "x-github-sso",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+];
 
 /// Unregisters the request id when `send` ends, however it ends (the command
 /// future may also be dropped).
@@ -136,16 +151,30 @@ pub async fn send(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Re
 /// kept headers, and answers a 429 too instead of failing with `status`.
 pub async fn send_raw(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<IncomingRaw, NetError> {
     let secret = out.secret.clone();
-    send_inner(net, request_id, out).await.map_err(|e| e.redact(secret.as_deref()))
+    send_inner(net, request_id, out, false).await.map_err(|e| e.redact(secret.as_deref()))
 }
 
-async fn send_inner(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<IncomingRaw, NetError> {
+/// Sends one request with `send_raw`'s rules (insecure, the body cap,
+/// cancellation, redaction of every error), but answers **every** HTTP status
+/// as `IncomingRaw`. A 3xx is not followed and not an error: it comes back
+/// with its `location` header (the key redacted from it).
+pub async fn send_answer(net: &NetState, request_id: Option<&str>, out: Outgoing) -> Result<IncomingRaw, NetError> {
+    let secret = out.secret.clone();
+    send_inner(net, request_id, out, true).await.map_err(|e| e.redact(secret.as_deref()))
+}
+
+async fn send_inner(
+    net: &NetState,
+    request_id: Option<&str>,
+    out: Outgoing,
+    accept_any_status: bool,
+) -> Result<IncomingRaw, NetError> {
     refuse_insecure(&out.url, out.secret.is_some(), out.allow_http)?;
-    let Some(id) = request_id else { return perform(out).await };
+    let Some(id) = request_id else { return perform(out, accept_any_status).await };
     let notify = net.register(id)?;
     let _registration = Registration { net, id };
     tokio::select! {
-        result = perform(out) => result,
+        result = perform(out, accept_any_status) => result,
         _ = notify.notified() => Err(cancelled()),
     }
 }
@@ -177,7 +206,10 @@ pub(crate) fn header_map(headers: &[(&'static str, String)]) -> Result<HeaderMap
     Ok(map)
 }
 
-async fn perform(out: Outgoing) -> Result<IncomingRaw, NetError> {
+/// One request. With `accept_any_status` every status is an answer (a 3xx
+/// keeps its redacted `location`); without it a 3xx is `redirect` and any
+/// non-2xx but 429 is a `status` error.
+async fn perform(out: Outgoing, accept_any_status: bool) -> Result<IncomingRaw, NetError> {
     let secret = out.secret.as_deref();
     let mut req = client().request(out.method.clone(), out.url.clone()).headers(header_map(&out.headers)?);
     if let Some(json) = &out.json {
@@ -188,18 +220,24 @@ async fn perform(out: Outgoing) -> Result<IncomingRaw, NetError> {
     }
     let resp = req.send().await.map_err(net_error)?;
     let status = resp.status().as_u16();
-    if (300..400).contains(&status) {
+    let redirect = (300..400).contains(&status);
+    if redirect && !accept_any_status {
         return Err(redirect_error(&resp, &out.url));
     }
-    let headers: Vec<(String, String)> = KEPT_HEADERS
+    let mut headers: Vec<(String, String)> = KEPT_HEADERS
         .iter()
         .filter_map(|name| {
             let value = resp.headers().get(*name)?.to_str().ok()?;
             Some((name.to_string(), value.to_string()))
         })
         .collect();
+    if redirect {
+        if let Some(loc) = resp.headers().get(LOCATION).and_then(|v| v.to_str().ok()) {
+            headers.push(("location".to_string(), redact_text(loc, secret)));
+        }
+    }
     let bytes = read_capped(resp, out.max_body).await?;
-    if (200..300).contains(&status) || status == 429 {
+    if accept_any_status || (200..300).contains(&status) || status == 429 {
         Ok(IncomingRaw { status, headers, bytes })
     } else {
         Err(NetError::status(status, &String::from_utf8_lossy(&bytes), secret))
@@ -562,6 +600,107 @@ mod tests {
         assert!(!net.cancel("r7"));
         let s = serve(vec![Canned::ok("{}")]);
         assert_eq!(block_on(send_raw(&net, Some("r7"), get(&s.url, None))).unwrap_err().kind, NetErrorKind::Cancelled);
+    }
+
+    #[test]
+    fn kept_headers_hold_link_and_github_headers_but_never_authorization() {
+        assert!(KEPT_HEADERS.contains(&"link"));
+        assert!(!KEPT_HEADERS.iter().any(|h| *h == "authorization" || *h == "set-cookie"));
+        let s = serve(vec![Canned::ok("[]")
+            .header("Link", "<https://api.example/x?page=2>; rel=\"next\"")
+            .header("X-GitHub-SSO", "required; url=https://github.com/orgs/x/sso")
+            .header("X-RateLimit-Remaining", "59")
+            .header("X-RateLimit-Reset", "1700000000")
+            .header("Authorization", "Bearer ghp_FAKEFAKE")
+            .header("Set-Cookie", "a=b")]);
+        let raw = block_on(send_raw(&NetState::default(), None, get(&s.url, None))).unwrap();
+        let names: Vec<&str> = raw.headers.iter().map(|(k, _)| k.as_str()).collect();
+        for kept in ["link", "x-github-sso", "x-ratelimit-remaining", "x-ratelimit-reset"] {
+            assert!(names.contains(&kept), "{kept} missing from {names:?}");
+        }
+        assert!(!names.contains(&"authorization") && !names.contains(&"set-cookie"), "{names:?}");
+        assert!(!format!("{raw:?}").contains("ghp_FAKEFAKE"));
+        // The request's own Authorization header is never echoed into the kept headers.
+        let s = echo_header("authorization", 200);
+        let mut out = get(&s.url, Some("ghp_FAKEFAKE"));
+        out.headers.push(("Authorization", "Bearer ghp_FAKEFAKE".into()));
+        let raw = block_on(send_answer(&NetState::default(), None, out)).unwrap();
+        assert!(!raw.headers.iter().any(|(k, v)| k == "authorization" || v.contains("ghp_FAKEFAKE")));
+    }
+
+    #[test]
+    fn send_answer_returns_a_403_with_its_body_and_sso_header() {
+        let s = serve(vec![Canned::status(403)
+            .header("X-GitHub-SSO", "required; url=https://github.com/orgs/lab/sso?authorization_request=1")
+            .header("Content-Type", "application/json")
+            .body("{\"message\":\"Resource protected by organization SAML enforcement.\"}")]);
+        let raw = block_on(send_answer(&NetState::default(), None, get(&s.url, None))).unwrap();
+        assert_eq!(raw.status, 403);
+        assert!(String::from_utf8_lossy(&raw.bytes).contains("SAML"));
+        assert!(raw.headers.iter().any(|(k, v)| k == "x-github-sso" && v.starts_with("required")));
+        // Every other status too: 401, 404, 422, 451, 500.
+        for code in [401u16, 404, 422, 451, 500] {
+            let s = serve(vec![Canned::status(code).body("{}")]);
+            assert_eq!(block_on(send_answer(&NetState::default(), None, get(&s.url, None))).unwrap().status, code);
+        }
+    }
+
+    #[test]
+    fn send_answer_returns_a_redirect_with_its_location_and_never_follows_it() {
+        let second = serve(vec![Canned::ok("{}")]);
+        let first = serve(vec![Canned::status(301).header("Location", format!("{}/repos/a/b", second.url))]);
+        let mut out = get(&first.url, Some("ghp_FAKEFAKE"));
+        out.headers.push(("Authorization", "Bearer ghp_FAKEFAKE".into()));
+        let raw = block_on(send_answer(&NetState::default(), None, out)).unwrap();
+        assert_eq!(raw.status, 301);
+        let location = raw.headers.iter().find(|(k, _)| k == "location").map(|(_, v)| v.clone());
+        assert_eq!(location, Some(format!("{}/repos/a/b", second.url)));
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(second.requests.lock().unwrap().len(), 0);
+        // A key the server reflects into the location is redacted.
+        let s = serve(vec![Canned::status(302).header("Location", "https://evil.example/?t=ghp_FAKEFAKE")]);
+        let raw = block_on(send_answer(&NetState::default(), None, get(&s.url, Some("ghp_FAKEFAKE")))).unwrap();
+        assert!(!format!("{raw:?}").contains("ghp_FAKEFAKE"));
+        // A non-3xx answer never keeps a location.
+        let s = serve(vec![Canned::ok("{}").header("Location", "https://x.example/")]);
+        let raw = block_on(send_answer(&NetState::default(), None, get(&s.url, None))).unwrap();
+        assert!(!raw.headers.iter().any(|(k, _)| k == "location"));
+    }
+
+    #[test]
+    fn send_answer_keeps_the_other_rules() {
+        // A key never goes to plain http off this computer.
+        let t = Instant::now();
+        let e = block_on(send_answer(&NetState::default(), None, get("http://10.255.255.1:9/x", Some("ghp_FAKEFAKE")))).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Insecure);
+        assert!(t.elapsed() < Duration::from_millis(100));
+        // Errors are redacted: a bad header value never names the key.
+        let s = serve(vec![Canned::ok("{}")]);
+        let mut out = get(&s.url, Some("ghp_FAKE
+FAKE"));
+        out.headers.push(("Authorization", "Bearer ghp_FAKE
+FAKE".into()));
+        let e = block_on(send_answer(&NetState::default(), None, out)).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::BadInput);
+        assert!(!serde_json::to_string(&e).unwrap().contains("ghp_FAKE"));
+        // The body cap holds on a non-2xx answer too.
+        let s = serve(vec![Canned::status(500).body("x".repeat(2048))]);
+        let mut out = get(&s.url, None);
+        out.max_body = 1024;
+        assert_eq!(block_on(send_answer(&NetState::default(), None, out)).unwrap_err().kind, NetErrorKind::TooLarge);
+        // Cancel works, before and during the request.
+        let net = NetState::default();
+        assert!(!net.cancel("g1"));
+        let s = serve(vec![Canned::ok("{}")]);
+        assert_eq!(block_on(send_answer(&net, Some("g1"), get(&s.url, None))).unwrap_err().kind, NetErrorKind::Cancelled);
+        let s = silent();
+        let net = Arc::new(NetState::default());
+        let n2 = net.clone();
+        let url = s.url.clone();
+        let h = std::thread::spawn(move || block_on(send_answer(&n2, Some("g2"), get(&url, None))));
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(net.cancel("g2"));
+        assert_eq!(h.join().unwrap().unwrap_err().kind, NetErrorKind::Cancelled);
     }
 
     #[test]

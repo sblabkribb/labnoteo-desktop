@@ -11,7 +11,7 @@ import type { SecretStatus, Slot } from './secretsEvents';
  * 보이는 글은 `kind` 에서 번역 키로 만든다.
  */
 
-export type { SecretStatus, Slot } from './secretsEvents';
+export type { KeySlot, SecretStatus, Slot } from './secretsEvents';
 
 export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 

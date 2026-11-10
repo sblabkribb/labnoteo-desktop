@@ -159,8 +159,8 @@ describe('netIpc', () => {
 
   it('secretStatusOf fills the missing slots', () => {
     expect(secretStatusOf({ partbankWeb: true }, { partbankWeb: 2 })).toEqual({
-      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false },
-      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0 },
+      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, github: false, githubRefresh: false },
+      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, github: 0, githubRefresh: 0 },
     });
   });
 

@@ -58,6 +58,7 @@ describe('보관함별 설정', () => {
         'catalogNoticeHash',
         'customSampleTypes',
         'defaultExperimenter',
+        'githubReadmeOverlay',
         'globalSampleFolder',
         'imageFolder',
         'legacyNotesOfferDismissed',
@@ -219,6 +220,19 @@ describe('보관함별 설정', () => {
     await saveVaultSettings({ ...settings, defaultExperimenter: '박예성', imageFolder: 'resources' }, store.invoke);
     expect(JSON.parse(store.stored()!)).toMatchObject({ defaultExperimenter: '박예성', imageFolder: 'resources' });
     expect((await loadVaultSettings(store.invoke)).settings).toMatchObject({ defaultExperimenter: '박예성', imageFolder: 'resources' });
+  });
+
+  it('githubReadmeOverlay (app-only key) defaults on, keeps only a stored false and survives a save and reload', async () => {
+    expect(fromPluginData(undefined).githubReadmeOverlay).toBe(true);
+    expect(fromPluginData({ githubReadmeOverlay: false }).githubReadmeOverlay).toBe(true); // not a plugin key
+    expect(fromStored({}).githubReadmeOverlay).toBe(true);
+    expect(fromStored({ githubReadmeOverlay: false }).githubReadmeOverlay).toBe(false);
+    for (const odd of ['false', 0, null, [false]]) expect(fromStored({ githubReadmeOverlay: odd }).githubReadmeOverlay).toBe(true);
+    const store = fakeStore();
+    const { settings } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings({ ...settings, githubReadmeOverlay: false }, store.invoke);
+    expect(JSON.parse(store.stored()!)).toMatchObject({ githubReadmeOverlay: false });
+    expect((await loadVaultSettings(store.invoke)).settings.githubReadmeOverlay).toBe(false);
   });
 
   it('llmContextWindow (app-only key) defaults to 8192, is clamped to 2048-1,000,000 and survives a save and reload', async () => {

@@ -85,5 +85,7 @@
   "mcp_drain": [],
   "skill_status": [],
   "skill_install": ["overwrite"],
-  "skill_save_as": []
+  "skill_save_as": [],
+  "github_app_settings_get": [],
+  "github_app_settings_set": ["patch"]
 }

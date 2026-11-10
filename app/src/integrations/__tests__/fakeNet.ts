@@ -1,7 +1,7 @@
 import { NetError, type InvokeFn, type NetErrorKind, type SecretStatus, type Slot } from '../netIpc';
 
 /** 이 파일이 쓰는 슬롯 전부. `secretStatusOf` 가 빠진 슬롯을 채울 때 쓴다. */
-const SLOTS: readonly Slot[] = ['partbankDesktop', 'partbankWeb', 'llmOpenai', 'bfwServer', 'bfwDesktop', 'slackBot'];
+const SLOTS: readonly Slot[] = ['partbankDesktop', 'partbankWeb', 'llmOpenai', 'bfwServer', 'bfwDesktop', 'slackBot', 'github', 'githubRefresh'];
 
 /**
  * Rust 흉내 invoke. 알려진 커맨드만 답하고(경로 함수가 던지면 그 값으로 거절), 모르는 커맨드는

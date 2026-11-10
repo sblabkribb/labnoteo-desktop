@@ -4,7 +4,21 @@
  * `notifySecretsChange` 를 부르고, partbank 기능과 bfworkflow 준비 상태가 `onSecretsChange` 로 새로 고친다.
  */
 
-export type Slot = 'partbankDesktop' | 'partbankWeb' | 'llmOpenai' | 'bfwServer' | 'bfwDesktop' | 'slackBot';
+export type Slot =
+  | 'partbankDesktop'
+  | 'partbankWeb'
+  | 'llmOpenai'
+  | 'bfwServer'
+  | 'bfwDesktop'
+  | 'slackBot'
+  | 'github'
+  | 'githubRefresh';
+
+/**
+ * 웹뷰가 secret_set / secret_clear 로 직접 저장하거나 지울 수 있는 슬롯. GitHub 토큰 두 슬롯은 Rust 의 GitHub 로그인만
+ * 쓴다(secret_set 이 badInput 으로 거절한다). 그래서 일반 KeyField 는 이 타입만 받는다.
+ */
+export type KeySlot = Exclude<Slot, 'github' | 'githubRefresh'>;
 
 /** Rust `secret_status` 의 모양. */
 export interface SecretStatus {
