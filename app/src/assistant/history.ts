@@ -110,6 +110,11 @@ export function toWireDoc(doc: HistoryDoc): HistoryDoc {
   return out;
 }
 
+/** Rust 가 받을 JSON 의 UTF-8 바이트 수(한도 `HISTORY_MAX_BYTES` 와 견준다). 압축 판단에 쓴다(`compact.ts`). */
+export function historyBytes(doc: HistoryDoc): number {
+  return new TextEncoder().encode(JSON.stringify(toWireDoc(doc))).length;
+}
+
 async function call<T>(invoke: InvokeFn, cmd: string, args: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(cmd, args);

@@ -7,6 +7,7 @@ import {
   clearAllHistory,
   clearHistory,
   emptyHistory,
+  historyBytes,
   historyStats,
   readHistory,
   toHistoryError,
@@ -132,5 +133,11 @@ describe('assistant history IPC client', () => {
 
   it('emptyHistory is version 1 with no messages', () => {
     expect(emptyHistory(NFD)).toEqual({ version: 1, folder: NFC, updated: 0, messages: [] });
+  });
+
+  it('historyBytes counts the UTF-8 bytes of the wire JSON', () => {
+    const doc = { ...emptyHistory('f'), messages: [{ id: 'a', role: 'user' as const, text: '가', ts: 1 }] };
+    expect(historyBytes(doc)).toBe(new TextEncoder().encode(JSON.stringify(toWireDoc(doc))).length);
+    expect(historyBytes(doc)).toBe(JSON.stringify(toWireDoc(doc)).length + 2);
   });
 });

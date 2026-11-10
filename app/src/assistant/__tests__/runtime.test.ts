@@ -404,6 +404,23 @@ describe('builtinRuntime', () => {
     expect(sent[0].content).not.toContain(UNTRUSTED_RULES);
   });
 
+  it('history goes through toPromptMessages: a reply with web sources is fenced, and only what fits the window is sent', async () => {
+    const p = new Script([answer('끝'), answer('끝')]);
+    const { rt } = await setup(p, { settings: { llmContextWindow: 1000 } });
+    const web = msg('assistant', '웹 답', { sources: [{ kind: 'web', label: 'x', target: 'https://example.test/' }] });
+    await rt.run(turnOf('hi', { history: [web] }), recordSink().sink, go());
+    expect(p.seen[0][1].content).toMatch(/^<untrusted-data source="earlier reply" id="[0-9a-f]{12}">\n웹 답\n/);
+    expect(p.seen[0][0].content).toContain(EARLIER_UNTRUSTED_RULES);
+    // Budget 0.4 × 1000 = 400 tokens: the old 300-token message no longer fits beside the newer one.
+    const old = msg('user', 'o'.repeat(1200));
+    const recent = msg('assistant', 'r'.repeat(1200));
+    await rt.run(turnOf('hi', { history: [old, recent] }), recordSink().sink, go());
+    expect(p.seen[1].slice(1)).toEqual([
+      { role: 'assistant', content: 'r'.repeat(1200) },
+      { role: 'user', content: 'hi' },
+    ]);
+  });
+
   it('sends exactly the turn history: system, the given messages in order, then the user text', async () => {
     const p = new Script([answer('A'), answer('B')]);
     const { rt } = await setup(p);
