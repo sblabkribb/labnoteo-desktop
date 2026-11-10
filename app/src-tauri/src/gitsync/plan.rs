@@ -117,8 +117,16 @@ pub struct PlanExcluded {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Red {
     /// A secret-scan hit (`hit.overridable` says whether "키가 아닙니다" may
-    /// wave it through).
-    Secret { hit: Hit },
+    /// wave it through). `from_sample` is true only for a hit in a generated
+    /// sample snapshot (an exact path in `Plan::sample_paths`); such a hit
+    /// stops mattering when samples are left out. A real folder file under
+    /// `_labnoteo/samples/` is never `from_sample`: it always goes up.
+    #[serde(rename_all = "camelCase")]
+    Secret {
+        hit: Hit,
+        #[serde(skip_serializing_if = "is_false")]
+        from_sample: bool,
+    },
     /// A file at or above the per-file limit, seen for the first time. It is
     /// already left out; unticking it remembers that.
     TooLarge { path: String, size: u64 },
@@ -170,10 +178,15 @@ pub struct SampleSummary {
 #[derive(Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Totals {
-    /// Files that go up (folder files and generated ones; not samples).
+    /// The user's folder files that go up (not generated files, not samples),
+    /// so the count matches what the user sees in the folder.
     pub files: u32,
+    /// Generated files that go up (`.gitattributes`, `.gitignore`, `README.md`).
+    pub generated: u32,
+    /// All bytes that go up, generated files included (not samples).
     pub bytes: u64,
     pub excluded: u32,
+    /// `new` / `changed` / `deleted` count the user's files only.
     pub new: u32,
     pub changed: u32,
     pub deleted: u32,
@@ -221,6 +234,9 @@ pub struct Plan {
     pub target: PlanTarget,
     pub created: Instant,
     pub mode: PlanMode,
+    /// The folder's link record id, when it has one. Set for `create`/`link`
+    /// targets too (with no `base_commit`): the upload step must refuse or
+    /// handle a second create/link for an already linked folder.
     pub link_id: Option<String>,
     /// The commit the changes were computed against (`lastPushedCommit`).
     pub base_commit: Option<Oid>,
@@ -229,6 +245,10 @@ pub struct Plan {
     pub overlays: Vec<(String, Vec<u8>)>,
     /// The sample snapshot, which goes up only when the user ticks it.
     pub sample_overlays: Vec<(String, Vec<u8>)>,
+    /// The exact paths of `sample_overlays`. Only red items for these paths
+    /// may be skipped when samples are left out; never match on the
+    /// `_labnoteo/samples/` prefix, since a real folder file can live there.
+    pub sample_paths: HashSet<String>,
     /// The only paths an upload may leave out.
     pub untickable: HashSet<String>,
     /// Every scan hit, including ones acknowledged earlier.
@@ -255,6 +275,11 @@ impl Plan {
     /// optimisation: the caller still compares the blob id.
     pub fn cached(&self, rel: &str) -> Option<Arc<[u8]>> {
         self.cache.get(rel).cloned()
+    }
+
+    /// Whether `rel` is a generated sample snapshot file of this plan.
+    pub fn is_sample_path(&self, rel: &str) -> bool {
+        self.sample_paths.contains(rel)
     }
 
     fn cache_bytes(&self) -> usize {
@@ -676,6 +701,7 @@ pub fn build_plan(env: &PlanEnv<'_>, req: PlanRequest) -> Result<(PlanOutcome, O
     for (p, _) in &sample_overlays {
         untickable.insert(p.clone());
     }
+    let sample_paths: HashSet<String> = sample_overlays.iter().map(|(p, _)| p.clone()).collect();
 
     // Changes against the last pushed tree.
     let base_map = base.as_ref().map(|(_, m)| m);
@@ -711,8 +737,26 @@ pub fn build_plan(env: &PlanEnv<'_>, req: PlanRequest) -> Result<(PlanOutcome, O
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
 
+    // User-facing counts leave out generated files; `all` counts them too
+    // (for the quick re-upload check and when only generated files change).
     let mut totals = Totals { excluded: w.excluded.len() as u32, ..Totals::default() };
+    let mut all = Counts { new: 0, changed: 0, deleted: 0 };
     for f in files.iter().filter(|f| !f.sample) {
+        match f.change {
+            Change::New => all.new += 1,
+            Change::Changed => all.changed += 1,
+            Change::Deleted => all.deleted += 1,
+            Change::Same => {}
+        }
+        if f.change != Change::Deleted {
+            totals.bytes += f.size;
+        }
+        if f.generated {
+            if f.change != Change::Deleted {
+                totals.generated += 1;
+            }
+            continue;
+        }
         match f.change {
             Change::New => totals.new += 1,
             Change::Changed => totals.changed += 1,
@@ -721,13 +765,11 @@ pub fn build_plan(env: &PlanEnv<'_>, req: PlanRequest) -> Result<(PlanOutcome, O
         }
         if f.change != Change::Deleted {
             totals.files += 1;
-            totals.bytes += f.size;
         }
     }
-    let message = commit_message(
-        &env.now,
-        &Counts { new: totals.new, changed: totals.changed, deleted: totals.deleted },
-    );
+    let user = Counts { new: totals.new, changed: totals.changed, deleted: totals.deleted };
+    let user_none = user.new == 0 && user.changed == 0 && user.deleted == 0;
+    let message = commit_message(&env.now, if user_none { &all } else { &user });
     merge(&mut report, scan(&[(COMMIT_MESSAGE_PATH.to_string(), Arc::from(message.as_bytes()))], &[], env.saved, &env.limits));
 
     // Red: hits not acknowledged before, first-seen big files, the upload
@@ -739,7 +781,7 @@ pub fn build_plan(env: &PlanEnv<'_>, req: PlanRequest) -> Result<(PlanOutcome, O
         if hit.overridable && allowed.contains(&(hit.path.as_str(), hit.line_hash.as_str())) {
             continue;
         }
-        red.push(Red::Secret { hit: hit.clone() });
+        red.push(Red::Secret { hit: hit.clone(), from_sample: sample_paths.contains(&hit.path) });
     }
     for x in w.excluded.iter().filter(|x| x.reason == ExcludeReason::TooLarge) {
         let path = x.rel.split('/').fold(w.folder_abs.clone(), |p, c| p.join(c));
@@ -788,11 +830,21 @@ pub fn build_plan(env: &PlanEnv<'_>, req: PlanRequest) -> Result<(PlanOutcome, O
         })
         .collect();
     let samples_in_base = base_map.is_some_and(|m| m.keys().any(|p| p.starts_with(&format!("{SAMPLES_DIR}/"))));
+    // Per-file warnings about files that did not change were already shown at
+    // an earlier upload, so they do not force the full preview.
+    let changed: HashSet<&str> =
+        files.iter().filter(|f| f.change != Change::Same).map(|f| f.path.as_str()).collect();
+    let touches = |paths: &[String]| paths.iter().any(|p| changed.contains(p.as_str()));
+    let yellow_blocks_quick = yellow.iter().any(|y| match y {
+        Yellow::Large { path, .. } | Yellow::Nfd { path } => changed.contains(path.as_str()),
+        Yellow::Gps { paths } | Yellow::Unscanned { paths } => touches(paths),
+        _ => true,
+    });
     let quick_ok = mode == PlanMode::Update
         && red.is_empty()
-        && yellow.is_empty()
-        && totals.new == 0
-        && totals.deleted == 0
+        && !yellow_blocks_quick
+        && all.new == 0
+        && all.deleted == 0
         && samples.is_empty()
         && !samples_in_base;
 
@@ -821,6 +873,7 @@ pub fn build_plan(env: &PlanEnv<'_>, req: PlanRequest) -> Result<(PlanOutcome, O
         entries,
         overlays,
         sample_overlays,
+        sample_paths,
         untickable,
         hits: report.hits,
         red,
@@ -1016,7 +1069,9 @@ mod tests {
         let plan = plan.unwrap();
         assert_eq!(plan.entries.len(), 3);
         assert!(plan.untickable.contains("data/plate.csv") && !plan.untickable.contains(".env"));
-        assert_eq!(plan.message, "labnoteO: 2026-11-10 14:32 — 새 파일 6");
+        assert_eq!(plan.message, "labnoteO: 2026-11-10 14:32 — 새 파일 3", "generated files are not counted");
+        let PlanOutcome::Ready { totals, .. } = &o else { panic!() };
+        assert_eq!((totals.files, totals.generated, totals.new), (3, 3, 3));
         // Each entry's blob id is the id of the bytes on disk.
         for e in &plan.entries {
             let bytes = fs::read(fx.root.join(FOLDER).join(&e.rel)).unwrap();
@@ -1072,6 +1127,7 @@ mod tests {
             entries: vec![],
             overlays: vec![],
             sample_overlays: vec![],
+            sample_paths: HashSet::new(),
             untickable: HashSet::new(),
             hits: vec![],
             red: vec![],
@@ -1158,7 +1214,8 @@ mod tests {
         assert_eq!(samples, &vec![SampleSummary { id: "DNA-1".into(), sample_type: "DNA".into(), name: "pUC19-GFP".into() }]);
         let f = files.iter().find(|f| f.path == "_labnoteo/samples/DNA.json").unwrap();
         assert!(f.sample && !f.generated);
-        assert_eq!(totals.files, 6, "samples are not counted as files");
+        assert_eq!((totals.files, totals.generated), (3, 3), "samples are not counted as files");
+        assert!(plan.as_ref().unwrap().is_sample_path("_labnoteo/samples/DNA.json"));
         let plan = plan.unwrap();
         let (_, bytes) = &plan.sample_overlays[0];
         let snap: Value = serde_json::from_slice(bytes).unwrap();
@@ -1215,7 +1272,7 @@ mod tests {
         let (o, plan) = build_plan(&fx.env("{}", &[], Limits::DEFAULT), req).unwrap();
         let (_, _, red, _, _, _) = ready(&o);
         assert!(
-            red.iter().any(|r| matches!(r, Red::Secret { hit } if hit.path == "README.md")),
+            red.iter().any(|r| matches!(r, Red::Secret { hit, from_sample: false } if hit.path == "README.md")),
             "{red:?}"
         );
         // The answer and the plan's debug output never hold the raw token.
@@ -1299,7 +1356,7 @@ mod tests {
         let mut rec = linked(&fx, None);
         let (o, _) = build_plan(&fx.env("{}", &saved, Limits::DEFAULT), req()).unwrap();
         let (_, _, red, ..) = ready(&o);
-        let secrets: Vec<&Hit> = red.iter().filter_map(|r| if let Red::Secret { hit } = r { Some(hit) } else { None }).collect();
+        let secrets: Vec<&Hit> = red.iter().filter_map(|r| if let Red::Secret { hit, .. } = r { Some(hit) } else { None }).collect();
         assert_eq!(secrets.len(), 2, "{red:?}");
         let pw = secrets.iter().find(|h| h.path == "notes.md").unwrap();
         let key = secrets.iter().find(|h| h.path == "keys.txt").unwrap();
@@ -1314,7 +1371,7 @@ mod tests {
         let (o, plan) = build_plan(&fx.env("{}", &saved, Limits::DEFAULT), req()).unwrap();
         let (_, _, red, ..) = ready(&o);
         assert_eq!(red.len(), 1);
-        assert!(matches!(&red[0], Red::Secret { hit } if hit.path == "keys.txt"));
+        assert!(matches!(&red[0], Red::Secret { hit, .. } if hit.path == "keys.txt"));
         assert_eq!(plan.unwrap().hits.len(), 2, "the plan keeps every hit");
     }
 
@@ -1362,6 +1419,91 @@ mod tests {
         assert_eq!(compose_hangul("\u{1103}\u{1161}\u{11ab}"), "단");
         assert_eq!(compose_hangul("가\u{11a8}"), "각");
         assert_eq!(compose_hangul("abc 단백질"), "abc 단백질");
+    }
+
+    #[test]
+    fn a_real_file_under_the_sample_folder_is_never_a_sample() {
+        let fx = Fx::new();
+        let saved = [SavedSecret { label: crate::gitsync::scan::SavedLabel::Llm, value: Zeroizing::new("abc123SAVEDkey".into()) }];
+        // A real folder file at the snapshot's own path, and one beside it.
+        fx.put("_labnoteo/samples/DNA.json", b"{\"k\": \"llm abc123SAVEDkey\"}\n");
+        fx.put("_labnoteo/samples/notes.json", b"password: hunter22\n");
+        // A Global sample whose snapshot would sit at DNA.json and Protein.json.
+        let global = fx.root.join("resources").join("labsamples");
+        fs::create_dir_all(&global).unwrap();
+        fs::write(global.join("DNA.json"), r#"{"DNA-1":{"type":"DNA","alias":"plain"}}"#).unwrap();
+        fs::write(global.join("Protein.json"), r#"{"P-1":{"type":"Protein","alias":"p","descriptions":["abc123SAVEDkey"]}}"#).unwrap();
+        let req = PlanRequest {
+            folder: FOLDER.into(),
+            target: create(),
+            sample_ids: vec!["DNA-1".into(), "P-1".into()],
+            info_findings: vec![],
+        };
+        let (o, plan) = build_plan(&fx.env("{}", &saved, Limits::DEFAULT), req).unwrap();
+        let plan = plan.unwrap();
+        let (files, _, red, ..) = ready(&o);
+        // The real files win and are ordinary files that always go up.
+        for real in ["_labnoteo/samples/DNA.json", "_labnoteo/samples/notes.json"] {
+            let f = files.iter().find(|f| f.path == real).unwrap();
+            assert!(!f.sample && !f.generated, "{real}");
+            assert!(!plan.is_sample_path(real), "{real}");
+        }
+        assert!(plan.sample_overlays.iter().all(|(p, _)| p != "_labnoteo/samples/DNA.json"));
+        assert!(plan.is_sample_path("_labnoteo/samples/Protein.json"));
+        let secret = |path: &str| {
+            red.iter()
+                .find_map(|r| match r {
+                    Red::Secret { hit, from_sample } if hit.path == path => Some((hit.overridable, *from_sample)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no hit for {path}: {red:?}"))
+        };
+        // Real files: never from a sample, so leaving samples out cannot skip them.
+        assert_eq!(secret("_labnoteo/samples/DNA.json"), (false, false));
+        assert_eq!(secret("_labnoteo/samples/notes.json"), (true, false));
+        // The generated snapshot: marked, so only it may be skipped.
+        assert_eq!(secret("_labnoteo/samples/Protein.json"), (false, true));
+        let json = serde_json::to_string(&o).unwrap();
+        assert!(json.contains("\"fromSample\":true"), "{json}");
+        assert!(!json.contains("abc123SAVEDkey"));
+    }
+
+    #[test]
+    fn unchanged_files_with_warnings_keep_the_quick_path() {
+        let fx = Fx::new();
+        fx.put("images/gel.png", b"\x89PNG not really");
+        fx.put("data/results.xlsx", b"PK not really");
+        linked(&fx, None);
+        let (_, plan) = fx.plan(PlanTarget::Update);
+        let commit = fx.commit(&committed(&fx, &plan.unwrap()));
+        linked(&fx, Some(commit));
+        // The png and xlsx are unscanned, but unchanged: still quick.
+        fx.put("data/plate.csv", b"well,od\nA1,0.9\n");
+        let (o, _) = fx.plan(PlanTarget::Update);
+        let (_, _, red, yellow, quick, _) = ready(&o);
+        assert!(red.is_empty(), "{red:?}");
+        assert!(yellow.iter().any(|y| matches!(y, Yellow::Unscanned { .. })), "{yellow:?}");
+        assert!(quick);
+        // A changed unscanned file shows the full preview.
+        fx.put("data/results.xlsx", b"PK changed");
+        let (o, _) = fx.plan(PlanTarget::Update);
+        assert!(!ready(&o).4);
+    }
+
+    #[test]
+    fn only_generated_changes_still_name_a_change() {
+        let fx = Fx::new();
+        linked(&fx, None);
+        let (_, plan) = fx.plan(PlanTarget::Update);
+        let commit = fx.commit(&committed(&fx, &plan.unwrap()));
+        linked(&fx, Some(commit));
+        // The user's own README.md replaces the generated one: a changed
+        // generated path, no change in the user's counts.
+        fx.put("README.md", b"# mine\n");
+        let (o, plan) = fx.plan(PlanTarget::Update);
+        let PlanOutcome::Ready { totals, .. } = &o else { panic!() };
+        assert_eq!((totals.new, totals.changed, totals.files), (0, 1, 4), "README.md is now the user's file");
+        assert_eq!(plan.unwrap().message, "labnoteO: 2026-11-10 14:32 — 바뀜 1");
     }
 
     #[test]
