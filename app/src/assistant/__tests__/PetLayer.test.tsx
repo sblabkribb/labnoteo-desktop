@@ -188,6 +188,24 @@ describe('PetLayer', () => {
     expect(restore).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+
+  it('Escape lands on the pet when the place the command was run from cannot take focus (the page body, a removed element)', () => {
+    const { store } = setup();
+    // Opened by the shortcut while nothing had focus: the restore target is the body.
+    (document.activeElement as HTMLElement | null)?.blur();
+    act(() => store.setOpen(true, () => document.body.focus()));
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(pet());
+    // Opened from a button that is gone by the time the bubble closes.
+    const gone = document.createElement('button');
+    document.body.append(gone);
+    gone.focus();
+    act(() => store.setOpen(true, () => gone.focus()));
+    gone.remove();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(document.activeElement).toBe(pet());
+  });
 });
 
 describe('PetLayer skins', () => {

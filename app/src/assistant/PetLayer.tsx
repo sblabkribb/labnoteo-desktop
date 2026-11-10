@@ -97,8 +97,11 @@ export function PetLayer(props: {
   const close = () => {
     const restore = store.takeRestore();
     store.setOpen(false);
-    if (restore) restore();
-    else button.current?.focus();
+    restore?.();
+    // 돌아갈 곳이 없으면(본문에서 단축키로 열었거나 그 요소가 사라졌다) 초점이 곧 사라질 말풍선에 남거나 본문으로
+    // 빠지지 않게 도우미로 온다.
+    const now = document.activeElement;
+    if (!restore || !now || now === document.body || (wrap.current?.contains(now) && now !== button.current)) button.current?.focus();
   };
 
   const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
