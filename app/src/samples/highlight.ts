@@ -7,8 +7,10 @@
  *   한 번 마이크로태스크로 다시 그린다. 저장소 판이 오르거나 바깥 설정이 바뀌어도 같은 길로 다시 그린다.
  */
 import type { EditorState, Extension, Range, Text } from '@codemirror/state';
-import { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ViewUpdate } from '@codemirror/view';
+import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView, type ViewUpdate } from '@codemirror/view';
 import { findDefinedSampleIds } from '@labnoteo/core/lib/sampleStorage';
+import { getMode, subscribeMode } from '../editor/live/mode';
+import { touchedLines } from '../editor/live/reveal';
 import { activeCellView, outerOf } from '../editor/table/cellEditor';
 import { coreT } from '../labnote/i18n';
 import { sampleTokenRanges, type SampleHighlightInput } from '../labnote/port/sampleHighlightRanges';
@@ -49,12 +51,16 @@ class SampleHighlightPlugin {
   private queued = false;
   private dead = false;
   private readonly off: () => void;
+  private readonly offMode: () => void;
+  /** 지난 그리기에서 커서가 닿은 줄(라이브 모드의 구분자 감추기는 이 줄을 건너뛴다). */
+  private drawnLines = '';
 
   constructor(private readonly view: EditorView) {
     this.decorations = this.build(view);
     // 셀 편집기를 만드는 중이면 바깥 편집기를 아직 모른다(cellEditor.ts): 한 번 다시 그린다.
     if (outerOf(view) === null && view.state.facet(sampleNotePath) === '') this.requestRebuild();
     this.off = samples.subscribe(() => this.requestRebuild());
+    this.offMode = subscribeMode(() => this.requestRebuild());
   }
 
   /** 다음 마이크로태스크에 빈 갱신으로 다시 그린다. 조합 중이면 조합이 끝난 뒤의 갱신에 맡긴다. */
@@ -79,7 +85,9 @@ class SampleHighlightPlugin {
     const cfg = state.facet(sampleEditorConfig);
     const path = state.facet(sampleNotePath);
     const configChanged = cfg !== this.drawnCfg || path !== this.drawnPath;
-    if (this.pending || u.docChanged || u.viewportChanged || configChanged) {
+    // 라이브 모드에서 커서가 다른 줄로 가면 구분자 감추기가 달라진다(셀 편집기는 감추지 않는다).
+    const linesChanged = !cell && u.selectionSet && getMode() === 'live' && lineKey(u.view) !== this.drawnLines;
+    if (this.pending || u.docChanged || u.viewportChanged || configChanged || linesChanged) {
       this.decorations = this.build(u.view);
       this.pending = false;
     }
@@ -93,12 +101,17 @@ class SampleHighlightPlugin {
   destroy(): void {
     this.dead = true;
     this.off();
+    this.offMode();
   }
 
   private build(view: EditorView): DecorationSet {
-    const { state } = sourceState(view);
+    const { state, cell } = sourceState(view);
     const cfg = state.facet(sampleEditorConfig);
     const path = state.facet(sampleNotePath);
+    // 라이브 모드의 바깥 편집기에서 커서가 닿지 않은 줄은 정의의 `;` 를 감춘다(아래 conceal).
+    const conceal = !cell && getMode() === 'live';
+    const touched = conceal ? touchedLines(view.state) : new Set<number>();
+    this.drawnLines = conceal ? [...touched].join(',') : '';
     this.drawnCfg = cfg;
     this.drawnPath = path;
     if (!cfg || !cfg.enabled(path)) return Decoration.none;
@@ -125,12 +138,41 @@ class SampleHighlightPlugin {
       const text = doc.sliceString(from, to);
       for (const r of sampleTokenRanges(text, input, from)) {
         marks.push(Decoration.mark({ class: r.cls, attributes: r.title ? { title: r.title } : undefined }).range(r.from, r.to));
-        for (const [a, b] of definitionSyntax(text, r.from - from, r.to - from)) marks.push(syntaxMark.range(from + a, from + b));
+        const syntax = definitionSyntax(text, r.from - from, r.to - from);
+        const hide = conceal && syntax.length > 0 && !touched.has(doc.lineAt(r.from).number);
+        syntax.forEach(([a, b], i) => {
+          if (!hide) return void marks.push(syntaxMark.range(from + a, from + b));
+          // 머리(`@dna;`)는 `@dna` 만 흐리게 두고 `;` 는 감춘다. ID·별칭 뒤의 `;` 는 흐린 가운뎃점으로 바꾼다.
+          if (i === 0) {
+            marks.push(syntaxMark.range(from + a, from + b - 1));
+            marks.push(Decoration.replace({}).range(from + b - 1, from + b));
+          } else marks.push(separator.range(from + a, from + b));
+        });
       }
     }
     return Decoration.set(marks, true);
   }
 }
+
+/** 커서가 닿은 줄 번호들을 한 글로(바뀌었는지 견주는 데 쓴다). */
+function lineKey(view: EditorView): string {
+  return [...touchedLines(view.state)].join(',');
+}
+
+/** 라이브 모드에서 정의의 `;` 대신 그리는 흐린 가운뎃점. 파일 글은 그대로다. */
+class SeparatorWidget extends WidgetType {
+  eq(): boolean {
+    return true;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('span');
+    el.className = 'lno-sample-syntax lno-sample-sep';
+    el.textContent = '·';
+    el.setAttribute('aria-hidden', 'true');
+    return el;
+  }
+}
+const separator = Decoration.replace({ widget: new SeparatorWidget() });
 
 /** 샘플 정의 줄의 문법 글자(`@dna;` 와 ID·별칭 뒤의 `;`): 흐리게 그려 ID 와 별칭이 먼저 읽히게 한다. 파일 글은 그대로다. */
 const syntaxMark = Decoration.mark({ class: 'lno-sample-syntax' });

@@ -326,6 +326,8 @@ function gridInput(view: EditorView, o: InputOpts): HTMLInputElement {
   // 비교는 입력이 실제로 지닌 글로: 보이는 것만 다른(줄바꿈이 지워진) 값이 적히는 일이 없게
   input.dataset[ORIG] = input.value;
   input.setAttribute('aria-label', o.label);
+  // 칸보다 긴 값은 말줄임표로 잘리므로(theme.ts) 온 글은 툴팁으로 보인다
+  if (input.value) input.title = input.value;
   input.spellcheck = false;
   input.readOnly = locked(view.state);
   let composing = false;

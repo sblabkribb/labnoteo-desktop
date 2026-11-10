@@ -234,6 +234,8 @@ export const editorThemeSpec = {
     borderColor: 'var(--bg-hover)',
     verticalAlign: 'middle',
   },
+  // `[WB150]` 은 마크다운 링크 참조로 읽혀 안쪽 span 에 강조색(링크 색)이 붙는다: 칩 안에서는 칩과 같은 흐린 색(--text-muted)이다.
+  '.lno-uo-code span': { color: 'var(--text-muted)' },
   // UO 카드(live/uoCards.ts): 구역의 줄마다 옅은 바탕과 좌우 선, 첫 줄·끝 줄에 위·아래 선과 둥근 모서리. 커서가 든 카드는 강조색 선.
   // 카드는 본문 글 칸(줄의 좌우 padding)과 같은 자리에 선다: 좌우 바깥 여백이 줄 padding 만큼이라 속성 카드·본문 글과 가장자리가
   // 맞는다. 위아래 여백(margin)은 CodeMirror 의 높이 계산을 흐리므로 쓰지 않는다(좌우 여백은 높이에 들지 않는다).
@@ -347,6 +349,7 @@ export const editorThemeSpec = {
     verticalAlign: '0.1em',
   },
   '.lno-sample-syntax': { color: 'var(--text-muted)', fontSize: '0.85em' },
+  '.lno-sample-sep': { padding: '0 var(--space-2)' },
   '.lno-sample-t-dna': { '--sample-dot': 'var(--sample-dna-bg)' },
   '.lno-sample-t-rna': { '--sample-dot': 'var(--sample-rna-bg)' },
   '.lno-sample-t-plasmid': { '--sample-dot': 'var(--sample-plasmid-bg)' },
@@ -421,6 +424,7 @@ export const editorThemeSpec = {
     width: '100%',
     boxSizing: 'border-box',
     padding: '0 var(--space-2)',
+    textOverflow: 'ellipsis', // 칸보다 긴 값(긴 제목)이 낱말 가운데서 끊겨 보이지 않게. 온 글은 title 툴팁
     color: 'var(--text)',
     backgroundColor: 'var(--bg-elevated)',
     border: '1px solid var(--bg-elevated)', // 배경과 같은 색: 테두리가 드러날 때 칸이 움직이지 않는다

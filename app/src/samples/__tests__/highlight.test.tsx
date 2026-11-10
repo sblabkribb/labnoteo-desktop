@@ -41,6 +41,23 @@ describe('sample highlight in the editor', () => {
     m.unmount();
   });
 
+  it('live mode shows a definition without its ; separators until the caret is on the line', async () => {
+    setMode('live');
+    const m = mountEditor(createFakeVault({ [NOTE]: 'top\n@dna;DNA-5;GFP;PCR product\n' }), NOTE, { samples: cfg(KNOWN) });
+    await m.loaded();
+    m.view().dispatch({ selection: { anchor: 0 } });
+    const line = () => m.view().contentDOM.querySelectorAll('.cm-line')[1];
+    expect(line().textContent).toBe('@dnaDNA-5·GFP·PCR product');
+    expect(line().querySelectorAll('.lno-sample-sep')).toHaveLength(2);
+    m.view().dispatch({ selection: { anchor: m.view().state.doc.line(2).from + 2 } });
+    expect(line().textContent).toBe('@dna;DNA-5;GFP;PCR product');
+    act(() => setMode('source'));
+    await microtask();
+    m.view().dispatch({ selection: { anchor: 0 } });
+    expect(line().textContent).toBe('@dna;DNA-5;GFP;PCR product');
+    m.unmount();
+  });
+
   it('no rebuild while composing; rebuilds after compositionend', async () => {
     const m = mountEditor(createFakeVault({ [NOTE]: 'x\n' }), NOTE, { samples: cfg(KNOWN) });
     await m.loaded();
