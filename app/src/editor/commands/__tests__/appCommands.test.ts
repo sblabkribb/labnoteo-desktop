@@ -7,9 +7,10 @@ import { getMode, setMode } from '../../live/mode';
 import { appCommands, clearAppCommandsForTest, displayKey, registerAllAppCommands, registerAppCommand } from '../appCommands';
 import { setLang } from '../../../i18n/lang';
 import { check as pluginCheck } from '@tauri-apps/plugin-updater';
-import { dismissUpdate, resetUpdateStoreForTest, startUpdateChecks, updateState } from '../../../update/updateStore';
+import { resetUpdateStoreForTest, startUpdateChecks, updateState } from '../../../update/updateStore';
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn(async () => null) }));
+vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn(async () => {}) }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn(async () => '0.1.4') }));
 
 // Node 의 자체 localStorage 가 jsdom 의 것을 가리므로 메모리 저장소를 꽂는다(theme-guard.test.tsx 와 같다).
@@ -161,17 +162,17 @@ describe('Check for updates (palette)', () => {
     expect(b.notify).toHaveBeenCalledWith('warn', "Couldn't check for updates. Check your internet connection.");
   });
 
-  it('shows no toast when a new version is found; the banner shows it, even after Later', async () => {
-    const update = { version: '0.2.0', download: vi.fn(), install: vi.fn() };
+  it('a found update downloads quietly; the command then says it is ready, without checking again', async () => {
+    const update = { version: '0.2.0', download: vi.fn(async () => {}), install: vi.fn(), close: vi.fn(async () => {}) };
     checkMock.mockResolvedValue(update);
     const stop = startUpdateChecks();
-    await vi.waitFor(() => expect(updateState().kind).toBe('available'));
-    dismissUpdate();
+    await vi.waitFor(() => expect(updateState()).toEqual({ kind: 'ready', version: '0.2.0' }));
     const { ctx, notify } = ctxWithNotify();
     await cmd().run(ctx);
-    expect(notify).not.toHaveBeenCalled();
-    expect(updateState()).toMatchObject({ kind: 'available', dismissed: false });
-    expect(update.download).not.toHaveBeenCalled();
+    expect(checkMock).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('info', "새 버전 0.2.0을 받았어요. 왼쪽 아래 '업데이트'를 누르면 적용돼요.");
+    expect(update.download).toHaveBeenCalledTimes(1);
+    expect(update.install).not.toHaveBeenCalled();
     stop();
   });
 
