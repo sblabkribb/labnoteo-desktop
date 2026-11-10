@@ -255,12 +255,14 @@ describe('link clicks (SP4 Task 9)', () => {
     expect(linkAt(st, 16)).toEqual({ kind: 'wiki', from: 12, to: 21, linkpath: 'Home', subpath: '', embed: true });
   });
 
-  it('targetOf: markdown create paths drop ./, keep folders relative, and skip attachments', () => {
+  it('targetOf: markdown create paths drop ./, keep folders relative, and route attachments to a viewer', () => {
     const st = EditorState.create({ doc: '', extensions: [labnoteMarkdown(), linkResolution.of(res(['n.md']))] });
     const md = (href: string) => targetOf(st, { kind: 'md', from: 0, to: 0, href }, 'n.md');
     expect(md('./New%20one.md')).toEqual({ kind: 'create', linkpath: 'New one.md' });
     expect(md('sub/x.md')).toEqual({ kind: 'create', linkpath: './sub/x.md' });
-    expect(md('spec.pdf')).toBeNull();
+    expect(md('spec.pdf')).toEqual({ kind: 'attachment', linkpath: 'spec.pdf', href: 'spec.pdf' });
+    expect(md('./res/plate%20A.csv#x')).toEqual({ kind: 'attachment', linkpath: './res/plate A.csv', href: './res/plate%20A.csv' });
+    expect(md('table.tsv')).toEqual({ kind: 'attachment', linkpath: 'table.tsv', href: 'table.tsv' });
     expect(md('n.md#top')).toEqual({ kind: 'note', path: 'n.md', anchor: 'top' });
   });
 
@@ -271,10 +273,10 @@ describe('link clicks (SP4 Task 9)', () => {
     expect(opened).toEqual([]);
   });
 
-  it('an unknown attachment target opens nothing', () => {
-    const v = view('[[spec.pdf]]\nx', 14);
+  it('an attachment wikilink goes to the viewer route (App resolves it against the file tree)', () => {
+    const v = view('[[plate.csv]]\nx', 15);
     plainClick(v.contentDOM.querySelector('.lno-wikilink')!);
-    expect(opened).toEqual([]);
+    expect(opened).toEqual([{ kind: 'attachment', linkpath: 'plate.csv' }]);
   });
 });
 

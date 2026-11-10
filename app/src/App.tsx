@@ -9,6 +9,9 @@ import { newNoteDialog } from './tree/NewNoteDialog';
 import { useTree, visibleEntries } from './tree/useTree';
 import { fileKind, isNotePath, type FileKind } from './labnote/panel/treeIcons';
 import { FileCard } from './viewers/FileCard';
+import { CsvViewer } from './viewers/CsvViewer';
+import { ImageViewer } from './viewers/ImageViewer';
+import { viewerFor } from './viewers/viewerFor';
 import { SearchPanel } from './search/SearchPanel';
 import { rebuildIndex } from './search/indexApi';
 import { useLinkIndex } from './links/useLinkIndex';
@@ -723,8 +726,24 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
         <main className={viewing ? 'content viewing-file' : 'content'}>
           {viewing && (
             <section className="file-view" data-path={viewing.path}>
-              <ViewHeader lead={navButtons} actions={rightToggle} />
-              <FileCard path={viewing.path} kind={viewing.kind} />
+              <ViewHeader
+                lead={
+                  <>
+                    {navButtons}
+                    <span className="view-file-path" title={viewing.path}>
+                      {viewing.path}
+                    </span>
+                  </>
+                }
+                actions={rightToggle}
+              />
+              {viewerFor(viewing.path) === 'image' ? (
+                <ImageViewer key={viewing.path} path={viewing.path} />
+              ) : viewerFor(viewing.path) === 'csv' ? (
+                <CsvViewer key={viewing.path} path={viewing.path} />
+              ) : (
+                <FileCard path={viewing.path} kind={viewing.kind} />
+              )}
             </section>
           )}
           {selected ? (
@@ -773,6 +792,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
         />
         <StatusBar
           path={viewing ? undefined : selected}
+          viewerPath={viewing?.path}
           onReveal={() => showLeft('experiments')}
           notes={
             <>

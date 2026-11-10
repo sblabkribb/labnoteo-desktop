@@ -269,6 +269,16 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
             .filter((p) => p.includes('.') && IMAGE_EXTS.includes(ext(p)))
             .sort((x, y) => (x.toLowerCase() < y.toLowerCase() ? -1 : x.toLowerCase() > y.toLowerCase() ? 1 : 0));
         }
+        // 보기 화면: 파일 글을 UTF-8 바이트로(Rust 는 원시 응답, JS 에는 ArrayBuffer)
+        case 'vault_read_image':
+        case 'vault_read_bytes': {
+          if (!isFile(path)) throw fail(ERROR_KINDS.notFound, `not found: ${path}`);
+          return new TextEncoder().encode(files()[path]).buffer;
+        }
+        // 기본 앱으로 열기, 폴더에서 보기: 아무것도 띄우지 않고 기록만 남긴다
+        case 'vault_open_default':
+        case 'vault_reveal':
+          return undefined;
         case 'settings_vault_read':
           return fake.settings;
         case 'settings_vault_write':

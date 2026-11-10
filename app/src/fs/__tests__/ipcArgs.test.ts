@@ -5,7 +5,7 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
-import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultAttachment, writeVaultImage } from '../vaultImage';
+import { listVaultImages, readVaultBytes, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultAttachment, writeVaultImage } from '../vaultImage';
 import { openWithDefaultApp, revealInFolder } from '../vaultOpen';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
@@ -59,7 +59,7 @@ function recorder() {
     if (cmd === 'settings_plugin_llm_key') return true;
     if (cmd === 'integration_import_file') return { status: 'refused', reason: 'insideVault' };
     if (cmd === 'integration_import_delete') return 'gone';
-    if (cmd === 'vault_read_image') return new ArrayBuffer(0);
+    if (cmd === 'vault_read_image' || cmd === 'vault_read_bytes') return new ArrayBuffer(0);
     if (cmd === 'vault_list_images') return [];
     if (cmd === 'vault_created_times') return [null];
     if (cmd === 'slack_call') return { status: 200, json: { ok: true } };
@@ -103,6 +103,7 @@ describe('IPC 인자 이름 계약', () => {
     await saveVaultSettings(settings, r.invoke);
     await offerPluginLlmKey({ confirm: async () => true, notify: () => undefined }, r.invoke);
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
+    expect(await readVaultBytes('a.csv', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
     await openWithDefaultApp('a.pdf', r.invoke);
     await revealInFolder('a.pdf', r.invoke);

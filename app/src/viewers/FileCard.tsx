@@ -2,6 +2,7 @@ import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { treeIcon, type FileKind } from '../labnote/panel/treeIcons';
 import { Icon } from '../ui/Icon';
+import { FileActions } from './fileActions';
 
 /** 노트가 아닌 파일의 종류 이름. */
 function kindLabel(kind: FileKind): string {
@@ -20,10 +21,11 @@ function kindLabel(kind: FileKind): string {
 }
 
 /**
- * 노트가 아닌 파일(그림, 표, PDF, 그 밖의 첨부)을 파일 탭에서 고르면 본문에 보이는 카드: 이름, 위치, 종류.
- * 파일을 읽지 않는다(텍스트 vault_read 는 노트만). 그림·표 보기 화면은 Task 18 이 이 자리에 붙인다.
+ * 앱 안에 보기 화면이 없는 파일(PDF, Excel, 그 밖의 첨부)을 고르면 본문에 보이는 카드: 이름, 위치, 종류, 그리고
+ * 기본 앱으로 열기·폴더에서 보기(둘 다 Rust 가 연다, R7). 파일을 읽지 않는다.
+ * 그림·표 보기가 파일을 읽지 못했으면(너무 큼 등) 그 이유(`reason`)를 실어 같은 카드를 보인다.
  */
-export function FileCard({ path, kind }: { path: string; kind: FileKind }) {
+export function FileCard({ path, kind, reason }: { path: string; kind: FileKind; reason?: string }) {
   useLang();
   const at = path.lastIndexOf('/');
   const name = path.slice(at + 1);
@@ -39,7 +41,14 @@ export function FileCard({ path, kind }: { path: string; kind: FileKind }) {
         <dt>{t('fileCard.kind')}</dt>
         <dd>{kindLabel(kind)}</dd>
       </dl>
-      <p className="file-card-hint">{t('fileCard.hint')}</p>
+      {reason !== undefined ? (
+        <p className="file-card-hint file-card-reason" role="status">
+          {reason}
+        </p>
+      ) : (
+        <p className="file-card-hint">{t('fileCard.hint')}</p>
+      )}
+      <FileActions path={path} />
     </article>
   );
 }

@@ -15,7 +15,7 @@ import { t } from '../i18n/t';
 import type { CommandContext } from '../labnote/commands/context';
 import { runCommand } from '../labnote/commands/runCommand';
 import { warnIfWindowsPathTooLong } from '../labnote/port/experiments';
-import { ATTACHMENT_EXTS, IMAGE_EXTS, labnoteFallback } from './resolve';
+import { ATTACHMENT_EXTS, IMAGE_EXTS, createResolver, labnoteFallback } from './resolve';
 import { subpathLine } from './subpath';
 
 const dirOf = (path: string) => {
@@ -153,6 +153,17 @@ export async function openLinkTarget(
     case 'external':
       await openExternal(target.url);
       return;
+    case 'attachment': {
+      // The link index has no attachments: resolve by Obsidian's rules against the files in the tree.
+      const r = createResolver(ctx.treeFiles?.() ?? []);
+      const path = target.href !== undefined ? r.resolveMd(target.href, sourcePath) : r.resolveWiki(target.linkpath, sourcePath);
+      if (path === null) {
+        ctx.host.notify('info', t('viewer.missing', target.linkpath));
+        return;
+      }
+      await ctx.openFile(path);
+      return;
+    }
   }
 }
 

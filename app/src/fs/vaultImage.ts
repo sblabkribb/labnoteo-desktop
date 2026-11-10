@@ -11,6 +11,14 @@ export function readVaultImage(path: string, invoke: InvokeFn = tauriInvoke): Pr
   return invoke<ArrayBuffer>('vault_read_image', { path });
 }
 
+/**
+ * 보관함 파일 하나의 원시 바이트(`vault_read_bytes`, UI 재설계 Task 18): CSV·TSV 보기가 읽는다. Rust 가 경로를 보관함 안으로
+ * 가두고, 폴더는 `badInput`, 50 MiB 를 넘으면 `tooLarge` 로 거부한다. 응답은 ArrayBuffer 다.
+ */
+export function readVaultBytes(path: string, invoke: InvokeFn = tauriInvoke): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>('vault_read_bytes', { path });
+}
+
 /** 보관함의 모든 이미지 경로('/' 구분, 정렬). 점 폴더와 링크는 건너뛴다(`vault_list_images`). */
 export function listVaultImages(invoke: InvokeFn = tauriInvoke): Promise<string[]> {
   return invoke<string[]>('vault_list_images', {});

@@ -517,6 +517,31 @@ title: 실험
     std::fs::remove_file(dir.join("vault").join("run.exe")).unwrap();
     assert!(call("vault_reveal", args("vault_reveal", vec![json!("../outside.pdf")])).is_err());
 
+    // Viewer bytes: a raw response like vault_read_image; escapes are refused.
+    std::fs::write(dir.join("vault").join("plate.csv"), "a,b\n1,2").unwrap();
+    let raw = get_ipc_response(
+        &webview,
+        InvokeRequest {
+            cmd: "vault_read_bytes".into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: "http://tauri.localhost".parse().unwrap(),
+            body: InvokeBody::Json(args("vault_read_bytes", vec![json!("plate.csv")])),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        },
+    )
+    .unwrap_or_else(|e| panic!("vault_read_bytes was refused: {e}"));
+    match raw {
+        InvokeResponseBody::Raw(bytes) => assert_eq!(bytes, b"a,b\n1,2".to_vec()),
+        other => panic!("expected raw bytes, got {other:?}"),
+    }
+    std::fs::remove_file(dir.join("vault").join("plate.csv")).unwrap();
+    assert_eq!(
+        call("vault_read_bytes", args("vault_read_bytes", vec![json!("../outside.csv")])).unwrap_err()["kind"],
+        "escape"
+    );
+
     // Creation times: one entry per path, `null` for a missing file; too many
     // paths is a malformed argument (`badInput`), not an io error.
     let times = ok("vault_created_times", args("vault_created_times", vec![json!(["a.md"])]));

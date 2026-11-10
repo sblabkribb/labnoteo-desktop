@@ -143,7 +143,12 @@ export type LinkHit =
 export type OpenTarget =
   | { kind: 'note'; path: string; anchor?: string; subpath?: string }
   | { kind: 'create'; linkpath: string }
-  | { kind: 'external'; url: string };
+  | { kind: 'external'; url: string }
+  /**
+   * A link to an attachment (csv, pdf, ...; `isUnknownTarget`). The link index lists notes and images only, so App
+   * resolves it against the files in the tree and opens its viewer (Task 18). `href` is the Markdown link's raw path.
+   */
+  | { kind: 'attachment'; linkpath: string; href?: string };
 
 /** A plain click opens only when the button comes up within this many pixels of where it went down (D4). */
 export const CLICK_SLOP_PX = 4;
@@ -202,8 +207,8 @@ export function linkAt(state: EditorState, pos: number): LinkHit | null {
 
 /**
  * Where a link goes from note `notePath` (D2, D5). `self` is a place in this note (`line` undefined when the
- * heading is missing). Null when there is nothing to open: an attachment the app does not list, a malformed
- * path, or an unresolved wikilink before the link index is ready.
+ * heading is missing). An attachment goes to its viewer (`attachment`). Null when there is nothing to open: a
+ * malformed path, or an unresolved wikilink before the link index is ready.
  */
 export function targetOf(
   state: EditorState,
@@ -220,7 +225,8 @@ export function targetOf(
     // A self link before this note is in the file list (a note just created): stay here
     if (isSelfLinkName(linkpath, notePath))
       return { kind: 'self', line: subpath ? subpathLine(doc(), { subpath }) : 0 };
-    if (!res || res.isUnknownTarget(linkpath)) return null;
+    if (!res) return null;
+    if (res.isUnknownTarget(linkpath)) return { kind: 'attachment', linkpath };
     return { kind: 'create', linkpath };
   }
   let h = hit.href.trim();
@@ -244,7 +250,8 @@ export function targetOf(
   } catch {
     return null;
   }
-  if (decoded === '' || res.isUnknownTarget(decoded)) return null;
+  if (decoded === '') return null;
+  if (res.isUnknownTarget(decoded)) return { kind: 'attachment', linkpath: decoded, href: hash < 0 ? h : h.slice(0, hash) };
   let linkpath = decoded.replace(/^(\.\/)+/, '');
   if (linkpath === '') return null;
   // A Markdown path is relative to this note: keep a folder path relative (D6 reads `a/b` as vault-rooted)

@@ -27,7 +27,7 @@ export const IMAGE_EXTS: ReadonlySet<string> = new Set(IMAGE_EXT_LIST);
 
 /** Attachment extensions: links to these are "unknown", never drawn unresolved (D1). */
 export const ATTACHMENT_EXTS: ReadonlySet<string> = new Set([
-  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'csv', 'zip', 'mp4', 'mov', 'mp3', 'wav', 'txt', 'json',
+  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'csv', 'tsv', 'zip', 'mp4', 'mov', 'mp3', 'wav', 'txt', 'json',
 ]);
 
 export function linkKey(s: string): string {

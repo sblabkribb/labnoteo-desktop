@@ -4,6 +4,7 @@ import { useLang } from '../i18n/useLang';
 import { useEditorLoaded, useEditorStatus, type SaveState } from '../editor/editorStatus';
 import { Icon, type IconName } from './Icon';
 import { useNotePosition } from './Breadcrumb';
+import { useViewerStatus } from '../viewers/viewerStatus';
 
 /** 저장 상태의 아이콘과 글. */
 function saveView(save: SaveState): { icon: IconName; text: string; title?: string; tone?: 'danger' | 'warning' } | undefined {
@@ -61,17 +62,32 @@ function EditorItems(p: { path: string }) {
   );
 }
 
+/** 보기 화면(그림, 표)의 칸: 그림은 픽셀 크기·바이트·배율, 표는 행×열·인코딩·구분자. */
+function ViewerItems(p: { path: string }) {
+  const items = useViewerStatus(p.path);
+  return (
+    <>
+      {items.map((text, i) => (
+        <span key={i} className="statusbar-item">
+          {text}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /**
  * 창 아래 상태 줄(26px): 구조 위치, 저장 상태, 줄·열, 단어 수, 그리고 앱 알림(색인 중 등). 오른쪽 끝에 모양 단추(appearance).
  * 맞지 않는 칸은 숨긴다.
  */
-export function StatusBar(p: { path?: string; onReveal: () => void; notes?: ReactNode; trailing?: ReactNode }) {
+export function StatusBar(p: { path?: string; viewerPath?: string; onReveal: () => void; notes?: ReactNode; trailing?: ReactNode }) {
   useLang();
   return (
     <footer className="statusbar" aria-label={t('statusbar.label')}>
       <div className="statusbar-group">
         {p.path !== undefined && <PositionItem path={p.path} onReveal={p.onReveal} />}
         {p.path !== undefined && <EditorItems path={p.path} />}
+        {p.viewerPath !== undefined && <ViewerItems path={p.viewerPath} />}
         {p.notes}
       </div>
       <div className="statusbar-group statusbar-end">{p.trailing}</div>

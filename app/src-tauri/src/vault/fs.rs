@@ -199,7 +199,7 @@ impl PathLocks {
         }
     }
 
-    fn with<R>(&self, root: &Path, rel: &str, f: impl FnOnce() -> R) -> R {
+    pub(crate) fn with<R>(&self, root: &Path, rel: &str, f: impl FnOnce() -> R) -> R {
         let key = Self::key(root, rel);
         let entry = self.acquire(&key);
         let result = {

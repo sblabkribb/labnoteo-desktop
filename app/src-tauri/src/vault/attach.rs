@@ -142,6 +142,32 @@ pub fn write_attachment(locks: &PathLocks, root: &Path, dir: &str, name: &str, b
     Err(FsError::Exists)
 }
 
+/// Larger files are not read into the webview (`TooLarge`); the viewers show
+/// the file card instead (plan ruling R6).
+pub const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
+
+/// The bytes of one regular vault file for the in-app viewers (CSV/TSV and
+/// the like). Confined to the vault (links resolved first), never a folder,
+/// at most `MAX_READ_BYTES`. Reading runs nothing, so no extension check.
+pub fn read_bytes(locks: &PathLocks, root: &Path, rel: &str) -> Result<Vec<u8>, FsError> {
+    locks.with(root, rel, || {
+        let abs = confine(root, rel)?;
+        let meta = std::fs::metadata(&abs)?;
+        if !meta.is_file() {
+            return Err(bad(format!("{rel}: not a file")));
+        }
+        if meta.len() > MAX_READ_BYTES {
+            return Err(FsError::TooLarge);
+        }
+        let bytes = std::fs::read(&abs)?;
+        // The file may have grown between the check and the read.
+        if bytes.len() as u64 > MAX_READ_BYTES {
+            return Err(FsError::TooLarge);
+        }
+        Ok(bytes)
+    })
+}
+
 /// What actually opens things; a trait so tests never launch anything.
 pub trait Opener {
     fn open_path(&self, abs: &Path) -> Result<(), String>;
@@ -216,6 +242,22 @@ pub async fn vault_reveal<R: tauri::Runtime>(
     reveal(&root, &path, &AppOpener(&app))
 }
 
+/// The raw bytes of a vault file for the CSV and file viewers (`read_bytes`).
+/// Like `vault_read_image`, the bytes go back as a raw IPC response
+/// (an `ArrayBuffer` in JS), off the main thread.
+#[tauri::command]
+pub async fn vault_read_bytes(
+    state: tauri::State<'_, super::VaultState>,
+    path: String,
+) -> Result<tauri::ipc::Response, FsError> {
+    let root = state.root()?;
+    let locks = Arc::clone(&state.locks);
+    let bytes = tauri::async_runtime::spawn_blocking(move || read_bytes(&locks, &root, &path))
+        .await
+        .map_err(join_error)??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Paste and drop of a non-image file: the raw protocol of `vault_write_image`
 /// (bytes as the raw body, percent-encoded `x-lno-dir` and `x-lno-name`
 /// headers). Returns the vault path written.
@@ -283,6 +325,63 @@ mod tests {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, b"x").unwrap();
+    }
+
+    #[test]
+    fn reads_the_bytes_of_any_vault_file_within_the_cap() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        std::fs::create_dir_all(t.0.join("exp/resources")).unwrap();
+        let body = b"\xEF\xBB\xBFa,b\n1,2";
+        std::fs::write(t.0.join("exp/resources/plate.csv"), body).unwrap();
+        assert_eq!(read_bytes(&l, &t.0, "exp/resources/plate.csv").unwrap(), body);
+        std::fs::write(t.0.join("run.exe"), b"MZ").unwrap();
+        // reading runs nothing: any regular file inside the vault may be read
+        assert_eq!(read_bytes(&l, &t.0, "run.exe").unwrap(), b"MZ");
+    }
+
+    #[test]
+    fn read_bytes_refuses_escapes_folders_missing_files_and_oversize() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(root.join("dir")).unwrap();
+        std::fs::write(t.0.join("outside.csv"), b"x").unwrap();
+        for p in ["../outside.csv", "/outside.csv", r"C:\outside.csv", "dir/../../outside.csv"] {
+            assert!(matches!(read_bytes(&l, &root, p), Err(FsError::Vault(_))), "{p}");
+        }
+        assert!(matches!(read_bytes(&l, &root, "dir"), Err(FsError::BadInput(_))));
+        assert!(matches!(read_bytes(&l, &root, "missing.csv"), Err(FsError::Io(_))));
+        let big = std::fs::File::create(root.join("big.csv")).unwrap();
+        big.set_len(MAX_READ_BYTES + 1).unwrap();
+        drop(big);
+        assert!(matches!(read_bytes(&l, &root, "big.csv"), Err(FsError::TooLarge)));
+        let edge = std::fs::File::create(root.join("edge.csv")).unwrap();
+        edge.set_len(MAX_READ_BYTES).unwrap();
+        drop(edge);
+        assert_eq!(read_bytes(&l, &root, "edge.csv").unwrap().len() as u64, MAX_READ_BYTES);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn read_bytes_refuses_a_junction_out_of_the_vault() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let root = t.0.join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(t.0.join("outside")).unwrap();
+        std::fs::write(t.0.join("outside/y.csv"), b"x").unwrap();
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("out"))
+            .arg(t.0.join("outside"))
+            .output()
+            .unwrap();
+        if !status.status.success() {
+            return;
+        }
+        assert!(matches!(read_bytes(&l, &root, "out/y.csv"), Err(FsError::Vault(_))));
+        let _ = std::fs::remove_dir(root.join("out"));
     }
 
     #[test]

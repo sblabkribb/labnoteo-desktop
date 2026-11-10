@@ -17,6 +17,7 @@
   "vault_read_image": ["path"],
   "vault_open_default": ["path"],
   "vault_reveal": ["path"],
+  "vault_read_bytes": ["path"],
   "vault_list_images": [],
   "vault_write_image": ["x-lno-dir", "x-lno-name"],
   "scan_write_image": ["x-lno-dir", "x-lno-name"],

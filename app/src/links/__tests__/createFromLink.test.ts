@@ -107,6 +107,18 @@ describe('createFromLink', () => {
     expect(h.opened).toEqual(['B.md']);
     expect(urls).toEqual(['https://a.b']);
   });
+  it('opens an attachment link in its viewer, resolved against the files in the tree', async () => {
+    const h = createTestHost({ 'exp/a.md': '' });
+    h.ctx.treeFiles = () => ['exp/a.md', 'exp/resources/plate.csv', 'exp/resources/spec A.pdf'];
+    const spy = vi.spyOn(h.ctx, 'openFile');
+    await openLinkTarget(h.ctx, { kind: 'attachment', linkpath: 'plate.csv' }, 'exp/a.md', async () => {});
+    expect(spy).toHaveBeenLastCalledWith('exp/resources/plate.csv');
+    await openLinkTarget(h.ctx, { kind: 'attachment', linkpath: './resources/spec A.pdf', href: './resources/spec%20A.pdf' }, 'exp/a.md', async () => {});
+    expect(spy).toHaveBeenLastCalledWith('exp/resources/spec A.pdf');
+    await openLinkTarget(h.ctx, { kind: 'attachment', linkpath: 'gone.csv' }, 'exp/a.md', async () => {});
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(h.notes.at(-1)).toEqual({ kind: 'info', message: t('viewer.missing', 'gone.csv') });
+  });
   it('reports a failed create instead of leaving an unhandled rejection', async () => {
     const h = createTestHost({ 'a.md': '' });
     h.vault.failNext('vault_modify', 'io');
