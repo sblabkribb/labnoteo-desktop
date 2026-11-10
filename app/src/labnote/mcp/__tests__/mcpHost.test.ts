@@ -52,8 +52,15 @@ async function advance(ms: number): Promise<void> {
   await flush();
 }
 
-function setup(opts: { claim?: (a: Record<string, unknown>) => unknown; mount?: boolean } = {}) {
-  const th = createTestHost({ [NOTE]: BODY });
+function setup(
+  opts: {
+    claim?: (a: Record<string, unknown>) => unknown;
+    mount?: boolean;
+    files?: Record<string, string>;
+    routes?: Record<string, (a: Record<string, unknown>) => unknown>;
+  } = {}
+) {
+  const th = createTestHost({ [NOTE]: BODY, ...opts.files });
   hosts.push(th);
   const confirm = vi.fn((message: string, o?: Parameters<typeof confirmDialog>[1]) => confirmDialog(message, o));
   th.host.confirm = confirm;
@@ -63,6 +70,7 @@ function setup(opts: { claim?: (a: Record<string, unknown>) => unknown; mount?: 
     mcp_reply: () => true,
     vault_current: () => ({ root, name: 'Vault' }),
     net_cancel: () => null,
+    ...opts.routes,
   });
   const handlers = new Map<string, Handler>();
   const listen = (async (name: string, h: Handler) => {
@@ -99,7 +107,7 @@ afterEach(() => {
 });
 
 describe('MCP host (Task 36)', () => {
-  it('the tool catalog is the core tools, with mutates', () => {
+  it('the tool catalog is the core tools plus the context tools, with mutates', () => {
     const cat = toolCatalog();
     expect(cat.find((x) => x.name === 'read_section')).toMatchObject({ mutates: false });
     expect(cat.find((x) => x.name === 'update_section')).toMatchObject({ mutates: true });
@@ -399,5 +407,118 @@ describe('MCP host (Task 36)', () => {
 
   it('APPROVAL_TIMEOUT_MS stays under the read cap', () => {
     expect(APPROVAL_TIMEOUT_MS).toBeLessThan(55_000);
+  });
+});
+
+describe('MCP context tools (feat/ai-context, spec §10.1)', () => {
+  const EXP = 'labnote/001_GFP';
+  const WF1 = `${EXP}/001_WB010_Cloning.labnote.md`;
+  const WF2 = `${EXP}/002_WB020_Expression.labnote.md`;
+  const OTHER = 'labnote/002_Other';
+  const files = {
+    [`${EXP}/README.labnote.md`]: [
+      '---',
+      'title: GFP expression',
+      '---',
+      '',
+      '## Goal',
+      '',
+      'Express GFP.',
+      '',
+      '## Related Workflows',
+      '',
+      '- [ ] [WB010 Cloning](./001_WB010_Cloning.labnote.md)',
+      '- [ ] [WB020 Expression](./002_WB020_Expression.labnote.md)',
+      '',
+    ].join('\n'),
+    [WF1]: ['## [WB010 Cloning]', '', '### [UHW010 PCR]', '', '#### Input', '- DNA-1', '', '#### Output', '- DNA-2', ''].join('\n'),
+    [WF2]: ['## [WB020 Expression]', '', '### [UHW030 Induction]', '', '#### Input', '', '#### Output', '- Protein-1', ''].join('\n'),
+    [`${OTHER}/README.labnote.md`]: ['---', 'title: Other', '---', '', '## Goal', '', 'Secret other goal.', ''].join('\n'),
+  };
+  const NEW_TOOLS = ['list_experiment', 'search_experiment', 'read_note', 'get_experiment_context', 'get_unit_operation_context'];
+  const payload = (r: McpReplyIn) => {
+    expect(r).toMatchObject({ kind: 'result' });
+    const result = (r as { result: { isError: boolean; content: Array<{ text: string }> } }).result;
+    return { isError: result.isError, data: JSON.parse(result.content[0].text) };
+  };
+
+  it('the catalog lists the five context tools as read-only, and no name contains ":"', () => {
+    const cat = toolCatalog();
+    for (const name of NEW_TOOLS) expect(cat.find((x) => x.name === name)).toMatchObject({ mutates: false });
+    expect(cat.find((x) => x.name === 'update_section')).toMatchObject({ mutates: true });
+    for (const x of cat) expect(x.name).not.toContain(':');
+    expect(new Set(cat.map((x) => x.name)).size).toBe(cat.length);
+  });
+
+  it('on MCP, list/search/read take a notePath and name their experiment explicitly', () => {
+    const cat = toolCatalog();
+    for (const name of ['list_experiment', 'search_experiment', 'read_note']) {
+      const schema = cat.find((x) => x.name === name)!.inputSchema as { properties: Record<string, { description?: string }> };
+      expect(schema.properties.notePath).toMatchObject({ type: 'string' });
+      expect(schema.properties.experiment.description).toMatch(/required unless notePath/i);
+      expect(schema.properties.experiment.description).not.toMatch(/current experiment/i);
+    }
+  });
+
+  it('get_unit_operation_context runs on the read path: claim, no approval, the context as the result', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    await flush();
+    await s.call('c1', 'get_unit_operation_context', { notePath: WF2 }, false);
+    await flush();
+    expect(s.confirm).not.toHaveBeenCalled();
+    expect(s.cmds()).toEqual(['mcp_claim', 'mcp_reply']);
+    const { isError, data } = payload(s.replies()[0].reply);
+    expect(isError).toBe(false);
+    expect(data.scope).toEqual({ folder: EXP, named: [] });
+    expect(data.target).toMatchObject({ path: WF2, unitOpIndex: 0, opId: 'UHW030' });
+    expect(data.prefill).toMatchObject({ ids: ['DNA-2'], from: { path: WF1 } });
+    expect(data.rules).toContain('Never output Results & Discussions');
+    expect(data.text).not.toContain('Secret other goal');
+    expect(s.th.vault.files()[WF2]).toBe(files[WF2]);
+  });
+
+  it('get_experiment_context without experiment or notePath replies scopeRequired as an isError result', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files });
+    await flush();
+    await s.call('c1', 'get_experiment_context', {}, false);
+    await flush();
+    expect(s.confirm).not.toHaveBeenCalled();
+    const { isError, data } = payload(s.replies()[0].reply);
+    expect(isError).toBe(true);
+    expect(String(data)).toContain(EXP);
+    expect(String(data)).toContain(OTHER);
+  });
+
+  it('search_experiment searches the index with the experiment as the prefix', async () => {
+    vi.useFakeTimers();
+    const seen: Array<Record<string, unknown>> = [];
+    const s = setup({
+      files,
+      routes: {
+        index_search_in: (a) => {
+          seen.push(a);
+          return { hits: [{ path: WF1, title: 'Cloning', snippet: 'DNA-2' }, { path: `${OTHER}/README.labnote.md`, title: 'x', snippet: 'DNA-2' }], truncated: false };
+        },
+      },
+    });
+    await flush();
+    await s.call('c1', 'search_experiment', { query: 'DNA-2', experiment: '001' }, false);
+    await flush();
+    expect(seen).toEqual([{ query: 'DNA-2', prefix: EXP, limit: 20 }]);
+    const { isError, data } = payload(s.replies()[0].reply);
+    expect(isError).toBe(false);
+    expect(data.hits.map((h: { path: string }) => h.path)).toEqual([WF1]);
+  });
+
+  it('a claim refused by Rust runs no context tool and sends no reply', async () => {
+    vi.useFakeTimers();
+    const s = setup({ files, claim: () => false });
+    await flush();
+    await s.call('c1', 'get_experiment_context', { experiment: '001' }, false);
+    await flush();
+    expect(s.cmds()).toEqual(['mcp_claim']);
+    expect(runTool).not.toHaveBeenCalled();
   });
 });

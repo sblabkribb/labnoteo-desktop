@@ -5,12 +5,15 @@ import type { SearchResults } from '../../../search/indexApi';
 import { appTools, scopeErrorText } from '../appTools';
 import { contextTools, type ScopedToolContext } from '../contextTools';
 import { scopeGate, type Scope } from '../scope';
+import { PLANNING_RULES } from '../planningPrompt';
+import { PLANNING_SECTIONS_HW } from '../chain';
 import {
   buildFixtureVault,
   EXP_A,
   EXP_AB,
   EXP_MAIN,
   EXP_OTHER,
+  EXP_STRESS,
   FIXTURE_EXPERIMENTS,
   GLOBAL_SAMPLE_FOLDER,
   LEAK_SAMPLE_ID,
@@ -60,8 +63,14 @@ const dataOf = (res: { ok: boolean; data?: unknown; error?: string }) => {
 };
 
 describe('contextTools', () => {
-  it('are list_experiment, search_experiment and read_note, all read-only', () => {
-    expect(tools.map(t => t.name)).toEqual(['list_experiment', 'search_experiment', 'read_note']);
+  it('are list_experiment, search_experiment, read_note and the two context tools, all read-only', () => {
+    expect(tools.map(t => t.name)).toEqual([
+      'list_experiment',
+      'search_experiment',
+      'read_note',
+      'get_experiment_context',
+      'get_unit_operation_context',
+    ]);
     for (const t of tools) expect(t.mutates).toBe(false);
     for (const t of appTools({ scope: scopeOf(EXP_MAIN) }).filter(t => tools.some(c => c.name === t.name))) {
       expect(t.mutates).toBe(false);
@@ -279,7 +288,13 @@ describe('appTools', () => {
   it('is the core tools plus the context tools', () => {
     const names = appTools().map(t => t.name);
     expect(names).toContain('update_section');
-    expect(names.slice(-3)).toEqual(['list_experiment', 'search_experiment', 'read_note']);
+    expect(names.slice(-5)).toEqual([
+      'list_experiment',
+      'search_experiment',
+      'read_note',
+      'get_experiment_context',
+      'get_unit_operation_context',
+    ]);
   });
 
   it('scoped, refuses a core documentPath in another experiment before preview or approval', async () => {
@@ -347,5 +362,187 @@ describe('scopeErrorText', () => {
     setLang('en');
     expect(ko).toContain('없음');
     expect(ko).not.toBe(en);
+  });
+});
+
+describe('get_experiment_context and get_unit_operation_context (MCP, spec §10.1)', () => {
+  const props = (name: string) => tools.find(t => t.name === name)!.inputSchema as { required?: string[]; properties: Record<string, any> };
+  const mcpCtx = (opts: Partial<ScopedToolContext> = {}) => ctxOf(opts);
+  const ids = (data: Record<string, any>) => data.sources.map((s: { id: string }) => s.id);
+
+  it('have the §10.1 schemas', () => {
+    const exp = props('get_experiment_context');
+    expect(exp.required).toBeUndefined();
+    expect(Object.keys(exp.properties)).toEqual(['experiment', 'notePath', 'named', 'maxTokens', 'includeResults']);
+    expect(exp.properties.named).toMatchObject({ type: 'array', items: { type: 'string' } });
+    expect(exp.properties.maxTokens).toMatchObject({ type: 'integer', minimum: 1024, maximum: 200000, default: 16000 });
+    expect(exp.properties.includeResults).toMatchObject({ type: 'boolean', default: false });
+    const uo = props('get_unit_operation_context');
+    expect(uo.required).toEqual(['notePath']);
+    expect(Object.keys(uo.properties)).toEqual(['notePath', 'unitOp', 'maxTokens', 'includeResults', 'exclude']);
+    expect(uo.properties.maxTokens).toMatchObject({ type: 'integer', minimum: 1024, maximum: 200000, default: 16000 });
+    expect(uo.properties.exclude).toMatchObject({ type: 'array', items: { type: 'string' } });
+  });
+
+  it('without experiment or notePath gives scopeRequired with the experiments', async () => {
+    const ctx = await mcpCtx();
+    const res = await run(ctx, 'get_experiment_context', {});
+    expect(res).toMatchObject({ ok: false, code: 'scopeRequired' });
+    expect(res.params).toEqual(FIXTURE_EXPERIMENTS.map(e => e.folder));
+    expect(await run(ctx, 'get_unit_operation_context', {})).toMatchObject({ ok: false, code: 'scopeRequired' });
+  });
+
+  it('a notePath outside any experiment gives noExperiment', async () => {
+    const ctx = await mcpCtx();
+    expect(await run(ctx, 'get_experiment_context', { notePath: 'notes/loose.md' })).toMatchObject({ ok: false, code: 'noExperiment' });
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: 'notes/loose.md' })).toMatchObject({ ok: false, code: 'noExperiment' });
+    const sneaky = `${EXP_MAIN}/../003_정제/001_WB010_Cloning.labnote.md`;
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: sneaky })).toMatchObject({ ok: false });
+  });
+
+  it('an experiment and a notePath of different experiments are refused', async () => {
+    const ctx = await mcpCtx();
+    const res = await run(ctx, 'get_experiment_context', { experiment: '003', notePath: MAIN_FILES.cloning });
+    expect(res).toMatchObject({ ok: false, code: 'ambiguousExperiment' });
+  });
+
+  it('returns the experiment context: scope, sources, text, tokens, issues and the planning rules', async () => {
+    const ctx = await mcpCtx();
+    const data = dataOf(await run(ctx, 'get_experiment_context', { experiment: TITLE_MAIN }));
+    expect(data.scope).toEqual({ folder: EXP_MAIN, named: [] });
+    expect(data.rules).toBe(PLANNING_RULES);
+    expect(ids(data)).toContain('readme:goal');
+    expect(ids(data)).toContain(`wf:${MAIN_FILES.cloning}`);
+    for (const s of data.sources) {
+      expect(Object.keys(s)).toEqual(expect.arrayContaining(['id', 'kind', 'label', 'mode', 'tokens', 'included']));
+      expect(s.text).toBeUndefined();
+    }
+    expect(data.text).toContain('<<source id="readme:goal"');
+    expect(data.text).not.toContain('LEAKED');
+    expect(data.text).not.toContain(EXP_OTHER);
+    expect(data.issues.length).toBeGreaterThan(0);
+    expect(typeof data.totalTokens).toBe('number');
+    expect(data.trimmed).toEqual([]);
+  });
+
+  it('the same folder by notePath', async () => {
+    const ctx = await mcpCtx();
+    const data = dataOf(await run(ctx, 'get_experiment_context', { notePath: MAIN_FILES.expression }));
+    expect(data.scope.folder).toBe(EXP_MAIN);
+  });
+
+  it('named adds outlines of the named experiments only, never their samples', async () => {
+    const ctx = await mcpCtx();
+    const data = dataOf(await run(ctx, 'get_experiment_context', { experiment: '002', named: [TITLE_OTHER] }));
+    expect(data.scope).toEqual({ folder: EXP_MAIN, named: [EXP_OTHER] });
+    const named = data.sources.filter((s: { kind: string }) => s.kind === 'named');
+    expect(named.map((s: { id: string }) => s.id)).toEqual([`named:${EXP_OTHER}`]);
+    expect(data.text).not.toContain('LEAKED');
+    const a = dataOf(await run(ctx, 'get_experiment_context', { experiment: '002', named: [EXP_A] }));
+    expect(a.sources.filter((s: { kind: string }) => s.kind === 'named').map((s: { id: string }) => s.id)).toEqual([`named:${EXP_A}`]);
+    expect(await run(ctx, 'get_experiment_context', { experiment: '002', named: ['nope'] })).toMatchObject({
+      ok: false,
+      code: 'unknownExperiment',
+    });
+  });
+
+  it('in-app, a named experiment the user did not name is refused', async () => {
+    const ctx = await mcpCtx({ scope: scopeOf(EXP_MAIN), allowedFolders: new Set<string>() });
+    expect(await run(ctx, 'get_experiment_context', { named: [TITLE_OTHER] })).toMatchObject({ ok: false, code: 'outOfScope' });
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: `${EXP_OTHER}/001_WB010_Cloning.labnote.md` })).toMatchObject({
+      ok: false,
+      code: 'outOfScope',
+    });
+    expect(dataOf(await run(ctx, 'get_experiment_context', {})).scope.folder).toBe(EXP_MAIN);
+  });
+
+  it('maxTokens is the budget', async () => {
+    const ctx = await mcpCtx();
+    const notePath = `${EXP_STRESS}/004_WB040_Stage 4.labnote.md`;
+    const small = dataOf(await run(ctx, 'get_unit_operation_context', { notePath, maxTokens: 1024 }));
+    expect(small.budget).toBe(1024);
+    expect(small.trimmed.length).toBeGreaterThan(0);
+    if (!small.overBudget) expect(small.totalTokens).toBeLessThanOrEqual(1024);
+    const big = dataOf(await run(ctx, 'get_unit_operation_context', { notePath, maxTokens: 200000 }));
+    expect(big.budget).toBe(200000);
+    expect(big.trimmed).toEqual([]);
+    expect(dataOf(await run(ctx, 'get_experiment_context', { experiment: '005', maxTokens: 10 })).budget).toBe(1024);
+    expect(dataOf(await run(ctx, 'get_experiment_context', { experiment: '005', maxTokens: 10_000_000 })).budget).toBe(200000);
+    expect(dataOf(await run(ctx, 'get_experiment_context', { experiment: '005' })).budget).toBe(16000);
+  });
+
+  it('the unit op defaults to the last one of the note', async () => {
+    const ctx = await mcpCtx();
+    const data = dataOf(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression }));
+    expect(data.rules).toBe(PLANNING_RULES);
+    expect(data.target).toMatchObject({
+      path: MAIN_FILES.expression,
+      unitOpIndex: 1,
+      heading: '### [UHW030 Induction]',
+      opId: 'UHW030',
+      kind: 'hw',
+    });
+    expect(data.draftableSections).toEqual([...PLANNING_SECTIONS_HW]);
+    expect(data.prefill).toEqual({
+      ids: ['DNA-4'],
+      lines: ['- DNA-4'],
+      from: { path: MAIN_FILES.expression, heading: '### [USW010 Codon Check] 코돈 확인' },
+    });
+    expect(data.sources.at(-1)).toMatchObject({ id: 'target', kind: 'target', included: true });
+    expect(data.text).toContain('<<source id="target"');
+  });
+
+  it('unitOp takes heading text, an opId or a 1-based number', async () => {
+    const ctx = await mcpCtx();
+    const at = async (unitOp: unknown) =>
+      dataOf(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression, unitOp })).target.unitOpIndex;
+    expect(await at('USW010')).toBe(0);
+    expect(await at('usw010')).toBe(0);
+    expect(await at('1')).toBe(0);
+    expect(await at(2)).toBe(1);
+    expect(await at('[USW010 Codon Check] 코돈 확인')).toBe(0);
+    expect(await at('### [UHW030 Induction]')).toBe(1);
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression, unitOp: '9' })).toMatchObject({ ok: false });
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression, unitOp: 'UHW999' })).toMatchObject({ ok: false });
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.analysis })).toMatchObject({ ok: false });
+    expect(await run(ctx, 'get_unit_operation_context', { notePath: `${EXP_MAIN}/README.labnote.md` })).toMatchObject({ ok: false });
+  });
+
+  it('prefill crosses the workflow boundary with registry names, or gives a reason', async () => {
+    const ctx = await mcpCtx();
+    const first = dataOf(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression, unitOp: '1' }));
+    expect(first.prefill).toEqual({
+      ids: ['DNA-3'],
+      lines: ['- DNA-3 — insert'],
+      from: { path: MAIN_FILES.cloning, heading: '### [UHW020 Gel Purification]' },
+    });
+    const none = dataOf(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.cloning, unitOp: '1' }));
+    expect(none.prefill).toEqual({ reason: 'noPrevious' });
+  });
+
+  it('results are offered unticked unless includeResults; exclude unticks a source', async () => {
+    const ctx = await mcpCtx();
+    const resultsId = `uo:${MAIN_FILES.cloning}#1:results`;
+    const off = dataOf(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression, unitOp: '1' }));
+    expect(off.sources.find((s: { id: string }) => s.id === resultsId)).toMatchObject({ included: false, reason: 'default' });
+    expect(off.text).not.toContain('깨끗한 밴드');
+    const on = dataOf(
+      await run(ctx, 'get_unit_operation_context', {
+        notePath: MAIN_FILES.expression,
+        unitOp: '1',
+        includeResults: true,
+        exclude: ['readme:goal', 'target'],
+      })
+    );
+    expect(on.sources.find((s: { id: string }) => s.id === resultsId)).toMatchObject({ included: true });
+    expect(on.text).toContain('깨끗한 밴드');
+    expect(on.sources.find((s: { id: string }) => s.id === 'readme:goal')).toMatchObject({ included: false, reason: 'user' });
+    expect(on.sources.find((s: { id: string }) => s.id === 'target')).toMatchObject({ included: true });
+  });
+
+  it('the old tools take a notePath for their experiment (MCP)', async () => {
+    const ctx = await mcpCtx();
+    const data = dataOf(await run(ctx, 'list_experiment', { notePath: MAIN_FILES.cloning }));
+    expect(data.folder).toBe(EXP_MAIN);
   });
 });

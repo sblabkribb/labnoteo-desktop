@@ -1,15 +1,20 @@
-// Read-only agent tools over one experiment folder (spec §9): list_experiment,
-// search_experiment and read_note. Every path goes through assertInScope;
-// another experiment is reachable only when the user named it (in-app:
-// `allowedFolders` from scopeGate) or the call names it (MCP, no
-// `allowedFolders`). None of them writes.
+// Read-only agent tools over one experiment folder (spec §9, §10.1):
+// list_experiment, search_experiment, read_note, and the context tools
+// get_experiment_context and get_unit_operation_context over the shared
+// builder. Every path goes through assertInScope; another experiment is
+// reachable only when the user named it (in-app: `allowedFolders` from
+// scopeGate) or the call names it (MCP, no `allowedFolders`, by `experiment`
+// or `notePath`). None of them writes.
 import type { LabnoteFs, ToolContext, ToolDef, ToolResult } from '@labnoteo/core';
 import { listUnitOpBlocks } from '@labnoteo/core';
 import { listHeadings, normalizeHeadingText } from '../../../vendor/labnoteo/packages/labnoteo-core/src/sections/sectionEdit';
 import type { SearchResults } from '../../search/indexApi';
 import { experimentReadmes } from '../port/experiments';
-import { buildChain, canonicalSection, MAX_FILE_BYTES, MAX_WORKFLOW_FILES } from './chain';
-import { assertInScope, experimentFolderOf, findExperiment, ScopeError, type ExperimentRef, type Scope } from './scope';
+import { buildChain, canonicalSection, MAX_FILE_BYTES, MAX_WORKFLOW_FILES, previousUnitOp, type UnitOpNode } from './chain';
+import { buildContext, catalogFromTools, registryAliases, renderContext, type BuildInput, type BuiltContext } from './contextBuilder';
+import { draftableSections, PLANNING_RULES } from './planningPrompt';
+import { prefillInput } from './prefill';
+import { assertInScope, experimentFolderOf, findExperiment, resolveScope, ScopeError, type ExperimentRef, type Scope } from './scope';
 
 /** Core `ToolContext` plus what the scoped tools need (spec §9). */
 export interface ScopedToolContext extends ToolContext {
@@ -78,20 +83,39 @@ function nameArg(args: Record<string, unknown>): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
+/** The experiment folder of `notePath` (an explicit note of a call), through resolveScope. Throws ScopeError. */
+function folderOfNote(notePath: string, experiments: readonly ExperimentRef[]): string {
+  return resolveScope({ activePath: notePath }, experiments).folder;
+}
+
+/** In-app, `folder` is allowed when it is the current experiment or one the user named; MCP allows any. */
+function gate(ctx: ScopedToolContext, folder: string, asked: string): void {
+  if (ctx.scope && sameFolder(folder, ctx.scope.folder)) return;
+  if (ctx.allowedFolders !== undefined && ![...ctx.allowedFolders].some(f => sameFolder(f, folder))) {
+    throw new ScopeError('outOfScope', [asked, ctx.scope?.folder ?? '']);
+  }
+}
+
 /**
- * The experiment a call works in: the named `experiment` (allowed in-app only
- * when it is the current one or the user named it), else `ctx.scope`.
- * Undefined when there is neither. Throws ScopeError.
+ * The experiment a call works in: the named `experiment` or the experiment of
+ * `notePath` (both given must agree; allowed in-app only when it is the
+ * current one or the user named it), else `ctx.scope`. Undefined when there
+ * is none of them. Throws ScopeError.
  */
 export async function toolScope(ctx: ScopedToolContext, args: Record<string, unknown>): Promise<Scope | undefined> {
   const name = nameArg(args);
-  if (name === undefined) return ctx.scope;
-  const ref = findExperiment(name, await experimentsOf(ctx));
-  if (ctx.scope && sameFolder(ref.folder, ctx.scope.folder)) return ctx.scope;
-  if (ctx.allowedFolders !== undefined && ![...ctx.allowedFolders].some(f => sameFolder(f, ref.folder))) {
-    throw new ScopeError('outOfScope', [name, ctx.scope?.folder ?? '']);
+  const notePath = str(args, 'notePath');
+  if (name === undefined && notePath === undefined) return ctx.scope;
+  const experiments = await experimentsOf(ctx);
+  const byName = name !== undefined ? findExperiment(name, experiments).folder : undefined;
+  const byNote = notePath !== undefined ? folderOfNote(notePath, experiments) : undefined;
+  if (byName !== undefined && byNote !== undefined && !sameFolder(byName, byNote)) {
+    throw new ScopeError('ambiguousExperiment', [name ?? '', byName, byNote]);
   }
-  return { folder: ref.folder, explicit: true, named: [] };
+  const folder = (byName ?? byNote)!;
+  gate(ctx, folder, name ?? notePath ?? folder);
+  if (ctx.scope && sameFolder(folder, ctx.scope.folder)) return ctx.scope;
+  return { folder, explicit: true, named: [] };
 }
 
 async function requiredScope(ctx: ScopedToolContext, args: Record<string, unknown>): Promise<Scope> {
@@ -378,6 +402,128 @@ async function readNote(ctx: ScopedToolContext, args: Record<string, unknown>): 
   };
 }
 
+// ---------------------------------------------------------------- context (MCP, spec §10.1)
+
+/** `maxTokens` bounds and default of the context tools. */
+export const MAX_TOKENS_MIN = 1024;
+export const MAX_TOKENS_MAX = 200000;
+export const MAX_TOKENS_DEFAULT = 16000;
+
+function clampMaxTokens(v: unknown): number {
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : MAX_TOKENS_DEFAULT;
+  return Math.min(MAX_TOKENS_MAX, Math.max(MAX_TOKENS_MIN, n));
+}
+
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map(x => x.trim()) : [];
+}
+
+/** The folders of `named` other than the scope's (in-app: only ones the user named). Throws ScopeError. */
+async function namedFolders(ctx: ScopedToolContext, scope: Scope, names: readonly string[]): Promise<string[]> {
+  if (names.length === 0) return [];
+  const experiments = await experimentsOf(ctx);
+  const out: string[] = [];
+  for (const name of names) {
+    const folder = findExperiment(name, experiments).folder;
+    if (sameFolder(folder, scope.folder) || out.some(f => sameFolder(f, folder))) continue;
+    gate(ctx, folder, name);
+    out.push(folder);
+  }
+  return out;
+}
+
+/** The fields both context tools return. Sources without their text: `text` holds the rendered included ones. */
+function contextData(built: BuiltContext): Record<string, unknown> {
+  return {
+    scope: { folder: built.scope.folder, named: [...built.scope.named] },
+    sources: built.sources.map(s => ({
+      id: s.id,
+      kind: s.kind,
+      label: s.label,
+      ...(s.path !== undefined ? { path: s.path } : {}),
+      ...(s.heading !== undefined ? { heading: s.heading } : {}),
+      mode: s.mode,
+      tokens: s.tokens,
+      included: s.included,
+      ...(s.reason !== undefined ? { reason: s.reason } : {}),
+    })),
+    text: renderContext(built),
+    totalTokens: built.totalTokens,
+    budget: built.budget,
+    overBudget: built.overBudget,
+    trimmed: built.trimmed,
+    issues: built.issues,
+    rules: PLANNING_RULES,
+  };
+}
+
+function buildInput(ctx: ScopedToolContext, scope: Scope, args: Record<string, unknown>): Omit<BuildInput, 'target'> {
+  return {
+    fs: ctx.fs,
+    scope,
+    includeResults: args.includeResults === true,
+    budgetTokens: clampMaxTokens(args.maxTokens),
+    exclude: stringList(args.exclude),
+    customTypes: ctx.customTypes,
+    globalSampleFolder: ctx.globalSampleFolder,
+    catalog: catalogFromTools(ctx),
+  };
+}
+
+async function getExperimentContext(ctx: ScopedToolContext, args: Record<string, unknown>): Promise<ToolResult> {
+  const base = await requiredScope(ctx, args);
+  const named = await namedFolders(ctx, base, stringList(args.named));
+  const scope: Scope = { ...base, named };
+  const built = await buildContext({ ...buildInput(ctx, scope, args), exclude: [] });
+  return { ok: true, data: contextData(built) };
+}
+
+/** The unit op `wanted` names among `ops`: a 1-based number, heading text, opId, title or alias; first match. */
+function pickUnitOp(ops: readonly UnitOpNode[], wanted: unknown): UnitOpNode | undefined {
+  if (wanted === undefined || wanted === null || (typeof wanted === 'string' && wanted.trim() === '')) return ops[ops.length - 1];
+  if (typeof wanted === 'number') return Number.isInteger(wanted) ? ops[wanted - 1] : undefined;
+  if (typeof wanted !== 'string') return undefined;
+  const text = wanted.trim();
+  if (/^\d+$/.test(text)) return ops[Number(text) - 1];
+  const key = normalizeHeadingText(headingText(text).normalize('NFC'));
+  return ops.find(
+    u =>
+      normalizeHeadingText(headingText(u.heading).normalize('NFC')) === key ||
+      u.opId.toLowerCase() === key ||
+      (u.title !== '' && normalizeHeadingText(u.title.normalize('NFC')) === key) ||
+      (u.alias !== '' && normalizeHeadingText(u.alias.normalize('NFC')) === key)
+  );
+}
+
+async function getUnitOperationContext(ctx: ScopedToolContext, args: Record<string, unknown>): Promise<ToolResult> {
+  const raw = str(args, 'notePath');
+  const scope = await requiredScope(ctx, args);
+  if (!raw) return { ok: false, error: 'notePath is required' };
+  const notePath = assertInScope({ ...scope, named: [] }, raw);
+  const chain = await buildChain(ctx.fs, scope.folder, { customTypes: ctx.customTypes });
+  const key = folderKey(notePath);
+  const wf = chain.workflows.find(w => folderKey(w.path) === key);
+  if (!wf) return { ok: false, error: `${notePath} is not a workflow note of ${scope.folder}` };
+  if (wf.unitOps.length === 0) return { ok: false, error: `${notePath} has no unit operations` };
+  const uo = pickUnitOp(wf.unitOps, args.unitOp);
+  if (!uo) return { ok: false, error: `No unit operation "${String(args.unitOp)}" in ${notePath}` };
+
+  const target = { workflowPath: uo.workflowPath, unitOpIndex: uo.index };
+  const previous = previousUnitOp(chain, target);
+  const names = await registryAliases(ctx.fs, scope.folder, ctx.globalSampleFolder, previous?.outputIds ?? [], ctx.customTypes);
+  const prefill = prefillInput(chain, target, id => names.get(id));
+  const built = await buildContext({ ...buildInput(ctx, scope, args), target });
+  return {
+    ok: true,
+    data: {
+      ...contextData(built),
+      target: { path: uo.workflowPath, unitOpIndex: uo.index, heading: uo.heading, opId: uo.opId, kind: uo.kind },
+      draftableSections: draftableSections(uo, { environment: 'Environment' in uo.sections }),
+      prefill,
+    },
+  };
+}
+
 // ---------------------------------------------------------------- defs
 
 const EXPERIMENT_ARG = {
@@ -385,7 +531,7 @@ const EXPERIMENT_ARG = {
   description: 'Experiment number, folder name or title. Omit for the current experiment; name another only when the user did.',
 };
 
-/** The read-only context tools (spec §9). Their handlers take a {@link ScopedToolContext}. */
+/** The read-only context tools (spec §9, §10.1). Their handlers take a {@link ScopedToolContext}. */
 export function contextTools(): ToolDef[] {
   return [
     {
@@ -435,6 +581,45 @@ export function contextTools(): ToolDef[] {
         },
       },
       handler: scoped(readNote),
+    },
+    {
+      name: 'get_experiment_context',
+      mutates: false,
+      description:
+        'The planning context of one experiment folder: README goal, workflows in checklist order with their unit operations, chain problems, ' +
+        'rendered as <<source>> blocks within maxTokens, plus the planning rules. Name the experiment or a note in it; other experiments only in "named", and only ones the user named. ' +
+        'Never write Results & Discussions, QC Metrics, Discussion or Meta.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          experiment: { type: 'string', description: 'Experiment number, folder name or title. Required unless notePath is given.' },
+          notePath: { type: 'string', description: 'A vault-relative note inside the experiment' },
+          named: { type: 'array', items: { type: 'string' }, description: 'Other experiments to outline; only ones the user named' },
+          maxTokens: { type: 'integer', minimum: MAX_TOKENS_MIN, maximum: MAX_TOKENS_MAX, default: MAX_TOKENS_DEFAULT },
+          includeResults: { type: 'boolean', default: false },
+        },
+      },
+      handler: scoped(getExperimentContext),
+    },
+    {
+      name: 'get_unit_operation_context',
+      mutates: false,
+      description:
+        'The context for drafting one unit operation: its experiment chain (earlier workflows, earlier unit ops, the previous Output), samples and catalog definitions, ' +
+        'the target with its current planning sections, the sections that may be drafted and the Input prefill from the previous Output. ' +
+        'Draft only those planning sections; never Results & Discussions, QC Metrics, Discussion or Meta.',
+      inputSchema: {
+        type: 'object',
+        required: ['notePath'],
+        properties: {
+          notePath: { type: 'string', description: 'Vault-relative workflow note inside the experiment' },
+          unitOp: { type: 'string', description: 'Heading text, opId or 1-based index; default: last unit op' },
+          maxTokens: { type: 'integer', minimum: MAX_TOKENS_MIN, maximum: MAX_TOKENS_MAX, default: MAX_TOKENS_DEFAULT },
+          includeResults: { type: 'boolean', default: false },
+          exclude: { type: 'array', items: { type: 'string' }, description: 'source ids to drop' },
+        },
+      },
+      handler: scoped(getUnitOperationContext),
     },
   ];
 }
