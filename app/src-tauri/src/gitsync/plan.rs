@@ -138,6 +138,8 @@ pub enum Red {
     /// A file that could not be read (locked, or a cloud file that would not
     /// download).
     Unreadable { path: String },
+    /// A public repository without the typed name (the upload's own check).
+    PublicNotConfirmed,
 }
 
 /// The kinds of findings the webview may pass in (P-R4).
@@ -344,6 +346,12 @@ impl PlanStore {
         let id = plan.id.clone();
         plans.push(plan);
         id
+    }
+
+    /// The folder of a plan that is still held (the upload locks it before
+    /// taking the plan).
+    pub fn folder_of(&self, id: &str) -> Option<String> {
+        self.lock().iter().find(|p| p.id == id).map(|p| p.folder.clone())
     }
 
     /// Hands the plan over to the upload (it is used once).
@@ -557,7 +565,7 @@ pub fn global_samples(root: &Path, settings_json: &str, ids: &[String]) -> Vec<S
 
 /// The blobs of the last pushed commit, read from the app-owned bare repo.
 /// `None` when there is none or it cannot be read (every file is then new).
-fn base_tree(dirs: &Path, root: &Path, link: &LinkRecord) -> Option<(Oid, BTreeMap<String, (Oid, u64)>)> {
+pub(crate) fn base_tree(dirs: &Path, root: &Path, link: &LinkRecord) -> Option<(Oid, BTreeMap<String, (Oid, u64)>)> {
     let commit = Oid::from_str(link.last_pushed_commit.as_deref()?).ok()?;
     let path = bare_repo_path(dirs, root, &link.link_id)?;
     if !path.is_dir() {

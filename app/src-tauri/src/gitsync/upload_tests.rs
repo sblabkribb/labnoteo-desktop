@@ -1,0 +1,564 @@
+//! `gitsync::upload` tests: a fake GitHub API on `127.0.0.1`
+//! (`net::testserver`) and `file://` bare remotes in temp dirs. No test
+//! reaches a real server, and the token is a fixed fake.
+
+use super::*;
+use crate::gitsync::links::LinksDoc;
+use crate::gitsync::overlay::LocalTime;
+use crate::gitsync::plan::{build_plan, PlanEnv, PlanOutcome, PlanRequest};
+use crate::gitsync::repo::blob_at;
+use crate::gitsync::repo::tests::snapshot;
+use crate::gitsync::state::write_doc;
+use crate::net::config::tests::scratch_dir;
+use crate::net::config::ServiceConfig;
+use crate::net::secrets::{store_secret, MemoryStore, Slot};
+use crate::net::testserver::{serve, Canned, TestServer};
+use serde_json::Value;
+use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Mutex};
+
+const FAKE: &str = "gho_FAKEupload00000000000000000000000000";
+const FOLDER: &str = "labnote/001_단백질 발현";
+const NAME: &str = "001_danbaekjil_balhyeon";
+const NOW: LocalTime = LocalTime { year: 2026, month: 11, day: 10, hour: 14, minute: 32 };
+
+/// Counts the Git steps; optionally pauses at `BeforeCreate` until released.
+#[derive(Default)]
+struct TestSteps {
+    fetches: AtomicUsize,
+    pushes: AtomicUsize,
+    gate: Option<(mpsc::Sender<()>, Mutex<mpsc::Receiver<()>>)>,
+}
+
+impl Steps for TestSteps {
+    fn reached(&self, point: Point) {
+        if let (Point::BeforeCreate, Some((reached, release))) = (point, &self.gate) {
+            reached.send(()).unwrap();
+            release.lock().unwrap().recv().unwrap();
+        }
+    }
+
+    fn fetch(&self, repo: &Repository, remote: &Url, branch: &str, token: &Zeroizing<String>, allowed: &GitBase) -> Result<Option<Oid>, GitError> {
+        self.fetches.fetch_add(1, Ordering::SeqCst);
+        git_push::fetch(repo, remote, branch, token, allowed)
+    }
+
+    fn push(
+        &self,
+        repo: &Repository,
+        remote: &Url,
+        branch: &str,
+        token: &Zeroizing<String>,
+        allowed: &GitBase,
+        progress: &mut dyn FnMut(Progress) -> bool,
+    ) -> Result<PushResult, GitError> {
+        self.pushes.fetch_add(1, Ordering::SeqCst);
+        git_push::push(repo, remote, branch, branch, token, allowed, progress, &[])
+    }
+}
+
+struct Fx {
+    base: PathBuf,
+    root: PathBuf,
+    dirs: PathBuf,
+    remotes: PathBuf,
+    store: MemoryStore,
+    net: NetState,
+    gh: GithubState,
+}
+
+impl Drop for Fx {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.base);
+    }
+}
+
+impl Fx {
+    fn new(tag: &str) -> Fx {
+        let base = scratch_dir(tag);
+        let root = base.join("vault");
+        // A Korean Windows user folder above the app data.
+        let dirs = base.join("사용자").join("integrations");
+        let remotes = base.join("remotes");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&dirs).unwrap();
+        fs::create_dir_all(remotes.join("kim-lab")).unwrap();
+        let store = MemoryStore::default();
+        store_secret(&store, Slot::Github, &ServiceConfig::from_settings_json("{}"), FAKE).unwrap();
+        let account = Account { login: "kim-lab".into(), id: 4242, avatar_url: String::new() };
+        write_doc(&dirs, None, GithubDoc::Account, &Some(account)).unwrap();
+        let fx = Fx { base, root, dirs, remotes, store, net: NetState::default(), gh: GithubState::default() };
+        fx.put("README.labnote.md", "# 개요\n".as_bytes());
+        fx.put("workflows/002_PCR.labnote.md", b"PCR\n");
+        fx.put("data/plate.csv", b"well,od\r\nA1,0.5\r\n");
+        fx.put(".env", b"SECRET=1\n");
+        fx
+    }
+
+    fn put(&self, rel: &str, bytes: &[u8]) {
+        let p = self.root.join(FOLDER).join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, bytes).unwrap();
+    }
+
+    fn plan_full(&self, target: PlanTarget) -> (PlanOutcome, String) {
+        let env = PlanEnv { dirs: &self.dirs, root: &self.root, settings_json: "{}", saved: &[], limits: Limits::DEFAULT, now: NOW };
+        let req = PlanRequest { folder: FOLDER.into(), target, sample_ids: vec![], info_findings: vec![] };
+        let (outcome, plan) = build_plan(&env, req).unwrap();
+        let id = self.gh.plans.insert(plan.expect("a plan"), Instant::now());
+        (outcome, id)
+    }
+
+    fn plan(&self, target: PlanTarget) -> String {
+        self.plan_full(target).1
+    }
+
+    fn create(&self, private: bool) -> String {
+        self.plan(PlanTarget::Create { owner: "kim-lab".into(), name: NAME.into(), private })
+    }
+
+    /// The bare remote the fake GitHub "created".
+    fn remote(&self, owner: &str, name: &str) -> Repository {
+        Repository::init_bare(self.remotes.join(owner).join(format!("{name}.git"))).unwrap()
+    }
+
+    fn ep(&self, s: &TestServer) -> GithubEndpoints {
+        let base = Url::parse(&format!("{}/", s.url)).unwrap();
+        GithubEndpoints { api: base.clone(), web: base, git: Url::from_directory_path(&self.remotes).unwrap() }
+    }
+
+    fn upload_with(&self, s: &TestServer, steps: &dyn Steps, id: &str, choices: UploadChoices) -> UploadOutcome {
+        let ep = self.ep(s);
+        let progress = |_: Stage, _: u64, _: u64| {};
+        let env = UploadEnv {
+            ep: &ep,
+            dirs: &self.dirs,
+            root: &self.root,
+            store: &self.store,
+            net: &self.net,
+            gh: &self.gh,
+            request_id: Some("up-1"),
+            steps,
+            progress: &progress,
+        };
+        upload_at(&env, id, choices).unwrap()
+    }
+
+    fn upload(&self, s: &TestServer, id: &str, choices: UploadChoices) -> UploadOutcome {
+        self.upload_with(s, &RealSteps, id, choices)
+    }
+
+    fn links(&self) -> LinksDoc {
+        read_links(&self.dirs, &self.root).unwrap()
+    }
+
+    fn link(&self) -> LinkRecord {
+        self.links().links[FOLDER].clone()
+    }
+
+    /// Nothing under the app data holds the fake token.
+    fn no_token(&self) {
+        let mut stack = vec![self.base.clone()];
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(&d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    let b = fs::read(&p).unwrap();
+                    assert!(!b.windows(FAKE.len()).any(|w| w == FAKE.as_bytes()), "token in {p:?}");
+                }
+            }
+        }
+    }
+}
+
+fn repo_json(name: &str, private: bool) -> String {
+    json!({
+        "id": 99, "name": name, "full_name": format!("kim-lab/{name}"), "owner": {"login": "kim-lab"},
+        "private": private, "html_url": format!("https://github.com/kim-lab/{name}"), "size": 0,
+        "default_branch": "main", "permissions": {"admin": true, "push": true, "pull": true}
+    })
+    .to_string()
+}
+
+fn created(name: &str, private: bool) -> Canned {
+    Canned::status(201).header("Content-Type", "application/json").body(repo_json(name, private))
+}
+
+fn got(name: &str, private: bool) -> Canned {
+    Canned::ok(&repo_json(name, private))
+}
+
+fn quiet_count(s: &TestServer) -> usize {
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    s.request_count()
+}
+
+fn choices(json: Value) -> UploadChoices {
+    serde_json::from_value(json).unwrap()
+}
+
+/// Creates and pushes the fixture folder; answers the remote.
+fn first_upload(fx: &Fx) -> Repository {
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, true)]);
+    let out = fx.upload(&s, &fx.create(true), UploadChoices::default());
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    remote
+}
+
+#[test]
+fn create_and_first_push() {
+    let fx = Fx::new("gh-up-first");
+    let before = snapshot(&fx.root);
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, true)]);
+    let steps = TestSteps::default();
+    let id = fx.create(true);
+    let out = fx.upload_with(&s, &steps, &id, UploadChoices::default());
+    assert_eq!(
+        out,
+        UploadOutcome::Done {
+            html_url: format!("https://github.com/kim-lab/{NAME}"),
+            full_name: format!("kim-lab/{NAME}"),
+            counts: Counts { new: 3, changed: 0, deleted: 0 },
+            warnings: vec![],
+        }
+    );
+    // Exactly one POST, with exactly the fixed body.
+    let reqs = s.requests.lock().unwrap().clone();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!((reqs[0].method.as_str(), reqs[0].path.as_str()), ("POST", "/user/repos"));
+    let body: Value = serde_json::from_str(&reqs[0].body).unwrap();
+    assert_eq!(
+        body,
+        json!({"name": NAME, "description": "단백질 발현 · labnoteO", "private": true, "auto_init": false, "has_wiki": false})
+    );
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 1);
+    // The journal ends `pushed`, and the commit is on the remote.
+    let link = fx.link();
+    assert_eq!(link.state, LinkState::Pushed);
+    assert_eq!((link.repo_id, link.owner.as_str(), link.name.as_str(), link.private), (99, "kim-lab", NAME, true));
+    assert!(link.pending_commit.is_none() && link.last_pushed_at.is_some());
+    let commit = Oid::from_str(link.last_pushed_commit.as_deref().unwrap()).unwrap();
+    assert_eq!(remote.refname_to_id("refs/heads/main").unwrap(), commit);
+    assert_eq!(blob_at(&remote, commit, "data/plate.csv").as_deref(), Some(&b"well,od\r\nA1,0.5\r\n"[..]));
+    assert!(blob_at(&remote, commit, ".gitattributes").is_some());
+    assert!(blob_at(&remote, commit, ".env").is_none());
+    assert_eq!(fx.links().default_owner.as_deref(), Some("kim-lab"));
+    // The vault is byte- and mtime-identical; nothing holds the token.
+    assert_eq!(snapshot(&fx.root), before);
+    fx.no_token();
+    // The plan was used: a second upload of it has expired.
+    assert_eq!(fx.upload(&s, &id, UploadChoices::default()), UploadOutcome::PlanExpired);
+}
+
+#[test]
+fn an_update_sends_changes_and_nothing_changed_sends_nothing() {
+    let fx = Fx::new("gh-up-update");
+    let remote = first_upload(&fx);
+    let first = fx.link().last_pushed_commit.unwrap();
+    fx.put("data/plate.csv", b"well,od\r\nA1,0.7\r\n");
+    let s = serve(vec![got(NAME, true)]);
+    let out = fx.upload(&s, &fx.plan(PlanTarget::Update), UploadChoices::default());
+    let UploadOutcome::Done { counts, warnings, .. } = out else { panic!("{out:?}") };
+    assert_eq!(counts, Counts { new: 0, changed: 1, deleted: 0 });
+    assert!(warnings.is_empty());
+    let reqs = s.requests.lock().unwrap().clone();
+    assert_eq!((reqs.len(), reqs[0].method.as_str()), (1, "GET"), "an update never creates");
+    let second = fx.link().last_pushed_commit.unwrap();
+    assert_ne!(first, second);
+    let tip = remote.refname_to_id("refs/heads/main").unwrap();
+    assert_eq!(tip.to_string(), second);
+    assert_eq!(remote.find_commit(tip).unwrap().parent_id(0).unwrap().to_string(), first, "a fast-forward");
+    // No change: nothing is committed or pushed.
+    let steps = TestSteps::default();
+    let s = serve(vec![got(NAME, true)]);
+    assert_eq!(fx.upload_with(&s, &steps, &fx.plan(PlanTarget::Update), UploadChoices::default()), UploadOutcome::NothingChanged);
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    assert_eq!(fx.link().last_pushed_commit.unwrap(), second);
+    assert_eq!(remote.refname_to_id("refs/heads/main").unwrap(), tip);
+    fx.no_token();
+}
+
+#[test]
+fn untick_only_removes_planned_paths() {
+    let fx = Fx::new("gh-up-untick");
+    let remote = fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, true)]);
+    let c = choices(json!({"untick": [".env", "../outside.txt", "nope.md", "data/plate.csv"]}));
+    let out = fx.upload(&s, &fx.create(true), c);
+    let UploadOutcome::Done { counts, .. } = out else { panic!("{out:?}") };
+    assert_eq!(counts.new, 2);
+    let commit = Oid::from_str(fx.link().last_pushed_commit.as_deref().unwrap()).unwrap();
+    for absent in [".env", "../outside.txt", "nope.md", "data/plate.csv"] {
+        assert!(blob_at(&remote, commit, absent).is_none(), "{absent}");
+    }
+    assert!(blob_at(&remote, commit, "README.labnote.md").is_some());
+    // The exclusion is remembered; unknown paths are not.
+    assert_eq!(fx.link().excluded, ["data/plate.csv"]);
+}
+
+#[test]
+fn a_file_changed_after_the_plan_is_stale_before_anything_is_sent() {
+    let fx = Fx::new("gh-up-stale");
+    let s = serve(vec![created(NAME, true)]);
+    let steps = TestSteps::default();
+    let id = fx.create(true);
+    fx.put("data/plate.csv", b"edited after the preview\n");
+    assert_eq!(fx.upload_with(&s, &steps, &id, UploadChoices::default()), UploadOutcome::PlanStale);
+    assert_eq!(quiet_count(&s), 0, "no POST");
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    assert!(fx.links().links.is_empty());
+}
+
+#[test]
+fn a_private_key_stays_blocked_whatever_allow_hits_says() {
+    let fx = Fx::new("gh-up-pk");
+    fx.put("keys.md", b"-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\n-----END RSA PRIVATE KEY-----\n");
+    let (outcome, id) = fx.plan_full(PlanTarget::Create { owner: "kim-lab".into(), name: NAME.into(), private: true });
+    let PlanOutcome::Ready { red, .. } = outcome else { panic!() };
+    let hit = red
+        .iter()
+        .find_map(|r| match r {
+            Red::Secret { hit, .. } if hit.path == "keys.md" => Some(hit.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!hit.overridable);
+    let s = serve(vec![created(NAME, true)]);
+    let c = choices(json!({"allowHits": [{"path": "keys.md", "lineHash": hit.line_hash}]}));
+    let UploadOutcome::Blocked { red } = fx.upload(&s, &id, c) else { panic!() };
+    assert!(red.iter().any(|r| matches!(r, Red::Secret { hit, .. } if hit.path == "keys.md")));
+    assert_eq!(quiet_count(&s), 0);
+    // Leaving the file out is the way through.
+    let id = fx.create(true);
+    fx.remote("kim-lab", NAME);
+    let out = fx.upload(&s, &id, choices(json!({"untick": ["keys.md"]})));
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+}
+
+#[test]
+fn public_needs_the_typed_name() {
+    let fx = Fx::new("gh-up-public");
+    let s = serve(vec![created(NAME, false)]);
+    let out = fx.upload(&s, &fx.create(false), choices(json!({"publicConfirm": "001_danbaekjil"})));
+    assert_eq!(out, UploadOutcome::Blocked { red: vec![Red::PublicNotConfirmed] });
+    assert_eq!(quiet_count(&s), 0);
+    fx.remote("kim-lab", NAME);
+    let out = fx.upload(&s, &fx.create(false), choices(json!({"publicConfirm": NAME})));
+    assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    let body: Value = serde_json::from_str(&s.requests.lock().unwrap()[0].body).unwrap();
+    assert_eq!(body["private"], json!(false));
+    assert!(!fx.link().private);
+}
+
+#[test]
+fn a_repo_that_is_not_private_stops_before_any_push() {
+    let fx = Fx::new("gh-up-vis");
+    fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, false)]);
+    let steps = TestSteps::default();
+    let out = fx.upload_with(&s, &steps, &fx.create(true), UploadChoices::default());
+    assert_eq!(out, UploadOutcome::VisibilityMismatch { html_url: format!("https://github.com/kim-lab/{NAME}") });
+    assert_eq!((steps.fetches.load(Ordering::SeqCst), steps.pushes.load(Ordering::SeqCst)), (0, 0));
+    let link = fx.link();
+    assert_eq!(link.state, LinkState::RepoReady);
+    assert_eq!(link.repo_id, 99);
+    assert!(link.last_pushed_commit.is_none());
+}
+
+#[test]
+fn two_uploads_of_one_folder_one_is_busy_and_one_post() {
+    let fx = Fx::new("gh-up-busy");
+    fx.remote("kim-lab", NAME);
+    let s = serve(vec![created(NAME, true)]);
+    let (reached_tx, reached_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let gated = TestSteps { gate: Some((reached_tx, Mutex::new(release_rx))), ..TestSteps::default() };
+    let (a, b) = (fx.create(true), fx.create(true));
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| fx.upload_with(&s, &gated, &a, UploadChoices::default()));
+        reached_rx.recv().unwrap();
+        // The first holds the lock and waits just before its POST.
+        assert_eq!(fx.upload(&s, &b, UploadChoices::default()), UploadOutcome::Busy);
+        release_tx.send(()).unwrap();
+        let out = first.join().unwrap();
+        assert!(matches!(out, UploadOutcome::Done { .. }), "{out:?}");
+    });
+    assert_eq!(quiet_count(&s), 1, "exactly one POST");
+}
+
+#[test]
+fn an_org_restriction_names_the_approve_page_and_unlinks() {
+    let fx = Fx::new("gh-up-org");
+    write_doc(&fx.dirs, None, GithubDoc::App, &GithubAppSettings { client_id: Some("Iv1.lab".into()), forget_on_exit: false }).unwrap();
+    let body = json!({"message": "Although you appear to have the correct authorization credentials, the `lab-org` organization has enabled OAuth App access restrictions."});
+    let s = serve(vec![Canned::status(403).header("Content-Type", "application/json").body(body.to_string())]);
+    let id = fx.plan(PlanTarget::Create { owner: "lab-org".into(), name: format!("kim-lab-{NAME}"), private: true });
+    let out = fx.upload(&s, &id, UploadChoices::default());
+    assert_eq!(
+        out,
+        UploadOutcome::OrgRestricted {
+            org: "lab-org".into(),
+            approve_url: "https://github.com/settings/connections/applications/Iv1.lab".into()
+        }
+    );
+    let reqs = s.requests.lock().unwrap().clone();
+    assert_eq!((reqs[0].method.as_str(), reqs[0].path.as_str()), ("POST", "/orgs/lab-org/repos"));
+    assert!(fx.links().links.is_empty(), "nothing was created, so the folder is not linked");
+}
+
+#[test]
+fn a_401_needs_sign_in_and_starts_no_device_flow() {
+    let fx = Fx::new("gh-up-401");
+    first_upload(&fx);
+    fx.put("data/plate.csv", b"changed\n");
+    let s = serve(vec![Canned::status(401), Canned::status(200)]);
+    let steps = TestSteps::default();
+    assert_eq!(fx.upload_with(&s, &steps, &fx.plan(PlanTarget::Update), UploadChoices::default()), UploadOutcome::NeedsSignIn);
+    assert_eq!(quiet_count(&s), 1, "no device flow, no retry");
+    assert_eq!(steps.pushes.load(Ordering::SeqCst), 0);
+    assert_eq!(fx.link().state, LinkState::Pushed);
+    // A 401 on create: nothing created, so no link stays behind.
+    let fx = Fx::new("gh-up-401c");
+    let s = serve(vec![Canned::status(401)]);
+    assert_eq!(fx.upload(&s, &fx.create(true), UploadChoices::default()), UploadOutcome::NeedsSignIn);
+    assert!(fx.links().links.is_empty());
+}
+
+#[test]
+fn a_repo_made_public_warns_once() {
+    let fx = Fx::new("gh-up-nowpublic");
+    first_upload(&fx);
+    fx.put("data/plate.csv", b"v2\n");
+    let s = serve(vec![got(NAME, false)]);
+    let UploadOutcome::Done { warnings, .. } = fx.upload(&s, &fx.plan(PlanTarget::Update), UploadChoices::default()) else { panic!() };
+    assert_eq!(warnings, [UploadWarning::NowPublic]);
+    assert!(!fx.link().private);
+    fx.put("data/plate.csv", b"v3\n");
+    let s = serve(vec![got(NAME, false)]);
+    let UploadOutcome::Done { warnings, .. } = fx.upload(&s, &fx.plan(PlanTarget::Update), UploadChoices::default()) else { panic!() };
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn no_token_means_sign_in_with_nothing_sent() {
+    let fx = Fx::new("gh-up-notoken");
+    crate::gitsync::state::sign_out_stored(&fx.dirs, &fx.store).unwrap();
+    let s = serve(vec![created(NAME, true)]);
+    assert_eq!(fx.upload(&s, &fx.create(true), UploadChoices::default()), UploadOutcome::NeedsSignIn);
+    assert_eq!(quiet_count(&s), 0);
+    assert!(fx.links().links.is_empty());
+}
+
+#[test]
+fn status_is_offline_and_counts_changes() {
+    let fx = Fx::new("gh-up-status");
+    // Unlinked: nothing to count, and no network is even reachable here.
+    let st = folder_status_at(&fx.dirs, &fx.root, FOLDER).unwrap();
+    assert!(!st.linked && !st.folder_missing && st.changed_count == 0);
+    assert_eq!(serde_json::to_value(&st).unwrap(), json!({"linked": false, "state": "planned", "changedCount": 0, "folderMissing": false}));
+    first_upload(&fx);
+    let st = folder_status_at(&fx.dirs, &fx.root, FOLDER).unwrap();
+    assert_eq!((st.linked, st.state, st.changed_count, st.private), (true, LinkState::Pushed, 0, Some(true)));
+    assert_eq!(st.full_name.as_deref(), Some(&*format!("kim-lab/{NAME}")));
+    fx.put("data/plate.csv", b"changed\n");
+    fx.put("new.md", b"new\n");
+    fs::remove_file(fx.root.join(FOLDER).join("workflows/002_PCR.labnote.md")).unwrap();
+    assert_eq!(folder_status_at(&fx.dirs, &fx.root, FOLDER).unwrap().changed_count, 3);
+    let all = statuses_at(&fx.dirs, &fx.root).unwrap();
+    assert_eq!(all.keys().collect::<Vec<_>>(), [FOLDER]);
+    assert_eq!(all[FOLDER].changed_count, 3);
+    // A deleted folder keeps its link and says so.
+    fs::remove_dir_all(fx.root.join(FOLDER)).unwrap();
+    let st = folder_status_at(&fx.dirs, &fx.root, FOLDER).unwrap();
+    assert!(st.linked && st.folder_missing);
+}
+
+#[test]
+fn default_owner_is_validated() {
+    let fx = Fx::new("gh-up-owner");
+    assert_eq!(default_owner_get_at(&fx.dirs, &fx.root).unwrap(), None);
+    default_owner_set_at(&fx.dirs, &fx.root, "lab-org").unwrap();
+    assert_eq!(default_owner_get_at(&fx.dirs, &fx.root).unwrap().as_deref(), Some("lab-org"));
+    for bad in ["", "a/b", "..", "x y"] {
+        assert_eq!(default_owner_set_at(&fx.dirs, &fx.root, bad).unwrap_err().kind, NetErrorKind::BadInput, "{bad}");
+    }
+}
+
+#[test]
+fn unlink_trashes_the_app_copy_and_sends_nothing() {
+    let fx = Fx::new("gh-up-unlink");
+    first_upload(&fx);
+    let link = fx.link();
+    let bare = bare_repo_path(&fx.dirs, &fx.root, &link.link_id).unwrap();
+    assert!(bare.is_dir());
+    let before = snapshot(&fx.root);
+    let trashed = Mutex::new(Vec::new());
+    // Held by an upload: refused, nothing touched.
+    {
+        let _held = lock_link(&fx.gh.busy, &fx.dirs, &fx.root, &[LockKey::Link(link.link_id.clone())]).unwrap();
+        assert!(unlink_at(&fx.dirs, &fx.root, &fx.gh.busy, FOLDER, |p| {
+            trashed.lock().unwrap().push(p.to_path_buf());
+            Ok(())
+        })
+        .is_err());
+        assert!(trashed.lock().unwrap().is_empty());
+    }
+    unlink_at(&fx.dirs, &fx.root, &fx.gh.busy, FOLDER, |p| {
+        trashed.lock().unwrap().push(p.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(*trashed.lock().unwrap(), [bare]);
+    assert!(fx.links().links.is_empty());
+    assert_eq!(snapshot(&fx.root), before, "the vault is untouched");
+    // An unlinked folder is fine and trashes nothing.
+    unlink_at(&fx.dirs, &fx.root, &fx.gh.busy, FOLDER, |_| panic!("nothing to trash")).unwrap();
+    // A failing Recycle Bin keeps the link.
+    let fx = Fx::new("gh-up-unlink2");
+    first_upload(&fx);
+    assert!(unlink_at(&fx.dirs, &fx.root, &fx.gh.busy, FOLDER, |_| Err(trash::Error::Unknown { description: "no".into() })).is_err());
+    assert!(fx.links().links.contains_key(FOLDER));
+}
+
+#[test]
+fn a_renamed_folder_keeps_its_link() {
+    let fx = Fx::new("gh-up-rename");
+    first_upload(&fx);
+    let id = fx.link().link_id;
+    let locks = crate::vault::fs::PathLocks::default();
+    crate::vault::fs::rename(&locks, &fx.root, FOLDER, "labnote/001_renamed").unwrap();
+    crate::gitsync::links::on_rename(&fx.dirs, &fx.root, FOLDER, "labnote/001_renamed").unwrap();
+    let links = fx.links();
+    assert_eq!(links.links["labnote/001_renamed"].link_id, id);
+    let st = folder_status_at(&fx.dirs, &fx.root, "labnote/001_renamed").unwrap();
+    assert!(st.linked && !st.folder_missing && st.changed_count == 0, "{st:?}");
+}
+
+#[test]
+fn the_wire_shapes() {
+    let v = serde_json::to_value(UploadOutcome::OrgRestricted { org: "o".into(), approve_url: "u".into() }).unwrap();
+    assert_eq!(v, json!({"outcome": "orgRestricted", "org": "o", "approveUrl": "u"}));
+    let v = serde_json::to_value(UploadOutcome::Done {
+        html_url: "h".into(),
+        full_name: "o/r".into(),
+        counts: Counts { new: 1, changed: 2, deleted: 3 },
+        warnings: vec![UploadWarning::NowPublic],
+    })
+    .unwrap();
+    assert_eq!(
+        v,
+        json!({"outcome": "done", "htmlUrl": "h", "fullName": "o/r", "counts": {"new": 1, "changed": 2, "deleted": 3}, "warnings": ["nowPublic"]})
+    );
+    assert_eq!(serde_json::to_value(UploadOutcome::Busy).unwrap(), json!({"outcome": "busy"}));
+    let p = GithubProgress { request_id: "r".into(), stage: Stage::Uploading, done: 1, total: 2 };
+    assert_eq!(serde_json::to_value(p).unwrap(), json!({"requestId": "r", "stage": "uploading", "done": 1, "total": 2}));
+    // Choices refuse anything they do not know (no way to add a path).
+    assert!(serde_json::from_value::<UploadChoices>(json!({"add": ["x"]})).is_err());
+    let c: UploadChoices = serde_json::from_value(json!({"diverged": "mine", "ackFiles": ["a"]})).unwrap();
+    assert_eq!(c.diverged, Some(DivergedChoice::Mine));
+}

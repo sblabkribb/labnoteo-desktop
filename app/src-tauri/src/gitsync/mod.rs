@@ -4,6 +4,7 @@
 //! `github_*` commands, never through `integration_state_*`.
 
 pub mod exif;
+pub mod journal;
 pub mod links;
 pub mod overlay;
 pub mod plan;
@@ -13,4 +14,5 @@ pub mod scan;
 #[cfg(test)]
 pub mod smart_http_stub;
 pub mod state;
+pub mod upload;
 pub mod walk;

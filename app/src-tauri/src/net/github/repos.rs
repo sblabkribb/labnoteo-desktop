@@ -181,20 +181,22 @@ fn has_next(reply: &ApiReply) -> bool {
     })
 }
 
-/// What a `GET repos/{o}/{r}` answer says about the repo.
-struct RepoFacts {
-    owner: String,
-    name: String,
-    id: u64,
-    private: bool,
-    empty: bool,
-    can_push: bool,
-    default_branch: String,
+/// What a `GET repos/{o}/{r}` (or a create) answer says about the repo.
+pub(crate) struct RepoFacts {
+    pub owner: String,
+    pub name: String,
+    pub id: u64,
+    pub private: bool,
+    pub empty: bool,
+    pub can_push: bool,
+    pub default_branch: String,
+    /// `html_url` when it is `https` (the web page of the repo); empty otherwise.
+    pub html_url: String,
 }
 
 /// `None` unless the answer has an id, a visibility and a valid owner and
 /// name: "private" is never guessed.
-fn repo_facts(j: &Value) -> Option<RepoFacts> {
+pub(crate) fn repo_facts(j: &Value) -> Option<RepoFacts> {
     let owner = j["owner"]["login"].as_str().filter(|s| valid_segment(s))?;
     let name = j["name"].as_str().filter(|s| valid_segment(s))?;
     let branch = j["default_branch"]
@@ -209,6 +211,11 @@ fn repo_facts(j: &Value) -> Option<RepoFacts> {
         empty: j["size"].as_u64() == Some(0),
         can_push: j["permissions"]["push"].as_bool().unwrap_or(false),
         default_branch: branch.to_string(),
+        html_url: j["html_url"]
+            .as_str()
+            .filter(|u| Url::parse(u).is_ok_and(|u| matches!(u.scheme(), "https" | "http")))
+            .unwrap_or("")
+            .to_string(),
     })
 }
 

@@ -130,6 +130,13 @@ macro_rules! register_commands {
             $crate::net::github::repos::github_resolve_repo,
             // GitHub upload plan (walk and scan and compare; local only and no network).
             $crate::gitsync::plan::github_plan,
+            // GitHub upload and status and default owner and disconnect (all but the upload offline).
+            $crate::gitsync::upload::github_upload,
+            $crate::gitsync::upload::github_folder_status,
+            $crate::gitsync::upload::github_statuses,
+            $crate::gitsync::upload::github_default_owner_get,
+            $crate::gitsync::upload::github_default_owner_set,
+            $crate::gitsync::upload::github_unlink,
         ])
     };
 }

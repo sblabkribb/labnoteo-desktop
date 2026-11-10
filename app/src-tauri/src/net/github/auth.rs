@@ -81,6 +81,8 @@ pub struct GithubState {
     /// Upload plans (`github_plan`); they hold no token and no file bytes
     /// beyond a capped cache.
     pub(crate) plans: crate::gitsync::plan::PlanStore,
+    /// Links and folders being uploaded in this process (plan P-R13).
+    pub(crate) busy: crate::gitsync::links::BusySet,
 }
 
 impl std::fmt::Debug for GithubState {

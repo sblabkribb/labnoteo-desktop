@@ -45,6 +45,13 @@ const PENDING_TS_WRAPPERS: readonly string[] = [
   'github_resolve_repo',
   // Task 7: 올릴 파일 확인(계획). 네트워크를 쓰지 않는다.
   'github_plan',
+  // Task 9A: 올리기, 폴더 상태, 기본 올릴 곳, 연결 끊기(올리기 말고는 네트워크를 쓰지 않는다).
+  'github_upload',
+  'github_folder_status',
+  'github_statuses',
+  'github_default_owner_get',
+  'github_default_owner_set',
+  'github_unlink',
 ];
 
 /**

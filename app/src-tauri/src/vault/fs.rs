@@ -888,8 +888,19 @@ pub fn vault_rmdir(state: tauri::State<'_, super::VaultState>, path: String) -> 
 }
 
 #[tauri::command]
-pub fn vault_rename(state: tauri::State<'_, super::VaultState>, from: String, to: String) -> Result<(), FsError> {
-    rename(&state.locks, &state.root()?, &from, &to)
+pub fn vault_rename(
+    state: tauri::State<'_, super::VaultState>,
+    dirs: tauri::State<'_, crate::net::IntegrationDirs>,
+    from: String,
+    to: String,
+) -> Result<(), FsError> {
+    let root = state.root()?;
+    rename(&state.locks, &root, &from, &to)?;
+    // GitHub links follow the folder (plan P-R14). A failure here leaves the
+    // folder shown as not linked, which the name check recovers; the rename
+    // itself already happened.
+    let _ = crate::gitsync::links::on_rename(&dirs.0, &root, &from, &to);
+    Ok(())
 }
 
 /// Async and off the main thread: a sync command runs on the main thread, and a

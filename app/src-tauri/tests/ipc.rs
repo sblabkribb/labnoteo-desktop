@@ -381,6 +381,54 @@ fn ipc_argument_names_match_the_typescript_side() {
         "badInput"
     );
     assert!(call("github_plan", json!({"folder": "labnote/001_ipc"})).is_err());
+    // The upload names only a plan: an unknown one is `planExpired` with
+    // nothing sent, and choices that try to add anything are refused.
+    assert_eq!(
+        ok(
+            "github_upload",
+            args(
+                "github_upload",
+                vec![json!("gh-up-1"), json!("0123456789abcdef0123456789abcdef"), json!({"untick": [], "allowHits": [], "includeSamples": false})]
+            )
+        ),
+        json!({"outcome": "planExpired"})
+    );
+    assert!(call("github_upload", json!({"requestId": "x", "planId": "y", "choices": {"add": ["x"]}})).is_err());
+    // Status, default owner and unlink are offline and answer for an unlinked folder.
+    assert_eq!(
+        ok("github_folder_status", args("github_folder_status", vec![json!("labnote/001_ipc")])),
+        json!({"linked": false, "state": "planned", "changedCount": 0, "folderMissing": false})
+    );
+    assert_eq!(ok("github_statuses", args("github_statuses", vec![])), json!({}));
+    assert_eq!(ok("github_default_owner_get", args("github_default_owner_get", vec![])), Value::Null);
+    assert_eq!(
+        call("github_default_owner_set", args("github_default_owner_set", vec![json!("a/b")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(ok("github_default_owner_set", args("github_default_owner_set", vec![json!("kim-lab")])), Value::Null);
+    assert_eq!(ok("github_default_owner_get", args("github_default_owner_get", vec![])), json!("kim-lab"));
+    assert_eq!(ok("github_unlink", args("github_unlink", vec![json!("labnote/001_ipc")])), Value::Null);
+    // The links document is Rust-only: no integration state names it.
+    for name in ["githubLinks", "githubStatusCache", "githubApp"] {
+        assert!(call("integration_state_read", json!({"name": name})).is_err(), "{name}");
+        assert!(call("integration_state_write", json!({"name": name, "content": "{}"})).is_err(), "{name}");
+    }
+    // `vault_rename` (now with the integration dirs) re-keys a link in Rust.
+    let links_file = std::fs::read_dir(dir.join("data").join("integrations").join("github"))
+        .unwrap()
+        .map(|e| e.unwrap().path().join("links.json"))
+        .find(|p| p.is_file())
+        .expect("the default owner was saved in links.json");
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&links_file).unwrap()).unwrap();
+    doc["links"] = json!({"labnote/001_ipc": {"linkId": "0123456789abcdef0123456789abcdef", "owner": "kim-lab", "name": "exp", "state": "pushed"}});
+    std::fs::write(&links_file, doc.to_string()).unwrap();
+    ok("vault_rename", args("vault_rename", vec![json!("labnote/001_ipc"), json!("labnote/001_moved")]));
+    let statuses = ok("github_statuses", args("github_statuses", vec![]));
+    assert_eq!(statuses["labnote/001_moved"]["linked"], json!(true), "{statuses}");
+    assert_eq!(statuses["labnote/001_moved"]["fullName"], json!("kim-lab/exp"));
+    assert!(statuses.get("labnote/001_ipc").is_none());
+    assert_eq!(ok("github_unlink", args("github_unlink", vec![json!("labnote/001_moved")])), Value::Null);
+    assert_eq!(ok("github_statuses", args("github_statuses", vec![])), json!({}));
     std::fs::remove_dir_all(dir.join("vault").join("labnote")).unwrap();
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["github"], &status["set"]["githubRefresh"]), (&json!(false), &json!(false)));
@@ -1122,6 +1170,23 @@ fn bfworkflow_notes_event_matches_the_typescript_side() {
     assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
     assert_eq!(payload[ev["payload"]["fields"]["step"].as_str().unwrap()], "init");
     assert_eq!(payload[ev["payload"]["fields"]["message"].as_str().unwrap()], "m");
+}
+
+#[test]
+fn github_progress_event_matches_the_typescript_side() {
+    use labnoteo_app_lib::gitsync::upload::{GithubProgress, Stage, PROGRESS_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let ev = &fixture["githubProgress"];
+    assert_eq!(ev["name"], PROGRESS_EVENT);
+    let payload = serde_json::to_value(GithubProgress { request_id: "r".into(), stage: Stage::Creating, done: 1, total: 2 }).unwrap();
+    let keys: std::collections::BTreeSet<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+    let fields: std::collections::BTreeSet<&str> =
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(keys, fields, "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
+    assert_eq!(payload[ev["payload"]["fields"]["stage"].as_str().unwrap()], "creating");
+    assert_eq!(payload[ev["payload"]["fields"]["done"].as_str().unwrap()], 1);
+    assert_eq!(payload[ev["payload"]["fields"]["total"].as_str().unwrap()], 2);
 }
 
 #[test]

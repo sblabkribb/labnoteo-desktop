@@ -96,5 +96,11 @@
   "github_owners": ["requestId"],
   "github_name_check": ["owner", "name"],
   "github_resolve_repo": ["url"],
-  "github_plan": ["folder", "target", "sampleIds", "infoFindings"]
+  "github_plan": ["folder", "target", "sampleIds", "infoFindings"],
+  "github_upload": ["requestId", "planId", "choices"],
+  "github_folder_status": ["folder"],
+  "github_statuses": [],
+  "github_default_owner_get": [],
+  "github_default_owner_set": ["owner"],
+  "github_unlink": ["folder"]
 }
