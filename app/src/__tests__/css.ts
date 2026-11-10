@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 
 /** 앱의 스타일 파일. main.tsx 가 이 순서로 불러온다: 같은 특이도에서는 뒤의 파일이 이긴다(styles.test.ts 가 그 순서를 지킨다). */
-export const STYLE_FILES = ['tokens', 'shell', 'tree', 'menus', 'dialogs', 'viewers'] as const;
+export const STYLE_FILES = ['tokens', 'shell', 'tree', 'menus', 'dialogs', 'viewers', 'assistant'] as const;
 
 /** 스타일 파일들을 불러오는 순서대로. `file` 은 앱 폴더 기준 경로(src/styles/tokens.css …). */
 export function readStyles(): { file: string; text: string }[] {

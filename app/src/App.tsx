@@ -48,7 +48,7 @@ import { createAppHost } from './labnote/host/createAppHost';
 import { DialogLayer, PET_LAYER_ID } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
-import { clearToasts } from './labnote/host/toastStore';
+import { clearToasts, notify as notifyToast } from './labnote/host/toastStore';
 import { startMcpForVault } from './labnote/mcp/commands';
 import { cancelAllRequests } from './integrations/netIpc';
 import { startBfworkflow } from './bfworkflow/bfwApp';
@@ -89,6 +89,8 @@ import { startScan } from './labnote/scan/commands';
 import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
 import { Ribbon } from './ui/Ribbon';
+import { PetLayer } from './assistant/PetLayer';
+import { openAssistant, toggleAssistant } from './assistant/commands';
 import { EmptyState } from './ui/EmptyState';
 import { Dock } from './ui/Dock';
 import { RightDock } from './ui/RightDock';
@@ -583,9 +585,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     }
     if (id === 'app.toggleLeft') layoutStore.toggleLeft();
     else if (id === 'app.toggleRight') layoutStore.toggleRight();
+    // 어시스턴트 보이기·열기도 보관함 설정 없이 돈다(이 PC 의 ui.json 만 쓴다)
+    else if (id === 'assistant.toggleVisible') toggleAssistant(notifyToast);
+    else if (id === 'assistant.open') openAssistant();
     else if (id === 'app.newNote') void newNote();
   };
-  // 셸 단축키(shellKeys.ts): Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바, Ctrl+N 새 노트, Ctrl+O 빠른 이동, Ctrl+, 설정.
+  // 셸 단축키(shellKeys.ts): Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바, Ctrl+N 새 노트, Ctrl+O 빠른 이동, Ctrl+, 설정,
+  // Ctrl+Shift+Y 어시스턴트 열기.
   // 편집기 키는 그림자 DOM 을 지나 window 까지 온다. 대화상자가 열려 있으면 듣지 않는다.
   const shellRun = useRef(runShellCommand);
   shellRun.current = runShellCommand;
@@ -694,7 +700,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   return (
     <>
       <div className="shell" ref={shell}>
-        <Ribbon onCommand={runShellCommand} leftHidden={layout.leftHidden} rightOpen={layout.rightOpen} ready={ctx !== undefined} />
+        <Ribbon
+          onCommand={runShellCommand}
+          leftHidden={layout.leftHidden}
+          rightOpen={layout.rightOpen}
+          ready={ctx !== undefined}
+          assistantVisible={!layout.pet.hidden}
+        />
         <div className="notices">
           {failed && <p role="alert">{t('tree.error')}</p>}
           {settingsImported && <p role="status">{t('settings.imported')}</p>}
@@ -873,8 +885,10 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       {/* .shell 밖: 대화상자가 열려 있는 동안 .shell 은 inert 다. 알림과 메뉴는 그 위에 뜬다 */}
       <DialogLayer blockRef={shell} />
       <Toaster />
-      {/* 떠 있는 도우미 층(아직 비어 있다). 대화상자가 열려 있는 동안 DialogLayer 가 inert 로 막는다 */}
-      <div id={PET_LAYER_ID} />
+      {/* 떠 있는 도우미 층(assistant 명세 §4.1). 탭 순서의 맨 끝(상태 줄 뒤)이다. 대화상자가 열려 있는 동안 DialogLayer 가 inert 로 막는다 */}
+      <div id={PET_LAYER_ID}>
+        <PetLayer />
+      </div>
       <ContextMenu />
     </>
   );

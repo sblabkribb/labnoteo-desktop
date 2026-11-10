@@ -1,6 +1,7 @@
 //! App-wide UI layout preferences (sidebar widths, which sidebars are open,
-//! the active tabs, row density), kept in `ui.json` next to `settings.json` in
-//! the app config dir. Not per vault and not a secret.
+//! the active tabs, row density, and the floating assistant's place, size,
+//! visibility and skin), kept in `ui.json` next to `settings.json` in the app
+//! config dir. Per PC, not per vault and not a secret.
 //!
 //! Every field is validated on read and on write: a width out of range is
 //! clamped, an unknown tab or density falls back to its default, unknown
@@ -22,6 +23,68 @@ pub const LEFT_DEFAULT: u16 = 272;
 pub const RIGHT_MIN: u16 = 220;
 pub const RIGHT_MAX: u16 = 480;
 pub const RIGHT_DEFAULT: u16 = 280;
+/// The assistant's offsets are measured from the window's right and bottom
+/// edges in CSS px. Rust does not know the window size: it only caps them, and
+/// the webview clamps them into the viewport.
+pub const PET_OFFSET_MAX: u16 = 4096;
+pub const PET_X_DEFAULT: u16 = 24;
+pub const PET_Y_DEFAULT: u16 = 40;
+pub const PET_SKIN_DEFAULT: &str = "flasko";
+
+/// The floating assistant ("pet"). Integer display scale 2 or 3 only. `skin`
+/// is only checked against the id pattern `[a-z0-9-]{3,32}`: Rust does not
+/// know which skins are installed, the webview falls back to the built-in one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetPrefs {
+    pub x: u16,
+    pub y: u16,
+    pub hidden: bool,
+    pub scale: u8,
+    pub skin: String,
+}
+
+impl Default for PetPrefs {
+    fn default() -> Self {
+        PetPrefs { x: PET_X_DEFAULT, y: PET_Y_DEFAULT, hidden: false, scale: 2, skin: PET_SKIN_DEFAULT.into() }
+    }
+}
+
+/// `[a-z0-9-]{3,32}`.
+pub fn valid_skin_id(id: &str) -> bool {
+    (3..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+impl PetPrefs {
+    pub fn clamp(self) -> Self {
+        PetPrefs {
+            x: self.x.min(PET_OFFSET_MAX),
+            y: self.y.min(PET_OFFSET_MAX),
+            hidden: self.hidden,
+            scale: if self.scale == 3 { 3 } else { 2 },
+            skin: if valid_skin_id(&self.skin) { self.skin } else { PET_SKIN_DEFAULT.into() },
+        }
+    }
+}
+
+/// Lenient like `UiPrefs`: a non-object gives the defaults, a bad field its default.
+impl From<Option<&Value>> for PetPrefs {
+    fn from(v: Option<&Value>) -> Self {
+        let d = PetPrefs::default();
+        let Some(o) = v.filter(|v| v.is_object()) else { return d };
+        PetPrefs {
+            x: width(o.get("x"), d.x),
+            y: width(o.get("y"), d.y),
+            hidden: flag(o.get("hidden"), d.hidden),
+            scale: match o.get("scale").and_then(Value::as_f64) {
+                Some(n) if n == 3.0 => 3,
+                _ => 2,
+            },
+            skin: o.get("skin").and_then(Value::as_str).map(str::to_owned).unwrap_or(d.skin),
+        }
+        .clamp()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -61,6 +124,7 @@ pub struct UiPrefs {
     pub right_tab: RightTab,
     pub density: Density,
     pub show_system_files: bool,
+    pub pet: PetPrefs,
 }
 
 impl Default for UiPrefs {
@@ -74,16 +138,18 @@ impl Default for UiPrefs {
             right_tab: RightTab::Outline,
             density: Density::Comfortable,
             show_system_files: false,
+            pet: PetPrefs::default(),
         }
     }
 }
 
 impl UiPrefs {
-    /// Widths into their ranges. The enums are valid by construction.
+    /// Widths into their ranges and the pet's fields checked. The enums are valid by construction.
     pub fn clamp(self) -> Self {
         UiPrefs {
             left_width: self.left_width.clamp(LEFT_MIN, LEFT_MAX),
             right_width: self.right_width.clamp(RIGHT_MIN, RIGHT_MAX),
+            pet: self.pet.clamp(),
             ..self
         }
     }
@@ -125,6 +191,7 @@ impl From<Value> for UiPrefs {
                 _ => Density::Comfortable,
             },
             show_system_files: flag(v.get("showSystemFiles"), d.show_system_files),
+            pet: PetPrefs::from(v.get("pet")),
         }
         .clamp()
     }
@@ -245,7 +312,7 @@ mod tests {
         let p = read_at(&s.settings());
         let out = serde_json::to_value(write_at(&s.settings(), p).unwrap()).unwrap();
         let keys: Vec<&String> = out.as_object().unwrap().keys().collect();
-        assert_eq!(keys.len(), 8);
+        assert_eq!(keys.len(), 9);
         assert!(out.get("apiKey").is_none() && out.get("extra").is_none());
         let stored = std::fs::read_to_string(ui_path(&s.settings())).unwrap();
         assert!(!stored.contains("apiKey") && !stored.contains("extra"));
@@ -266,6 +333,7 @@ mod tests {
             right_tab: RightTab::Links,
             density: Density::Compact,
             show_system_files: true,
+            pet: PetPrefs { x: 120, y: 64, hidden: true, scale: 3, skin: "flasko-blue".into() },
         };
         assert_eq!(write_at(&s.settings(), prefs.clone()).unwrap(), prefs);
         assert_eq!(read_at(&s.settings()), prefs);
@@ -273,7 +341,8 @@ mod tests {
         assert_eq!(
             raw,
             json!({ "leftWidth": 350, "leftHidden": true, "leftTab": "experiments", "rightWidth": 300,
-                    "rightOpen": true, "rightTab": "links", "density": "compact", "showSystemFiles": true })
+                    "rightOpen": true, "rightTab": "links", "density": "compact", "showSystemFiles": true,
+                    "pet": { "x": 120, "y": 64, "hidden": true, "scale": 3, "skin": "flasko-blue" } })
         );
     }
 
@@ -292,5 +361,43 @@ mod tests {
         write_at(&s.settings(), UiPrefs::default()).unwrap();
         assert!(s.0.join("config").join("ui.json").is_file());
         assert!(!s.settings().exists(), "settings.json is not touched");
+    }
+
+    #[test]
+    fn ui_prefs_pet_defaults() {
+        let p = UiPrefs::default().pet;
+        assert_eq!(p, PetPrefs { x: PET_X_DEFAULT, y: PET_Y_DEFAULT, hidden: false, scale: 2, skin: "flasko".into() });
+        assert_eq!(UiPrefs::from(json!({})).pet, p);
+    }
+
+    #[test]
+    fn ui_prefs_pet_is_parsed_leniently_and_clamped() {
+        let p = UiPrefs::from(json!({ "pet": { "x": -5, "y": 1e9, "hidden": true, "scale": 7, "skin": "../evil" } })).pet;
+        assert_eq!((p.x, p.y, p.hidden, p.scale, p.skin.as_str()), (0, PET_OFFSET_MAX, true, 2, "flasko"));
+        let p = UiPrefs::from(json!({ "pet": { "x": 33.6, "y": "far", "scale": 3, "skin": "my-skin-2" } })).pet;
+        assert_eq!((p.x, p.y, p.hidden, p.scale, p.skin.as_str()), (34, PET_Y_DEFAULT, false, 3, "my-skin-2"));
+        for bad in ["ab", "Flasko", "a_b_c", "x".repeat(33).as_str(), "", "가나다", "abc/def"] {
+            assert_eq!(UiPrefs::from(json!({ "pet": { "skin": bad } })).pet.skin, "flasko", "{bad:?}");
+        }
+        assert_eq!(UiPrefs::from(json!({ "pet": { "skin": "a".repeat(32) } })).pet.skin, "a".repeat(32));
+        // clamp() (the write path) applies the same rules to a struct built in Rust
+        let p = UiPrefs { pet: PetPrefs { x: 60000, y: 1, hidden: false, scale: 9, skin: "BAD".into() }, ..UiPrefs::default() }.clamp().pet;
+        assert_eq!((p.x, p.scale, p.skin.as_str()), (PET_OFFSET_MAX, 2, "flasko"));
+    }
+
+    #[test]
+    fn ui_prefs_junk_pet_falls_back_without_losing_the_layout() {
+        for junk in [json!("junk"), json!(42), json!(null), json!([1, 2]), json!(true)] {
+            let p = UiPrefs::from(json!({ "leftWidth": 300, "rightOpen": true, "pet": junk.clone() }));
+            assert_eq!(p.pet, PetPrefs::default(), "{junk}");
+            assert_eq!(p.left_width, 300);
+            assert!(p.right_open);
+        }
+        // unknown pet fields are dropped
+        let out = serde_json::to_value(UiPrefs::from(json!({ "pet": { "x": 10, "evil": "<script>" } }))).unwrap();
+        let mut keys: Vec<&String> = out["pet"].as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["hidden", "scale", "skin", "x", "y"]);
+        assert_eq!(out["pet"]["x"], 10);
     }
 }

@@ -20,8 +20,8 @@ function coloursIn(css: string): string[] {
 }
 
 describe('styles/*.css', () => {
-  it('여섯 파일이 있고 main.tsx 가 tokens, shell, tree, menus, dialogs, viewers 순서로 불러온다', () => {
-    expect(STYLE_FILES).toEqual(['tokens', 'shell', 'tree', 'menus', 'dialogs', 'viewers']);
+  it('일곱 파일이 있고 main.tsx 가 tokens, shell, tree, menus, dialogs, viewers, assistant 순서로 불러온다', () => {
+    expect(STYLE_FILES).toEqual(['tokens', 'shell', 'tree', 'menus', 'dialogs', 'viewers', 'assistant']);
     for (const name of STYLE_FILES) expect(existsSync(`src/styles/${name}.css`), name).toBe(true);
     const main = readFileSync('src/main.tsx', 'utf-8');
     // 따옴표가 든 정규식은 String.raw 로 쓴다(escapes.test.ts 가 정규식 리터럴 안의 따옴표를 문자열의 시작으로 읽는다)
@@ -118,12 +118,19 @@ describe('styles/*.css', () => {
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);
   });
 
-  it('고대비와 인쇄의 창 틀 규칙은 맨 마지막 파일에 있다: 앞 파일들의 같은 특이도 규칙을 덮는다', () => {
+  it('고대비와 인쇄의 창 틀 규칙은 창 틀의 마지막 파일(viewers.css)에 있다: 앞 파일들의 같은 특이도 규칙을 덮는다', () => {
     const styles = readStyles();
-    const last = styles[styles.length - 1];
+    const at = styles.findIndex((s) => s.file.endsWith('/viewers.css'));
+    const last = styles[at];
     const heads = (text: string) => parseRules(text).filter((r) => r.atRule).map((r) => `${r.atRule} ${r.selectors.join(', ')}`);
     expect(heads(last.text)).toEqual(expect.arrayContaining(['@media (forced-colors: active) :focus-visible', '@media print .shell']));
-    for (const s of styles.slice(0, -1)) {
+    // 그 뒤의 assistant.css 는 도우미(.pet*, #pet-layer)의 규칙만 둔다: 창 틀 규칙을 덮지 않는다(assistant-css.test.ts)
+    for (const s of styles.slice(at + 1)) {
+      expect(s.file).toBe('src/styles/assistant.css');
+      expect(heads(s.text).filter((h) => h.includes('forced-colors') && !/ (?:#pet-layer|\.pet)/.test(h)), s.file).toEqual([]);
+      expect(heads(s.text).filter((h) => h.startsWith('@media print') && !/ (?:#pet-layer|\.pet)/.test(h)), s.file).toEqual([]);
+    }
+    for (const s of styles.slice(0, at)) {
       // 앞 파일의 고대비 규칙은 tokens.css 의 토큰 대응 블록(:root …)뿐이다
       expect(heads(s.text).filter((h) => h.includes('forced-colors') && !h.includes(':root')), s.file).toEqual([]);
       // 앞 파일의 인쇄 규칙은 tokens.css 의 라이트 토큰 블록뿐이다

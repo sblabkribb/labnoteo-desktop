@@ -25,6 +25,7 @@ import {
   BetweenHorizontalEnd,
   BetweenVerticalEnd,
   BookOpen,
+  Bot,
   Braces,
   Calendar,
   Check,
@@ -46,6 +47,7 @@ import {
   Ellipsis,
   ExternalLink,
   Eye,
+  EyeOff,
   File,
   FilePlus,
   FileText,
@@ -64,6 +66,7 @@ import {
   Languages,
   Link,
   LoaderCircle,
+  LocateFixed,
   CircleArrowUp,
   CircleAlert,
   ListTree,
@@ -205,6 +208,9 @@ const ICONS = {
   'list-ordered': ListOrdered,
   'list-todo': ListTodo,
   'text-quote': TextQuote,
+  bot: Bot,
+  'eye-off': EyeOff,
+  'locate-fixed': LocateFixed,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

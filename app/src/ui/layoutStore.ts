@@ -2,17 +2,29 @@ import { useSyncExternalStore } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 /**
- * 앱 전체의 화면 배치(왼쪽·오른쪽 사이드바 너비와 열림, 탭, 행 밀도, 시스템 파일 표시).
+ * 앱 전체의 화면 배치(왼쪽·오른쪽 사이드바 너비와 열림, 탭, 행 밀도, 시스템 파일 표시, 떠 있는 도우미의 자리·크기·숨김·스킨).
  * 기준은 Rust 의 `ui.json`(app config 의 settings.json 옆, src-tauri/src/ui_prefs.rs)이고,
  * `localStorage['labnoteo.ui.layout']` 은 첫 프레임용 거울일 뿐이다(public/theme-boot.js 가 건다).
  * 창은 숨긴 채 뜨고, useTheme 은 `ready()` 가 끝난 뒤에 창을 보인다: 첫 프레임에 너비가 튀지 않는다.
  * DOM 에는 CSSOM(`style.setProperty`)과 data- 속성으로만 건다(CSP style-src 'self').
  * 규칙(범위, 기본값)은 ui_prefs.rs 와 theme-boot.js 가 같다.
+ * 도우미(pet)는 거울에 넣지 않는다(assistant 명세 R7): 마운트 뒤에 그려지므로 첫 프레임이 필요 없다. ui.json 을 쓰는 곳은
+ * 이 저장소 하나뿐이다(ui_prefs_write 는 통째로 바꾼다: 두 번째 쓰는 곳이 있으면 배치 변경을 잃는다).
  */
 
 export type LeftTab = 'files' | 'experiments' | 'samples';
 export type RightTab = 'outline' | 'links';
 export type Density = 'comfortable' | 'compact';
+
+/** 떠 있는 도우미. x·y 는 창의 오른쪽·아래 끝에서 잰 CSS px(뷰포트에 맞춰 자르는 것은 petStore). 배율은 정수 2 또는 3. */
+export interface PetPrefs {
+  x: number;
+  y: number;
+  hidden: boolean;
+  scale: 2 | 3;
+  /** 스킨 id(`[a-z0-9-]{3,32}`). 설치되지 않은 id 면 그리는 쪽이 기본 스킨을 쓴다. */
+  skin: string;
+}
 
 export interface UiPrefs {
   leftWidth: number;
@@ -23,12 +35,17 @@ export interface UiPrefs {
   rightTab: RightTab;
   density: Density;
   showSystemFiles: boolean;
+  pet: PetPrefs;
 }
 
 export const LAYOUT_KEY = 'labnoteo.ui.layout';
 export const WRITE_DEBOUNCE_MS = 300;
 export const LEFT_RANGE = { min: 200, max: 480, default: 272 } as const;
 export const RIGHT_RANGE = { min: 220, max: 480, default: 280 } as const;
+/** ui_prefs.rs 의 PET_OFFSET_MAX 와 같다. */
+export const PET_OFFSET_MAX = 4096;
+export const PET_DEFAULT: Readonly<PetPrefs> = Object.freeze({ x: 24, y: 40, hidden: false, scale: 2, skin: 'flasko' });
+const SKIN_ID = /^[a-z0-9-]{3,32}$/;
 
 export const DEFAULT_PREFS: Readonly<UiPrefs> = Object.freeze({
   leftWidth: LEFT_RANGE.default,
@@ -39,6 +56,7 @@ export const DEFAULT_PREFS: Readonly<UiPrefs> = Object.freeze({
   rightTab: 'outline',
   density: 'comfortable',
   showSystemFiles: false,
+  pet: PET_DEFAULT,
 });
 
 export type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -51,6 +69,24 @@ function width(v: unknown, range: { min: number; max: number; default: number })
 const flag = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], d: T): T =>
   allowed.includes(v as T) ? (v as T) : d;
+
+function offset(v: unknown, d: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return d;
+  return Math.min(PET_OFFSET_MAX, Math.max(0, Math.round(v)));
+}
+
+/** 도우미 값: 객체가 아니면 기본값, 나쁜 칸은 그 칸의 기본값(ui_prefs.rs 의 PetPrefs 와 같은 규칙). */
+export function normalizePet(raw: unknown): PetPrefs {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...PET_DEFAULT };
+  const o = raw as Record<string, unknown>;
+  return {
+    x: offset(o.x, PET_DEFAULT.x),
+    y: offset(o.y, PET_DEFAULT.y),
+    hidden: flag(o.hidden, PET_DEFAULT.hidden),
+    scale: o.scale === 3 ? 3 : 2,
+    skin: typeof o.skin === 'string' && SKIN_ID.test(o.skin) ? o.skin : PET_DEFAULT.skin,
+  };
+}
 
 /** 아무 값이나 받아 유효한 UiPrefs 로: 범위 밖 너비는 자르고, 모르는 값은 기본값, 모르는 필드는 버린다. */
 export function normalizePrefs(raw: unknown): UiPrefs {
@@ -65,6 +101,7 @@ export function normalizePrefs(raw: unknown): UiPrefs {
     rightTab: oneOf(o.rightTab, ['outline', 'links'] as const, d.rightTab),
     density: oneOf(o.density, ['comfortable', 'compact'] as const, d.density),
     showSystemFiles: flag(o.showSystemFiles, d.showSystemFiles),
+    pet: normalizePet(o.pet),
   };
 }
 
@@ -82,13 +119,15 @@ export function readUiPrefs(invoke: Invoke = tauriInvoke): Promise<UiPrefs> {
 }
 
 export function writeUiPrefs(prefs: UiPrefs, invoke: Invoke = tauriInvoke): Promise<UiPrefs> {
-  return invoke('ui_prefs_write', { prefs: { ...prefs } }).then((v) => (v == null ? prefs : normalizePrefs(v)));
+  return invoke('ui_prefs_write', { prefs: { ...prefs, pet: { ...prefs.pet } } }).then((v) => (v == null ? prefs : normalizePrefs(v)));
 }
 
 export interface LayoutStore {
   get(): UiPrefs;
   subscribe(fn: (prefs: UiPrefs) => void): () => void;
   update(patch: Partial<UiPrefs>): void;
+  /** 도우미 값 일부를 바꾼다(나머지 칸은 그대로). 다른 배치 변경과 같은 지연 쓰기 하나로 Rust 에 간다. */
+  setPet(patch: Partial<PetPrefs>): void;
   /** 왼쪽 독을 숨기거나 보인다(리본 단추, Ctrl+\, 팔레트). */
   toggleLeft(): void;
   /** 오른쪽 사이드바를 열거나 닫는다. */
@@ -126,7 +165,9 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
   };
   const writeMirror = (p: UiPrefs) => {
     try {
-      storage().setItem(LAYOUT_KEY, JSON.stringify(p));
+      // 도우미는 거울에 넣지 않는다(R7)
+      const { pet: _pet, ...layout } = p;
+      storage().setItem(LAYOUT_KEY, JSON.stringify(layout));
     } catch {
       // 거울을 못 써도 Rust 가 기준이다
     }
@@ -138,6 +179,8 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
   let pending: Promise<unknown> = Promise.resolve();
   // load 가 시작된 뒤 사람이 바꾼 것이 있으면 load 결과로 덮지 않는다
   let changedSinceLoad = false;
+  // 그중 도우미를 바꿨는지: 배치만 바뀌었으면 도우미는 Rust 의 것을 쓴다(거울에 없으므로 지금 값은 기본값일 뿐이다)
+  let petChangedSinceLoad = false;
   // 오른쪽 사이드바를 열며 왼쪽 독을 숨겼다: 오른쪽을 닫으면 되돌린다
   let yielded = false;
   const windowWidth = () => (typeof window === 'undefined' ? Infinity : window.innerWidth);
@@ -157,12 +200,16 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
     },
     update(patch) {
       changedSinceLoad = true;
+      if (patch.pet !== undefined) petChangedSinceLoad = true;
       set(normalizePrefs({ ...state, ...patch }));
       if (timer !== undefined) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = undefined;
         writeUiPrefs(state, invoke).catch(() => undefined);
       }, WRITE_DEBOUNCE_MS);
+    },
+    setPet(patch) {
+      store.update({ pet: { ...state.pet, ...patch } });
     },
     toggleLeft() {
       yielded = false;
@@ -187,9 +234,11 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
     load(withInvoke) {
       if (withInvoke) invoke = withInvoke;
       changedSinceLoad = false;
+      petChangedSinceLoad = false;
       const p = readUiPrefs(invoke)
         .then((rust) => {
           if (!changedSinceLoad) set(rust);
+          else if (!petChangedSinceLoad) set({ ...state, pet: rust.pet });
         })
         .catch(() => {
           if (!changedSinceLoad) set(state); // Rust 를 못 읽었다: 거울(또는 기본값)을 건다
@@ -203,6 +252,7 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
       changedSinceLoad = false;
+      petChangedSinceLoad = false;
       state = { ...DEFAULT_PREFS };
       // DOM 에 건 것도 걷어 낸다: 처음 뜬 문서처럼(style 속성도 data- 속성도 없다)
       if (typeof document !== 'undefined') {

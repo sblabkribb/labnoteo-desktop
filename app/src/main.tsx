@@ -7,6 +7,7 @@ import './styles/tree.css';
 import './styles/menus.css';
 import './styles/dialogs.css';
 import './styles/viewers.css';
+import './styles/assistant.css';
 import { installFileDropGuard } from './ui/fileDropGuard';
 import { startModalityTracking } from './ui/interactionModality';
 import { layoutStore } from './ui/layoutStore';

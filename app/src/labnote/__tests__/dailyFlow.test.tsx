@@ -298,9 +298,13 @@ describe('하루의 흐름(앱 전체)', () => {
       expect(messages).toContain(coreT('Experiment created: {0}', '002_형질전환_2차'));
       expect(toasts.all.filter((x) => x.kind === 'error')).toEqual([]);
 
-      // 영구 삭제는 없었다. style 속성도 없다(<html> 의 --side-w 같은 배치 변수는 layoutStore 가 CSSOM 으로 건 것이라 body 만 본다)
+      // 영구 삭제는 없었다. style 속성도 없다(<html> 의 --side-w 같은 배치 변수는 layoutStore 가 CSSOM 으로 건 것이라 body 만 본다).
+      // 떠 있는 도우미(#pet-layer)의 자리·스프라이트 값도 CSSOM 으로 건 --pet-* 사용자 속성뿐이다: 그 밖의 속성은 없다.
       expect(vault.log.filter((c) => c.cmd === 'vault_remove')).toEqual([]);
-      expect([...document.body.querySelectorAll('[style]')].map((el) => el.outerHTML.slice(0, 80))).toEqual([]);
+      const styled = [...document.body.querySelectorAll<HTMLElement>('[style]')];
+      const petOnly = (el: HTMLElement) =>
+        el.closest('#pet-layer') !== null && [...Array(el.style.length).keys()].every((i) => el.style.item(i).startsWith('--pet-'));
+      expect(styled.filter((el) => !petOnly(el)).map((el) => el.outerHTML.slice(0, 80))).toEqual([]);
     },
     60_000,
   );

@@ -88,7 +88,7 @@ describe('셸: 리본, 왼쪽 독, 보관함 줄 (상단 바 없음)', () => {
     await openVault();
     expect(document.querySelector('.topbar')).toBeNull();
     expect(screen.queryByRole('banner')).toBeNull();
-    expect(ribbon().getAllByRole('button')).toHaveLength(7);
+    expect(ribbon().getAllByRole('button')).toHaveLength(8);
     const dock = screen.getByRole('complementary', { name: '사이드바' });
     expect(within(dock).getByRole('group', { name: '보관함' })).toBeTruthy();
     expect(within(dock).getByText('fake-vault')).toBeTruthy();

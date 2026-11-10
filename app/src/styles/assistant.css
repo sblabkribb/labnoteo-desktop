@@ -1,0 +1,101 @@
+/* 떠 있는 도우미(assistant 명세 §4): 편집기 위 오른쪽 아래의 작은 픽셀 그림과 그 말풍선.
+   main.tsx 가 맨 마지막에 불러온다. 이 파일에는 도우미(#pet-layer, .pet*)의 규칙만 둔다(assistant-css.test.ts):
+   창 틀의 고대비·인쇄 규칙은 viewers.css 에 있고 이 파일이 그것을 덮지 않는다.
+   자리(--pet-x, --pet-y: 창의 오른쪽·아래 끝에서 잰 px), 배율(--pet-scale), 스프라이트 값(--pet-sheet, --pet-w, --pet-h,
+   --pet-frames, --pet-dur)은 스크립트가 CSSOM(style.setProperty)으로 건다(CSP style-src 'self'). 색은 토큰만 쓴다. */
+
+.pet-wrap {
+  position: fixed;
+  right: var(--pet-x);
+  bottom: var(--pet-y);
+  z-index: var(--z-pet);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+/* 단추 자체는 그림만: 채움·높이·안쪽 여백이 없다. 초점 고리는 전역 :focus-visible 을 따른다 */
+.pet {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-element);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.pet:hover:not(:disabled) { background: transparent; }
+.pet:active { cursor: grabbing; }
+
+/* 시트 한 줄을 steps() 로 한 칸씩 넘긴다. 정수 배율이고 흐리게 늘이지 않는다 */
+.pet-sprite {
+  display: block;
+  width: calc(var(--pet-w) * var(--pet-scale));
+  height: calc(var(--pet-h) * var(--pet-scale));
+  background-image: var(--pet-sheet);
+  background-repeat: no-repeat;
+  background-size: calc(var(--pet-w) * var(--pet-frames) * var(--pet-scale)) calc(var(--pet-h) * var(--pet-scale));
+  background-position: 0 0;
+  image-rendering: pixelated;
+  animation: pet-play var(--pet-dur) steps(var(--pet-frames)) infinite;
+}
+
+@keyframes pet-play {
+  from { background-position-x: 0; }
+  to { background-position-x: calc(var(--pet-w) * var(--pet-frames) * var(--pet-scale) * -1); }
+}
+
+/* 줄인 움직임: 움직이지 않는다. 그 상태의 첫 칸이 남아 상태끼리는 여전히 다르게 보인다 */
+@media (prefers-reduced-motion: reduce) {
+  .pet-sprite { animation: none; }
+}
+html[data-reduced-motion] .pet-sprite { animation: none; }
+
+/* 말풍선: 그림 위에, 오른쪽 끝을 맞춰 뜬다(전환 없이) */
+.pet-bubble {
+  width: min(18rem, calc(100vw - 2 * var(--space-6)));
+  padding: var(--space-5) var(--space-6);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-container);
+  box-shadow: var(--shadow-high);
+  color: var(--text);
+}
+.pet-bubble-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.pet-bubble-title {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+}
+.pet-bubble-greeting { margin: var(--space-4) 0; }
+.pet-bubble-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 자리 안내(aria-live): 화면에는 보이지 않고 읽기 프로그램만 읽는다 */
+.pet-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .pet:focus-visible { outline: 2px solid Highlight; }
+  .pet-bubble { border: 1px solid CanvasText; }
+}
+
+@media print {
+  #pet-layer { display: none; }
+}

@@ -8,7 +8,7 @@ const noop = () => undefined;
 afterEach(() => setLang('ko'));
 
 describe('Ribbon', () => {
-  it('renders 7 icon buttons with localised names and shortcut tooltips', () => {
+  it('renders 8 icon buttons with localised names and shortcut tooltips', () => {
     render(<Ribbon onCommand={noop} leftHidden={false} rightOpen={false} ready />);
     const bar = screen.getByRole('toolbar', { name: '리본' });
     expect(bar.getAttribute('aria-orientation')).toBe('vertical');
@@ -20,6 +20,7 @@ describe('Ribbon', () => {
       '새 실험',
       '새 노트',
       '스캔 가져오기',
+      '어시스턴트 보이기/숨기기',
       '오른쪽 사이드바 보이기/숨기기',
     ]);
     expect(buttons.map((b) => b.title)).toEqual([
@@ -29,6 +30,7 @@ describe('Ribbon', () => {
       '새 실험',
       '새 노트 (Ctrl+N)',
       '스캔 가져오기',
+      '어시스턴트 보이기/숨기기',
       '오른쪽 사이드바 보이기/숨기기 (Ctrl+Shift+\\)',
     ]);
     expect(buttons[buttons.length - 1].getAttribute('aria-keyshortcuts')).toBe('Control+Shift+\\');
@@ -64,6 +66,7 @@ describe('Ribbon', () => {
       'create-experiment',
       'app.newNote',
       'import-scanned-pages',
+      'assistant.toggleVisible',
       'app.toggleRight',
     ]);
   });
@@ -77,6 +80,21 @@ describe('Ribbon', () => {
     expect(disabled('명령 팔레트')).toBe(true);
     expect(disabled('새 실험')).toBe(true);
     expect(disabled('스캔 가져오기')).toBe(true);
+    // the assistant works without the vault settings
+    expect(disabled('어시스턴트 보이기/숨기기')).toBe(false);
+  });
+
+  it('the assistant button runs assistant.toggleVisible and shows whether the assistant is on (aria-pressed)', () => {
+    const run = vi.fn();
+    const { rerender } = render(<Ribbon onCommand={run} leftHidden={false} rightOpen={false} ready assistantVisible={false} />);
+    const button = () => within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '어시스턴트 보이기/숨기기' });
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(button());
+    expect(run).toHaveBeenCalledWith('assistant.toggleVisible');
+    rerender(<Ribbon onCommand={run} leftHidden={false} rightOpen={false} ready assistantVisible />);
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+    // the other buttons are not toggle buttons
+    expect(within(screen.getByRole('toolbar', { name: '리본' })).getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))).toHaveLength(1);
   });
 
   it('Up and Down arrows move focus between the buttons', () => {

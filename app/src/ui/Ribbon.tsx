@@ -15,6 +15,8 @@ interface Item {
   needsCtx?: boolean;
   /** 사이드바 접기 단추: aria-expanded 로 열림을 알린다. */
   expands?: 'left' | 'right';
+  /** 켜고 끄는 단추: aria-pressed 로 켜짐을 알린다(어시스턴트 보이기). */
+  pressed?: 'assistant';
 }
 
 const TOP: readonly Item[] = [
@@ -28,6 +30,7 @@ const MIDDLE: readonly Item[] = [
   { commandId: 'import-scanned-pages', icon: 'scan-barcode', labelKey: 'ribbon.scan', needsCtx: true },
 ];
 const BOTTOM: readonly Item[] = [
+  { commandId: 'assistant.toggleVisible', icon: 'bot', labelKey: 'ribbon.assistant', pressed: 'assistant' },
   { commandId: 'app.toggleRight', icon: 'panel-right', labelKey: 'ribbon.toggleRight', key: 'Ctrl+Shift+\\', expands: 'right' },
 ];
 
@@ -35,7 +38,14 @@ const BOTTOM: readonly Item[] = [
  * 왼쪽 끝의 리본(44px, 늘 보인다): 18px 아이콘 단추와 그 툴팁(단축키 포함). 세로 toolbar 라 ↑/↓ 로 단추 사이를 옮긴다.
  * 이름은 aria-label 에 있고 단추에는 글자가 없다. 단추마다 등록된 명령 하나를 부른다(data-command-id).
  */
-export function Ribbon(p: { onCommand: (commandId: string) => void; leftHidden: boolean; rightOpen: boolean; ready: boolean }) {
+export function Ribbon(p: {
+  onCommand: (commandId: string) => void;
+  leftHidden: boolean;
+  rightOpen: boolean;
+  ready: boolean;
+  /** 떠 있는 도우미가 보이는지(어시스턴트 단추의 aria-pressed). */
+  assistantVisible?: boolean;
+}) {
   useLang();
   const button = (item: Item) => {
     const label = t(item.labelKey);
@@ -49,6 +59,7 @@ export function Ribbon(p: { onCommand: (commandId: string) => void; leftHidden: 
         title={item.key ? t('ribbon.withKey', label, item.key) : label}
         aria-keyshortcuts={item.key ? item.key.replace('Ctrl', 'Control') : undefined}
         aria-expanded={expanded}
+        aria-pressed={item.pressed === 'assistant' ? (p.assistantVisible ?? true) : undefined}
         aria-controls={item.expands === 'left' ? 'dock' : item.expands === 'right' ? 'right-dock' : undefined}
         disabled={item.needsCtx && !p.ready}
         data-command-id={item.commandId}

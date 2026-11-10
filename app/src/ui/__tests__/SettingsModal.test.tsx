@@ -115,7 +115,7 @@ describe('Settings modal', () => {
   it('opens on the General page by default, with theme, language, density and system files', async () => {
     install();
     act(() => void openSettings());
-    expect(nav().getAllByRole('tab').map((x) => x.textContent)).toEqual(['일반', '편집기', '실험·워크플로', '샘플', '연동', '단축키', '정보']);
+    expect(nav().getAllByRole('tab').map((x) => x.textContent)).toEqual(['일반', '편집기', '실험·워크플로', '샘플', '연동', '어시스턴트', '단축키', '정보']);
     expect(nav().getByRole('tab', { name: '일반' }).getAttribute('aria-selected')).toBe('true');
     const panel = within(dialog().getByRole('tabpanel', { name: '일반' }));
     expect(within(panel.getByRole('radiogroup', { name: '테마' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['시스템', '밝게', '어둡게']);
@@ -153,7 +153,7 @@ describe('Settings modal', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'Home' });
     expect(nav().getByRole('tab', { name: '일반' }).getAttribute('aria-selected')).toBe('true');
     // 고르지 않은 탭은 Tab 으로 닿지 않는다(roving tabindex)
-    expect(nav().getAllByRole('tab').map((x) => x.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+    expect(nav().getAllByRole('tab').map((x) => x.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
   });
 
   it('General: theme calls setTheme; density switches data-density; system files persists in the layout store', async () => {
@@ -244,6 +244,34 @@ describe('Settings modal', () => {
     fireEvent.keyDown(d.getByRole('tab', { name: 'Integrations' }), { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull());
     expect(deps.integrations.commit).toHaveBeenCalledWith({ scanMaxImageEdge: 3000 });
+  });
+
+  it('Assistant: in the tablist with roving focus; show assistant and size persist in the layout store (per PC)', async () => {
+    install();
+    act(() => void openSettings('integrations'));
+    const integrations = nav().getByRole('tab', { name: '연동' });
+    await waitFor(() => expect(document.activeElement).toBe(integrations));
+    fireEvent.keyDown(integrations, { key: 'ArrowDown' });
+    const tab = nav().getByRole('tab', { name: '어시스턴트' });
+    expect(document.activeElement).toBe(tab);
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    expect(tab.tabIndex).toBe(0);
+    const panel = within(dialog().getByRole('tabpanel', { name: '어시스턴트' }));
+    const show = panel.getByRole('switch', { name: '어시스턴트 보이기' });
+    expect(show.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(show);
+    expect(layoutStore.get().pet.hidden).toBe(true);
+    expect(show.getAttribute('aria-checked')).toBe('false');
+    const sizes = within(panel.getByRole('radiogroup', { name: '크기' }));
+    expect(sizes.getAllByRole('radio').map((r) => r.textContent)).toEqual(['보통 (2배)', '크게 (3배)']);
+    fireEvent.click(sizes.getByRole('radio', { name: '크게 (3배)' }));
+    expect(layoutStore.get().pet.scale).toBe(3);
+  });
+
+  it('openSettings("assistant") opens the Assistant pane', () => {
+    install();
+    act(() => void openSettings('assistant'));
+    expect(nav().getByRole('tab', { name: '어시스턴트' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('Shortcuts lists the registry keys read-only', () => {

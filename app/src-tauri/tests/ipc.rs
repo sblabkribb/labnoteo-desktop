@@ -128,9 +128,16 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(defaults["rightOpen"], false);
     let stored = ok(
         "ui_prefs_write",
-        args("ui_prefs_write", vec![json!({"leftWidth": 9000, "leftHidden": true, "leftTab": "samples", "junk": 1})]),
+        args(
+            "ui_prefs_write",
+            vec![json!({"leftWidth": 9000, "leftHidden": true, "leftTab": "samples", "junk": 1,
+                        "pet": {"x": 99999, "hidden": true, "scale": 3, "skin": "../x", "extra": 1}})],
+        ),
     );
     assert_eq!(stored["leftWidth"], 480);
+    // The pet (assistant) prefs: clamped, skin id checked, unknown fields dropped; the layout survives.
+    assert_eq!(stored["pet"], json!({"x": 4096, "y": 40, "hidden": true, "scale": 3, "skin": "flasko"}));
+    assert_eq!(defaults["pet"], json!({"x": 24, "y": 40, "hidden": false, "scale": 2, "skin": "flasko"}));
     assert!(stored.get("junk").is_none(), "{stored}");
     assert_eq!(ok("ui_prefs_read", args("ui_prefs_read", vec![])), stored);
     assert!(dir.join("config").join("ui.json").is_file());

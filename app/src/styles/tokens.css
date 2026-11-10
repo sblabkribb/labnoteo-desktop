@@ -210,6 +210,8 @@
   --z-widget: 5;
   --z-widget-menu: 10;
   --z-popover: 600;
+  /* 떠 있는 도우미(assistant.css): 창 틀 위, 좁은 창의 떠 있는 독과 대화상자·메뉴·알림 아래 */
+  --z-pet: 90;
   --z-dialog: 100;
   --z-menu: 105;
   --z-toast: 110;

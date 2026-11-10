@@ -8,6 +8,7 @@ import { IntegrationSettingsPage, type IntegrationDeps } from '../integrations/I
 import type { Theme } from '../theme/useTheme';
 import { Icon, type IconName } from './Icon';
 import { AboutPage } from './settings/AboutPage';
+import { AssistantPage } from './settings/AssistantPage';
 import { EditorPage } from './settings/EditorPage';
 import { ExperimentsPage } from './settings/ExperimentsPage';
 import { GeneralPage } from './settings/GeneralPage';
@@ -16,7 +17,7 @@ import { ShortcutsPage } from './settings/ShortcutsPage';
 import { rovingStop } from './roving';
 
 /** 설정 창의 쪽들. 왼쪽 목록의 순서다. */
-export const SETTINGS_PAGES = ['general', 'editor', 'experiments', 'samples', 'integrations', 'shortcuts', 'about'] as const;
+export const SETTINGS_PAGES = ['general', 'editor', 'experiments', 'samples', 'integrations', 'assistant', 'shortcuts', 'about'] as const;
 export type SettingsPage = (typeof SETTINGS_PAGES)[number];
 
 /** 설정 창이 쓰는 바깥 값과 함수. App 이 열 때마다 지금 값으로 만든다(setSettingsSource). */
@@ -66,6 +67,7 @@ const PAGE_ICON: Record<SettingsPage, IconName> = {
   experiments: 'flask-conical',
   samples: 'test-tube',
   integrations: 'link',
+  assistant: 'bot',
   shortcuts: 'keyboard',
   about: 'info',
 };
@@ -77,6 +79,7 @@ const PAGE_LABEL: Record<SettingsPage, () => string> = {
   experiments: () => t('settings.page.experiments'),
   samples: () => t('settings.page.samples'),
   integrations: () => t('settings.page.integrations'),
+  assistant: () => t('settings.page.assistant'),
   shortcuts: () => t('settings.page.shortcuts'),
   about: () => t('settings.page.about'),
 };
@@ -151,6 +154,8 @@ export function SettingsModal(props: {
         return <SamplesPage deps={deps.samples} leave={(after) => void finish(after)} />;
       case 'integrations':
         return <IntegrationSettingsPage deps={deps.integrations} commitRef={integrationCommit} onLeave={() => finish()} />;
+      case 'assistant':
+        return <AssistantPage />;
       case 'shortcuts':
         return <ShortcutsPage />;
       case 'about':

@@ -5,6 +5,8 @@ import {
   DEFAULT_PREFS,
   LAYOUT_KEY,
   normalizePrefs,
+  PET_DEFAULT,
+  PET_OFFSET_MAX,
   WRITE_DEBOUNCE_MS,
   type UiPrefs,
 } from '../layoutStore';
@@ -195,5 +197,75 @@ describe('layout store', () => {
     expect(done).toBe(false);
     resolve(DEFAULT_PREFS);
     await vi.waitFor(() => expect(done).toBe(true));
+  });
+});
+
+describe('pet prefs (floating assistant, assistant spec §4.1/§4.3)', () => {
+  it('normalizePrefs applies the Rust rules to pet: clamped offsets, scale 2|3, skin id pattern, junk gives defaults', () => {
+    expect(DEFAULT_PREFS.pet).toEqual({ x: PET_DEFAULT.x, y: PET_DEFAULT.y, hidden: false, scale: 2, skin: 'flasko' });
+    expect(PET_DEFAULT).toEqual({ x: 24, y: 40, hidden: false, scale: 2, skin: 'flasko' });
+    expect(normalizePrefs({ pet: { x: -5, y: 1e9, hidden: true, scale: 7, skin: '../evil' } }).pet).toEqual({
+      x: 0,
+      y: PET_OFFSET_MAX,
+      hidden: true,
+      scale: 2,
+      skin: 'flasko',
+    });
+    expect(normalizePrefs({ pet: { x: 33.6, y: 'far', scale: 3, skin: 'my-skin-2', extra: 1 } }).pet).toEqual({
+      x: 34,
+      y: 40,
+      hidden: false,
+      scale: 3,
+      skin: 'my-skin-2',
+    });
+    for (const bad of ['ab', 'Flasko', 'a_b_c', 'x'.repeat(33), '', '가나다'])
+      expect(normalizePrefs({ pet: { skin: bad } }).pet.skin, bad).toBe('flasko');
+    for (const junk of ['junk', 42, null, [1, 2], true]) {
+      const p = normalizePrefs({ leftWidth: 300, pet: junk });
+      expect(p.pet).toEqual(PET_DEFAULT);
+      expect(p.leftWidth).toBe(300);
+    }
+  });
+
+  it('setPet merges into pet, and a pet write and a sidebar-width change in quick succession both reach Rust (single writer)', () => {
+    vi.useFakeTimers();
+    const invoke = vi.fn(async (_cmd: string, args?: Record<string, unknown>) => (args?.prefs as UiPrefs | undefined) ?? null);
+    const store = createLayoutStore({ storage: () => memoryStorage(), invoke });
+    store.setPet({ x: 100, y: 60 });
+    store.update({ leftWidth: 330 });
+    store.setPet({ hidden: true });
+    expect(store.get().pet).toEqual({ ...PET_DEFAULT, x: 100, y: 60, hidden: true });
+    vi.advanceTimersByTime(WRITE_DEBOUNCE_MS);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const sent = invoke.mock.calls[0][1]!.prefs as UiPrefs;
+    expect(sent.leftWidth).toBe(330);
+    expect(sent.pet).toEqual({ ...PET_DEFAULT, x: 100, y: 60, hidden: true });
+  });
+
+  it('the pet is not in the first-frame localStorage mirror', () => {
+    const storage = memoryStorage();
+    const store = createLayoutStore({ storage: () => storage, invoke: vi.fn(async () => null) });
+    store.setPet({ x: 200 });
+    const mirror = JSON.parse(storage.getItem(LAYOUT_KEY)!);
+    expect(mirror.pet).toBeUndefined();
+    expect(Object.keys(mirror)).not.toContain('pet');
+  });
+
+  it('a layout change during load still takes the pet from Rust (the mirror never had it)', async () => {
+    let resolve!: (v: unknown) => void;
+    const invoke = vi.fn((cmd: string) => (cmd === 'ui_prefs_read' ? new Promise((r) => (resolve = r)) : Promise.resolve(null)));
+    const store = createLayoutStore({ storage: () => memoryStorage(), invoke: invoke as never });
+    const p = store.load(invoke as never);
+    store.update({ leftHidden: true });
+    resolve({ ...DEFAULT_PREFS, pet: { ...PET_DEFAULT, x: 300, hidden: true } });
+    await p;
+    expect(store.get().leftHidden).toBe(true);
+    expect(store.get().pet).toMatchObject({ x: 300, hidden: true });
+    // ...but a pet change made during load wins over the loaded pet
+    const q = store.load(invoke as never);
+    store.setPet({ x: 50 });
+    resolve({ ...DEFAULT_PREFS, pet: { ...PET_DEFAULT, x: 999 } });
+    await q;
+    expect(store.get().pet.x).toBe(50);
   });
 });
