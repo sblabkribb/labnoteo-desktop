@@ -50,12 +50,14 @@ export function setSettingsSource(fn: () => SettingsDeps | undefined): () => voi
  * 설정 창을 `page` 쪽으로 연다(Ctrl+,, 보관함 줄의 톱니, 모양 창의 "모든 설정 열기", 팔레트, 연동·샘플 설정 명령).
  * 보관함 설정을 아직 읽지 못했으면(값이 없으면) 아무것도 하지 않는다. 이미 보이고 있으면 하나 더 열지 않는다.
  * 닫힌 뒤 할 일이 있으면(샘플 폴더 옮기기 등) 그것까지 기다린다.
+ * `opts.focus`: 'githubToken' 이면 연동 쪽의 GitHub 고급 칸을 펴고 토큰 칸에 초점을 준다(로그인 대화상자의 "토큰으로 연결").
  */
-export async function openSettings(page: SettingsPage = 'general'): Promise<void> {
+export async function openSettings(page: SettingsPage = 'general', opts?: { focus?: 'githubToken' }): Promise<void> {
   const deps = source?.();
   if (!deps) return;
   if (currentDialog()?.spec.kind === 'settings') return;
-  const after = await openDialog<SettingsAfter | undefined>({ kind: 'settings', page, deps }, undefined);
+  const spec: DialogSpec = opts?.focus ? { kind: 'settings', page, deps, focus: opts.focus } : { kind: 'settings', page, deps };
+  const after = await openDialog<SettingsAfter | undefined>(spec, undefined);
   if (after) await after();
 }
 
@@ -147,7 +149,7 @@ export function SettingsModal(props: {
       case 'samples':
         return <SamplesPage deps={deps.samples} leave={(after) => void finish(after)} />;
       case 'integrations':
-        return <IntegrationSettingsPage deps={deps.integrations} commitRef={integrationCommit} onLeave={() => finish()} />;
+        return <IntegrationSettingsPage deps={deps.integrations} commitRef={integrationCommit} onLeave={() => finish()} focus={props.spec.focus} />;
       case 'shortcuts':
         return <ShortcutsPage />;
       case 'about':

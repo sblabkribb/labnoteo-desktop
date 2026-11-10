@@ -27,6 +27,22 @@ import {
   type ImportRefusal,
 } from './importFile';
 import { SelectField } from '../ui/SelectField';
+import { GithubSection, type GithubDeps, type GithubFocus } from './GithubSection';
+import {
+  githubAccount,
+  githubAppSettingsGet,
+  githubAppSettingsSet,
+  githubDefaultOwnerGet,
+  githubDefaultOwnerSet,
+  githubOwners,
+  githubSetToken,
+  githubSignInStart,
+  githubSignInWait,
+  githubSignOut,
+  githubStatuses,
+  githubUnlink,
+} from './githubIpc';
+import { openExternal, tauriExternalDeps } from '../links/openExternal';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -51,6 +67,8 @@ export interface IntegrationDeps {
     runBytes(name: string, bytes: Uint8Array): Promise<ImportOutcome>;
     remove(permanent: boolean): Promise<DeleteOutcome>;
   };
+  /** 설정의 GitHub 묶음(spec §9). 없으면 그리지 않는다. */
+  github?: GithubDeps;
 }
 
 function pickIntegration(s: AppSettings): IntegrationSettingsValue {
@@ -82,6 +100,30 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
  */
 export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauriInvoke): IntegrationDeps {
   let current = pickIntegration(ctx.settings);
+  let readmeOverlay = ctx.settings.githubReadmeOverlay !== false;
+  const external = tauriExternalDeps((kind, message) => ctx.host.notify(kind, message));
+  const github: GithubDeps = {
+    account: () => githubAccount(invoke),
+    secretStatus: () => secretStatus(invoke),
+    signInStart: () => githubSignInStart(invoke),
+    signInWait: (signal) => githubSignInWait({ signal }, invoke),
+    signOut: () => githubSignOut(invoke),
+    setToken: (value) => githubSetToken(value, invoke),
+    statuses: () => githubStatuses(invoke),
+    unlink: (folder) => githubUnlink(folder, invoke),
+    openExternal: (url) => openExternal(url, external),
+    copy: (text) => external.copy(text),
+    appSettings: () => githubAppSettingsGet(invoke),
+    setAppSettings: (patch) => githubAppSettingsSet(patch, invoke),
+    readmeOverlay: () => readmeOverlay,
+    async commitReadmeOverlay(value) {
+      if ((await ctx.updateSettings({ githubReadmeOverlay: value })) === false) throw new Error('settings were not saved');
+      readmeOverlay = value;
+    },
+    owners: (signal) => githubOwners({ signal }, invoke),
+    defaultOwner: async () => (await githubDefaultOwnerGet(invoke)) ?? undefined,
+    setDefaultOwner: (owner) => githubDefaultOwnerSet(owner, invoke),
+  };
   return {
     value: () => current,
     async commit(patch) {
@@ -102,12 +144,14 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
       runBytes: (name, bytes) => importConnectionsBytes(name, bytes, invoke as unknown as RawInvoke),
       remove: (permanent) => deleteImportedFile(permanent, invoke),
     },
+    github,
   };
 }
 
 const DEFAULTS = fromPluginData(undefined);
 
-const EMPTY_STATUS: SecretStatus = {
+/** 아직 읽지 못한 키 상태: 모든 자리가 비어 있다(GitHub 두 자리 포함). */
+export const EMPTY_STATUS: SecretStatus = {
   set: { partbankDesktop: false, partbankWeb: false, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, github: false, githubRefresh: false },
   epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, github: 0, githubRefresh: 0 },
 };
@@ -264,6 +308,8 @@ export function IntegrationSettingsPage(props: {
   onLeave: () => Promise<void>;
   commitRef?: MutableRefObject<(() => Promise<void>) | null>;
   autoFocus?: boolean;
+  /** 열 때 초점을 줄 곳(`openSettings(page, {focus})`). */
+  focus?: GithubFocus;
 }) {
   const { deps } = props;
   const autoFocus = useRef(props.autoFocus === true);
@@ -824,6 +870,7 @@ export function IntegrationSettingsPage(props: {
           />
         ) : null}
         {deps.mcp ? <SkillSection notify={deps.mcp.notify} invoke={deps.mcp.invoke} /> : null}
+        {deps.github ? <GithubSection deps={deps.github} onLeave={leave} focus={props.focus} /> : null}
       </div>
   );
 }

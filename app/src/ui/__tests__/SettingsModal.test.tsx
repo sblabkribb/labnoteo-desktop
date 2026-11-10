@@ -5,7 +5,8 @@ import { setLang } from '../../i18n/lang';
 import { catalogs, t } from '../../i18n/t';
 import { coreT } from '../../labnote/i18n';
 import { DialogLayer } from '../../labnote/host/DialogLayer';
-import { closeAllDialogs } from '../../labnote/host/dialogStore';
+import { closeAllDialogs, currentDialog } from '../../labnote/host/dialogStore';
+import type { GithubDeps } from '../../integrations/GithubSection';
 import { fromPluginData, type AppSettings } from '../../labnote/settings';
 import type { IntegrationDeps, IntegrationSettingsValue } from '../../integrations/IntegrationSettingsDialog';
 import { secretStatusOf } from '../../integrations/__tests__/fakeNet';
@@ -274,6 +275,64 @@ describe('Settings modal', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(document.activeElement).toBe(outside);
     outside.remove();
+  });
+
+  it('Integrations shows the GitHub section when deps.integrations.github is set; connecting stays inline (no second dialog)', async () => {
+    const github: GithubDeps = {
+      account: async () => null,
+      secretStatus: async () => secretStatusOf({}),
+      signInStart: async () => ({ outcome: 'started', userCode: 'WXYZ-9876', verificationUri: 'https://github.com/login/device', expiresIn: 900 }),
+      signInWait: (signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled')))),
+      signOut: async () => undefined,
+      setToken: async () => ({ outcome: 'badToken' }),
+      statuses: async () => ({}),
+      unlink: async () => undefined,
+      openExternal: vi.fn(async () => undefined),
+      copy: vi.fn(async () => undefined),
+      appSettings: async () => ({ clientIdDefault: true, forgetOnExit: false }),
+      setAppSettings: async () => ({ clientIdDefault: true, forgetOnExit: false }),
+      readmeOverlay: () => true,
+      commitReadmeOverlay: async () => undefined,
+      owners: async () => ({ outcome: 'needsSignIn' }),
+      defaultOwner: async () => undefined,
+      setDefaultOwner: async () => undefined,
+    };
+    const deps = fakeDeps();
+    install({ ...deps, integrations: { ...deps.integrations, github } });
+    act(() => void openSettings('integrations'));
+    const d = within(screen.getByRole('dialog', { name: '설정' }));
+    expect(await d.findByRole('heading', { name: 'GitHub' })).toBeTruthy();
+    await userEvent.click(await d.findByRole('button', { name: t('github.settings.connect') }));
+    expect(await d.findByText('WXYZ-9876')).toBeTruthy();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(currentDialog()?.spec.kind).toBe('settings');
+  });
+
+  it('openSettings(page, {focus: "githubToken"}) opens the GitHub advanced part with the token field focused', async () => {
+    const deps = fakeDeps();
+    const github: GithubDeps = {
+      account: async () => null,
+      secretStatus: async () => secretStatusOf({}),
+      signInStart: async () => ({ outcome: 'notConfigured' }),
+      signInWait: async () => ({ outcome: 'cancelled' }),
+      signOut: async () => undefined,
+      setToken: async () => ({ outcome: 'badToken' }),
+      statuses: async () => ({}),
+      unlink: async () => undefined,
+      openExternal: async () => undefined,
+      copy: async () => undefined,
+      appSettings: async () => ({ clientIdDefault: true, forgetOnExit: false }),
+      setAppSettings: async () => ({ clientIdDefault: true, forgetOnExit: false }),
+      readmeOverlay: () => true,
+      commitReadmeOverlay: async () => undefined,
+      owners: async () => ({ outcome: 'needsSignIn' }),
+      defaultOwner: async () => undefined,
+      setDefaultOwner: async () => undefined,
+    };
+    install({ ...deps, integrations: { ...deps.integrations, github } });
+    act(() => void openSettings('integrations', { focus: 'githubToken' }));
+    const d = within(screen.getByRole('dialog', { name: '설정' }));
+    await waitFor(() => expect(document.activeElement).toBe(d.getByLabelText(t('github.settings.token'))));
   });
 
   it('with no source (settings not read yet) openSettings does nothing', async () => {

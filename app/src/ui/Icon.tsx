@@ -6,6 +6,8 @@
 import type { JSX } from 'react';
 import {
   Bold,
+  LogIn,
+  LogOut,
   Italic,
   Strikethrough,
   Highlighter,
@@ -175,6 +177,8 @@ const ICONS = {
   'zoom-in': ZoomIn,
   'zoom-out': ZoomOut,
   'external-link': ExternalLink,
+  'log-in': LogIn,
+  'log-out': LogOut,
   'folder-search': FolderSearch,
   eye: Eye,
   filter: Filter,

@@ -2,7 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefOb
 import { t } from '../i18n/t';
 import { isComposing } from '../labnote/host/DialogFrame';
 import type { IntegrationDeps } from './IntegrationSettingsDialog';
-import type { KeySlot, SecretStatus } from './netIpc';
+import type { SecretStatus, Slot } from './netIpc';
 import { notifySecretsChange } from './secretsEvents';
 
 /**
@@ -13,7 +13,8 @@ import { notifySecretsChange } from './secretsEvents';
  */
 export function KeyField(props: {
   deps: Pick<IntegrationDeps, 'setSecret' | 'clearSecret' | 'status'>;
-  slot: KeySlot;
+  /** `github` 은 GitHub 묶음의 어댑터(`github_set_token`)로만 간다. `secret_set` 은 GitHub 자리를 거절한다. */
+  slot: Slot;
   label: string;
   hints?: readonly string[];
   isSet: boolean;
