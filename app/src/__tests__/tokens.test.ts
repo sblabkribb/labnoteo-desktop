@@ -152,6 +152,9 @@ function contrastFailures(t: Record<string, string>, name: string): string[] {
   // 글자가 반투명 바탕(텍스트 선택, 칩) 위에 놓여도 읽힌다
   need('--text', '--bg-selection', 4.5);
   need('--text', '--accent-soft', 4.5);
+  // secondary buttons: their label reads on the fill, and the fill stands apart from a dialog or card surface
+  need('--text', '--btn-bg', 4.5);
+  need('--text', '--btn-bg-hover', 4.5);
   need('--text-muted', '--accent-soft', 4.5);
   // 찾기에 맞은 글자(<mark>)는 그 칠 위에서도 읽힌다
   need('--text', '--search-hit', 4.5);
@@ -210,14 +213,14 @@ describe('디자인 토큰', () => {
     expect(parseRules(smuggled).filter((r) => r.atRule === DARK_MEDIA)).toHaveLength(2);
     expect(rawColoursOutside(smuggled)).toEqual(['#000000']);
     // 블록 밖의 이름 있는 색과 새 색 함수
-    expect(all).toContain('.empty-state { color: var(--text-muted); }');
+    expect(all).toContain('.empty-state-body { margin: 0; }');
     for (const bad of ['gray', 'White', 'oklch(0.5 0.1 200)', 'lab(50% 0 0)', 'color-mix(in srgb, var(--accent), white)', 'Canvas']) {
-      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${bad}; }`)), bad).not.toEqual([]);
+      expect(rawColoursOutside(all.replace('.empty-state-body { margin: 0; }', `.empty-state { color: ${bad}; }`)), bad).not.toEqual([]);
     }
     expect(rawColoursOutside(`${all}\n@media (forced-colors: active) { .probe { outline-color: Highlight; } }`)).toEqual([]);
     expect(rawColoursOutside(`${all}\n@media (forced-colors: active) { .probe { outline-color: red; } }`)).toEqual(['red']);
     for (const ok of ['transparent', 'currentColor', 'inherit', 'none']) {
-      expect(rawColoursOutside(all.replace('.empty-state { color: var(--text-muted); }', `.empty-state { color: ${ok}; }`)), ok).toEqual([]);
+      expect(rawColoursOutside(all.replace('.empty-state-body { margin: 0; }', `.empty-state { color: ${ok}; }`)), ok).toEqual([]);
     }
     expect(lightBody).toContain('--text-muted');
   });

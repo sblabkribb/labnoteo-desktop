@@ -24,6 +24,9 @@ export const TREE_ICONS: Readonly<Record<string, IconName>> = Object.freeze({
   // 실험 탭(experimentTree): 끝난 UO, 추가 줄
   'uo-done': 'circle-check',
   add: 'plus',
+  // 샘플 탭(samples/SamplesPanel.tsx): 종류 줄과 샘플 줄
+  'test-tube': 'test-tube',
+  sample: 'tag',
   // 파일 종류
   experiment: 'flask-conical',
   readme: 'flask-conical',

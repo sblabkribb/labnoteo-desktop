@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { UNSOLICITED_ARM_MS } from './whenNotComposing';
 import { t } from '../../i18n/t';
+import { Icon } from '../../ui/Icon';
 
 /** 한글 조합 중의 키(조합을 끝내는 Enter, 조합을 취소하는 Escape): 대화상자가 처리하지 않는다. */
 export function isComposing(e: KeyboardEvent): boolean {
@@ -76,7 +77,9 @@ export function DialogFrame(props: {
     >
       <div className="dialog-head">
         {props.title ? <h2 id={titleId}>{props.title}</h2> : <span />}
-        <button type="button" className="dialog-close" aria-label={t('dialog.close')} onClick={props.onClose ?? props.onCancel} />
+        <button type="button" className="dialog-close" aria-label={t('dialog.close')} title={t('dialog.close')} onClick={props.onClose ?? props.onCancel}>
+          <Icon name="x" size={16} />
+        </button>
       </div>
       {props.children}
     </div>

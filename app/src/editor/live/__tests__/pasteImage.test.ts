@@ -590,7 +590,7 @@ describe('Task 17: 첨부는 resources/ 로, 그림 폴더 설정, 자세한 알
     expect(saved).toHaveBeenCalledTimes(1);
     const [, opts] = saved.mock.calls[0];
     expect(opts.title).toBe('첨부 2개 저장됨');
-    expect(opts.detail).toBe('plate-reading.csv → resources/, gel.png → resources/');
+    expect(opts.detail).toBe('plate-reading.csv → resources/\ngel.png → resources/');
     expect(opts.action?.label).toBe('폴더 열기');
     opts.action!.run();
     expect(reveal).toHaveBeenCalledWith(`${EXP}/resources/plate-reading.csv`);
@@ -603,7 +603,7 @@ describe('Task 17: 첨부는 resources/ 로, 그림 폴더 설정, 자세한 알
     expect(writeAttachment).toHaveBeenCalledWith(`${EXP}/resources`, 'plate-reading.csv', expect.any(Uint8Array));
     expect(write).toHaveBeenCalledWith(`${EXP}/images`, 'gel.png', expect.any(Uint8Array));
     expect(saved.mock.calls[0][1].title).toBe('2 attachments saved');
-    expect(saved.mock.calls[0][1].detail).toBe('plate-reading.csv → resources/, gel.png → images/');
+    expect(saved.mock.calls[0][1].detail).toBe('plate-reading.csv → resources/\ngel.png → images/');
   });
 
   it('the setting is read at each paste, so a change applies at once', async () => {

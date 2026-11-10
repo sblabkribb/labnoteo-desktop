@@ -57,7 +57,7 @@ describe('create-workflow', () => {
     );
     expect(h.asked.pick).toHaveLength(1);
     expect(h.asked.pick[0].items.length).toBeGreaterThan(10);
-    expect(h.asked.pick[0].opts?.title).toBe('워크플로 선택');
+    expect(h.asked.pick[0].opts?.title).toBe('워크플로 추가') // the header button's name (one vocabulary);
     // 처음 채우는 것은 조용하다
     expect(h.notes).toEqual([]);
   });

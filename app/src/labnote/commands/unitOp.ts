@@ -43,16 +43,17 @@ async function pickUnitOp(ctx: CommandContext, step?: PickStep): Promise<ChosenU
   const row = (op: UnitOperationItem, kind: 'hw' | 'sw'): PickItem<ChosenUnitOp> => {
     const fields = catalogKoFields(op.id, kind === 'hw' ? 'HW' : 'SW', op.description, locale);
     const tools = [op.equipment, op.software].filter((x): x is string => !!x);
+    const searchWords = [...(fields.searchWords ?? []), ...tools];
     return {
       label: `${op.id}: ${op.name}`,
       ...fields,
-      ...(tools.length > 0 || fields.keywords ? { keywords: [...(fields.keywords ?? []), ...tools] } : {}),
+      ...(searchWords.length > 0 ? { searchWords } : {}),
       value: { op, kind },
     };
   };
   const items = [...hw.unitOperations.map((op) => row(op, 'hw')), ...sw.unitOperations.map((op) => row(op, 'sw'))];
   return host.pick(items, {
-    title: host.t('Insert unit operation'),
+    title: t('header.addUo'),
     placeholder: host.t('Search unit operations'),
     catalog: true,
     groupOf: (item) => ((item.value as ChosenUnitOp).kind === 'hw' ? t('catalog.hw') : t('catalog.sw')),

@@ -126,7 +126,7 @@ export function ImageViewer({ path }: { path: string }) {
           1:1
         </button>
         <span className="viewer-toolbar-gap" />
-        <FileActions path={path} compact />
+        <FileActions path={path} compact embed />
       </div>
       <div className={zoom === 'fit' ? 'image-stage checker fit' : 'image-stage checker'}>
         {state.kind === 'loading' ? (

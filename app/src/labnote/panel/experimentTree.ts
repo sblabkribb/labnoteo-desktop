@@ -26,6 +26,8 @@ export type UoNode = {
   name: string;
   /** 제목 줄(0부터). */
   line: number;
+  /** 구역이 끝나는 줄(0부터, 들지 않는다). 없으면 다음 UO 제목까지로 본다. */
+  end?: number;
   done: boolean;
 };
 
@@ -70,9 +72,12 @@ export function experimentLabel(n: Pick<ExpNode, 'num' | 'title'>): string {
 /** 워크플로의 UO 완료 수. */
 export const uoDone = (wf: WfNode): number => wf.uos.filter((u) => u.done).length;
 
-/** 워크플로 줄의 상태: 체크 = README 에서 체크, 반쪽 = UO 일부 완료, 점선 = 시작 전. */
-export function workflowState(wf: WfNode): 'ticked' | 'partial' | 'none' {
-  if (wf.ticked) return 'ticked';
+/**
+ * 워크플로 줄의 상태: 체크 = README 에서 체크(UO 가 없거나 모두 끝남), 반쪽 = UO 일부 완료 또는 README 에서 체크했지만 끝나지
+ * 않은 UO 가 있음(`tickedOpen`: 옆의 `0/2` 와 엇갈리는 완료 표시를 보이지 않는다), 점선 = 시작 전.
+ */
+export function workflowState(wf: WfNode): 'ticked' | 'tickedOpen' | 'partial' | 'none' {
+  if (wf.ticked) return wf.uos.length > 0 && uoDone(wf) < wf.uos.length ? 'tickedOpen' : 'ticked';
   return uoDone(wf) > 0 ? 'partial' : 'none';
 }
 
@@ -83,7 +88,7 @@ function workflowNode(path: string, fileName: string, ticked: boolean, text: str
   const pos = text === undefined ? undefined : notePosition(path, text);
   const uos: UoNode[] =
     pos?.kind === 'workflow'
-      ? pos.uos.map((u) => ({ kind: 'uo', id: `uo:${path}#${u.line}`, code: u.id, alias: u.alias || u.name, name: u.name, line: u.line, done: u.done }))
+      ? pos.uos.map((u) => ({ kind: 'uo', id: `uo:${path}#${u.line}`, code: u.id, alias: u.alias || u.name, name: u.name, line: u.line, end: u.end, done: u.done }))
       : [];
   return {
     kind: 'workflow',

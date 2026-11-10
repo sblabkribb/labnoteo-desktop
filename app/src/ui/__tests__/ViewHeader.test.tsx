@@ -50,7 +50,11 @@ describe('Breadcrumb', () => {
     await userEvent.click(last);
     const [anchor, items] = onMenu.mock.calls[0];
     expect(anchor).toBe(last);
-    expect(items.map((i: { label: string }) => i.label)).toEqual(['✓ UHW180 Incubation', 'UHW380 plate 1']);
+    expect(items.map((i: { label: string }) => i.label)).toEqual(['Incubation', 'plate 1']);
+    expect(items.map((i: { icon?: string; shortcut?: string }) => [i.icon, i.shortcut])).toEqual([
+      ['circle-check', 'UHW180'],
+      ['circle-dot', 'UHW380'],
+    ]);
     await items[1].run();
     expect(onJump).toHaveBeenCalledWith(5);
     // 상태 칩: 진행 중(반쪽 원), 워크플로에서는 단추가 아니다

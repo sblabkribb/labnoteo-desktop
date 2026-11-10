@@ -12,6 +12,7 @@ import { commitRangedNumber, connectSlack, folderStateLine, slackStatusLine } fr
 import { RECOMMENDED_SCOPE, REQUIRED_SCOPES, type SlackInbox, type SlackMode } from '../port/slackInbox';
 import { readSlackLink, scanFolderChoose, scanFolderClear, scanFolderSetMode, scanFolderStatus, type ScanFolderStatus, type ScanMode, type SlackLink } from './scanIpc';
 import { scanFeature } from './scanFeature';
+import { SelectField } from '../../ui/SelectField';
 
 /** What the section uses of the open vault's scan feature (scanFeature()). */
 export interface ScanSettingsFeature {
@@ -296,14 +297,14 @@ export function ScanSettingsSection(props: {
           <label className="prompt-question" htmlFor={`${id}-paper`}>
             {coreT('Worksheet paper size')}
           </label>
-          <select
+          <SelectField
             id={`${id}-paper`}
             value={val.worksheetPaperSize}
             onChange={(e) => void save({ worksheetPaperSize: e.target.value as IntegrationSettingsValue['worksheetPaperSize'] })}
           >
             <option value="a4">A4</option>
             <option value="letter">Letter</option>
-          </select>
+          </SelectField>
         </div>
 
         <div className="integration-field">
@@ -341,7 +342,7 @@ export function ScanSettingsSection(props: {
               'Dedicated: a folder only for scans; originals are moved to labnote-processed/ or labnote-failed/ inside it. Shared: a folder with other files too (KakaoTalk, camera uploads); originals stay, files without a worksheet QR code are left alone.',
             )}
           </p>
-          <select
+          <SelectField
             id={`${id}-mode`}
             value={folder.mode}
             disabled={!folder.path}
@@ -351,7 +352,7 @@ export function ScanSettingsSection(props: {
               {coreT('Dedicated folder')}
             </option>
             <option value="shared">{coreT('Shared folder')}</option>
-          </select>
+          </SelectField>
         </div>
 
         <div className="integration-field">
@@ -485,10 +486,10 @@ export function ScanSettingsSection(props: {
               <label className="prompt-question" htmlFor={`${id}-slackmode`}>
                 {coreT('Where you send scans')}
               </label>
-              <select id={`${id}-slackmode`} value={slackMode} onChange={(e) => setSlackMode(e.target.value as SlackMode)}>
+              <SelectField id={`${id}-slackmode`} value={slackMode} onChange={(e) => setSlackMode(e.target.value as SlackMode)}>
                 <option value="dm">{coreT('Direct message to the bot')}</option>
                 <option value="channel">{coreT('Private channel')}</option>
-              </select>
+              </SelectField>
               {slackMode === 'channel' ? (
                 <input
                   type="text"

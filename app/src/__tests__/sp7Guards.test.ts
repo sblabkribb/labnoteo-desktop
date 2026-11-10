@@ -298,7 +298,7 @@ describe('SP7 guards', () => {
     await deps.commit({ worksheetPaperSize: 'letter' });
 
     // MCP: enable the server (saved), then Copy token
-    fireEvent.click(await screen.findByRole('checkbox', { name: coreT('Enable MCP server') }));
+    fireEvent.click(await screen.findByRole('switch', { name: coreT('Enable MCP server') }));
     await flush();
     fireEvent.click(await screen.findByRole('button', { name: coreT('Copy token') }));
     await flush();

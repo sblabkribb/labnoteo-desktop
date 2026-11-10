@@ -30,8 +30,9 @@ export const PALETTE_RECENT_KEY = 'command';
 
 /**
  * 명령 팔레트: 지금 쓸 수 있는 명령을 host.pick 의 팔레트 꼴로 고르게 하고, 고른 명령을 runCommand 로 돌린다.
- * - 이름은 열 때 만든다(한국어: '실험 생성 (Create experiment)', 영어: 'Create experiment'). id 와 영어 키, 단축키로도 찾는다.
- * - 줄마다 아이콘과 오른쪽 끝의 단축키 칩. 검색어가 없으면 최근 고른 명령(id 로 기억한다)이 "최근" 묶음으로 맨 위에 온다.
+ * - 이름은 열 때 만든다(지금 언어의 이름 하나: '실험 생성' / 'Create experiment'). id 와 영어 키, 단축키로도 찾는다.
+ * - 줄마다 아이콘과 오른쪽 끝의 단축키 칩. 검색어가 없으면 최근 고른 명령(id 로 기억한다)이 "최근" 묶음으로 맨 위에 오고,
+ *   그다음 앱 명령(사이드바, 설정, 새 노트처럼 단축키가 있는 것)이 실험 노트 명령보다 먼저 온다.
  */
 export async function openPalette(ctx: CommandContext): Promise<void> {
   const vendor: PickItem<Entry>[] = commands()
@@ -52,7 +53,7 @@ export async function openPalette(ctx: CommandContext): Promise<void> {
       };
     });
   const entry = (item: PickItem<unknown>) => item.value as Entry;
-  const chosen = await ctx.host.pick([...vendor, ...app], {
+  const chosen = await ctx.host.pick([...app, ...vendor], {
     title: t('palette.title'),
     placeholder: t('palette.placeholder'),
     palette: { iconOf: (item) => entry(item).icon, kbdOf: (item) => entry(item).kbd, hint: t('palette.hint') },

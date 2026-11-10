@@ -89,11 +89,11 @@ export function PromptDialog(props: {
         </p>
       ) : null}
       <div className="dialog-actions">
-        <button type="button" className="primary" onClick={() => void submit()}>
-          {t('dialog.ok')}
-        </button>
         <button type="button" onClick={props.onCancel}>
           {t('dialog.cancel')}
+        </button>
+        <button type="button" className="primary" onClick={() => void submit()}>
+          {t('dialog.ok')}
         </button>
       </div>
     </DialogFrame>

@@ -3,6 +3,7 @@ import { openWithDefaultApp, revealInFolder } from '../fs/vaultOpen';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { notify } from '../labnote/host/toastStore';
+import { copyText, embedLinkText } from '../links/clipboard';
 import { Icon } from '../ui/Icon';
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
@@ -37,14 +38,32 @@ export function readFailure(e: unknown, cap: string): string {
   return t('viewer.readFailed', messageOf(e));
 }
 
-/** 기본 앱으로 열기, 폴더에서 보기. `compact` 면 아이콘 단추(보기 도구 막대), 아니면 글 단추(파일 카드). */
-export function FileActions(p: { path: string; compact?: boolean }) {
+/** 임베드 링크를 복사한다. 클립보드가 거부하면 경고 알림이다. */
+async function copyEmbed(path: string): Promise<void> {
+  try {
+    await copyText(embedLinkText(path), notify);
+  } catch (e) {
+    notify('warn', t('viewer.openFailed', messageOf(e)));
+  }
+}
+
+/**
+ * 기본 앱으로 열기, 폴더에서 보기(`embed` 면 임베드 링크 복사도, 명세 §6.1). `compact` 면 아이콘 단추(보기 도구 막대),
+ * 아니면 글 단추(파일 카드).
+ */
+export function FileActions(p: { path: string; compact?: boolean; embed?: boolean }) {
   useLang();
   const open = t('menu.openDefault');
   const reveal = t('menu.reveal');
+  const embed = t('menu.copyEmbed');
   if (p.compact) {
     return (
       <>
+        {p.embed ? (
+          <button type="button" className="ibtn" aria-label={embed} title={embed} onClick={() => void copyEmbed(p.path)}>
+            <Icon name="link" />
+          </button>
+        ) : null}
         <button type="button" className="ibtn" aria-label={open} title={open} onClick={() => void openOrWarn(p.path)}>
           <Icon name="external-link" />
         </button>

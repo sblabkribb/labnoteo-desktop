@@ -90,13 +90,13 @@ describe('앱', () => {
     });
     render(<App />);
     await screen.findByText('wrong', { selector: '.vault-bar-name' });
-    expect(screen.getByText("왼쪽에서 노트를 고르거나, 실험 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
+    expect(screen.getByText('왼쪽 트리에서 노트를 고르거나, 아래에서 시작하세요.')).toBeTruthy();
 
     await user.click(within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '새 노트' }));
     await user.type(within(await screen.findByRole('dialog', { name: '새 노트' })).getByRole('textbox', { name: '노트 이름' }), 'Day 1{Enter}');
 
     await waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('vault_read', { path: 'Day 1.labnote.md' }));
-    expect(screen.queryByText("왼쪽에서 노트를 고르거나, 실험 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeNull();
+    expect(screen.queryByText('왼쪽 트리에서 노트를 고르거나, 아래에서 시작하세요.')).toBeNull();
     expect(screen.queryByRole('textbox', { name: '노트 이름' })).toBeNull();
   });
   it('레이아웃 영역이 역할로 드러난다: 리본, 사이드바(보관함 줄), 본문, 상태줄. 상단 바는 없다', async () => {
@@ -113,7 +113,7 @@ describe('앱', () => {
     expect(within(side).getByText('노트가 없습니다')).toBeTruthy();
     expect(within(within(side).getByRole('group', { name: '보관함' })).getByRole('button', { name: '보관함 메뉴' })).toBeTruthy();
     expect(screen.getAllByRole('main')).toHaveLength(1); // main 안에 main 을 중첩하지 않는다
-    expect(within(screen.getByRole('main')).getByText("왼쪽에서 노트를 고르거나, 실험 탭의 '새 실험' 또는 Ctrl+P 로 시작하세요.")).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText('왼쪽 트리에서 노트를 고르거나, 아래에서 시작하세요.')).toBeTruthy();
     // the empty state mentions Ctrl+P
     expect(within(screen.getByRole('main')).getByText(/Ctrl\+P/)).toBeTruthy();
     expect(within(screen.getByRole('contentinfo')).getByText(/0\.0\.0/)).toBeTruthy();

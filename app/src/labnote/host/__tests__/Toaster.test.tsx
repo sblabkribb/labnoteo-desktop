@@ -18,7 +18,9 @@ describe('알림(토스트)', () => {
     act(() => notify('info', '실험을 만들었습니다.'));
     const toast = screen.getByRole('status');
     expect(toast.textContent).toContain('실험을 만들었습니다.');
-    expect(within(toast).queryByRole('button')).toBeNull();
+    // Every toast has a status icon and a close button (spec §5.4), even the quiet ones
+    expect(toast.querySelector('svg.toast-icon')).toBeTruthy();
+    expect(within(toast).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['알림 닫기']);
     act(() => vi.advanceTimersByTime(3999));
     expect(screen.queryByRole('status')).toBeTruthy();
     act(() => vi.advanceTimersByTime(1));

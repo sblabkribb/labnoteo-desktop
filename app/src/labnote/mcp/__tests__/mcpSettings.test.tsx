@@ -260,7 +260,7 @@ describe('McpSection', () => {
   it('the switch starts and stops the server and saves the setting; the status line shows the address', async () => {
     const r = fakeRust();
     const { commit } = section(r);
-    const toggle = (await screen.findByRole('checkbox', { name: coreT('Enable MCP server') })) as HTMLInputElement;
+    const toggle = (await screen.findByRole('switch', { name: coreT('Enable MCP server') })) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
     fireEvent.click(toggle);
     await flush();

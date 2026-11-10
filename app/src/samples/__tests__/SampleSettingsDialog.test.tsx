@@ -19,8 +19,8 @@ import { commitGlobalFolder } from '../../labnote/port/sampleSettings';
 import { applySampleSettings, SampleSettingsForm, type SampleSettingsValue } from '../SampleSettingsDialog';
 
 /**
- * The sample settings now live on the Samples page of the settings modal (UI redesign Task 8). The form is the same:
- * this renders it alone and resolves with what Save hands over, as the old dialog did.
+ * The sample settings now live on the Samples page of the settings modal (UI redesign Task 8). There is no Save button:
+ * a change is handed over when the field is left. This renders the form alone and resolves with the first hand-over.
  */
 function openSampleSettings(value: SampleSettingsValue): Promise<SampleSettingsValue | undefined> {
   return new Promise((resolve) => {
@@ -63,7 +63,7 @@ describe('SampleSettingsDialog', () => {
     act(() => {
       result = openSampleSettings(BASE);
     });
-    const input = screen.getByLabelText(coreT('Custom sample types')) as HTMLInputElement;
+    const input = screen.getByRole('textbox', { name: coreT('Custom sample types') }) as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'Cell Line, Dna, 세포_용해물' } });
     fireEvent.blur(input);
     expect(
@@ -89,12 +89,10 @@ describe('SampleSettingsDialog', () => {
     ).toBeTruthy();
     // 저장할 수 없는 이름은 칸에서 빠진다(플러그인의 t.setValue(s.customSampleTypes.join(', '))).
     expect(input.value).toBe('');
+    // Nothing that can be saved changed, so nothing is handed over yet; leaving the field again keeps the names that can be saved.
     fireEvent.change(input, { target: { value: 'CellLine, Cell Line' } });
-    // Save shows why a name is dropped and stays open; a second Save keeps the names that can be saved.
-    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
-    expect(document.querySelector('.sample-settings')).not.toBeNull();
+    fireEvent.blur(input);
     expect(input.value).toBe('CellLine');
-    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
     await expect(result).resolves.toEqual({ ...BASE, customSampleTypes: ['CellLine'] });
   });
 
@@ -106,48 +104,44 @@ describe('SampleSettingsDialog', () => {
     return s;
   };
 
-  it('a refused Global folder: change, blur, Save keeps the dialog open with the reason (browser order)', async () => {
+  it('a refused Global folder: change, blur shows the reason and hands nothing over', async () => {
     render(<DialogLayer />);
     let result: Promise<SampleSettingsValue | undefined> | undefined;
     act(() => {
       result = openSampleSettings(BASE);
     });
     const done = settled(result!);
-    const folder = screen.getByLabelText(coreT('Global sample folder')) as HTMLInputElement;
+    const folder = screen.getByRole('textbox', { name: coreT('Global sample folder') }) as HTMLInputElement;
     const notice = commitGlobalFolder(coreT, 'a/con', GLOBAL).notice!;
     fireEvent.change(folder, { target: { value: 'a/con' } });
     fireEvent.blur(folder);
-    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
     await act(async () => {});
     expect(done.done).toBe(false);
-    expect(document.querySelector('.sample-settings')).not.toBeNull();
     expect(screen.getByText(notice)).toBeTruthy();
     expect(folder.value).toBe(GLOBAL);
-    // Seen: Save again keeps the folder it was set back to.
-    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
-    await expect(result).resolves.toEqual(BASE);
+    // A valid folder is handed over when the field is left (Enter does the same).
+    fireEvent.change(folder, { target: { value: SHARED } });
+    fireEvent.keyDown(folder, { key: 'Enter' });
+    await expect(result).resolves.toEqual({ ...BASE, globalSampleFolder: SHARED });
   });
 
-  it('a refused custom type: change, blur, Save keeps the dialog open with the reason (browser order)', async () => {
+  it('a refused custom type: change, blur shows the reason and hands nothing over until a valid name', async () => {
     render(<DialogLayer />);
     let result: Promise<SampleSettingsValue | undefined> | undefined;
     act(() => {
       result = openSampleSettings(BASE);
     });
     const done = settled(result!);
-    const input = screen.getByLabelText(coreT('Custom sample types')) as HTMLInputElement;
+    const input = screen.getByRole('textbox', { name: coreT('Custom sample types') }) as HTMLInputElement;
     const notice = coreT('{0}: a space or - keeps a type from autocompleting, so it was not saved. Use {1} instead.', 'Cell Line', 'Cell_Line');
     fireEvent.change(input, { target: { value: 'Cell Line' } });
     fireEvent.blur(input);
-    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
     await act(async () => {});
     expect(done.done).toBe(false);
-    expect(document.querySelector('.sample-settings')).not.toBeNull();
     expect(screen.getByText(notice)).toBeTruthy();
-    // Editing the field again clears the stop; a valid name then saves at once.
+    // A valid name is handed over at once.
     fireEvent.change(input, { target: { value: 'CellLine' } });
     fireEvent.blur(input);
-    fireEvent.click(screen.getByRole('button', { name: t('samples.settings.save') }));
     await expect(result).resolves.toEqual({ ...BASE, customSampleTypes: ['CellLine'] });
   });
 
@@ -163,7 +157,7 @@ describe('SampleSettingsDialog', () => {
         ),
       ),
     ).toBeTruthy();
-    const input = screen.getByLabelText(coreT('Custom sample types')) as HTMLInputElement;
+    const input = screen.getByRole('textbox', { name: coreT('Custom sample types') }) as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'AUX, CON, Strain' } });
     fireEvent.blur(input);
     expect(
@@ -196,8 +190,24 @@ describe('SampleSettingsDialog', () => {
         ),
       ),
     ).toBeTruthy();
-    expect((screen.getByLabelText(coreT('Sample tracking')) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(t('samples.settings.typesDesc'))).toBeTruthy();
+    // The same rows as the other settings pages: a switch, no native checkbox, no Save button
+    expect(screen.getByRole('switch', { name: coreT('Sample tracking') }).getAttribute('aria-checked')).toBe('true');
+    expect(document.querySelector('.sample-settings input[type="checkbox"]')).toBeNull();
+    expect(document.querySelectorAll('.sample-settings .setting-row')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: /save|저장/i })).toBeNull();
     expect(document.querySelector('.sample-settings [style]')).toBeNull();
+  });
+
+  it('the tracking switch is handed over at once, and the EN help has no Korean examples', async () => {
+    render(<DialogLayer />);
+    let result: Promise<SampleSettingsValue | undefined> | undefined;
+    act(() => {
+      result = openSampleSettings(BASE);
+    });
+    expect(t('samples.settings.typesDesc')).not.toMatch(/[\uac00-\ud7a3]/);
+    fireEvent.click(screen.getByRole('switch', { name: coreT('Sample tracking') }));
+    await expect(result).resolves.toEqual({ ...BASE, sampleTracking: false });
   });
 
   it('a refused Global folder shows the plugin sentence and goes back; there is no Cancel (the settings modal closes)', async () => {
@@ -206,7 +216,7 @@ describe('SampleSettingsDialog', () => {
     act(() => {
       result = openSampleSettings(BASE);
     });
-    const folder = screen.getByLabelText(coreT('Global sample folder')) as HTMLInputElement;
+    const folder = screen.getByRole('textbox', { name: coreT('Global sample folder') }) as HTMLInputElement;
     fireEvent.change(folder, { target: { value: 'a/con' } });
     fireEvent.blur(folder);
     expect(screen.getByText(commitGlobalFolder(coreT, 'a/con', GLOBAL).notice!)).toBeTruthy();

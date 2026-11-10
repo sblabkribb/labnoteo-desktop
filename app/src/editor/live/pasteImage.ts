@@ -310,11 +310,11 @@ export function pasteImages(deps: PasteImageDeps): Extension {
     if (finish(view, id, notePath, paths, links)) announce(paths);
   }
 
-  /** "첨부 N개 저장됨" 과 파일마다 간 폴더("plate.csv → resources/"), 그리고 첫 파일을 탐색기에서 보이는 단추. */
+  /** "첨부 N개 저장됨" 과 파일마다 한 줄씩 간 폴더("plate.csv → resources/"), 그리고 첫 파일을 탐색기에서 보이는 단추. */
   function announce(paths: string[]): void {
     const detail = paths
       .map((p) => t('attach.detail', p.slice(p.lastIndexOf('/') + 1), folderLabel(p.slice(0, Math.max(0, p.lastIndexOf('/'))))))
-      .join(', ');
+      .join('\n');
     const reveal = deps.reveal;
     saved(detail, {
       title: t('attach.saved', paths.length),

@@ -62,7 +62,7 @@ describe('catalog picker rows', () => {
     expect(styleAttributes()).toEqual([]);
   });
 
-  it('group headers without a query; a flat ranked list once something is typed', async () => {
+  it('group headers without a query; with a query the ranked rows are grouped in the order their best row ranks', async () => {
     renderLayer();
     openIn(() => pickDialog(ITEMS, opts));
     expect(groups()).toEqual(['Design', 'Build', 'Test']);
@@ -71,7 +71,7 @@ describe('catalog picker rows', () => {
     expect(within(list).getAllByRole('group').map((g) => g.getAttribute('aria-label') ?? document.getElementById(g.getAttribute('aria-labelledby')!)?.textContent)).toEqual(['Design', 'Build', 'Test']);
     expect(within(within(list).getByRole('group', { name: 'Build' })).getAllByRole('option').map((o) => o.querySelector('.picker-code')?.textContent)).toEqual(['WB010', 'WB030']);
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '조립' } });
-    expect(groups()).toEqual([]);
+    expect(groups()).toEqual(['Build']);
     expect(options()[0].querySelector('.picker-code')?.textContent).toBe('WB030');
   });
 

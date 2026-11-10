@@ -36,11 +36,11 @@ export function ConfirmDialog(props: {
         ))}
       </div>
       <div className="dialog-actions">
-        <button ref={confirm} type="button" className={spec.destructive ? 'danger' : 'primary'} onClick={() => props.onDone(true)}>
-          {spec.confirmLabel ?? t('dialog.ok')}
-        </button>
         <button ref={cancel} type="button" onClick={() => props.onDone(false)}>
           {t('dialog.cancel')}
+        </button>
+        <button ref={confirm} type="button" className={spec.destructive ? 'danger' : 'primary'} onClick={() => props.onDone(true)}>
+          {spec.confirmLabel ?? t('dialog.ok')}
         </button>
       </div>
     </DialogFrame>

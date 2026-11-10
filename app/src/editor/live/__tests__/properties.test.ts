@@ -96,7 +96,7 @@ function press(v: EditorView, init: KeyboardEventInit) {
 describe('라이브 미리보기: 속성(front matter) 격자', () => {
   it('renders one row per key, in file order', () => {
     const v = view('---\ntitle: a\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx', 64);
-    expect(rows(v).map(([k]) => k)).toEqual(['title', '상태', '마지막 수정']);
+    expect(rows(v).map(([k]) => k)).toEqual(['제목', '상태', '마지막 수정']);
     expect(rows(v)[1][1]).toBe('계획'); // 저장 값 Planned 를 지역화해 보인다
   });
 
@@ -327,17 +327,19 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
   });
 
   it('renames a key from its key input and keeps the value', () => {
-    const v = view(original, original.length);
-    const input = keyInput(v, 'title');
-    input.value = '제목';
+    // a key the card does not localise (localised ones such as title are renamed in Edit as YAML)
+    const doc = original.replace('title: a', 'note: a');
+    const v = view(doc, doc.length);
+    const input = keyInput(v, 'note');
+    input.value = '메모';
     enter(input);
-    expect(v.state.doc.toString()).toBe(original.replace('title: a', '제목: a'));
-    expect(rows(v).map(([k]) => k)).toEqual(['제목', '상태', '마지막 수정']);
-    const taken = keyInput(v, '제목');
+    expect(v.state.doc.toString()).toBe(doc.replace('note: a', '메모: a'));
+    expect(rows(v).map(([k]) => k)).toEqual(['메모', '상태', '마지막 수정']);
+    const taken = keyInput(v, '메모');
     taken.value = 'status';
     enter(taken);
-    expect(v.state.doc.toString()).toBe(original.replace('title: a', '제목: a'));
-    expect(taken.value).toBe('제목'); // 받지 않은 이름은 되돌린다
+    expect(v.state.doc.toString()).toBe(doc.replace('note: a', '메모: a'));
+    expect(taken.value).toBe('메모'); // 받지 않은 이름은 되돌린다
   });
 
   it('the add button with an empty key focuses the key input instead of failing', () => {
@@ -363,7 +365,7 @@ describe('라이브 미리보기: 속성 격자 고치기', () => {
   });
   it('removes a row and adds one from the add row', () => {
     const v = view(original, original.length);
-    click(rowEl(v, 'title').querySelector(`button[aria-label="${t('props.removeKey', 'title')}"]`)!);
+    click(rowEl(v, 'title').querySelector(`button[aria-label="${t('props.removeKey', t('props.title'))}"]`)!);
     expect(v.state.doc.toString()).toBe('---\nstatus: Planned\nlast_updated_date: 2026-11-01\n---\nx');
     const key = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.add')}"]`)!;
     const value = v.contentDOM.querySelector<HTMLInputElement>(`.lno-props input[aria-label="${t('props.newValue')}"]`)!;

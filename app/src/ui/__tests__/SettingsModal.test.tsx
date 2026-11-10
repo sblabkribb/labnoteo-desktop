@@ -211,20 +211,17 @@ describe('Settings modal', () => {
     expect(name.value).toBe('박예성');
   });
 
-  it('Samples: the existing sample settings; a plain change is saved in place, a folder change closes settings first', async () => {
+  it('Samples: the existing sample settings; a plain change is applied at once, a folder change closes settings first', async () => {
     const deps = install();
     act(() => void openSettings('samples'));
     const panel = within(dialog().getByRole('tabpanel', { name: '샘플' }));
-    fireEvent.click(panel.getByLabelText(coreT('Sample tracking')));
-    fireEvent.click(panel.getByRole('button', { name: t('samples.settings.save') }));
+    fireEvent.click(panel.getByRole('switch', { name: coreT('Sample tracking') }));
     await waitFor(() => expect(deps.samples.apply).toHaveBeenCalledWith(SAMPLES, { ...SAMPLES, sampleTracking: false }));
     expect(screen.getByRole('dialog', { name: '설정' })).toBeTruthy();
-    expect(await panel.findByText('저장했습니다')).toBeTruthy();
     // 폴더를 바꾸면 옮길지 묻는 대화상자가 이 창 뒤에 줄 서지 않게 먼저 닫는다
-    const folder = panel.getByLabelText(coreT('Global sample folder')) as HTMLInputElement;
+    const folder = panel.getByRole('textbox', { name: coreT('Global sample folder') }) as HTMLInputElement;
     fireEvent.change(folder, { target: { value: 'shared/samples' } });
     fireEvent.blur(folder);
-    fireEvent.click(panel.getByRole('button', { name: t('samples.settings.save') }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '설정' })).toBeNull());
     await waitFor(() =>
       expect(deps.samples.apply).toHaveBeenLastCalledWith(

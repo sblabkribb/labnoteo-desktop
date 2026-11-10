@@ -169,11 +169,11 @@ describe('단추는 평평하다: 보조는 회색 채움, 주된 것은 강조 
     '.notices > aside': '<div class="notices"><aside><button>a</button><button class="primary">b</button></aside></div>',
   };
 
-  it.each(['.dialog', '.first-run', '.notices > aside'])('%s: plain button is --bg-hover, primary is --accent-fill', (c) => {
+  it.each(['.dialog', '.first-run', '.notices > aside'])('%s: plain button is --btn-bg, primary is --accent-fill', (c) => {
     document.body.innerHTML = MARKUP[c];
     const plain = document.querySelector(`${c} button:not(.primary)`)!;
     const primary = document.querySelector(`${c} button.primary`)!;
-    expect(winning(plain, 'background')).toBe('var(--bg-hover)');
+    expect(winning(plain, 'background')).toBe('var(--btn-bg)');
     expect(winning(plain, 'border')).toBe('0');
     expect(winning(plain, 'min-height')).toBe('28px');
     expect(winning(primary, 'background')).toBe('var(--accent-fill)');
@@ -182,7 +182,7 @@ describe('단추는 평평하다: 보조는 회색 채움, 주된 것은 강조 
 
   it('.btn 클래스도 같은 모양이고, ghost 는 투명, ibtn 은 테두리 없는 아이콘 단추다', () => {
     document.body.innerHTML = '<span class="btn">a</span><span class="btn primary">b</span><span class="btn ghost">c</span><span class="ibtn">d</span>';
-    expect(winning(document.querySelector('.btn:not(.primary):not(.ghost)')!, 'background')).toBe('var(--bg-hover)');
+    expect(winning(document.querySelector('.btn:not(.primary):not(.ghost)')!, 'background')).toBe('var(--btn-bg)');
     expect(winning(document.querySelector('.btn.primary')!, 'background')).toBe('var(--accent-fill)');
     expect(winning(document.querySelector('.btn.ghost')!, 'background')).toBe('transparent');
     const ibtn = document.querySelector('.ibtn')!;

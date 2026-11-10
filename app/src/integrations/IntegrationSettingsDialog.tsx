@@ -24,6 +24,7 @@ import {
   type ImportProblem,
   type ImportRefusal,
 } from './importFile';
+import { SelectField } from '../ui/SelectField';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -640,19 +641,21 @@ export function IntegrationSettingsPage(props: {
                 'Which partbank the autocomplete search and the catalog download use. A link made through the desktop app points at this PC only, so a vault shared with the lab should use the server.',
               )}
             </p>
-            <select
+            <SelectField
               id={`${id}-pbconn`}
               value={val.partbankDefaultConnection}
               onChange={(e) => void save({ partbankDefaultConnection: e.target.value as IntegrationSettingsValue['partbankDefaultConnection'] })}
             >
               <option value="web">{coreT('partbank server')}</option>
               <option value="desktop">{coreT('partbank desktop app')}</option>
-            </select>
+            </SelectField>
           </div>
           <div className="integration-field">
-            <label className="prompt-question">
+            <label className="prompt-question switch-label">
               <input
                 type="checkbox"
+                role="switch"
+                className="switch"
                 checked={val.partbankSendUsages}
                 onChange={(e) => void save({ partbankSendUsages: e.target.checked })}
               />{' '}
@@ -672,7 +675,7 @@ export function IntegrationSettingsPage(props: {
             <label className="prompt-question" htmlFor={`${id}-provider`}>
               {coreT('Provider')}
             </label>
-            <select
+            <SelectField
               id={`${id}-provider`}
               value={provider}
               onChange={(e) => void save({ llmProvider: e.target.value as IntegrationSettingsValue['llmProvider'] })}
@@ -680,7 +683,7 @@ export function IntegrationSettingsPage(props: {
               <option value="none">{coreT('Disabled')}</option>
               <option value="openai">OpenAI-compatible</option>
               <option value="ollama">Ollama</option>
-            </select>
+            </SelectField>
           </div>
           {provider !== 'none' ? (
             <div className="integration-group">
@@ -744,14 +747,14 @@ export function IntegrationSettingsPage(props: {
             <label className="prompt-question" htmlFor={`${id}-bfwconn`}>
               {t('integrations.bfw.connection')}
             </label>
-            <select
+            <SelectField
               id={`${id}-bfwconn`}
               value={val.bfwConnection}
               onChange={(e) => void save({ bfwConnection: e.target.value as IntegrationSettingsValue['bfwConnection'] })}
             >
               <option value="server">{t('integrations.bfw.server')}</option>
               <option value="desktop">{t('integrations.bfw.desktop')}</option>
-            </select>
+            </SelectField>
           </div>
           {val.bfwConnection === 'server' ? (
             <UrlField

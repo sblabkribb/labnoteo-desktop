@@ -10,6 +10,16 @@ export function openWithDefaultApp(path: string, invoke: InvokeFn = tauriInvoke)
   return invoke<void>('vault_open_default', { path });
 }
 
+/** 파일 카드의 크기와 수정 시각(`vault_file_info`): 바이트, 에포크 밀리초(시스템이 모르면 null). 보관함 밖은 거부한다. */
+export interface VaultFileInfo {
+  size: number;
+  modified: number | null;
+}
+
+export function fileInfo(path: string, invoke: InvokeFn = tauriInvoke): Promise<VaultFileInfo> {
+  return invoke<VaultFileInfo>('vault_file_info', { path });
+}
+
 /** 보관함 파일이나 폴더를 탐색기에서 골라 보인다(`vault_reveal`). 보관함 밖은 거부한다. */
 export function revealInFolder(path: string, invoke: InvokeFn = tauriInvoke): Promise<void> {
   return invoke<void>('vault_reveal', { path });

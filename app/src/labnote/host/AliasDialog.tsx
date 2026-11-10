@@ -108,11 +108,11 @@ export function AliasDialog(props: {
             {t('alias.back')}
           </button>
         ) : null}
-        <button type="button" className="primary" onClick={submit}>
-          {t('dialog.ok')}
-        </button>
         <button type="button" onClick={props.onCancel}>
           {t('dialog.cancel')}
+        </button>
+        <button type="button" className="primary" onClick={submit}>
+          {t('dialog.ok')}
         </button>
       </div>
     </DialogFrame>

@@ -16,8 +16,7 @@ import { openWithDefaultApp, revealInFolder } from '../fs/vaultOpen';
 import type { IconName } from '../ui/Icon';
 import { activeCellView } from '../editor/table/cellEditor';
 import type { LinkHit } from '../editor/live/links';
-import { copyText, markdownLinkFor, noteLinkText } from '../links/clipboard';
-import { linkIndex } from '../links/linkIndex';
+import { copyText, embedLinkText, noteLinkText } from '../links/clipboard';
 import type { TreeEntry } from '../tree/useTree';
 import type { CommandContext } from './commands/context';
 import { commandById } from './commands/registry';
@@ -70,8 +69,12 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
   }
   const experiment = isExperimentReadme(path) ? posix.dirname(path) : undefined;
   const attachment = !isNotePath(path);
+  // 파일 줄에서도 "여기에 새 노트·폴더"(명세 §5.6): 그 파일이 든 폴더에 만든다
+  const parent = posix.dirname(path) === '.' ? '' : posix.dirname(path);
   return [
     { labelKey: 'menu.open', icon: 'file', run: () => ctx.openFile(path) },
+    { labelKey: 'menu.newNoteHere', icon: 'file-plus', run: () => newNoteIn(ctx, parent) },
+    { labelKey: 'menu.newFolderHere', icon: 'folder-plus', run: () => newFolder(ctx, parent) },
     ...(attachment
       ? [
           { labelKey: 'menu.openDefault', icon: 'external-link' as const, run: () => openWithDefaultApp(path) },
@@ -82,19 +85,13 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
     copyPath,
     ...(experiment
       ? [
-          { label: coreT('Change experiment status'), run: () => changeExperimentStatus(ctx, experiment) },
-          { label: coreT('Toggle discussion flag'), run: () => toggleDiscussionFlag(ctx, experiment) },
+          { label: coreT('Change experiment status'), icon: 'circle-half' as const, run: () => changeExperimentStatus(ctx, experiment) },
+          { label: coreT('Toggle discussion flag'), icon: 'pencil' as const, run: () => toggleDiscussionFlag(ctx, experiment) },
         ]
       : []),
     ...csvItems(ctx, csvExperimentOfFile(path), path),
     ...tail,
   ];
-}
-
-/** 첨부의 임베드 링크: 이름이 하나뿐이면 `![[이름.확장자]]`, 아니면 보관함 경로, 위키링크로 쓸 수 없는 이름이면 Markdown 이미지 링크. */
-function embedLinkText(path: string): string {
-  const linktext = linkIndex.resolver().linktextFor(path, '');
-  return linktext === null ? `!${markdownLinkFor(path)}` : `![[${linktext}]]`;
 }
 
 /** 실험 README 면 그 실험 폴더(플러그인처럼 이름은 대소문자를 가리지 않고, 실험은 getExperimentDir 로). */
@@ -106,10 +103,10 @@ function csvExperimentOfFile(path: string): string | undefined {
 function csvItems(ctx: CommandContext, experimentDir: string | undefined, notePath?: string): MenuAction[] {
   return [
     ...(experimentDir
-      ? [{ label: coreT('Export all tables of this experiment to CSV'), run: () => exportExperimentTablesToCsv(ctx, experimentDir) }]
+      ? [{ label: coreT('Export all tables of this experiment to CSV'), icon: 'sheet' as const, run: () => exportExperimentTablesToCsv(ctx, experimentDir) }]
       : []),
     ...(notePath !== undefined && posix.extname(notePath) === '.md'
-      ? [{ label: coreT('Export tables to CSV'), run: () => exportTablesToCsv(ctx, notePath) }]
+      ? [{ label: coreT('Export tables to CSV'), icon: 'sheet' as const, run: () => exportTablesToCsv(ctx, notePath) }]
       : []),
   ];
 }

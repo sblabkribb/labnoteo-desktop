@@ -26,6 +26,8 @@ const DYNAMIC_ARGS: Record<string, string[]> = {
   'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'],
   // 보기 머리 ⋯ 메뉴의 등록된 명령(MORE_COMMANDS)의 nameKey. 위와 같은 registry.test.ts 가 본다.
   'src/labnote/menus.ts': ['c.nameKey'],
+  // paletteName(key) 의 정의 안에서 넘기는 key: 부르는 쪽(위의 c.nameKey, 테스트의 글자 키)이 지킨다.
+  'src/labnote/i18n.ts': ['key'],
   // 같은 파일 위쪽의 `const NAME = '...'` 상수. 아래 '상수 인자의 글자도 obsidianKo 에 있다' 가 그 글자를 확인한다.
   'src/integrations/IntegrationSettingsDialog.tsx': ['CLEARTEXT', 'FULL_ADDRESS'],
 };

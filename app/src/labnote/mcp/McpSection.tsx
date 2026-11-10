@@ -174,8 +174,8 @@ export function McpSection(props: McpSectionProps) {
     <section className="integration-section mcp-section">
       <h3>{coreT('MCP server')}</h3>
       <div className="integration-field">
-        <label className="prompt-question">
-          <input type="checkbox" checked={enabled} onChange={(e) => void onToggle(e.target.checked)} />{' '}
+        <label className="prompt-question switch-label">
+          <input type="checkbox" role="switch" className="switch" checked={enabled} onChange={(e) => void onToggle(e.target.checked)} />{' '}
           {coreT('Enable MCP server')}
         </label>
         <p className="prompt-hint">{overrideOr('mcp.enableDesc')}</p>

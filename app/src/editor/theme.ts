@@ -224,15 +224,22 @@ export const editorThemeSpec = {
   },
   // 스캔 주석(<!-- labnoteo-scan … -->): 흐리고 작게.
   '.lno-scan-meta': { color: 'var(--text-muted)', fontSize: '0.8em' },
-  // 유닛 오퍼레이션·워크플로 제목의 코드 칩: .lno-chip 위에 고정폭 글꼴과 종류별 테두리색.
-  '.lno-uo-code': { fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text)', verticalAlign: 'middle' },
-  '.lno-uo-uhw': { borderColor: 'var(--accent)' },
-  '.lno-uo-usw': { borderColor: 'var(--success)' },
-  '.lno-uo-wb': { borderColor: 'var(--warning)' },
+  // 유닛 오퍼레이션·워크플로 제목의 코드 칩(명세 §5.2): .lno-chip 위에 흐린 고정폭 글꼴, --bg-hover 바탕. 종류(UHW·USW·WB)마다
+  // 같은 모양이다(색은 강조에만 쓴다). 종류 클래스는 남겨 둔다(찾기·인쇄용).
+  '.lno-uo-code': {
+    fontFamily: 'var(--font-mono)',
+    fontWeight: '500',
+    color: 'var(--text-muted)',
+    backgroundColor: 'var(--bg-hover)',
+    borderColor: 'var(--bg-hover)',
+    verticalAlign: 'middle',
+  },
   // UO 카드(live/uoCards.ts): 구역의 줄마다 옅은 바탕과 좌우 선, 첫 줄·끝 줄에 위·아래 선과 둥근 모서리. 커서가 든 카드는 강조색 선.
-  // 줄 바깥 여백(margin)은 CodeMirror 의 높이 계산을 흐리므로 쓰지 않는다: 카드는 본문 폭을 채운다. 왼쪽 여백은 줄의 것
-  // (목록 깊이의 padding-left 와 textIndent)을 그대로 둔다.
+  // 카드는 본문 글 칸(줄의 좌우 padding)과 같은 자리에 선다: 좌우 바깥 여백이 줄 padding 만큼이라 속성 카드·본문 글과 가장자리가
+  // 맞는다. 위아래 여백(margin)은 CodeMirror 의 높이 계산을 흐리므로 쓰지 않는다(좌우 여백은 높이에 들지 않는다).
   '.cm-line.cm-uo-card': {
+    marginLeft: 'var(--space-5)',
+    marginRight: 'var(--space-5)',
     backgroundColor: 'var(--bg-side)',
     borderLeft: '1px solid var(--border)',
     borderRight: '1px solid var(--border)',
@@ -325,19 +332,31 @@ export const editorThemeSpec = {
   '.lno-empty-state-title': { fontWeight: '600' },
   '.lno-empty-state-body': { color: 'var(--text-muted)', fontSize: '0.9em' },
   '.lno-empty-state-add': { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', height: '30px', flex: '0 0 auto', whiteSpace: 'nowrap' },
-  // 샘플 ID(samples/typeClass.ts): 종류별 옅은 바탕. 레지스트리에 없는 ID 는 위험색 물결 밑줄, 낡은 별칭은 경고색 점선 밑줄,
+  // 샘플 ID(samples/typeClass.ts): 종류별 8px 점(명세 §2.3: 색은 점이나 선으로만, 바탕 채움은 없다). `@dna;` 와 `;` 는 흐리게. 레지스트리에 없는 ID 는 위험색 물결 밑줄, 낡은 별칭은 경고색 점선 밑줄,
   // 폐기된 샘플은 흐리고 취소선. 폐기 + 낡은 별칭은 두 줄을 함께 긋는다. 자동 완성의 샘플 행은 설명을 흐리게, 폐기 행은 흐리게.
-  '.lno-sample-id': { borderRadius: '3px', padding: '0 2px' },
-  '.lno-sample-t-dna': { backgroundColor: 'var(--sample-dna-bg)' },
-  '.lno-sample-t-rna': { backgroundColor: 'var(--sample-rna-bg)' },
-  '.lno-sample-t-plasmid': { backgroundColor: 'var(--sample-plasmid-bg)' },
-  '.lno-sample-t-reagent': { backgroundColor: 'var(--sample-reagent-bg)' },
-  '.lno-sample-t-primer': { backgroundColor: 'var(--sample-primer-bg)' },
-  '.lno-sample-t-protein': { backgroundColor: 'var(--sample-protein-bg)' },
-  '.lno-sample-t-equip': { backgroundColor: 'var(--sample-equip-bg)' },
-  '.lno-sample-t-labware': { backgroundColor: 'var(--sample-labware-bg)' },
-  '.lno-sample-t-other': { backgroundColor: 'var(--sample-other-bg)' },
-  '.lno-sample-t-custom': { backgroundColor: 'var(--sample-custom-bg)' },
+  '.lno-sample-id': { fontWeight: '600', '--sample-dot': 'var(--text-faint)' },
+  '.lno-sample-id::before': {
+    content: '""',
+    display: 'inline-block',
+    width: '8px',
+    height: '8px',
+    marginLeft: 'var(--space-1)',
+    marginRight: 'var(--space-2)',
+    borderRadius: '50%',
+    backgroundColor: 'var(--sample-dot)',
+    verticalAlign: '0.1em',
+  },
+  '.lno-sample-syntax': { color: 'var(--text-muted)', fontSize: '0.85em' },
+  '.lno-sample-t-dna': { '--sample-dot': 'var(--sample-dna-bg)' },
+  '.lno-sample-t-rna': { '--sample-dot': 'var(--sample-rna-bg)' },
+  '.lno-sample-t-plasmid': { '--sample-dot': 'var(--sample-plasmid-bg)' },
+  '.lno-sample-t-reagent': { '--sample-dot': 'var(--sample-reagent-bg)' },
+  '.lno-sample-t-primer': { '--sample-dot': 'var(--sample-primer-bg)' },
+  '.lno-sample-t-protein': { '--sample-dot': 'var(--sample-protein-bg)' },
+  '.lno-sample-t-equip': { '--sample-dot': 'var(--sample-equip-bg)' },
+  '.lno-sample-t-labware': { '--sample-dot': 'var(--sample-labware-bg)' },
+  '.lno-sample-t-other': { '--sample-dot': 'var(--sample-other-bg)' },
+  '.lno-sample-t-custom': { '--sample-dot': 'var(--sample-custom-bg)' },
   '.lno-sample-id-missing': { textDecoration: 'underline wavy var(--danger)' },
   '.lno-sample-alias-stale': { textDecoration: 'underline dotted var(--warning)' },
   '.lno-sample-discarded': { opacity: 0.6, textDecoration: 'line-through' },
@@ -415,7 +434,27 @@ export const editorThemeSpec = {
   '.lno-props-status': { cursor: 'pointer', justifySelf: 'start', color: 'var(--text)', backgroundColor: 'var(--accent-soft)' },
   '.lno-props-status.lno-status-done': { color: 'var(--success)' },
   '.lno-props-status:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
-  '.lno-props-actions': { display: 'inline-flex', gap: 'var(--space-2)' },
+  // 오른쪽 칸은 늘 같은 너비: 지우기가 없는 줄(상태, 마지막 수정)도 다른 줄과 끝이 맞는다
+  '.lno-props-actions': { display: 'inline-flex', justifyContent: 'flex-end', gap: 'var(--space-2)', minWidth: '24px' },
+  // 지우기(×): 테두리·채움 없는 아이콘 단추. 줄에 올리거나 포커스가 있을 때만 보인다(Obsidian)
+  '.lno-props-remove': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    padding: '0',
+    color: 'var(--text-muted)',
+    backgroundColor: 'var(--bg)',
+    border: '0',
+    borderRadius: 'var(--radius-s)',
+    cursor: 'pointer',
+    opacity: '0',
+    '&:hover:not(:disabled)': { backgroundColor: 'var(--bg-hover)', color: 'var(--text)' },
+    '&:focus-visible': { opacity: '1', outline: '2px solid var(--accent)', outlineOffset: '1px' },
+    '&:disabled': { cursor: 'default' },
+  },
+  '.lno-props-row:hover .lno-props-remove, .lno-props-row:focus-within .lno-props-remove': { opacity: '1' },
   '.lno-props-add': {
     display: 'grid',
     gridTemplateColumns: 'minmax(8em, 30%) 1fr auto',
@@ -445,7 +484,8 @@ export const editorThemeSpec = {
     textAlign: 'left',
     minWidth: '3em',
   },
-  '.lno-table th': { backgroundColor: 'var(--bg-elevated)', fontWeight: '700' },
+  // 머리줄: CSV 보기의 표처럼 --bg-side 채움(명세 §2.3 "table header")
+  '.lno-table th': { backgroundColor: 'var(--bg-side)', fontWeight: '700' },
   // 빈 칸도 글자 한 줄 높이(줄 높이 + 위아래 여백)를 갖게 보이지 않는 글자 하나를 둔다: 새 표의 빈 행이 얇아 누르기 어렵지 않게.
   // 셀 편집기가 든 칸은 비어 있지 않으므로(편집기 DOM) 걸리지 않는다.
   '.lno-table td:empty::before, .lno-table th:empty::before': { content: '"\\200b"' },
@@ -471,10 +511,12 @@ export const editorThemeSpec = {
     transition: 'opacity 120ms',
   },
   '.lno-table-toolbar .lno-table-strip-tool': {
-    minWidth: '1.75em',
-    lineHeight: '1.4',
-    padding: '0 var(--space-2)',
-    textAlign: 'center',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '24px',
+    height: '24px',
+    padding: '0',
   },
   // 셀 편집기(table/cellEditor.ts): 칸 안에 뜨는 작은 CodeMirror. 바깥 편집기의 줄·본문 여백을 걷고, 포커스는 칸의 윤곽선으로 보인다
   '.lno-table .lno-cell-active': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },

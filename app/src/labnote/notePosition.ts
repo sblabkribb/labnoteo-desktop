@@ -32,6 +32,8 @@ export interface UoItem {
   alias: string;
   /** 제목 줄(0부터). */
   line: number;
+  /** 구역이 끝나는 줄(0부터, 이 줄은 들지 않는다): 다음 `#`·`##`·`###` 제목 줄 또는 문서 끝. */
+  end: number;
   /** Meta 의 End_date 가 채워졌다(앞날이 아니고 날짜로 읽힌다). */
   done: boolean;
 }
@@ -90,7 +92,7 @@ export function notePosition(path: string, text: string, opts: { line?: number; 
         if (date.field === 'Start_date') started = true;
         if (date.field === 'End_date') done = classifyMetaEndDate(date.value.trim(), now) === 'ended';
       }
-      uos.push({ id: b.opId, name: b.opName, alias: b.alias, line: b.headingLine, done });
+      uos.push({ id: b.opId, name: b.opName, alias: b.alias, line: b.headingLine, end: b.endLine, done });
     }
     const line0 = opts.line === undefined ? undefined : opts.line - 1;
     const blocks = listUnitOpBlocks(text);

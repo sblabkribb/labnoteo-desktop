@@ -137,11 +137,11 @@ describe('영어 화면', () => {
     const side = screen.getByRole('complementary', { name: 'Sidebar' });
     expect(within(side).getByRole('searchbox', { name: 'Search notes' })).toBeTruthy();
     expect(await within(side).findByRole('navigation', { name: 'Notes' })).toBeTruthy();
-    expect(within(screen.getByRole('main')).getByText("Pick a note on the left, or start with 'New experiment' in the Experiments tab or Ctrl+P.")).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText('Pick a note in the tree on the left, or start below.')).toBeTruthy();
     expect(within(screen.getByRole('contentinfo')).getByText('Version 0.0.0')).toBeTruthy();
     // 한국어가 한 글자도 남지 않았다: 글자와 이름(placeholder, aria-label, title, alt) 모두.
     // 언어 이름 선택지(한국어)만은 일부러 자기 언어로 적는다.
-    expect(document.body.textContent).toContain('Pick a note on the left'); // 실제 화면을 읽었다
+    expect(document.body.textContent).toContain('Pick a note in the tree on the left'); // 실제 화면을 읽었다
     expect(hangulIn(document.body)).toEqual([]);
     // 검사식 자체: 한글 이름표와 글자를 실제로 잡고, 언어 이름 선택지는 건너뛴다
     const probe = document.createElement('div');

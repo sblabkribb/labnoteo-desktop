@@ -13,6 +13,9 @@
   --menu-bg: #ffffff;
   --bg-hover: #e9e9ec;
   --bg-selected: #e2e2e6;
+  /* 보조 단추 채움: 다크에서는 떠 있는 면(--bg-elevated, 대화상자·첫 화면 카드) 위에서도 단추로 보이게 한 단계 밝다 */
+  --btn-bg: #e9e9ec;
+  --btn-bg-hover: #e2e2e6;
   --bg-selection: rgba(103, 65, 217, 0.18);
   --border: #e3e3e7;
   --border-strong: #cfcfd5;
@@ -57,6 +60,8 @@
   --menu-bg: #2a2a2a;
   --bg-hover: #303030;
   --bg-selected: #363636;
+  --btn-bg: #3a3a3f;
+  --btn-bg-hover: #45454b;
   --bg-selection: rgba(176, 154, 251, 0.25);
   --border: #333336;
   --border-strong: #46464b;
@@ -79,16 +84,16 @@
   --checker-a: #2a2a2a;
   --checker-b: #1f1f1f;
   /* 같은 색조를 --bg-side(#262626) 위에 35% 로 섞은 불투명 값 */
-  --sample-dna-bg: #72585c;
-  --sample-rna-bg: #556469;
-  --sample-plasmid-bg: #4e714e;
-  --sample-reagent-bg: #726419;
-  --sample-primer-bg: #723d58;
-  --sample-protein-bg: #665166;
-  --sample-equip-bg: #725143;
-  --sample-labware-bg: #645c64;
-  --sample-other-bg: #565b5e;
-  --sample-custom-bg: #3a4449;
+  --sample-dna-bg: #FFB6C1;
+  --sample-rna-bg: #ADD8E6;
+  --sample-plasmid-bg: #98FB98;
+  --sample-reagent-bg: #FFD700;
+  --sample-primer-bg: #FF69B4;
+  --sample-protein-bg: #DDA0DD;
+  --sample-equip-bg: #FFA07A;
+  --sample-labware-bg: #D8BFD8;
+  --sample-other-bg: #B0BEC5;
+  --sample-custom-bg: #90A4AE;
   color-scheme: dark;
 }
 
@@ -102,6 +107,8 @@
     --menu-bg: #2a2a2a;
     --bg-hover: #303030;
     --bg-selected: #363636;
+    --btn-bg: #3a3a3f;
+    --btn-bg-hover: #45454b;
     --bg-selection: rgba(176, 154, 251, 0.25);
     --border: #333336;
     --border-strong: #46464b;
@@ -124,16 +131,16 @@
     --checker-a: #2a2a2a;
     --checker-b: #1f1f1f;
     /* 같은 색조를 --bg-side(#262626) 위에 35% 로 섞은 불투명 값 */
-    --sample-dna-bg: #72585c;
-    --sample-rna-bg: #556469;
-    --sample-plasmid-bg: #4e714e;
-    --sample-reagent-bg: #726419;
-    --sample-primer-bg: #723d58;
-    --sample-protein-bg: #665166;
-    --sample-equip-bg: #725143;
-    --sample-labware-bg: #645c64;
-    --sample-other-bg: #565b5e;
-    --sample-custom-bg: #3a4449;
+    --sample-dna-bg: #FFB6C1;
+    --sample-rna-bg: #ADD8E6;
+    --sample-plasmid-bg: #98FB98;
+    --sample-reagent-bg: #FFD700;
+    --sample-primer-bg: #FF69B4;
+    --sample-protein-bg: #DDA0DD;
+    --sample-equip-bg: #FFA07A;
+    --sample-labware-bg: #D8BFD8;
+    --sample-other-bg: #B0BEC5;
+    --sample-custom-bg: #90A4AE;
     color-scheme: dark;
   }
 }
@@ -214,6 +221,8 @@
     --menu-bg: #ffffff;
     --bg-hover: #e9e9ec;
     --bg-selected: #e2e2e6;
+    --btn-bg: #e9e9ec;
+    --btn-bg-hover: #e2e2e6;
     --bg-selection: rgba(103, 65, 217, 0.18);
     --border: #e3e3e7;
     --border-strong: #cfcfd5;

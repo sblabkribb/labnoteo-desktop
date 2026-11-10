@@ -242,6 +242,39 @@ pub async fn vault_reveal<R: tauri::Runtime>(
     reveal(&root, &path, &AppOpener(&app))
 }
 
+/// Size and last-modified time of a vault file, for the file card (spec §6.1).
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct FileInfo {
+    /// Bytes.
+    pub size: u64,
+    /// Milliseconds since the Unix epoch; `None` when the system cannot say.
+    pub modified: Option<f64>,
+}
+
+/// `vault_file_info`: the file's size and modified time. Confined to the vault
+/// like every other path; a folder or a missing file is an error.
+pub fn file_info(root: &Path, rel: &str) -> Result<FileInfo, FsError> {
+    let abs = confine(root, rel)?;
+    let meta = std::fs::metadata(&abs)?;
+    if !meta.is_file() {
+        return Err(FsError::BadInput(format!("not a file: {rel}")));
+    }
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as f64);
+    Ok(FileInfo { size: meta.len(), modified })
+}
+
+#[tauri::command]
+pub async fn vault_file_info(state: tauri::State<'_, super::VaultState>, path: String) -> Result<FileInfo, FsError> {
+    let root = state.root()?;
+    tauri::async_runtime::spawn_blocking(move || file_info(&root, &path))
+        .await
+        .map_err(join_error)?
+}
+
 /// The raw bytes of a vault file for the CSV and file viewers (`read_bytes`).
 /// Like `vault_read_image`, the bytes go back as a raw IPC response
 /// (an `ArrayBuffer` in JS), off the main thread.
@@ -338,6 +371,19 @@ mod tests {
         std::fs::write(t.0.join("run.exe"), b"MZ").unwrap();
         // reading runs nothing: any regular file inside the vault may be read
         assert_eq!(read_bytes(&l, &t.0, "run.exe").unwrap(), b"MZ");
+    }
+
+    #[test]
+    fn file_info_gives_size_and_time_and_refuses_escapes_and_folders() {
+        let t = Tmp::new();
+        std::fs::write(t.0.join("a.pdf"), b"12345").unwrap();
+        std::fs::create_dir(t.0.join("dir")).unwrap();
+        let info = file_info(&t.0, "a.pdf").unwrap();
+        assert_eq!(info.size, 5);
+        assert!(info.modified.is_some_and(|ms| ms > 0.0));
+        assert!(matches!(file_info(&t.0, "dir"), Err(FsError::BadInput(_))));
+        assert!(file_info(&t.0, "missing.pdf").is_err());
+        assert!(file_info(&t.0, "../x.pdf").is_err());
     }
 
     #[test]

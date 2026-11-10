@@ -71,11 +71,11 @@ export function NewNoteForm({ flush, onCreated, onCancel, invoke = tauriInvoke }
         </p>
       )}
       <div className="dialog-actions">
-        <button type="submit" className="primary" disabled={busy}>
-          {t('newNote.create')}
-        </button>
         <button type="button" onClick={onCancel}>
           {t('newNote.cancel')}
+        </button>
+        <button type="submit" className="primary" disabled={busy}>
+          {t('newNote.create')}
         </button>
       </div>
     </form>

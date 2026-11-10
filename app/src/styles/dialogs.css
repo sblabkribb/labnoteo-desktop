@@ -52,8 +52,21 @@
 }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .dialog-head h2 { margin: 0; font-size: 1.05em; font-weight: 600; }
-.dialog-close { padding: 0 var(--space-4); background: transparent; border: 0; color: var(--text-muted); }
-.dialog-close::before { content: "×"; content: "×" / ""; }
+/* 닫기(×): 28px 아이콘 단추, 흐린 글자. hover 에 회색 채움과 본문 글자 */
+.dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+}
+.dialog-close:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .dialog > input, .picker-body > input { width: 100%; box-sizing: border-box; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-4); }
 
@@ -287,11 +300,77 @@ button.sample-def-link:hover { text-decoration: underline; }
 }
 .toggle[aria-checked="true"] .toggle-knob { transform: translateX(16px); }
 
-/* Integrations and samples keep their own forms inside the pane */
-.settings-page .integration-body { overflow: visible; }
-.settings-page .sample-settings { display: flex; flex-direction: column; gap: var(--space-5); }
-.settings-page .sample-settings-row { display: flex; flex-direction: column; gap: var(--space-2); }
-.settings-page .sample-settings input[type="text"] { width: 100%; box-sizing: border-box; }
+/* A native <select> in a dialog form (spec §3.8): no browser arrow, the app's chevron drawn over it */
+.select-field { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
+.select-field > select { appearance: none; min-width: 10rem; max-width: 100%; padding-right: 28px; cursor: pointer; }
+.select-field > .icon { position: absolute; right: var(--space-4); color: var(--text-muted); pointer-events: none; }
+
+/* A checkbox drawn as the settings switch (same track and knob as .toggle); still a native checkbox with role=switch */
+input[type="checkbox"].switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  background: var(--border-strong);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background var(--motion);
+}
+input[type="checkbox"].switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--bg);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px var(--shadow);
+  transition: transform var(--motion);
+}
+input[type="checkbox"].switch:hover:not(:disabled) { background: var(--text-faint); }
+input[type="checkbox"].switch:checked, input[type="checkbox"].switch:checked:hover:not(:disabled) { background: var(--accent-fill); }
+input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
+/* The label of a switch: its name on the left, the switch at the right end (the input comes first in the markup) */
+.switch-label { display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: var(--space-7); }
+
+/* Integrations inside the settings pane use the same rows as the other pages: name and hints on the left, the control on
+   the right, a divider between rows. Warnings, the http permission and other extras span the whole row. */
+.settings-page .integration-body { overflow: visible; gap: 0; }
+.settings-page .integration-section, .settings-page .integration-group { gap: 0; }
+.settings-page .integration-section > h3 { margin: var(--space-7) 0 var(--space-2); font-size: var(--font-size-lg); font-weight: 600; }
+.settings-page .integration-section > .prompt-hint { margin: 0 0 var(--space-4); }
+.settings-page .integration-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-7);
+  row-gap: var(--space-1);
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--border);
+}
+.settings-page .integration-field > * { grid-column: 1; margin: 0; }
+.settings-page .integration-field > input,
+.settings-page .integration-field > .select-field,
+.settings-page .integration-field > .integration-key-row,
+.settings-page .integration-field > .scan-folder-row { grid-column: 2; grid-row: 1 / span 3; justify-self: end; }
+.settings-page .integration-field > input[type="text"] { width: 16rem; }
+.settings-page .integration-field > [role="alert"],
+.settings-page .integration-field > .warn,
+.settings-page .integration-field > .integration-allow,
+.settings-page .integration-field > .switch-label { grid-column: 1 / -1; }
+.settings-page .integration-key-row { flex-wrap: nowrap; }
+.settings-page .integration-key-row input[type="password"] { flex: none; width: 12rem; }
+.settings-page .integration-group > .integration-test { justify-content: flex-end; padding-bottom: var(--space-5); }
+.settings-page .integration-drop { margin-bottom: var(--space-4); }
+
+/* Samples page: the same rows (SettingRow); the two text fields are wide enough for a list of names and a folder */
+.settings-page .sample-settings .setting-text { width: 16rem; }
+.settings-page .sample-settings .setting-row .warn { margin: var(--space-2) 0 0; }
 .settings-saved { align-self: center; color: var(--success); font-size: var(--font-size-sm); }
 
 /* Shortcuts: a read-only table */
@@ -313,6 +392,11 @@ button.sample-def-link:hover { text-decoration: underline; }
   .settings-body { flex-direction: column; }
   .settings-nav { flex-direction: row; width: auto; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
   .setting-row { flex-wrap: wrap; }
+  .settings-page .integration-field { grid-template-columns: minmax(0, 1fr); }
+  .settings-page .integration-field > input,
+  .settings-page .integration-field > .select-field,
+  .settings-page .integration-field > .integration-key-row,
+  .settings-page .integration-field > .scan-folder-row { grid-column: 1; grid-row: auto; justify-self: stretch; }
 }
 
 /* 카탈로그 고르기(UI 재설계 Task 11): 한 줄 행 [코드][영어 이름][흐린 설명 …], 고른 행만 상세 줄을 펼친다. 묶음 머리와 "최근" */

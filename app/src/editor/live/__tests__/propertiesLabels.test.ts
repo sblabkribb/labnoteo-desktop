@@ -69,7 +69,7 @@ describe('propertyLabel', () => {
     expect(['author', 'experimenter', 'status', 'created', 'created_date', 'date', 'last_updated', 'last_updated_date', 'tags', 'experiment', 'project'].map(propertyLabel)).toEqual(
       ['실험자', '실험자', '상태', '만든 날', '만든 날', '만든 날', '마지막 수정', '마지막 수정', '태그', '실험', '프로젝트'],
     );
-    expect(propertyLabel('experiment_type')).toBe('experiment_type');
+    expect(['title', 'labnote_id', 'end_date', 'experiment_type', 'sample_tracking'].map(propertyLabel)).toEqual(['제목', '노트 ID', '끝난 날', '노트 종류', '샘플 추적']);
     expect(propertyLabel('담당')).toBe('담당');
     setLang('en');
     expect(['author', 'status', 'created_date', 'last_updated_date', 'tags', 'experiment', 'project'].map(propertyLabel)).toEqual(
@@ -87,7 +87,8 @@ describe('properties card', () => {
     expect(keyText(v, 'last_updated_date')).toBe('마지막 수정');
     expect(keyText(v, 'tags')).toBe('태그');
     expect(keyText(v, 'project')).toBe('프로젝트');
-    expect(keyText(v, 'experiment_type')).toBe('experiment_type');
+    expect(keyText(v, 'experiment_type')).toBe('노트 종류');
+    expect(keyText(v, 'title')).toBe('제목');
     expect(rowEl(v, 'author').querySelector<HTMLElement>('.lno-props-key')!.title).toBe('author');
   });
 

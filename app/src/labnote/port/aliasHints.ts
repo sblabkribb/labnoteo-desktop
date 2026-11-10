@@ -138,16 +138,21 @@ export function catalogKoFields(
   category: string,
   description: string,
   locale: string
-): { description: string; detail: string; keywords?: readonly string[] } {
+): { description: string; detail: string; keywords?: readonly string[]; searchWords?: readonly string[] } {
   const korean = locale.toLowerCase().startsWith('ko');
   // The Korean name and search words stay searchable in either UI language (UI redesign spec §5.3);
   // only the Korean UI shows the name.
   const ko = catalogKoEntry(id);
   const detail = catalogDescription(id, description, locale);
-  const keywords = [...(ko ? [ko.name, ...(ko.keywords ?? [])] : []), ...(detail !== description ? [description] : [])];
+  // The Korean name ranks as a name; its search words (`PCR` for UHW100 열 순환) and the English description rank below
+  // every name match (spec §5.3: exact code > name > word-prefix name > search words and description), so `PCR` puts
+  // UHW110 Real-time PCR above UHW100 Thermocycling.
+  const keywords = ko ? [ko.name] : [];
+  const searchWords = [...(ko?.keywords ?? []), ...(detail !== description ? [description] : [])];
   return {
     description: ko && korean ? `${ko.name} · ${category}` : category,
     detail,
     ...(keywords.length > 0 ? { keywords } : {}),
+    ...(searchWords.length > 0 ? { searchWords } : {}),
   };
 }

@@ -23,8 +23,9 @@ describe('코어 번역 다리', () => {
     expect(coreT('Sync workflow checklist with folder')).toBe(KO_COMMAND_NAMES.syncWorkflowChecklist);
   });
 
-  it('paletteName 은 한국어에서 두 언어를, 영어에서 영어만 보인다', () => {
-    expect(paletteName('Create experiment')).toBe('실험 생성 (Create experiment)');
+  it('paletteName 은 지금 언어의 이름 하나만 보인다(영어를 괄호로 붙이지 않는다), 시료는 샘플로', () => {
+    expect(paletteName('Create experiment')).toBe('실험 생성');
+    expect(paletteName('Insert sample list of this experiment')).not.toContain('시료');
     setLang('en');
     expect(paletteName('Create experiment')).toBe('Create experiment');
   });

@@ -61,6 +61,17 @@ describe('notePosition', () => {
     expect(top.kind === 'workflow' && top.uoIndex).toBeUndefined();
   });
 
+  it('each UO ends before the next heading of level 1 to 3, so trailing sections belong to none', () => {
+    const text = `${WF_TEXT}\n## Conclusions and Discussion\n\nok\n`;
+    const p = notePosition(WF, text, { now: '2026-11-10 12:00' });
+    if (p.kind !== 'workflow') throw new Error('workflow');
+    const lines = text.split('\n');
+    expect(p.uos[0].end).toBe(p.uos[1].line);
+    expect(lines[p.uos[1].end]).toBe('## Conclusions and Discussion');
+    const below = notePosition(WF, text, { line: lines.length, now: '2026-11-10 12:00' });
+    expect(below.kind === 'workflow' && below.uoIndex).toBeUndefined();
+  });
+
   it('a workflow whose UOs all ended is done; one with no UOs is planned', () => {
     const ended = WF_TEXT.replace("- End_date: ''", "- End_date: '2026-11-09 12:00'");
     const p = notePosition(WF, ended, { now: '2026-11-10 12:00' });

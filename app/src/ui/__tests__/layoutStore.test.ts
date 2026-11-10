@@ -102,6 +102,29 @@ describe('layout store', () => {
     expect(seen).toHaveLength(3);
   });
 
+  it('on a narrow window the left dock yields while the right sidebar is open, and comes back when it closes', () => {
+    const width = window.innerWidth;
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 });
+      const s = createLayoutStore({ storage: () => memoryStorage(), invoke: async () => DEFAULT_PREFS });
+      s.toggleRight();
+      expect([s.get().rightOpen, s.get().leftHidden]).toEqual([true, true]);
+      s.toggleRight();
+      expect([s.get().rightOpen, s.get().leftHidden]).toEqual([false, false]);
+      // showing the dock again by hand keeps it: closing the right sidebar then leaves the dock as it is
+      s.toggleRight();
+      s.toggleLeft();
+      s.toggleRight();
+      expect([s.get().rightOpen, s.get().leftHidden]).toEqual([false, false]);
+      // a wide window keeps both
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1400 });
+      s.toggleRight();
+      expect([s.get().rightOpen, s.get().leftHidden]).toEqual([true, false]);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    }
+  });
+
   it('update clamps what it is given', () => {
     const store = createLayoutStore({ storage: () => memoryStorage(), invoke: vi.fn(async () => null) });
     store.update({ leftWidth: 50 });

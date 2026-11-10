@@ -13,6 +13,7 @@
  */
 import { useCallback, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import { t } from '../i18n/t';
+import { Icon } from '../ui/Icon';
 import type { CommandContext } from '../labnote/commands/context';
 import { runCommand } from '../labnote/commands/runCommand';
 import { processNote } from '../labnote/openNotes';
@@ -92,6 +93,18 @@ function OutgoingItem({ row, onOpen, onCreate }: { row: OutgoingRow } & Pick<Lin
   );
 }
 
+/**
+ * 맥락 줄을 읽기 좋게: 줄 앞의 목록·할 일 표시(`- [x] `)를 떼고, 링크는 보이는 글만 남긴다(`[글](주소)` → 글,
+ * `[[노트|별칭]]` → 별칭, `[[노트]]` → 노트), 굵게·기울임 따위의 표시 글자도 뗀다. 파일은 그대로다(보이기만 바꾼다).
+ */
+export function readableContext(text: string, atLineStart: boolean): string {
+  let s = atLineStart ? text.replace(/^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '') : text;
+  s = s.replace(/!?\[\[([^\]|]*)\|([^\]]*)\]\]/g, '$2');
+  s = s.replace(/!?\[\[([^\]]*)\]\]/g, (_m, target: string) => target.replace(/\.labnote\.md$|\.md$/i, ''));
+  s = s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');
+  return s.replace(/\*\*|__|~~|==|`/g, '');
+}
+
 function ContextLine({
   link,
   onClick,
@@ -101,10 +114,10 @@ function ContextLine({
 }) {
   const { context, contextFrom, contextTo } = link;
   return (
-    <button type="button" className="links-context" onClick={onClick}>
-      {context.slice(0, contextFrom)}
-      <mark>{context.slice(contextFrom, contextTo)}</mark>
-      {context.slice(contextTo)}
+    <button type="button" className="links-context" title={context} onClick={onClick}>
+      {readableContext(context.slice(0, contextFrom), true)}
+      <mark>{readableContext(context.slice(contextFrom, contextTo), contextFrom === 0)}</mark>
+      {readableContext(context.slice(contextTo), false)}
     </button>
   );
 }
@@ -201,7 +214,10 @@ function UnlinkedMentions({ target, ctx, onOpen }: { target: string; ctx: Comman
   const resolver = linkIndex.resolver();
   return (
     <details className="links-section links-unlinked" onToggle={onToggle}>
-      <summary className="links-heading">{t('links.unlinked')}</summary>
+      <summary className="links-heading">
+        <Icon name="chevron-right" size={14} className="links-chevron" />
+        {t('links.unlinked')}
+      </summary>
       {result === null ? (
         started && <p className="links-empty">{t('links.loading')}</p>
       ) : (

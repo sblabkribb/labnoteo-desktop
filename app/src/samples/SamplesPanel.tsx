@@ -31,7 +31,6 @@ import type { SampleScope } from '../labnote/port/sampleScope';
 import {
   loadSampleTree,
   sampleMenuItems,
-  sampleViewHint,
   SAMPLE_PANEL_REFRESH_MS,
   SAMPLE_SEARCH_MS,
   seedInitialExpansion,
@@ -60,13 +59,32 @@ const DETAIL = /:(alias|description(?::\d+)?|location|discarded)$/;
 
 /**
  * 코어 트리의 뿌리 이름('Samples (Local)'/'Samples (Global)')과 세부 줄의 앞말('alias: ', 'description 2: ', 'location: ',
- * 'discarded: ')을 앱의 말로 바꾼 새 트리. 다른 줄(종류 줄, 'No samples', 같은 폴더 알림)은 그대로 둔다.
+ * 'discarded: ')을 앱의 말로 바꾼 새 트리. 종류 줄은 이름만 남기고(`DNA [2]` → `DNA`, 수는 payload.count 로 옮겨 오른쪽 덧말로
+ * 그린다, 명세 §4.1) test-tube 아이콘을, 샘플 줄은 tag 아이콘을 단다. 다른 줄('No samples', 같은 폴더 알림)은 그대로 둔다.
  */
+const TYPE_COUNT = /^([\s\S]*) \[(\d+)\]$/;
+
+/** 종류 줄의 오른쪽 덧말: 괄호 없는 샘플 수(relabelSampleTree 가 옮겨 둔 수). */
+export function sampleTypeCount(node: TreeNode): string | undefined {
+  if (node.kind !== 'sampleType') return undefined;
+  const count = (node.payload as { count?: number } | undefined)?.count;
+  return count === undefined ? undefined : String(count);
+}
+
 export function relabelSampleTree(nodes: TreeNode[], tr: typeof t): TreeNode[] {
   const relabel = (node: TreeNode): TreeNode => {
     const children = node.children?.map(relabel);
     const next = children ? { ...node, children } : { ...node };
-    if (node.kind === 'sampleRoot') {
+    if (node.kind === 'sampleType') {
+      const m = TYPE_COUNT.exec(node.label);
+      if (m) {
+        next.label = m[1];
+        next.payload = { ...(node.payload as object), count: Number(m[2]) };
+      }
+      next.icon = 'test-tube';
+    } else if (node.kind === 'sample') {
+      next.icon = 'sample';
+    } else if (node.kind === 'sampleRoot') {
       const scope = (node.payload as { scope?: SampleScope } | undefined)?.scope;
       next.label = scope === 'global' ? tr('samples.root.global') : tr('samples.root.local');
     } else if (node.kind === 'sampleDetail') {
@@ -215,9 +233,16 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
   const nodeClass = (node: TreeNode) =>
     node.kind === 'sampleType' ? `sample-swatch ${sampleTypeClass((node.payload as SampleTypePayload).type)}` : undefined;
 
+  const header = (
+    <div className="nav-header">
+      <span className="nav-header-title">{t('sidebar.tab.samples')}</span>
+    </div>
+  );
+
   if (!tracking) {
     return (
       <div className="samples-panel">
+        {header}
         <p className="samples-hint" role="status">
           {coreT('Sample tracking is turned off in {0}.', t('cmd.sampleSettings'))}
         </p>
@@ -227,6 +252,7 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
 
   return (
     <div className="samples-panel">
+      {header}
       <input
         type="search"
         className="samples-search"
@@ -235,7 +261,7 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
         value={query}
         onChange={(e) => onSearch(e.target.value)}
       />
-      <p className="samples-hint">{sampleViewHint(coreT)}</p>
+      <p className="samples-hint">{t('samples.hint', coreT('Add sample'))}</p>
       {loaded && (
         <TreeView
           nodes={shown.nodes}
@@ -245,6 +271,7 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
           onActivate={() => undefined}
           onContext={context}
           nodeClass={nodeClass}
+          meta={sampleTypeCount}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { isSameSampleFolder } from '@labnoteo/core/lib/sampleStorage';
 import { getSampleDisplayMeta, suggestSampleTypeName } from '@labnoteo/core/lib/sampleUtils';
 import { t } from '../i18n/t';
@@ -7,6 +7,7 @@ import type { CommandContext } from '../labnote/commands/context';
 import { partitionCustomSampleTypes, removedCustomSampleTypes } from '../labnote/port/customSampleTypes';
 import { commitGlobalFolder, offerGlobalSampleFolderMove, offerToRestoreSampleTypes } from '../labnote/port/sampleSettings';
 import type { AppSettings } from '../labnote/settings';
+import { SettingRow, Toggle } from '../ui/settings/SettingRow';
 import { normalizeSampleFolder, type SampleEnv } from './env';
 import { samples } from './sampleStore';
 import { sampleTypesFor } from './types';
@@ -168,18 +169,17 @@ function legacyWarnings(stored: readonly string[]): string[] {
 }
 
 /**
- * 샘플 설정(plan SP5 Task 28, D17; UI 재설계 Task 8 부터 설정 창의 "샘플" 쪽). 플러그인 samplesSection 의 세 줄을 그 이름과
- * 설명(coreT)으로 보인다. 추적 스위치의 설명만 앱 키다(앱에서는 바로 적용된다). 사용자 종류 칸은 칸을 떠날 때 저장하지 않을
- * 이름의 까닭을 보이고 칸을 저장할 값으로 되돌린다. Global 폴더 칸은 칸을 떠날 때 commitGlobalFolder 로 검사한다.
- * 순수한 화면이다: 저장하면 값을 `onSave` 로 넘길 뿐이고 적용은 부른 쪽(applySampleSettings)이 한다(D16).
+ * 샘플 설정(plan SP5 Task 28, D17; UI 재설계 Task 8 부터 설정 창의 "샘플" 쪽). 플러그인 samplesSection 의 세 설정을 다른 설정
+ * 쪽과 같은 줄(SettingRow: 왼쪽 이름·설명, 오른쪽 조작)로 보인다. 저장 단추는 없다: 추적 스위치는 누르면, 두 글 칸은 칸을 떠날 때
+ * (또는 Enter) 바로 `onSave` 로 넘긴다. 사용자 종류 칸은 저장하지 않을 이름의 까닭을 보이고 칸을 저장할 값으로 되돌린다.
+ * Global 폴더 칸은 commitGlobalFolder 로 검사하고, 거절되면 까닭을 보인 채 앞 값을 지킨다(넘기지 않는다).
+ * 순수한 화면이다: 적용은 부른 쪽(applySampleSettings)이 한다(D16). 이름은 플러그인 키(coreT), 설명은 앱 키다.
  */
 export function SampleSettingsForm(props: {
   value: SampleSettingsValue;
   onSave: (value: SampleSettingsValue) => void;
-  /** 처음 칸에 초점을 줄지(설정 창은 왼쪽 목록에 초점을 두므로 주지 않는다). */
+  /** 처음 조작(추적 스위치)에 초점을 줄지(설정 창은 왼쪽 목록에 초점을 두므로 주지 않는다). */
   autoFocus?: boolean;
-  /** 저장 단추 옆의 상태 글(예: 저장했습니다). */
-  status?: string;
 }) {
   const { value } = props;
   const autoFocus = useRef(props.autoFocus === true);
@@ -192,127 +192,124 @@ export function SampleSettingsForm(props: {
   const [folder, setFolder] = useState(value.globalSampleFolder);
   const [committed, setCommitted] = useState(value.globalSampleFolder);
   const [folderNotice, setFolderNotice] = useState<string | undefined>(undefined);
-  const first = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const legacy = useRef(legacyWarnings(stored)).current;
-  // 칸을 떠날 때 거절한 뒤 아직 고치지 않았다: 브라우저에서는 저장 단추를 누르면 칸이 먼저 blur 되므로, 저장은 이것을 보고
-  // 대화상자를 연 채로 둔다(까닭이 함께 사라지지 않게). 한 번 멈추면 지운다 — 다시 누른 저장은 되돌린 값으로 저장한다.
-  const refused = useRef({ folder: false, types: false });
+  /** 마지막으로 넘긴 값: 같은 값은 다시 넘기지 않는다. */
+  const last = useRef<SampleSettingsValue>(value);
 
   useEffect(() => {
-    if (autoFocus.current) first.current?.focus();
+    if (autoFocus.current) root.current?.querySelector<HTMLElement>('[role="switch"]')?.focus();
   }, []);
 
-  const leaveTypes = () => {
-    const next = typeNotices(types, stored);
-    setNotices(next);
-    if (next.length > 0) {
-      setTypes(partitionCustomSampleTypes(types, stored).save.join(', '));
-      refused.current.types = true;
-    }
+  const commit = (patch: Partial<SampleSettingsValue>) => {
+    const next: SampleSettingsValue = { ...last.current, ...patch };
+    const same =
+      next.sampleTracking === last.current.sampleTracking &&
+      next.globalSampleFolder === last.current.globalSampleFolder &&
+      next.customSampleTypes.join('\n') === last.current.customSampleTypes.join('\n');
+    if (same) return;
+    last.current = next;
+    props.onSave(next);
   };
 
-  /** 칸의 폴더를 검사한다. 거절되면 까닭을 보이고 칸을 앞 값으로 되돌린다. 남길 폴더를 돌려준다. */
-  const leaveFolder = (): string => {
+  /** 종류 칸을 떠난다: 저장하지 않을 이름의 까닭을 보이고 칸을 저장할 값으로 되돌린 뒤 그 값을 넘긴다. */
+  const leaveTypes = () => {
+    const next = typeNotices(types, stored);
+    const kept = partitionCustomSampleTypes(types, stored).save;
+    setNotices(next);
+    if (next.length > 0) setTypes(kept.join(', '));
+    commit({ customSampleTypes: kept });
+  };
+
+  /** 폴더 칸을 떠난다: 거절되면 까닭을 보이고 칸을 앞 값으로 되돌린다(그러면 넘길 것이 없다). */
+  const leaveFolder = () => {
     const r = commitGlobalFolder(coreT, folder, committed);
     setFolder(r.value);
     setCommitted(r.value);
-    if (r.notice) {
-      setFolderNotice(r.notice);
-      refused.current.folder = true;
-    }
-    return r.value;
+    if (r.notice) setFolderNotice(r.notice);
+    commit({ globalSampleFolder: r.value });
   };
 
-  /** 거절이 있으면(지금 또는 칸을 떠날 때) 까닭을 보인 채 열어 둔다. 앞서 보인 까닭은 지우지 않는다. */
-  const save = () => {
-    const kept = leaveFolder();
-    const next = typeNotices(types, stored);
-    const keptTypes = partitionCustomSampleTypes(types, stored).save;
-    if (next.length > 0) {
-      setNotices(next);
-      setTypes(keptTypes.join(', '));
-      refused.current.types = true;
-    }
-    if (refused.current.folder || refused.current.types) {
-      refused.current = { folder: false, types: false };
-      return;
-    }
-    props.onSave({ sampleTracking: tracking, customSampleTypes: keptTypes, globalSampleFolder: kept });
+  const onEnter = (leave: () => void) => (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    leave();
   };
 
   return (
-    <div className="sample-settings">
-      <div className="sample-settings-row">
-        <label className="prompt-question">
-          <input ref={first} id={`${id}-tracking`} type="checkbox" checked={tracking} onChange={(e) => setTracking(e.target.checked)} />{' '}
-          {coreT('Sample tracking')}
-        </label>
-        <p className="prompt-hint">{t('samples.settings.trackingLive')}</p>
-      </div>
-      <div className="sample-settings-row">
-        <label className="prompt-question" htmlFor={`${id}-types`}>
-          {coreT('Custom sample types')}
-        </label>
-        <p className="prompt-hint">
-          {coreT(
-            'Comma-separated types in addition to the built-ins. Use letters, digits and _ only (no spaces or -), e.g. CellLine, 배지. A _ works between ASCII letters and digits (Cell_Line); next to other letters it turns the name italic in the reading view, so write those together (무세포용해물).',
-          )}
+    <div className="sample-settings" ref={root}>
+      <SettingRow
+        label={coreT('Sample tracking')}
+        description={t('samples.settings.trackingLive')}
+        control={
+          <Toggle
+            label={coreT('Sample tracking')}
+            checked={tracking}
+            onChange={(next) => {
+              setTracking(next);
+              commit({ sampleTracking: next });
+            }}
+          />
+        }
+      />
+      <SettingRow
+        label={coreT('Custom sample types')}
+        description={t('samples.settings.typesDesc')}
+        control={
+          <input
+            id={`${id}-types`}
+            type="text"
+            className="setting-text"
+            aria-label={coreT('Custom sample types')}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="CellLine, Strain"
+            value={types}
+            onChange={(e) => {
+              setTypes(e.target.value);
+              setNotices([]);
+            }}
+            onBlur={leaveTypes}
+            onKeyDown={onEnter(leaveTypes)}
+          />
+        }
+      />
+      {legacy.map((w, i) => (
+        <p key={`legacy-${i}`} className="prompt-hint warn">
+          {w}
         </p>
-        {legacy.map((w, i) => (
-          <p key={`legacy-${i}`} className="prompt-hint warn">
-            {w}
-          </p>
-        ))}
-        <input
-          id={`${id}-types`}
-          type="text"
-          placeholder="CellLine, Strain"
-          value={types}
-          onChange={(e) => {
-            setTypes(e.target.value);
-            setNotices([]);
-            refused.current.types = false;
-          }}
-          onBlur={leaveTypes}
-        />
-        {notices.map((n, i) => (
-          <p key={`notice-${i}`} role="alert" className="prompt-hint warn">
-            {n}
-          </p>
-        ))}
-      </div>
-      <div className="sample-settings-row">
-        <label className="prompt-question" htmlFor={`${id}-folder`}>
-          {coreT('Global sample folder')}
-        </label>
-        <p className="prompt-hint">{coreT('Vault-relative folder for vault-global samples.')}</p>
-        <input
-          id={`${id}-folder`}
-          type="text"
-          value={folder}
-          onChange={(e) => {
-            setFolder(e.target.value);
-            setFolderNotice(undefined);
-            refused.current.folder = false;
-          }}
-          onBlur={() => void leaveFolder()}
-        />
-        {folderNotice ? (
-          <p role="alert" className="prompt-hint warn">
-            {folderNotice}
-          </p>
-        ) : null}
-      </div>
-      <div className="dialog-actions">
-        {props.status ? (
-          <span role="status" className="settings-saved">
-            {props.status}
-          </span>
-        ) : null}
-        <button type="button" className="primary" onClick={save}>
-          {t('samples.settings.save')}
-        </button>
-      </div>
+      ))}
+      {notices.map((n, i) => (
+        <p key={`notice-${i}`} role="alert" className="prompt-hint warn">
+          {n}
+        </p>
+      ))}
+      <SettingRow
+        label={coreT('Global sample folder')}
+        description={coreT('Vault-relative folder for vault-global samples.')}
+        control={
+          <input
+            id={`${id}-folder`}
+            type="text"
+            className="setting-text"
+            aria-label={coreT('Global sample folder')}
+            autoComplete="off"
+            spellCheck={false}
+            value={folder}
+            onChange={(e) => {
+              setFolder(e.target.value);
+              setFolderNotice(undefined);
+            }}
+            onBlur={leaveFolder}
+            onKeyDown={onEnter(leaveFolder)}
+          />
+        }
+      />
+      {folderNotice ? (
+        <p role="alert" className="prompt-hint warn">
+          {folderNotice}
+        </p>
+      ) : null}
     </div>
   );
 }

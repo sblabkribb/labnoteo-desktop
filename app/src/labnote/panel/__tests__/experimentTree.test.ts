@@ -32,6 +32,14 @@ describe('buildExperimentTree', () => {
     expect(exp.workflows.map(workflowState)).toEqual(['ticked', 'partial', 'none']);
   });
 
+  it('a workflow ticked in the README with unfinished UOs is tickedOpen, not a plain check', () => {
+    const uo = (done: boolean, line: number) => ({ kind: 'uo' as const, id: `uo:${line}`, code: 'UHW100', alias: 'a', name: 'a', line, done });
+    const wf = { kind: 'workflow' as const, id: 'wf', path: 'p', code: 'WB150', alias: 'x', name: 'x', ticked: true, uos: [uo(false, 3), uo(false, 9)] };
+    expect(workflowState(wf)).toBe('tickedOpen');
+    expect(workflowState({ ...wf, uos: [uo(true, 3), uo(true, 9)] })).toBe('ticked');
+    expect(workflowState({ ...wf, uos: [] })).toBe('ticked');
+  });
+
   it('counts images and resources, leaving out the system folders', async () => {
     const nodes = await load();
     const exp = nodes.find((n) => n.dir === EXP)!;

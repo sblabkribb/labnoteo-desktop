@@ -109,8 +109,9 @@ function PaletteText(p: { item: PickItem<unknown>; query: string; palette: NonNu
 }
 
 /**
- * 보이는 차례와 묶음 머리. 검색어가 있으면 순위 그대로(머리 없음). 없으면 최근 고른 것을 맨 위 "최근" 묶음에, 나머지는
- * groupOf 의 묶음(처음 나온 차례)으로 모은다. 머리 있는 묶음 뒤에 오는 이름 없는 묶음은 `restHead`(기본 "그 밖")를 머리로 단다:
+ * 보이는 차례와 묶음 머리. 검색어가 있으면 "최근" 없이 순위대로 groupOf 의 묶음으로 모은다: 묶음 차례는 순위에서 처음 나온
+ * 차례라 가장 잘 맞는 줄이 늘 맨 위에 있고(명세 §5.3), 묶음 안은 순위 그대로다. 없으면 최근 고른 것을 맨 위 "최근" 묶음에,
+ * 나머지는 groupOf 의 묶음(처음 나온 차례)으로 모은다. 머리 있는 묶음 뒤에 오는 이름 없는 묶음은 `restHead`(기본 "그 밖")를 머리로 단다:
  * "최근" 다음 줄들이 머리 없이 이어지면 경계가 안 보인다.
  */
 export function arrange(
@@ -122,8 +123,8 @@ export function arrange(
   restHead: string = t('picker.rest'),
 ): { items: PickItem<unknown>[]; heads: Map<number, string> } {
   const heads = new Map<number, string>();
-  if (query.trim() || (!groupOf && recent.length === 0)) return { items: ranked, heads };
-  const recentItems = recent.flatMap((id) => ranked.filter((item) => keyOf(item) === id).slice(0, 1));
+  if (query.trim() ? !groupOf : !groupOf && recent.length === 0) return { items: ranked, heads };
+  const recentItems = query.trim() ? [] : recent.flatMap((id) => ranked.filter((item) => keyOf(item) === id).slice(0, 1));
   const rest = ranked.filter((item) => !recentItems.includes(item));
   const order: string[] = [];
   const byGroup = new Map<string, PickItem<unknown>[]>();
@@ -380,11 +381,11 @@ export function PickManyDialog(props: {
         <MoreOrEmpty shown={shown.length} total={ranked.length} />
       </div>
       <div className="dialog-actions">
-        <button type="button" className="primary" onClick={submit}>
-          {t('dialog.ok')}
-        </button>
         <button type="button" onClick={props.onCancel}>
           {t('dialog.cancel')}
+        </button>
+        <button type="button" className="primary" onClick={submit}>
+          {t('dialog.ok')}
         </button>
       </div>
     </DialogFrame>

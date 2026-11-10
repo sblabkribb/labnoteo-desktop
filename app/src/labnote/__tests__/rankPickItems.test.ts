@@ -108,7 +108,8 @@ describe('rankPickItems: catalog ranking (UI redesign Task 11)', () => {
   const hwItems = (hw as { unitOperations: { id: string; name: string; description: string; equipment?: string }[] }).unitOperations.map(
     (op): PickItem<string> => {
       const fields = catalogKoFields(op.id, 'HW', op.description, 'ko');
-      return { label: `${op.id}: ${op.name}`, ...fields, keywords: [...(fields.keywords ?? []), ...(op.equipment ? [op.equipment] : [])], value: op.id };
+      const searchWords = [...(fields.searchWords ?? []), ...(op.equipment ? [op.equipment] : [])];
+      return { label: `${op.id}: ${op.name}`, ...fields, ...{ searchWords }, value: op.id } as PickItem<string>;
     },
   );
   const ids = (items: PickItem<string>[], q: string) => rankPickItems(items, q).map((i) => i.value);
@@ -131,6 +132,13 @@ describe('rankPickItems: catalog ranking (UI redesign Task 11)', () => {
   it('"plate reader" and "reader" find UHW380 Microplate Reading (token-AND across name, description and equipment)', () => {
     expect(ids(hwItems, 'plate reader')).toContain('UHW380');
     expect(ids(hwItems, 'reader')).toContain('UHW380');
+  });
+
+  it('"PCR" puts UHW110 Real-time PCR (a word of the name) above UHW100 Thermocycling (a search word)', () => {
+    const found = ids(hwItems, 'PCR');
+    expect(found[0]).toBe('UHW110');
+    expect(found).toContain('UHW100');
+    expect(found.indexOf('UHW110')).toBeLessThan(found.indexOf('UHW100'));
   });
 
   it('every token must match somewhere', () => {

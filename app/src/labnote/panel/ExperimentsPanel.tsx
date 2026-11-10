@@ -73,7 +73,7 @@ type Item =
 const GROUPS: readonly GroupBy[] = ['status', 'experimenter', 'project', 'updated', 'discuss'];
 
 const SHAPE_ICON = { dashed: 'circle-dashed', half: 'circle-half', check: 'circle-check' } as const;
-const WF_ICON = { ticked: 'circle-check', partial: 'circle-half', none: 'circle-dashed' } as const;
+const WF_ICON = { ticked: 'circle-check', tickedOpen: 'circle-half', partial: 'circle-half', none: 'circle-dashed' } as const;
 
 /** 카탈로그를 보관함에 채우고(없는 것만) 읽는다. 루트는 늘 VAULT_ROOT('.')다. */
 async function loadCatalog(ctx: CommandContext): Promise<Catalog> {
@@ -383,8 +383,12 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
     setExpanded((prev) => new Set([...prev, ...(group ? [`group:${group.key}`] : []), activeExp.id, ...(activeWf ? [activeWf.id] : [])]));
   });
 
-  // 커서가 든 UO: 열린 워크플로에서 커서 줄보다 앞에 있는 마지막 UO 제목
-  const currentUo = !noteHidden && activeWf !== undefined && cursorLine !== undefined ? [...activeWf.uos].reverse().find((u) => u.line <= cursorLine - 1) : undefined;
+  // 커서가 든 UO: 열린 워크플로에서 커서 줄이 그 구역(제목 줄부터 다음 #~### 제목 앞까지) 안에 드는 UO.
+  // 마지막 UO 뒤의 `## Conclusions` 같은 글은 어느 UO 에도 들지 않는다.
+  const currentUo =
+    !noteHidden && activeWf !== undefined && cursorLine !== undefined
+      ? [...activeWf.uos].reverse().find((u) => u.line <= cursorLine - 1 && (u.end === undefined || cursorLine - 1 < u.end))
+      : undefined;
 
   const shownExpanded = searching ? new Set([...expanded, ...treeNodes.map((g) => g.id), ...found.expanded]) : expanded;
 
@@ -496,11 +500,19 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
       return { icon: SHAPE_ICON[statusShape(item.exp.status)], label };
     }
     if (item?.kind === 'workflow') {
-      const s = workflowState(fullWorkflows.get(item.wf.id) ?? item.wf);
+      const full = fullWorkflows.get(item.wf.id) ?? item.wf;
+      const s = workflowState(full);
       const { exp, wf } = item;
       return {
         icon: WF_ICON[s],
-        label: s === 'ticked' ? t('experiments.wf.ticked') : s === 'partial' ? t('experiments.wf.partial') : t('experiments.wf.none'),
+        label:
+          s === 'ticked'
+            ? t('experiments.wf.ticked')
+            : s === 'tickedOpen'
+              ? t('experiments.wf.tickedOpen', uoDone(full), full.uos.length)
+              : s === 'partial'
+                ? t('experiments.wf.partial')
+                : t('experiments.wf.none'),
         onClick: () => void runCommand(ctx, tickWorkflow(exp, wf)),
       };
     }

@@ -122,12 +122,35 @@ class SampleHighlightPlugin {
     const doc = view.state.doc;
     const marks: Range<Decoration>[] = [];
     for (const { from, to } of lineAlignedRanges(view)) {
-      for (const r of sampleTokenRanges(doc.sliceString(from, to), input, from)) {
+      const text = doc.sliceString(from, to);
+      for (const r of sampleTokenRanges(text, input, from)) {
         marks.push(Decoration.mark({ class: r.cls, attributes: r.title ? { title: r.title } : undefined }).range(r.from, r.to));
+        for (const [a, b] of definitionSyntax(text, r.from - from, r.to - from)) marks.push(syntaxMark.range(from + a, from + b));
       }
     }
     return Decoration.set(marks, true);
   }
+}
+
+/** 샘플 정의 줄의 문법 글자(`@dna;` 와 ID·별칭 뒤의 `;`): 흐리게 그려 ID 와 별칭이 먼저 읽히게 한다. 파일 글은 그대로다. */
+const syntaxMark = Decoration.mark({ class: 'lno-sample-syntax' });
+const DEFINITION_HEAD = /@[A-Za-z][\w-]*;$/;
+
+/**
+ * `@type;ID;alias;…` 에서 ID(`[idFrom, idTo)`) 둘레의 문법 글자 범위(text 안의 자리): 앞의 `@type;`, ID 바로 뒤의 `;`,
+ * 같은 줄에서 그다음 `;`(별칭 끝). 정의 꼴이 아니면(앞에 `@type;` 이 없으면) 아무것도 없다.
+ */
+export function definitionSyntax(text: string, idFrom: number, idTo: number): Array<[number, number]> {
+  const lineStart = text.lastIndexOf('\n', idFrom - 1) + 1;
+  const head = DEFINITION_HEAD.exec(text.slice(lineStart, idFrom));
+  if (!head) return [];
+  const out: Array<[number, number]> = [[idFrom - head[0].length, idFrom]];
+  if (text[idTo] !== ';') return out;
+  out.push([idTo, idTo + 1]);
+  const lineEnd = text.indexOf('\n', idTo);
+  const next = text.indexOf(';', idTo + 1);
+  if (next > idTo + 1 && (lineEnd < 0 || next < lineEnd)) out.push([next, next + 1]);
+  return out;
 }
 
 const sampleHighlightPlugin = ViewPlugin.fromClass(SampleHighlightPlugin, { decorations: (p) => p.decorations });

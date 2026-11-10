@@ -275,6 +275,11 @@ export function createFakeVault(initial: Record<string, string> = {}): FakeVault
           if (!isFile(path)) throw fail(ERROR_KINDS.notFound, `not found: ${path}`);
           return new TextEncoder().encode(files()[path]).buffer;
         }
+        // 파일 카드의 크기·수정 시각: 글의 UTF-8 바이트 수와 고정 시각
+        case 'vault_file_info': {
+          if (!isFile(path)) throw fail(ERROR_KINDS.notFound, `not found: ${path}`);
+          return { size: new TextEncoder().encode(files()[path]).length, modified: Date.UTC(2026, 10, 9, 3, 30) };
+        }
         // 기본 앱으로 열기, 폴더에서 보기: 아무것도 띄우지 않고 기록만 남긴다
         case 'vault_open_default':
         case 'vault_reveal':

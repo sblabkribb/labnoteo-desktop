@@ -15,16 +15,29 @@ beforeEach(() => {
 
 describe('FileCard', () => {
   it('shows the name, the folder and the kind of a non-note file without reading it', () => {
+    invoke.mockResolvedValue({ size: 2048, modified: null });
     const { container } = render(<FileCard path="labnote/001_PCR/resources/spec.pdf" kind="pdf" />);
     expect(screen.getByRole('heading', { name: 'spec.pdf' })).toBeTruthy();
     expect(screen.getByText('labnote/001_PCR/resources')).toBeTruthy();
     expect(screen.getByText('PDF 문서')).toBeTruthy();
     expect(container.querySelector('svg.lucide-file-type')).not.toBeNull();
     expect(container.querySelector('[style]')).toBeNull();
-    expect(invoke).not.toHaveBeenCalled();
+    // only the file's facts are asked for, never its bytes
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).toEqual(['vault_file_info']);
+  });
+
+  it('shows the size and the modified date (spec §6.1)', async () => {
+    const modified = new Date(2026, 10, 9, 14, 5).getTime();
+    invoke.mockResolvedValue({ size: 2048, modified });
+    render(<FileCard path="exp/resources/spec.pdf" kind="pdf" />);
+    expect(await screen.findByText('2 KB')).toBeTruthy();
+    expect(screen.getByText('2026-11-09 14:05')).toBeTruthy();
+    expect(screen.getByText('크기')).toBeTruthy();
+    expect(screen.getByText('수정한 날')).toBeTruthy();
   });
 
   it('a file at the vault root says so', () => {
+    invoke.mockResolvedValue({ size: 1, modified: null });
     render(<FileCard path="data.zip" kind="other" />);
     expect(screen.getByText('보관함 맨 위')).toBeTruthy();
     expect(screen.getByText('첨부 파일')).toBeTruthy();
@@ -49,6 +62,7 @@ describe('FileCard', () => {
   });
 
   it('shows why a viewer could not show the file', () => {
+    invoke.mockResolvedValue({ size: 1, modified: null });
     render(<FileCard path="big.png" kind="image" reason="이유" />);
     expect(screen.getByText('이유')).toBeTruthy();
   });

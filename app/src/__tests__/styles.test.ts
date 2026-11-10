@@ -78,6 +78,9 @@ describe('styles/*.css', () => {
       '@media (max-width: 640px) .shell',
       '@media (max-width: 640px) .sidebar',
       '.palette-open::before',
+      // 시각 점검(2026-11-10): 알림의 닫기는 이제 Lucide 아이콘이다(글자 ×의 ::before 가 없다)
+      '.toast-close::before',
+      '.dialog-close::before',
       '.sidebar-tabs',
       '.sidebar-tab',
       '.sidebar-tab[aria-selected="true"]',

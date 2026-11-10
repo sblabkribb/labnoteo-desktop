@@ -4,6 +4,8 @@ import { t } from '../../i18n/t';
 import { rows, type Align, type Cell, type TableModel } from './model';
 import { sampleCellDecorator } from '../../samples/cellMarks';
 import { renderInline, type InlineDecorator } from './renderInline';
+import { iconElement } from '../../ui/iconElement';
+import type { IconName } from '../../ui/Icon';
 
 /**
  * 표 하나를 격자로 그리는 블록 위젯. 문서가 유일한 원본이고, 위젯은 원문(`source`)에서 다시 그릴 수 있는 그림일 뿐이다.
@@ -69,11 +71,11 @@ const TOOLS: ReadonlyArray<{ action: TableAction; label: () => string }> = [
 type StripAction = 'insertRowBelow' | 'insertColumnRight' | 'cycleAlign' | 'more';
 
 /** 도구 막대의 작은 단추. 보이는 글자는 기호이고, 이름(aria-label 과 title)은 번역 카탈로그에서 읽는다. */
-const STRIP: ReadonlyArray<{ action: StripAction; glyph: string; label: () => string }> = [
-  { action: 'insertRowBelow', glyph: '+\u2193', label: () => t('table.insertRowBelow') },
-  { action: 'insertColumnRight', glyph: '+\u2192', label: () => t('table.insertColumnRight') },
-  { action: 'cycleAlign', glyph: '\u2261', label: () => t('table.alignCycle') },
-  { action: 'more', glyph: '\u22ef', label: () => t('table.more') },
+const STRIP: ReadonlyArray<{ action: StripAction; icon: IconName; label: () => string }> = [
+  { action: 'insertRowBelow', icon: 'between-horizontal-end', label: () => t('table.insertRowBelow') },
+  { action: 'insertColumnRight', icon: 'between-vertical-end', label: () => t('table.insertColumnRight') },
+  { action: 'cycleAlign', icon: 'align-left', label: () => t('table.alignCycle') },
+  { action: 'more', icon: 'ellipsis', label: () => t('table.more') },
 ];
 
 /**
@@ -175,7 +177,8 @@ function setLabel(b: HTMLElement): void {
     const name = strip.label();
     b.setAttribute('aria-label', name);
     b.title = name;
-    b.textContent = strip.glyph;
+    // Lucide 아이콘(명세 §5.1: 글자 아이콘은 없다). 이름은 aria-label 이 말한다
+    if (!b.querySelector('svg')) b.replaceChildren(iconElement(b.ownerDocument, strip.icon, 14));
     return;
   }
   const text =

@@ -172,7 +172,7 @@ describe('ExperimentsPanel', () => {
     await expandExperiment();
     await user.click(within(row(/GFP/)).getByRole('button', { name: /README/ }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
-    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('data-icon')).toBe('circle-check'));
+    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^README 에서 완료로 체크했지만 UO/));
     // 다시 누르면 푼다
     await user.click(within(row(/Gibson run/)).getByRole('button', { name: /README/ }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[ \] \[WB030 DNA Assembly Gibson run\]/));
@@ -187,7 +187,7 @@ describe('ExperimentsPanel', () => {
     expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['유닛 오퍼레이션 추가', 'README 에서 완료로 체크']);
     await user.click(screen.getByRole('menuitem', { name: 'README 에서 완료로 체크' }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
-    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('data-icon')).toBe('circle-check'));
+    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^README 에서 완료로 체크했지만 UO/));
     fireEvent.contextMenu(row(/GFP/));
     expect(screen.getByRole('menuitem', { name: 'README 에서 체크 해제' })).toBeTruthy();
   });

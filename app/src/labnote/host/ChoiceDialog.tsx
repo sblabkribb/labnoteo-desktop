@@ -32,17 +32,21 @@ export function ChoiceDialog(props: {
         ))}
       </div>
       <div className="dialog-actions">
-        {spec.choices.map((c, i) => (
-          <button
-            key={i}
-            ref={i === 0 ? first : undefined}
-            type="button"
-            className={i === 0 ? 'primary' : undefined}
-            onClick={() => props.onDone(c.value)}
-          >
-            {c.label}
-          </button>
-        ))}
+        {/* 첫 선택이 주된 동작(초점을 받는다)이고 맨 오른쪽에 선다(명세 §5.3): 거꾸로 그린다 */}
+        {spec.choices
+          .map((c, i) => ({ c, i }))
+          .reverse()
+          .map(({ c, i }) => (
+            <button
+              key={i}
+              ref={i === 0 ? first : undefined}
+              type="button"
+              className={i === 0 ? 'primary' : undefined}
+              onClick={() => props.onDone(c.value)}
+            >
+              {c.label}
+            </button>
+          ))}
       </div>
     </DialogFrame>
   );

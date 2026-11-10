@@ -521,6 +521,14 @@ title: 실험
         "escape"
     );
 
+    // File card facts: size and modified time; escapes are refused.
+    std::fs::write(dir.join("vault").join("protocol.pdf"), "%PDF").unwrap();
+    let info = ok("vault_file_info", args("vault_file_info", vec![json!("protocol.pdf")]));
+    assert_eq!(info["size"], 4, "{info}");
+    assert!(info["modified"].is_number(), "{info}");
+    std::fs::remove_file(dir.join("vault").join("protocol.pdf")).unwrap();
+    assert_eq!(call("vault_file_info", args("vault_file_info", vec![json!("../outside.pdf")])).unwrap_err()["kind"], "escape");
+
     // Creation times: one entry per path, `null` for a missing file; too many
     // paths is a malformed argument (`badInput`), not an io error.
     let times = ok("vault_created_times", args("vault_created_times", vec![json!(["a.md"])]));

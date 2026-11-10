@@ -106,6 +106,13 @@ export interface LayoutStoreOptions {
   invoke?: Invoke;
 }
 
+/**
+ * 창이 이보다 좁을 때(그리고 독이 떠 뜨는 820px 이상일 때) 오른쪽 사이드바를 열면 왼쪽 독이 자리를 내준다: 셋이 다 보이면
+ * 본문이 300px 남짓으로 줄어 머리의 경로가 사라진다. 오른쪽을 닫으면 독이 돌아온다(그 사이 사람이 독을 직접 열거나 닫지 않았다면).
+ */
+export const RIGHT_YIELD_BELOW_PX = 1100;
+const OVERLAY_BELOW_PX = 820;
+
 export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
   const storage = opts.storage ?? (() => localStorage);
   let invoke: Invoke = opts.invoke ?? tauriInvoke;
@@ -131,6 +138,9 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
   let pending: Promise<unknown> = Promise.resolve();
   // load 가 시작된 뒤 사람이 바꾼 것이 있으면 load 결과로 덮지 않는다
   let changedSinceLoad = false;
+  // 오른쪽 사이드바를 열며 왼쪽 독을 숨겼다: 오른쪽을 닫으면 되돌린다
+  let yielded = false;
+  const windowWidth = () => (typeof window === 'undefined' ? Infinity : window.innerWidth);
 
   const set = (next: UiPrefs) => {
     state = next;
@@ -155,10 +165,24 @@ export function createLayoutStore(opts: LayoutStoreOptions = {}): LayoutStore {
       }, WRITE_DEBOUNCE_MS);
     },
     toggleLeft() {
+      yielded = false;
       store.update({ leftHidden: !state.leftHidden });
     },
     toggleRight() {
-      store.update({ rightOpen: !state.rightOpen });
+      const opening = !state.rightOpen;
+      const width = windowWidth();
+      if (opening && !state.leftHidden && width < RIGHT_YIELD_BELOW_PX && width >= OVERLAY_BELOW_PX) {
+        yielded = true;
+        store.update({ rightOpen: true, leftHidden: true });
+        return;
+      }
+      if (!opening && yielded) {
+        yielded = false;
+        store.update({ rightOpen: false, leftHidden: false });
+        return;
+      }
+      yielded = false;
+      store.update({ rightOpen: opening });
     },
     load(withInvoke) {
       if (withInvoke) invoke = withInvoke;

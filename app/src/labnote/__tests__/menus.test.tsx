@@ -88,6 +88,8 @@ describe('noteTreeMenu', () => {
     h = createTestHost();
     expect(labels(noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES))).toEqual([
       'menu.open',
+      'menu.newNoteHere',
+      'menu.newFolderHere',
       'menu.copyLink',
       'header.copyPath',
       coreT('Export tables to CSV'),
@@ -103,6 +105,10 @@ describe('noteTreeMenu', () => {
       'menu.rename',
       'menu.delete',
     ]);
+    // every item has an icon, so the rows line up (CSV export included)
+    for (const item of noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES)) {
+      if ('run' in item) expect((item as MenuAction).icon, String((item as MenuAction).labelKey ?? (item as MenuAction).label)).toBeTruthy();
+    }
     // 삭제는 위험 항목이고 맨 끝이다
     const del = noteTreeMenu(h.ctx, entry('notes', true), ENTRIES).at(-1) as MenuAction;
     expect(del.labelKey).toBe('menu.delete');
@@ -115,6 +121,8 @@ describe('noteTreeMenu', () => {
     const items = noteTreeMenu(h.ctx, entry('notes/gel.png', false), ENTRIES);
     expect(labels(items)).toEqual([
       'menu.open',
+      'menu.newNoteHere',
+      'menu.newFolderHere',
       'menu.openDefault',
       'menu.reveal',
       'menu.copyEmbed',

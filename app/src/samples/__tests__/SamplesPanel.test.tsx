@@ -59,6 +59,15 @@ function mount(th: TestHost, activePath: string | undefined = NOTE) {
 
 const row = (name: RegExp | string) => screen.getByRole('treeitem', { name });
 const findRow = (name: RegExp | string) => screen.findByRole('treeitem', { name });
+/** A sample-type row: its name, and the count as the right-hand meta without brackets (spec §4.1). */
+const typeRow = (name: string, count: number): HTMLElement => {
+  const hit = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(
+    (li) => li.querySelector('.wf-tree-label')?.textContent === name && li.querySelector('.tree-meta')?.textContent === String(count),
+  );
+  if (!hit) throw new Error(`no type row ${name} ${count}`);
+  return hit;
+};
+const findTypeRow = (name: string, count: number) => waitFor(() => typeRow(name, count));
 
 async function treeFixture(): Promise<TreeNode[]> {
   const th = host();
@@ -95,10 +104,10 @@ describe('SamplesPanel', () => {
     expect(await screen.findByText(t('samples.root.local'))).toBeTruthy();
     expect(t('samples.root.local')).toBe('샘플 (로컬)');
     expect(screen.getByText(t('samples.root.global'))).toBeTruthy();
-    expect(await screen.findByText('DNA [1]')).toBeTruthy();
-    expect(screen.getByText('Reagent [1]')).toBeTruthy();
+    expect(await findTypeRow('DNA', 1)).toBeTruthy();
+    expect(typeRow('Reagent', 1)).toBeTruthy();
     expect(
-      screen.getByText(coreT('Type @dna (or another type) in a note, or right-click → "{0}" to register a sample.', coreT('Add sample'))),
+      screen.getByText(t('samples.hint', coreT('Add sample'))),
     ).toBeTruthy();
     expect(screen.getByPlaceholderText(coreT('Search samples'))).toBeTruthy();
   });
@@ -132,7 +141,7 @@ describe('SamplesPanel', () => {
       ),
     ).toBeTruthy();
     // Local 아래에는 빈 종류 줄이 없다: 종류 줄은 Global 아래의 것뿐이다
-    expect(screen.getAllByText(/^DNA \[/)).toHaveLength(1);
+    expect([...document.querySelectorAll('.wf-tree-label')].filter((l) => l.textContent === 'DNA')).toHaveLength(1);
   });
 
   it('expansion is seeded with roots and types that have samples; search expands everything', async () => {
@@ -207,13 +216,13 @@ describe('SamplesPanel', () => {
     th.setActive(NOTE);
     th.answer.prompt('ladder', '', '');
     mount(th);
-    fireEvent.contextMenu(await findRow('DNA [1]'));
+    fireEvent.contextMenu(await findTypeRow('DNA', 1));
     const menu = await screen.findByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual([coreT('Add sample')]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: coreT('Add sample') }));
     await waitFor(async () => expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).toContain('ladder'));
     // 쓴 뒤 패널이 다시 읽는다(env.changed → sampleEvents)
-    expect(await findRow('DNA [2]')).toBeTruthy();
+    expect(await findTypeRow('DNA', 2)).toBeTruthy();
   });
 
   it('View usages opens a picker of spots, or says the sample is unused', async () => {
@@ -289,23 +298,27 @@ describe('SamplesPanel', () => {
     const th = host();
     samples.configure(th.host.fs, th.ctx.settings);
     mount(th);
-    expect(await screen.findByText('DNA [1]')).toBeTruthy();
+    expect(await findTypeRow('DNA', 1)).toBeTruthy();
     const rec = (ids: string[]) =>
       JSON.stringify(Object.fromEntries(ids.map((id) => [id, { type: 'DNA', descriptions: [], sources: [] }])));
     await th.host.fs.write(`${LOCAL}/DNA.json`, rec(['DNA-1', 'DNA-2']));
     act(() => sampleEvents.emit([LOCAL]));
-    expect(await screen.findByText('DNA [2]')).toBeTruthy();
+    expect(await findTypeRow('DNA', 2)).toBeTruthy();
     await th.host.fs.write(`${LOCAL}/DNA.json`, rec(['DNA-1', 'DNA-2', 'DNA-3']));
     act(() => samples.vaultChanged([`${LOCAL}/DNA.json`]));
-    expect(await screen.findByText('DNA [3]')).toBeTruthy();
+    expect(await findTypeRow('DNA', 3)).toBeTruthy();
   });
 
   it('type nodes carry the swatch class, no style attribute', async () => {
     const th = host();
     const { container } = mount(th);
-    const dna = await findRow('DNA [1]');
+    const dna = await findTypeRow('DNA', 1);
     expect(dna.querySelector('.sample-swatch.lno-sample-t-dna')).toBeTruthy();
-    expect(row('Reagent [1]').querySelector('.sample-swatch.lno-sample-t-reagent')).toBeTruthy();
+    // One icon (test-tube) plus the colour dot, not a workflow icon plus a swatch (spec §4.2)
+    expect(dna.querySelectorAll('svg.tree-icon')).toHaveLength(1);
+    expect(dna.querySelector('.ti-test-tube')).toBeTruthy();
+    expect(screen.getByRole('treeitem', { name: /pET28a|DNA-1/ }).querySelector('.ti-sample')).toBeTruthy();
+    expect(typeRow('Reagent', 1).querySelector('.sample-swatch.lno-sample-t-reagent')).toBeTruthy();
     expect(container.querySelector('[style]')).toBeNull();
   });
 

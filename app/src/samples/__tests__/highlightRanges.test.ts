@@ -14,6 +14,7 @@ import {
   type SampleHighlightInput,
 } from '../../labnote/port/sampleHighlightRanges';
 import { sampleTypesFor } from '../types';
+import { definitionSyntax } from '../highlight';
 import { KNOWN } from './fixtures';
 
 const types = sampleTypesFor({ customSampleTypes: ['배지'] });
@@ -215,5 +216,26 @@ describe('sample IDs in comments', () => {
   it('still styles sample IDs in a comment', () => {
     const text = '<!-- DNA-1 -->';
     expect(collectTokenRanges(text, ['DNA']).map((r) => text.slice(r.start, r.end))).toEqual(['DNA-1']);
+  });
+});
+
+describe('definitionSyntax (the dimmed @type; and ; around a defined ID)', () => {
+  it('marks @type; before the ID, the ; after it and the ; that ends the alias', () => {
+    const text = '- @dna;DNA-2;GFP-amplicon;PCR product';
+    const id = text.indexOf('DNA-2');
+    const ranges = definitionSyntax(text, id, id + 'DNA-2'.length).map(([a, b]) => text.slice(a, b));
+    expect(ranges).toEqual(['@dna;', ';', ';']);
+  });
+
+  it('a plain reference (no @type; before it) has no syntax to dim', () => {
+    const text = 'used DNA-2 here';
+    const id = text.indexOf('DNA-2');
+    expect(definitionSyntax(text, id, id + 5)).toEqual([]);
+  });
+
+  it('stays on the ID line', () => {
+    const text = '@primer;P-1\nnext;line';
+    const id = text.indexOf('P-1');
+    expect(definitionSyntax(text, id, id + 3).map(([a, b]) => text.slice(a, b))).toEqual(['@primer;']);
   });
 });

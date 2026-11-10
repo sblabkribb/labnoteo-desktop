@@ -2,7 +2,6 @@ import { createTranslator, type Translator } from '@labnoteo/core';
 import obsidianKo from '../../vendor/labnoteo/src/l10n.ko';
 import { getLang } from '../i18n/lang';
 import { t } from '../i18n/t';
-import { bilingualName } from './port/bilingualName';
 
 /**
  * 코어와 옮겨 온 플러그인 코드가 쓰는 번역 다리. 그 문장들은 플러그인의 한국어 목록(l10n.ko.ts)에 있고, 키가 곧
@@ -21,9 +20,19 @@ export function coreLocale(): 'ko' | 'en' {
   return getLang();
 }
 
-/** 명령 팔레트 이름: 한국어에서는 '실험 생성 (Create experiment)', 영어에서는 'Create experiment'. 어느 언어로 쳐도 찾는다. */
+/**
+ * 앱의 한 가지 말(명세 §7.2): 플러그인 한국어 목록의 '시료' 는 앱 어디서나 '샘플' 이다. 보이는 글에만 쓴다(파일 내용은 그대로).
+ */
+export function appVocabulary(text: string): string {
+  return getLang() === 'ko' ? text.replace(/시료/g, '샘플') : text;
+}
+
+/**
+ * 명령 팔레트 이름: 지금 언어의 이름 하나('실험 생성' / 'Create experiment'). 예전처럼 영어를 괄호로 붙이지 않는다:
+ * 영어 키는 팔레트가 찾기 낱말(keywords)로 따로 넘기므로 어느 언어로 쳐도 찾는다.
+ */
 export function paletteName(key: string): string {
-  return bilingualName(coreT, key);
+  return appVocabulary(coreT(key));
 }
 
 /**

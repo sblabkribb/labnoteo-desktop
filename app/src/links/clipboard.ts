@@ -25,6 +25,12 @@ export function markdownLinkFor(path: string): string {
   return '[' + label + '](/' + encodeMdPath(path) + ')';
 }
 
+/** 첨부의 임베드 링크: 이름이 하나뿐이면 `![[이름.확장자]]`, 아니면 보관함 경로, 위키링크로 쓸 수 없는 이름이면 Markdown 이미지 링크. */
+export function embedLinkText(path: string): string {
+  const linktext = linkIndex.resolver().linktextFor(path, '');
+  return linktext === null ? `!${markdownLinkFor(path)}` : `![[${linktext}]]`;
+}
+
 /** What Copy wikilink copies for a note in the tree. */
 export function noteLinkText(path: string): string {
   const linktext = linkIndex.resolver().linktextFor(path, '');

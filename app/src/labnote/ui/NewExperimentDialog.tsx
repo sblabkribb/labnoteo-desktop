@@ -112,11 +112,11 @@ export function NewExperimentDialog(props: {
           {t('newExperiment.experimenterHint')}
         </p>
         <div className="dialog-actions">
-          <button type="submit" className="primary" disabled={checking}>
-            {t('newExperiment.create')}
-          </button>
           <button type="button" onClick={props.onCancel}>
             {t('dialog.cancel')}
+          </button>
+          <button type="submit" className="primary" disabled={checking}>
+            {t('newExperiment.create')}
           </button>
         </div>
       </form>

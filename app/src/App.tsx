@@ -89,6 +89,7 @@ import { startScan } from './labnote/scan/commands';
 import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
 import { Ribbon } from './ui/Ribbon';
+import { EmptyState } from './ui/EmptyState';
 import { Dock } from './ui/Dock';
 import { RightDock } from './ui/RightDock';
 import { VaultBar } from './ui/VaultBar';
@@ -774,8 +775,9 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
                 lead={
                   <>
                     {navButtons}
+                    {/* 명세 §3.4: 보기 화면의 머리는 파일 이름(전체 경로는 툴팁) */}
                     <span className="view-file-path" title={viewing.path}>
-                      {viewing.path}
+                      {viewing.path.slice(viewing.path.lastIndexOf('/') + 1)}
                     </span>
                   </>
                 }
@@ -829,7 +831,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
           ) : (
             <>
               <ViewHeader lead={navButtons} actions={rightToggle} />
-              <p className="empty-state">{t('editor.empty')}</p>
+              <EmptyState onCommand={runShellCommand} ready={ctx !== undefined} />
             </>
           )}
         </main>

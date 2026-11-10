@@ -6,7 +6,7 @@ import { t } from '../../i18n/t';
 import { createTestHost } from '../../labnote/__tests__/testHost';
 import { searchNotes } from '../../search/indexApi';
 import { linkIndex } from '../linkIndex';
-import { LinksPanel } from '../LinksPanel';
+import { LinksPanel, readableContext } from '../LinksPanel';
 
 vi.mock('../../search/indexApi', async (orig) => ({
   ...(await orig<typeof import('../../search/indexApi')>()),
@@ -22,6 +22,14 @@ beforeEach(() => {
   onCreate.mockReset();
 });
 
+describe('readableContext', () => {
+  it('drops list and task markers and link syntax, keeping the visible text', () => {
+    expect(readableContext('- [x] [WB150 PCR GFP](./001_WB150_PCR.labnote.md)', true)).toBe('WB150 PCR GFP');
+    expect(readableContext('see [[notes/a.md|A]] and [[Home.md]] **now**', false)).toBe('see A and Home now');
+    expect(readableContext('- item', false)).toBe('- item');
+  });
+});
+
 describe('LinksPanel backlinks', () => {
   it('lists backlinks grouped by note with highlighted context, and opens at the line', async () => {
     linkIndex.setFiles(['Home.md', 'notes/a.md', 'notes/b.md']);
@@ -31,7 +39,8 @@ describe('LinksPanel backlinks', () => {
     render(<LinksPanel activePath="Home.md" onOpen={onOpen} onCreate={onCreate} ctx={undefined} />);
     expect(screen.getByRole('heading', { name: t('links.backlinks', '2') })).toBeTruthy();
     const marks = [...document.querySelectorAll('.links-context mark')].map((m) => m.textContent);
-    expect(marks).toEqual(['[[Home]]', '[[Home|홈]]']);
+    // the context reads as text: link syntax is not shown (the file is unchanged)
+    expect(marks).toEqual(['Home', '홈']);
     await userEvent.click(screen.getByText('see', { exact: false }));
     expect(onOpen).toHaveBeenCalledWith('notes/a.md', 1);
   });

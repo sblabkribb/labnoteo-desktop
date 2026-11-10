@@ -146,7 +146,7 @@ describe('view header and status bar', () => {
     await user.click(wf);
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem');
-    expect(items.map((i) => i.textContent)).toEqual(['✓ UHW180 Incubation', 'UHW380 Microplate Reading']);
+    expect(items.map((i) => i.textContent)).toEqual(['IncubationUHW180', 'Microplate ReadingUHW380']);
     await user.click(items[1]);
     await waitFor(() => expect(v.state.doc.lineAt(v.state.selection.main.head).text).toBe('### [UHW380 Microplate Reading]'));
     // 실험 칸은 README 를 연다: 주 동작이 "워크플로 추가" 가 되고 체크리스트 칩과 상태 칩(눌러서 바꾸기)이 보인다

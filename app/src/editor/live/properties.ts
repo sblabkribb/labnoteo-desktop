@@ -29,9 +29,16 @@ import { linkResolution, linkStateOf } from './linkResolution';
 import { imageLoader } from './imageWidget';
 import { targetOf, type OpenTarget } from './links';
 import { statusKind, statusLabel } from '../../labnote/statusLabels';
+import { iconElement } from '../../ui/iconElement';
 
 /** Each known front-matter key's label (display only: the file keeps its keys). */
 const LABELS: Readonly<Record<string, () => string>> = {
+  title: () => t('props.title'),
+  labnote_id: () => t('props.labnoteId'),
+  start_date: () => t('props.startDate'),
+  end_date: () => t('props.endDate'),
+  experiment_type: () => t('props.experimentType'),
+  sample_tracking: () => t('props.sampleTracking'),
   author: () => t('props.experimenter'),
   experimenter: () => t('props.experimenter'),
   status: () => t('props.status'),
@@ -47,7 +54,8 @@ const LABELS: Readonly<Record<string, () => string>> = {
 
 /**
  * What the properties card shows for a front-matter key: 실험자 / Experimenter for `author` and `experimenter`,
- * 상태, 만든 날, 마지막 수정, 태그, 실험, 프로젝트 for the plugin's keys, and any other key as written.
+ * 제목, 노트 ID, 시작한 날, 끝난 날, 노트 종류, 샘플 추적, 상태, 만든 날, 마지막 수정, 태그, 실험, 프로젝트 for the plugin's
+ * keys (so one card never mixes localised names with raw keys), and any other key as written.
  */
 export function propertyLabel(key: string): string {
   return Object.prototype.hasOwnProperty.call(LABELS, key) ? LABELS[key]() : key;
@@ -560,8 +568,9 @@ export class PropertiesWidget extends WidgetType {
 function removeButton(view: EditorView, key: string, label: string): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = 'lno-btn lno-props-remove';
-  b.textContent = '×'; // 기호(글자 아님): 읽어 주는 이름은 aria-label
+  b.className = 'lno-props-remove';
+  // Obsidian 처럼 줄에 올렸을 때만 보이는 작은 × 아이콘(채운 상자가 아니다). 읽어 주는 이름은 aria-label
+  b.appendChild(iconElement(document, 'x', 14));
   b.title = t('props.remove');
   b.setAttribute('aria-label', t('props.removeKey', label));
   b.addEventListener('click', (e) => {

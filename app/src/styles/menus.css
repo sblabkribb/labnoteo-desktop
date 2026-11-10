@@ -10,11 +10,19 @@
   gap: var(--space-4);
   pointer-events: none;
 }
+/* 왼쪽 독이 보이면 독 오른쪽(본문 칸의 왼쪽 아래)에 선다: 보관함 막대와 트리 끝을 가리지 않는다 */
 .toaster-bottom-left {
-  left: calc(var(--ribbon-w) + var(--space-5));
+  left: calc(var(--ribbon-w) + var(--side-w) + var(--space-5));
   bottom: calc(var(--statusbar-h) + var(--space-5));
   align-items: flex-start;
-  width: min(22rem, calc(100vw - var(--ribbon-w) - 2 * var(--space-5)));
+  width: min(24rem, calc(100vw - var(--ribbon-w) - var(--side-w) - 2 * var(--space-5)));
+}
+:root[data-left-hidden="true"] .toaster-bottom-left {
+  left: calc(var(--ribbon-w) + var(--space-5));
+  width: min(24rem, calc(100vw - var(--ribbon-w) - 2 * var(--space-5)));
+}
+@media (max-width: 819.98px) {
+  .toaster-bottom-left { left: calc(var(--ribbon-w) + var(--space-5)); width: min(24rem, calc(100vw - var(--ribbon-w) - 2 * var(--space-5))); }
 }
 .toast {
   display: flex;
@@ -38,6 +46,12 @@
 .toast-success { border-left-color: var(--success); }
 .toast-warn { border-left-color: var(--warning); }
 .toast-error { border-left-color: var(--danger); }
+/* 상태 아이콘: 띠와 같은 색, 제목 첫 줄 높이에 맞춘다 */
+.toast-icon { margin-top: 2px; }
+.toast-info .toast-icon { color: var(--accent); }
+.toast-success .toast-icon { color: var(--success); }
+.toast-warn .toast-icon { color: var(--warning); }
+.toast-error .toast-icon { color: var(--danger); }
 .toast-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 /* 한국어는 낱말 중간에서 끊지 않는다(keep-all). 긴 경로는 그래도 어디서든 끊는다(anywhere) */
 .toast-title { margin: 0; font-weight: 600; word-break: keep-all; overflow-wrap: anywhere; }
@@ -53,11 +67,13 @@
   background: transparent;
   border: 0;
   border-radius: var(--radius-s);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
   line-height: 1;
 }
 .toast .toast-close:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-.toast-close::before { content: "×"; content: "×" / ""; }
 /* 알림 안의 단추 하나("자세히", "결과 다시 보기"): 강조색 글자 단추 */
 .toast-action {
   flex: none;

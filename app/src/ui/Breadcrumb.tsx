@@ -82,8 +82,11 @@ export function Breadcrumb(p: CrumbProps) {
     const items: MenuItem[] =
       pos.uos.length === 0
         ? [{ label: t('header.noUo'), disabled: true, run: async () => undefined }]
-        : pos.uos.map((u) => ({
-            label: `${u.done ? '✓ ' : ''}${u.id} ${u.alias || u.name}`,
+        : // 다른 메뉴와 같은 줄(명세 §3.4): 완료 표시 아이콘, 별칭, 오른쪽 끝에 고정폭 코드
+          pos.uos.map((u) => ({
+            label: u.alias || u.name,
+            icon: u.done ? ('circle-check' as const) : ('circle-dot' as const),
+            shortcut: u.id,
             run: async () => p.onJump(u.line),
           }));
     const exp = pos.experiment;

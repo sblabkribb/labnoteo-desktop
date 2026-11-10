@@ -122,7 +122,7 @@ describe('앱 셸 CSS 계약', () => {
     // 영역별 hover 규칙은 없다: 전역 button:hover 와, 그보다 특이도가 높은 button.primary:hover 가 정한다
     expect(ruleFor('.topbar button:hover:not(:disabled)')).toBeNull();
     expect(ruleFor('.topbar button:not(.primary):hover:not(:disabled)')).toBeNull();
-    expect(ruleFor('button:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--bg-selected\)/);
+    expect(ruleFor('button:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--btn-bg-hover\)/);
     expect(ruleFor('button.primary:hover:not(:disabled)')!.body).toMatch(/background:\s*var\(--accent-fill-hover\)/);
   });
 
@@ -156,9 +156,9 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.toaster')!.decls['z-index']).toBe('var(--z-toast)');
     expect(ruleFor('.dialog-backdrop')!.decls.background).toBe('var(--scrim)');
   });
-  it('editor frame: strong border and 2px accent focus ring', () => {
-    expect(ruleFor('.editor-frame')!.decls.border).toBe('1px solid var(--border-strong)');
-    expect(ruleFor('.editor-frame:focus-within')!.decls.outline).toBe('2px solid var(--accent)');
+  it('editor frame: no frame and no focus ring around the document (Obsidian, spec §3 and §5.7)', () => {
+    expect(ruleFor('.editor-frame')!.decls.border).toBe('none');
+    expect(ruleFor('.editor-frame:focus-within')!.decls.outline).toBe('none');
     expect(ruleFor('.editor-frame')!.decls.isolation).toBe('isolate');
   });
 });

@@ -5,6 +5,7 @@ import { DialogFrame, isComposing } from '../host/DialogFrame';
 import type { DialogSpec } from '../host/dialogStore';
 import { coreT } from '../i18n';
 import { initialWorksheetSelection, unitOpLabel, type WorksheetChoice } from '../port/worksheetPrint';
+import { SelectField } from '../../ui/SelectField';
 
 const PAPERS: readonly WorksheetPaperSize[] = ['a4', 'letter'];
 
@@ -90,13 +91,13 @@ export function WorksheetDialog(props: {
         </ul>
         <label className="worksheet-paper">
           <span>{coreT('Paper size')}</span>
-          <select value={paper} onChange={(e) => setPaper(e.currentTarget.value as WorksheetPaperSize)}>
+          <SelectField value={paper} onChange={(e) => setPaper(e.currentTarget.value as WorksheetPaperSize)}>
             {PAPERS.map((p) => (
               <option key={p} value={p}>
                 {p === 'a4' ? t('print.paper.a4') : t('print.paper.letter')}
               </option>
             ))}
-          </select>
+          </SelectField>
         </label>
         {empty ? (
           <p role="alert" className="prompt-hint warn">

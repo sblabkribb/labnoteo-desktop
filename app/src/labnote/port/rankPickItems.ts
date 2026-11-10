@@ -10,7 +10,13 @@ import type { PickItem } from '@labnoteo/core';
 const CODE = /^([A-Za-z]{1,4}\d{2,4}[A-Za-z]?)\s*:\s*/;
 
 /** The tiers of {@link pickScore}: higher is better. */
-const TIER = { code: 1000, name: 900, prefix: 800, wordPrefix: 700, inName: 600, anywhere: 300 } as const;
+const TIER = { code: 1000, name: 900, prefix: 800, wordPrefix: 700, inName: 600, searchWord: 500, anywhere: 300 } as const;
+
+/**
+ * A picker row may carry search words besides its names (`searchWords`, app side: the catalog's Korean search words, a
+ * unit operation's equipment). They find the row but rank below every name match.
+ */
+type WithSearchWords = { searchWords?: readonly string[] };
 
 /**
  * How well `item` matches the lowercased query `q`, higher first, or undefined when it does not
@@ -42,7 +48,12 @@ function pickScore<T>(item: PickItem<T>, q: string): number | undefined {
   if (best !== undefined) return best;
   const words = q.split(/\s+/).filter(Boolean);
   if (words.length > 1 && words.every(w => names.some(f => f.includes(w)))) return TIER.inName;
-  const all = [label, ...keywords, item.description?.toLowerCase() ?? '', item.detail?.toLowerCase() ?? ''];
+  const search = ((item as WithSearchWords).searchWords ?? []).map(k => k.toLowerCase());
+  for (const word of search) {
+    if (word === q || word.startsWith(q) || wordStarts(word, q)) offer(TIER.searchWord + cover(word));
+  }
+  if (best !== undefined) return best;
+  const all = [label, ...keywords, ...search, item.description?.toLowerCase() ?? '', item.detail?.toLowerCase() ?? ''];
   if (words.every(w => all.some(f => f.includes(w)))) return TIER.anywhere;
   return undefined;
 }

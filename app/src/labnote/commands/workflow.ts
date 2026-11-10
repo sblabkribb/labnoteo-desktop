@@ -76,7 +76,7 @@ export async function pickWorkflow(ctx: CommandContext, step?: PickStep): Promis
       value: wf,
     })),
     {
-      title: host.t('Select workflow'),
+      title: t('header.addWorkflow'),
       placeholder: host.t('Search workflows'),
       // 한 줄 행, Design / Build / Test / Learn 묶음, 최근 고른 것 먼저(UI 재설계 Task 11)
       catalog: true,

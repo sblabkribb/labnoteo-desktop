@@ -115,7 +115,11 @@ describe('셸: 리본, 왼쪽 독, 보관함 줄 (상단 바 없음)', () => {
     expect(ribbon().getByRole('button', { name: '왼쪽 사이드바 보이기/숨기기' }).getAttribute('aria-expanded')).toBe('false');
     ctrlBackslash('₩');
     expect(html().getAttribute('data-left-hidden')).toBe('false');
+    // (a wide window: below 1100px opening the right sidebar makes the left dock yield, layoutStore.test.ts)
+    const width = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1400 });
     ctrlBackslash('|', { shiftKey: true });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
     expect(html().getAttribute('data-left-hidden')).toBe('false');
     // 같은 글자라도 code 가 다른 키는 아니다
     act(() => void document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'IntlBackslash', ctrlKey: true, bubbles: true })));
