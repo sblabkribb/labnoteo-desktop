@@ -7,14 +7,21 @@ import { diagnoseExperimentPath, getExperimentDir } from '@labnoteo/core/lib/lab
 import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { createSampleEnv } from '../samples/env';
+import type { EditorView } from '@codemirror/view';
+import { clipboardTarget, copySelection, cutSelection, pasteClipboard, selectAllIn } from '../editor/commands/clipboardActions';
+import { displayKey } from '../editor/commands/appCommands';
 import { FORMAT_KEYS, runFormatCommand } from '../editor/commands/formatCommands';
+import { INSERT_TABLE_KEY, insertTable } from '../editor/table/commands';
+import { openWithDefaultApp, revealInFolder } from '../fs/vaultOpen';
+import type { IconName } from '../ui/Icon';
 import { activeCellView } from '../editor/table/cellEditor';
 import type { LinkHit } from '../editor/live/links';
-import { copyText, noteLinkText } from '../links/clipboard';
+import { copyText, markdownLinkFor, noteLinkText } from '../links/clipboard';
+import { linkIndex } from '../links/linkIndex';
 import type { TreeEntry } from '../tree/useTree';
 import type { CommandContext } from './commands/context';
 import { commandById } from './commands/registry';
-import { insertDate, insertIssueMarker } from './commands/editorInserts';
+import { insertCallout, insertCodeBlock, insertDate, insertHr, insertIssueMarker, insertMathBlock, runBlockInsert } from './commands/editorInserts';
 import { changeExperimentStatus, toggleDiscussionFlag } from './commands/experiment';
 import { deleteEntry, newFolder, newNoteIn, renameEntry } from './commands/fileOps';
 import { syncWorkflowChecklist } from './commands/syncChecklist';
@@ -23,6 +30,7 @@ import { createWorkflowIn, insertWorkflowOnReadme, isExperimentReadme } from './
 import { coreT } from './i18n';
 import { exportExperimentTablesToCsv, exportTablesToCsv } from './port/exportCsv';
 import { sampleEditorMenuItems } from './port/sampleCommands';
+import { isNotePath } from './panel/treeIcons';
 import { README } from './paths';
 import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
 
@@ -33,32 +41,44 @@ function experimentOf(dir: string): string | undefined {
 }
 
 /**
- * 파일 트리 줄의 메뉴.
- * - 파일: 열기, 위키링크 복사, 이름 바꾸기, 삭제. 실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다.
- * - 폴더: 여기에 새 노트, 새 폴더, 이름 바꾸기, 삭제. 실험 안의 폴더면 워크플로 생성(그 실험에)을 더한다.
+ * 파일 트리 줄의 메뉴(명세 §5.6). 위험 항목(삭제)은 구분선 뒤 맨 끝이다.
+ * - 파일: 열기, (첨부: 기본 앱으로 열기, 폴더에서 보기), 위키링크 복사(노트) 또는 임베드 링크 복사(첨부), 경로 복사.
+ *   실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다. 그다음 이름 바꾸기, 삭제.
+ * - 폴더: 여기에 새 노트, 새 폴더, 경로 복사, 이름 바꾸기, 삭제. 실험 안의 폴더면 워크플로 생성(그 실험에)을 더한다.
  * - CSV 내보내기(플러그인 main.ts registerFileMenu): 실험 폴더 자체와 실험 README 에는 "이 실험의 모든 표", .md 파일에는
  *   "이 노트의 표". 열린 노트가 아니라 누른 노트나 폴더를 내보낸다.
  */
-export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: readonly TreeEntry[]): MenuAction[] {
+export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: readonly TreeEntry[]): MenuItem[] {
   const { path, isDir } = entry;
-  const tail: MenuAction[] = [
-    { labelKey: 'menu.rename', run: () => renameEntry(ctx, path, isDir, entries) },
-    { labelKey: 'menu.delete', run: () => deleteEntry(ctx, path, isDir) },
+  const copyPath: MenuAction = { labelKey: 'header.copyPath', icon: 'copy', run: () => copyText(path, ctx.host.notify) };
+  const tail: MenuItem[] = [
+    MENU_SEPARATOR,
+    { labelKey: 'menu.rename', icon: 'pencil', run: () => renameEntry(ctx, path, isDir, entries) },
+    { labelKey: 'menu.delete', icon: 'trash-2', danger: true, run: () => deleteEntry(ctx, path, isDir) },
   ];
   if (isDir) {
     const experiment = experimentOf(path);
     return [
-      { labelKey: 'menu.newNoteHere', run: () => newNoteIn(ctx, path) },
-      { labelKey: 'menu.newFolder', run: () => newFolder(ctx, path) },
-      ...(experiment ? [{ label: coreT('Create workflow'), run: () => createWorkflowIn(ctx, experiment) }] : []),
+      { labelKey: 'menu.newNoteHere', icon: 'file-plus', run: () => newNoteIn(ctx, path) },
+      { labelKey: 'menu.newFolder', icon: 'folder-plus', run: () => newFolder(ctx, path) },
+      ...(experiment ? [{ label: coreT('Create workflow'), icon: 'workflow' as const, run: () => createWorkflowIn(ctx, experiment) }] : []),
+      copyPath,
       ...csvItems(ctx, getExperimentDir(path) === path ? path : undefined),
       ...tail,
     ];
   }
   const experiment = isExperimentReadme(path) ? posix.dirname(path) : undefined;
+  const attachment = !isNotePath(path);
   return [
-    { labelKey: 'menu.open', run: () => ctx.openFile(path) },
-    { labelKey: 'menu.copyLink', run: () => copyText(noteLinkText(path), ctx.host.notify) },
+    { labelKey: 'menu.open', icon: 'file', run: () => ctx.openFile(path) },
+    ...(attachment
+      ? [
+          { labelKey: 'menu.openDefault', icon: 'external-link' as const, run: () => openWithDefaultApp(path) },
+          { labelKey: 'menu.reveal', icon: 'folder-search' as const, run: () => revealInFolder(path) },
+          { labelKey: 'menu.copyEmbed', icon: 'link' as const, run: () => copyText(embedLinkText(path), ctx.host.notify) },
+        ]
+      : [{ labelKey: 'menu.copyLink', icon: 'link' as const, run: () => copyText(noteLinkText(path), ctx.host.notify) }]),
+    copyPath,
     ...(experiment
       ? [
           { label: coreT('Change experiment status'), run: () => changeExperimentStatus(ctx, experiment) },
@@ -68,6 +88,12 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
     ...csvItems(ctx, csvExperimentOfFile(path), path),
     ...tail,
   ];
+}
+
+/** 첨부의 임베드 링크: 이름이 하나뿐이면 `![[이름.확장자]]`, 아니면 보관함 경로, 위키링크로 쓸 수 없는 이름이면 Markdown 이미지 링크. */
+function embedLinkText(path: string): string {
+  const linktext = linkIndex.resolver().linktextFor(path, '');
+  return linktext === null ? `!${markdownLinkFor(path)}` : `![[${linktext}]]`;
 }
 
 /** 실험 README 면 그 실험 폴더(플러그인처럼 이름은 대소문자를 가리지 않고, 실험은 getExperimentDir 로). */
@@ -87,38 +113,90 @@ function csvItems(ctx: CommandContext, experimentDir: string | undefined, notePa
   ];
 }
 
-/** 어느 노트에서나 쓰는 넣기 명령: 날짜, 날짜와 시간, 논의 이슈 마커. */
-function insertItems(ctx: CommandContext): MenuItem[] {
+/** 클립보드 항목이 다룰 편집기(표 칸이면 그 셀 편집기). 노트가 열려 있지 않으면 undefined. */
+function targetView(ctx: CommandContext): EditorView | undefined {
+  const outer = ctx.activeView();
+  return outer ? clipboardTarget(outer) : undefined;
+}
+
+/** 잘라내기·복사·붙여넣기·모두 선택. 잘라내기와 복사는 고른 글이 없으면 꺼진다. */
+function clipboardItems(ctx: CommandContext): MenuItem[] {
+  const view = targetView(ctx);
+  const empty = !view || view.state.selection.ranges.every((r) => r.empty);
+  const onView = (run: (v: EditorView) => unknown) => async () => {
+    const v = targetView(ctx);
+    if (v) await run(v);
+  };
+  const off = empty ? { disabled: true, disabledReason: 'menu.needSelection' } : {};
   return [
-    { label: coreT('Insert date'), run: async () => insertDate(ctx, getSeoulDateString) },
-    { label: coreT('Insert date and time'), run: async () => insertDate(ctx, getSeoulDateTimeString) },
-    { label: coreT('Insert issue marker'), run: () => insertIssueMarker(ctx) },
+    { labelKey: 'menu.cut', icon: 'scissors', shortcut: 'Ctrl+X', ...off, run: onView((v) => cutSelection(v)) },
+    { labelKey: 'menu.copy', icon: 'copy', shortcut: 'Ctrl+C', ...off, run: onView((v) => copySelection(v)) },
+    {
+      labelKey: 'menu.paste',
+      icon: 'clipboard-paste',
+      shortcut: 'Ctrl+V',
+      run: onView((v) => pasteClipboard(v, undefined, (m) => ctx.host.notify('warn', m))),
+    },
+    { labelKey: 'menu.selectAll', icon: 'text-select', shortcut: 'Ctrl+A', run: onView((v) => selectAllIn(v)) },
   ];
 }
 
 /**
- * 서식 항목: 구분선 하나 뒤에 납작하게(MenuItem 에는 하위 메뉴가 없다). 이름은 labelKey 라 그릴 때 번역한다.
- * 블록 서식은 표 칸에서 아무것도 하지 않는다(runFormat).
+ * 삽입 ▸: 표, 콜아웃, 코드 블록, 가로줄, 수식 블록, 그리고 날짜, 날짜·시간, 이슈 마커(플러그인 명령).
+ * 이슈 마커는 실험 노트(.labnote.md)에서만 이슈가 되므로 다른 노트에서는 까닭과 함께 꺼 둔다.
  */
-function formatItems(ctx: CommandContext): MenuItem[] {
-  return [MENU_SEPARATOR, ...FORMAT_KEYS.map((f): MenuItem => ({ labelKey: f.nameKey, run: async () => runFormatCommand(ctx, f) }))];
+function insertSubmenu(ctx: CommandContext, path: string): MenuItem[] {
+  const block = (labelKey: string, icon: IconName, insert: (v: EditorView) => boolean): MenuAction => ({
+    labelKey,
+    icon,
+    run: async () => runBlockInsert(ctx, insert),
+  });
+  const labnote = /\.labnote\.md$/i.test(path);
+  return [
+    { ...block('menu.table', 'table', (v) => insertTable(v)), shortcut: displayKey(INSERT_TABLE_KEY) },
+    block('menu.callout', 'quote', insertCallout),
+    block('menu.codeBlock', 'square-code', insertCodeBlock),
+    block('menu.hr', 'minus', insertHr),
+    block('menu.mathBlock', 'sigma', insertMathBlock),
+    MENU_SEPARATOR,
+    { labelKey: 'menu.date', icon: 'calendar', run: async () => insertDate(ctx, getSeoulDateString) },
+    { labelKey: 'menu.dateTime', icon: 'clock', run: async () => insertDate(ctx, getSeoulDateTimeString) },
+    {
+      labelKey: 'menu.issueMarker',
+      icon: 'triangle-alert',
+      ...(labnote ? {} : { disabled: true, disabledReason: 'menu.issueMarker.onlyLabnote' }),
+      run: () => insertIssueMarker(ctx),
+    },
+  ];
+}
+
+/** 서식 ▸: 서식 명령 전부, 단축키와 함께. 블록 서식은 표 칸에서 아무것도 하지 않는다(runFormat). */
+function formatSubmenu(ctx: CommandContext): MenuItem[] {
+  return FORMAT_KEYS.map((f): MenuItem => ({ labelKey: f.nameKey, shortcut: displayKey(f.key), run: async () => runFormatCommand(ctx, f) }));
 }
 
 /**
- * 편집기 본문의 메뉴(`path` 는 열린 노트). 커서가 링크 위면 링크 열기와 링크 복사가 맨 앞에 온다. 표 칸의 메뉴는 표가 따로 띄운다. 어느 노트든 끝에 서식 항목이 붙는다.
- * - 워크플로 노트: 유닛 오퍼레이션 삽입, 그리고 넣기 명령.
- * - 실험 README: 워크플로 삽입(만들고 체크리스트에 등록, 커서에는 링크를 넣지 않는다), 체크리스트 맞추기,
- *   실험 상태 변경, 논의 표시 전환, 그리고 넣기 명령.
- * - 그 밖의 .labnote.md: 넣기 명령. 일반 .md 는 서식 항목만.
- * 샘플 추적이 켜진 노트면(어느 .md 든) 노트 항목 앞에 샘플 항목이 온다: 커서가 샘플 참조 위면 정의로 이동, 그리고 늘 샘플 추가
- * (플러그인 editor-menu 의 순서).
+ * 편집기 본문의 메뉴(`path` 는 열린 노트, 명세 §5.6의 순서). 표 칸의 메뉴는 표가 따로 띄운다.
+ * 1. 잘라내기·복사·붙여넣기·모두 선택, 2. 삽입 ▸, 서식 ▸, 3. "실험 노트" 구역(항목이 있을 때만):
+ * - 커서가 링크 위면 링크 열기와 링크 복사.
+ * - 샘플 추적이 켜진 노트면(어느 .md 든) 샘플 항목: 커서가 샘플 참조 위면 정의로 이동, 그리고 늘 샘플 추가(플러그인 editor-menu 의 순서).
+ * - 워크플로 노트: 유닛 오퍼레이션 삽입. 실험 README: 워크플로 삽입(만들고 체크리스트에 등록, 커서에는 링크를 넣지 않는다),
+ *   체크리스트 맞추기, 실험 상태 변경, 논의 표시 전환.
  */
 export function editorMenu(ctx: CommandContext, path: string, link?: { hit: LinkHit; text: string; open(): void }): MenuItem[] {
-  return [
+  const lab: MenuItem[] = [
     ...(link ? linkItems(ctx, link) : []),
-    ...sampleEditorMenuItems(createSampleEnv(ctx), path, cursorState(ctx)),
+    ...sampleEditorMenuItems(createSampleEnv(ctx), path, cursorState(ctx)).map((i): MenuAction => ({ ...i, icon: i.icon ?? 'test-tube' })),
     ...noteItems(ctx, path),
-    ...formatItems(ctx),
+  ];
+  const first = lab[0];
+  if (first && !first.separator) lab[0] = { ...first, section: 'menu.labnote' };
+  return [
+    ...clipboardItems(ctx),
+    MENU_SEPARATOR,
+    { labelKey: 'menu.insert', icon: 'plus', run: async () => undefined, submenu: insertSubmenu(ctx, path) },
+    { labelKey: 'menu.format', icon: 'heading', run: async () => undefined, submenu: formatSubmenu(ctx) },
+    ...lab,
   ];
 }
 
@@ -133,8 +211,8 @@ function linkItems(ctx: CommandContext, link: { hit: LinkHit; text: string; open
   const { hit } = link;
   const copied = hit.kind === 'wiki' ? link.text : stripAngles(hit.href);
   return [
-    { labelKey: 'menu.link.open', run: async () => link.open() },
-    { labelKey: 'menu.link.copy', run: () => copyText(copied, ctx.host.notify) },
+    { labelKey: 'menu.link.open', icon: 'external-link', run: async () => link.open() },
+    { labelKey: 'menu.link.copy', icon: 'link', run: () => copyText(copied, ctx.host.notify) },
   ];
 }
 
@@ -170,18 +248,18 @@ export function viewMoreMenu(ctx: CommandContext, path: string): MenuItem[] {
   ];
 }
 
+/** "실험 노트" 구역의 노트 종류별 명령. */
 function noteItems(ctx: CommandContext, path: string): MenuItem[] {
   if (isValidWorkflowPath(path)) {
-    return [{ label: coreT('Insert unit operation'), run: () => insertUnitOp(ctx) }, ...insertItems(ctx)];
+    return [{ label: coreT('Insert unit operation'), icon: 'circle-dot', run: () => insertUnitOp(ctx) }];
   }
   if (isExperimentReadme(path)) {
     return [
-      { label: coreT('Insert workflow'), run: () => insertWorkflowOnReadme(ctx) },
-      { label: coreT('Sync workflow checklist with folder'), run: () => syncWorkflowChecklist(ctx) },
-      { label: coreT('Change experiment status'), run: () => changeExperimentStatus(ctx) },
-      { label: coreT('Toggle discussion flag'), run: () => toggleDiscussionFlag(ctx) },
-      ...insertItems(ctx),
+      { label: coreT('Insert workflow'), icon: 'workflow', run: () => insertWorkflowOnReadme(ctx) },
+      { label: coreT('Sync workflow checklist with folder'), icon: 'refresh-cw', run: () => syncWorkflowChecklist(ctx) },
+      { label: coreT('Change experiment status'), icon: 'circle-half', run: () => changeExperimentStatus(ctx) },
+      { label: coreT('Toggle discussion flag'), icon: 'pencil', run: () => toggleDiscussionFlag(ctx) },
     ];
   }
-  return /\.labnote\.md$/i.test(path) ? insertItems(ctx) : [];
+  return [];
 }

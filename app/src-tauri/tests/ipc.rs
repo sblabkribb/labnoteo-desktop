@@ -507,6 +507,16 @@ title: 실험
     assert_eq!(ok("vault_list_images", args("vault_list_images", vec![])), json!(["a.png"]));
     std::fs::remove_file(dir.join("vault").join("a.png")).unwrap();
 
+    // Open with the default app / show in folder: `path` reaches the checks.
+    // Only refused calls here, so nothing is ever launched by the test.
+    std::fs::write(dir.join("vault").join("run.exe"), "MZ").unwrap();
+    assert_eq!(
+        call("vault_open_default", args("vault_open_default", vec![json!("run.exe")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    std::fs::remove_file(dir.join("vault").join("run.exe")).unwrap();
+    assert!(call("vault_reveal", args("vault_reveal", vec![json!("../outside.pdf")])).is_err());
+
     // Creation times: one entry per path, `null` for a missing file; too many
     // paths is a malformed argument (`badInput`), not an io error.
     let times = ok("vault_created_times", args("vault_created_times", vec![json!(["a.md"])]));

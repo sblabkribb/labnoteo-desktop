@@ -1,5 +1,6 @@
 /**
- * 편집기 명령: 날짜 넣기(insert-date), 날짜와 시간 넣기(insert-datetime), 논의 이슈 마커 넣기(insert-issue-marker).
+ * 편집기 명령: 날짜 넣기(insert-date), 날짜와 시간 넣기(insert-datetime), 논의 이슈 마커 넣기(insert-issue-marker), 그리고
+ * 편집기 메뉴의 삽입 ▸ 이 쓰는 블록 넣기(insertCallout, insertCodeBlock, insertHr, insertMathBlock, runBlockInsert: Task 16).
  * 플러그인 commands.ts 의 insertDateCommand(846-913), insertIssueMarkerCommand(928-1030)와 main.ts 의
  * insertDateFromPalette / insertIssueMarkerFromPalette(419-475)를 본뜬 앱의 오케스트레이터다. 앱에서 달라진 것:
  * - Obsidian 의 Editor 대신 CodeMirror 뷰(ctx.activeView()). 오프셋은 `state.doc.toString()`(LF 로 이은 글) 기준이다.
@@ -26,6 +27,7 @@ import { findMetaDateFieldInLine, findPairedMetaDate, getSeoulDateString, getSeo
 import { getSampleDisplayMeta } from '@labnoteo/core/lib/sampleUtils';
 import { isWorkflowChecklistEntryLine, workflowChecklistEntryLabel } from '@labnoteo/core/lib/workflowStructure';
 import { markerExperimentDir } from '../../../vendor/labnoteo/src/issueMarkerIndex';
+import { insertBlock, type BlockKind } from '../../editor/commands/insertBlocks';
 import { activeCellView } from '../../editor/table/cellEditor';
 import { t } from '../../i18n/t';
 import { toDocBreaks } from '../editTarget';
@@ -268,6 +270,41 @@ export async function insertIssueMarker(ctx: CommandContext): Promise<boolean> {
     );
   }
   return true;
+}
+
+/** 블록 하나를 뷰에 넣는다(insertBlocks: 문단과 빈 줄로 떼고 커서를 블록 안에). 넣었는지를 돌려준다. */
+function blockInto(view: EditorView, kind: BlockKind): boolean {
+  const spec = insertBlock(view.state, kind);
+  if (!spec) return false;
+  view.dispatch(spec);
+  view.focus();
+  return true;
+}
+
+/** `> [!note]` 콜아웃. 커서는 본문 줄에. */
+export const insertCallout = (view: EditorView): boolean => blockInto(view, 'callout');
+/** 펜스 코드 블록(선택이 있으면 감싼다). 커서는 펜스 안에. */
+export const insertCodeBlock = (view: EditorView): boolean => blockInto(view, 'codeBlock');
+/** 가로줄 `---`. 앞 줄이 비어 있지 않으면 빈 줄을 먼저 둔다(setext 제목이 되지 않게). 커서는 그 아래에. */
+export const insertHr = (view: EditorView): boolean => blockInto(view, 'hr');
+/** `$$` 수식 블록. 커서는 그 안에. */
+export const insertMathBlock = (view: EditorView): boolean => blockInto(view, 'mathBlock');
+
+/**
+ * 열린 노트에 블록 넣기를 돌린다(편집기 메뉴의 삽입 ▸). 노트가 없으면 noNote, 뷰가 없으면(바쁘면) noteBusy 를 알린다.
+ * 넣었는지를 돌려준다.
+ */
+export function runBlockInsert(ctx: CommandContext, insert: (view: EditorView) => boolean): boolean {
+  const r = resolve(ctx);
+  if (r === 'busy') {
+    ctx.host.notify('warn', t('command.noteBusy'));
+    return false;
+  }
+  if (r === 'noNote') {
+    ctx.host.notify('info', t('cmd.props.noNote'));
+    return false;
+  }
+  return insert(r.view);
 }
 
 export const editorInsertCommands: Command[] = [

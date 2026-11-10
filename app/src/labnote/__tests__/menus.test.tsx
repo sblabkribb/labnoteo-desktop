@@ -57,10 +57,21 @@ const ENTRIES: TreeEntry[] = [
   entry('notes/a.labnote.md', false),
 ];
 
-const labels = (items: MenuItem[]) => items.map((i) => (i.label !== undefined ? i.label : i.labelKey));
-const byLabel = (items: MenuItem[], label: string) => items.find((i): i is MenuAction => i.label === label)!;
-/** 서식 항목(구분선 뒤) 앞의 항목들. */
-const head = (items: MenuItem[]) => items.slice(0, items.findIndex((i) => i.separator));
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn(async () => undefined) }));
+vi.mock('@tauri-apps/api/core', async (orig) => ({ ...(await orig<object>()), invoke: invokeMock }));
+
+const labels = (items: readonly MenuItem[]) => items.map((i) => (i.label !== undefined ? i.label : i.labelKey));
+/** 하위 메뉴까지 펼친 모든 항목. */
+const flat = (items: readonly MenuItem[]): MenuItem[] => items.flatMap((i) => [i, ...(i.submenu ? flat(i.submenu) : [])]);
+const byLabel = (items: MenuItem[], label: string) => flat(items).find((i): i is MenuAction => i.label === label)!;
+/** "실험 노트" 구역(section 이 붙은 첫 항목부터 끝까지). 없으면 []. */
+const head = (items: MenuItem[]) => {
+  const at = items.findIndex((i) => i.section !== undefined);
+  return at < 0 ? [] : items.slice(at);
+};
+const submenuOf = (items: MenuItem[], key: string) => (items.find((i) => i.labelKey === key) as MenuAction).submenu!;
+
+beforeEach(() => invokeMock.mockClear());
 
 let h: TestHost;
 
@@ -78,16 +89,57 @@ describe('noteTreeMenu', () => {
     expect(labels(noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES))).toEqual([
       'menu.open',
       'menu.copyLink',
+      'header.copyPath',
       coreT('Export tables to CSV'),
+      undefined,
       'menu.rename',
       'menu.delete',
     ]);
     expect(labels(noteTreeMenu(h.ctx, entry('notes', true), ENTRIES))).toEqual([
       'menu.newNoteHere',
       'menu.newFolder',
+      'header.copyPath',
+      undefined,
       'menu.rename',
       'menu.delete',
     ]);
+    // 삭제는 위험 항목이고 맨 끝이다
+    const del = noteTreeMenu(h.ctx, entry('notes', true), ENTRIES).at(-1) as MenuAction;
+    expect(del.labelKey).toBe('menu.delete');
+    expect(del.danger).toBe(true);
+  });
+
+  it('the tree menu on a png offers Open with default app, Show in folder and Copy embed link', async () => {
+    h = createTestHost();
+    linkIndex.setFiles(['notes/gel.png']);
+    const items = noteTreeMenu(h.ctx, entry('notes/gel.png', false), ENTRIES);
+    expect(labels(items)).toEqual([
+      'menu.open',
+      'menu.openDefault',
+      'menu.reveal',
+      'menu.copyEmbed',
+      'header.copyPath',
+      undefined,
+      'menu.rename',
+      'menu.delete',
+    ]);
+    expect(t('menu.openDefault')).toBe('기본 앱으로 열기');
+    expect(t('menu.reveal')).toBe('폴더에서 보기');
+    const run = (key: string) => (items.find((i) => i.labelKey === key) as MenuAction).run();
+    await run('menu.openDefault');
+    await run('menu.reveal');
+    expect(invokeMock.mock.calls).toEqual([
+      ['vault_open_default', { path: 'notes/gel.png' }],
+      ['vault_reveal', { path: 'notes/gel.png' }],
+    ]);
+    const clip: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (s: string) => void clip.push(s) } });
+    await run('menu.copyEmbed');
+    await run('header.copyPath');
+    expect(clip).toEqual(['![[gel.png]]', 'notes/gel.png']);
+    linkIndex.clear();
+    // 노트에는 기본 앱·폴더 항목이 없다
+    expect(labels(noteTreeMenu(h.ctx, entry('notes/a.labnote.md', false), ENTRIES))).not.toContain('menu.openDefault');
   });
 
   it('the tree menu on a README offers status/flag', () => {
@@ -119,13 +171,13 @@ describe('noteTreeMenu', () => {
   it('New note here creates the note in that folder and opens it', async () => {
     h = createTestHost({ 'notes/a.labnote.md': '' });
     h.answer.prompt('b');
-    await runCommand(h.ctx, noteTreeMenu(h.ctx, entry('notes', true), ENTRIES)[0].run);
+    await runCommand(h.ctx, (noteTreeMenu(h.ctx, entry('notes', true), ENTRIES)[0] as MenuAction).run);
     expect(h.vault.files()['notes/b.labnote.md']).toBe('');
     expect(h.opened).toEqual(['notes/b.labnote.md']);
     expect(h.refreshes()).toBe(1);
     // 있는 이름은 거절한다
     h.answer.prompt('a');
-    await runCommand(h.ctx, noteTreeMenu(h.ctx, entry('notes', true), ENTRIES)[0].run);
+    await runCommand(h.ctx, (noteTreeMenu(h.ctx, entry('notes', true), ENTRIES)[0] as MenuAction).run);
     expect(h.notes.at(-1)?.kind).toBe('warn');
     expect(h.opened).toEqual(['notes/b.labnote.md']);
   });
@@ -198,12 +250,16 @@ describe('Open link and Copy link', () => {
 
   it('editor menu offers Open link and Copy link first on a link', async () => {
     h = createTestHost();
-    const items = editorMenu(h.ctx, 'n.md', {
-      hit: { kind: 'wiki', from: 0, to: 12, linkpath: 'Home', subpath: 'A', embed: false },
-      text: '[[Home#A|h]]',
-      open,
-    });
+    const items = head(
+      editorMenu(h.ctx, 'n.md', {
+        hit: { kind: 'wiki', from: 0, to: 12, linkpath: 'Home', subpath: 'A', embed: false },
+        text: '[[Home#A|h]]',
+        open,
+      }),
+    );
+    // 링크 항목은 "실험 노트" 구역의 맨 앞이다
     expect(labels(items.slice(0, 2))).toEqual(['menu.link.open', 'menu.link.copy']);
+    expect(items[0].section).toBe('menu.labnote');
     expect(t('menu.link.open')).toBe('링크 열기');
     await action(items, 1).run();
     expect(clip).toEqual(['[[Home#A|h]]']);
@@ -217,7 +273,7 @@ describe('Open link and Copy link', () => {
   it('Copy link on a Markdown link copies its href without angle brackets', async () => {
     h = createTestHost();
     const md = (href: string) =>
-      editorMenu(h.ctx, 'n.md', { hit: { kind: 'md', from: 0, to: 10, href }, text: `[x](${href})`, open });
+      head(editorMenu(h.ctx, 'n.md', { hit: { kind: 'md', from: 0, to: 10, href }, text: `[x](${href})`, open }));
     await action(md('https://doi.org/10.1/x'), 1).run();
     await action(md('<notes/My Home.md>'), 1).run();
     expect(clip).toEqual(['https://doi.org/10.1/x', 'notes/My Home.md']);
@@ -252,37 +308,128 @@ describe('Open link and Copy link', () => {
 });
 
 describe('editorMenu', () => {
-  it('the editor menu on a workflow note offers Insert unit operation', () => {
+  /** Task 16 이전의 편집기 메뉴 항목(이름) → 지금 그것을 찾을 이름. 하나도 빠지지 않아야 한다. */
+  const BEFORE: Record<string, string> = {
+    'samples.menu.addSample': 'samples.menu.addSample',
+    [coreT('Insert unit operation')]: coreT('Insert unit operation'),
+    [coreT('Insert workflow')]: coreT('Insert workflow'),
+    [coreT('Sync workflow checklist with folder')]: coreT('Sync workflow checklist with folder'),
+    [coreT('Change experiment status')]: coreT('Change experiment status'),
+    [coreT('Toggle discussion flag')]: coreT('Toggle discussion flag'),
+    [coreT('Insert date')]: 'menu.date',
+    [coreT('Insert date and time')]: 'menu.dateTime',
+    [coreT('Insert issue marker')]: 'menu.issueMarker',
+  };
+  const FORMAT = [
+    'cmd.format.bold',
+    'cmd.format.italic',
+    'cmd.format.strike',
+    'cmd.format.code',
+    'cmd.format.highlight',
+    'cmd.format.link',
+    'cmd.format.heading1',
+    'cmd.format.heading2',
+    'cmd.format.heading3',
+    'cmd.format.heading4',
+    'cmd.format.heading5',
+    'cmd.format.heading6',
+    'cmd.format.paragraph',
+    'cmd.format.bullet',
+    'cmd.format.numbered',
+    'cmd.format.task',
+    'cmd.format.quote',
+    'cmd.format.codeBlock',
+  ];
+
+  it('the order is Cut/Copy/Paste/Select all, Insert ▸, Format ▸, then the Lab note section', () => {
     h = createTestHost();
-    // 샘플 추적이 켜져 있으면(기본) 어느 노트든 샘플 추가가 노트 항목 앞에 온다(플러그인 editor-menu 의 순서, SP5 Task 24)
-    expect(labels(head(editorMenu(h.ctx, WF_PATH)))).toEqual([
+    const items = editorMenu(h.ctx, WF_PATH);
+    expect(labels(items)).toEqual([
+      'menu.cut',
+      'menu.copy',
+      'menu.paste',
+      'menu.selectAll',
+      undefined,
+      'menu.insert',
+      'menu.format',
       'samples.menu.addSample',
       coreT('Insert unit operation'),
-      coreT('Insert date'),
-      coreT('Insert date and time'),
-      coreT('Insert issue marker'),
     ]);
-    expect(coreT('Insert unit operation')).toBe('유닛 오퍼레이션 삽입');
-    expect(labels(head(editorMenu(h.ctx, 'notes/a.labnote.md')))).toEqual([
-      'samples.menu.addSample',
-      coreT('Insert date'),
-      coreT('Insert date and time'),
-      coreT('Insert issue marker'),
-    ]);
+    expect(items[7].section).toBe('menu.labnote');
+    expect(t('menu.labnote')).toBe('실험 노트');
+    expect(items.slice(0, 4).map((i) => i.shortcut)).toEqual(['Ctrl+X', 'Ctrl+C', 'Ctrl+V', 'Ctrl+A']);
+    expect(['menu.cut', 'menu.copy', 'menu.paste', 'menu.selectAll'].map((k) => t(k))).toEqual(['잘라내기', '복사', '붙여넣기', '모두 선택']);
   });
 
-  it('the editor menu on a README offers Insert workflow, and running it inserts no link', async () => {
-    h = createTestHost({ [README_PATH]: readme() });
+  it('Cut and Copy are disabled without a selection, with a reason', async () => {
+    h = createTestHost({ 'notes/a.labnote.md': 'abc' });
+    const off = editorMenu(h.ctx, 'notes/a.labnote.md');
+    expect(off.slice(0, 4).map((i) => !!i.disabled)).toEqual([true, true, false, false]);
+    expect(off[0].disabledReason).toBe('menu.needSelection');
+    const m = await h.mount('notes/a.labnote.md');
+    act(() => m.view().dispatch({ selection: { anchor: 0, head: 2 } }));
+    expect(editorMenu(h.ctx, 'notes/a.labnote.md').slice(0, 2).map((i) => !!i.disabled)).toEqual([false, false]);
+  });
+
+  it('the Insert submenu has table, callout, code block, rule, math block, then date, date-time and issue marker', () => {
+    h = createTestHost();
+    const insert = submenuOf(editorMenu(h.ctx, WF_PATH), 'menu.insert');
+    expect(labels(insert)).toEqual([
+      'menu.table',
+      'menu.callout',
+      'menu.codeBlock',
+      'menu.hr',
+      'menu.mathBlock',
+      undefined,
+      'menu.date',
+      'menu.dateTime',
+      'menu.issueMarker',
+    ]);
+    expect(labels(insert).map((k) => (k ? t(k) : '-'))).toEqual(['표', '콜아웃', '코드 블록', '가로줄', '수식 블록', '-', '날짜', '날짜·시간', '이슈 마커']);
+    expect(insert[0].shortcut).toBe('Ctrl+Alt+T');
+    // 일반 노트에서 이슈 마커는 이유와 함께 꺼져 있다(실험 노트에서만 이슈가 된다)
+    const plain = submenuOf(editorMenu(h.ctx, 'notes/plain.md'), 'menu.insert');
+    const marker = plain.find((i) => i.labelKey === 'menu.issueMarker')!;
+    expect(marker.disabled).toBe(true);
+    expect(marker.disabledReason).toBe('menu.issueMarker.onlyLabnote');
+    expect(submenuOf(editorMenu(h.ctx, WF_PATH), 'menu.insert').find((i) => i.labelKey === 'menu.issueMarker')!.disabled).toBeFalsy();
+  });
+
+  it('the Format submenu holds every formatting item with its shortcut', () => {
+    h = createTestHost();
+    const format = submenuOf(editorMenu(h.ctx, 'notes/plain.md'), 'menu.format');
+    expect(labels(format)).toEqual(FORMAT);
+    expect(format[0].shortcut).toBe('Ctrl+B');
+    expect(t('cmd.format.bold')).toBe('굵게');
+  });
+
+  it('every item the editor menu had before is still reachable', () => {
+    h = createTestHost();
+    const link = { hit: { kind: 'wiki' as const, from: 0, to: 6, linkpath: 'x', subpath: '', embed: false }, text: '[[x]]', open: () => undefined };
+    const reach = (p: string) => labels(flat(editorMenu(h.ctx, p, link)));
+    const all = new Set([...reach(WF_PATH), ...reach(README_PATH), ...reach('notes/a.labnote.md')]);
+    for (const [old, now] of Object.entries(BEFORE)) expect(all, old).toContain(now);
+    for (const k of [...FORMAT, 'menu.link.open', 'menu.link.copy']) expect(all, k).toContain(k);
+  });
+
+  it('the Lab note section of a workflow note, a labnote note and a README', () => {
+    h = createTestHost();
+    expect(labels(head(editorMenu(h.ctx, WF_PATH)))).toEqual(['samples.menu.addSample', coreT('Insert unit operation')]);
+    expect(coreT('Insert unit operation')).toBe('유닛 오퍼레이션 삽입');
+    expect(labels(head(editorMenu(h.ctx, 'notes/a.labnote.md')))).toEqual(['samples.menu.addSample']);
     expect(labels(head(editorMenu(h.ctx, README_PATH)))).toEqual([
       'samples.menu.addSample',
       coreT('Insert workflow'),
       coreT('Sync workflow checklist with folder'),
       coreT('Change experiment status'),
       coreT('Toggle discussion flag'),
-      coreT('Insert date'),
-      coreT('Insert date and time'),
-      coreT('Insert issue marker'),
     ]);
+    // 샘플 추적을 끈 일반 노트에는 구역이 없다
+    expect(head(editorMenu(createTestHost({}, { sampleTracking: false }).ctx, 'notes/plain.md'))).toEqual([]);
+  });
+
+  it('the editor menu on a README offers Insert workflow, and running it inserts no link', async () => {
+    h = createTestHost({ [README_PATH]: readme() });
     const m = await h.mount(README_PATH);
     const before = m.view().state.doc.toString();
     act(() => m.view().dispatch({ selection: { anchor: before.indexOf('## Summary') } }));
@@ -297,62 +444,28 @@ describe('editorMenu', () => {
     expect(h.opened).toEqual([]);
   });
 
-  it('editorMenu for a plain note now has the Format items', () => {
-    h = createTestHost();
-    const items = editorMenu(h.ctx, 'notes/plain.md');
-    expect(labels(head(items))).toEqual(['samples.menu.addSample']);
-    // 샘플 추적을 끄면 서식 항목만 남는다
-    expect(editorMenu(createTestHost({}, { sampleTracking: false }).ctx, 'notes/plain.md')[0].separator).toBe(true);
-    // 서식 항목은 labelKey(그릴 때 번역)다: 메뉴를 연 채 언어를 바꿔도 따라간다
-    const keys = items.filter((i) => !i.separator).map((i) => i.labelKey);
-    expect(keys).toEqual(expect.arrayContaining(['cmd.format.bold', 'cmd.format.codeBlock']));
-    expect(t('cmd.format.bold')).toBe('굵게');
-  });
-
-  it('every note ends with one separator and the flat Format items', () => {
-    h = createTestHost();
-    for (const p of [WF_PATH, README_PATH, 'notes/a.labnote.md', 'notes/plain.md']) {
-      const items = editorMenu(h.ctx, p);
-      expect(items.filter((i) => i.separator)).toHaveLength(1);
-      const tail = items.slice(items.findIndex((i) => i.separator) + 1).map((i) => i.labelKey);
-      expect(tail).toEqual([
-        'cmd.format.bold',
-        'cmd.format.italic',
-        'cmd.format.strike',
-        'cmd.format.code',
-        'cmd.format.highlight',
-        'cmd.format.link',
-        'cmd.format.heading1',
-        'cmd.format.heading2',
-        'cmd.format.heading3',
-        'cmd.format.heading4',
-        'cmd.format.heading5',
-        'cmd.format.heading6',
-        'cmd.format.paragraph',
-        'cmd.format.bullet',
-        'cmd.format.numbered',
-        'cmd.format.task',
-        'cmd.format.quote',
-        'cmd.format.codeBlock',
-      ]);
-    }
-  });
-
-  it('the Format menu item bolds the selection in the open note', async () => {
+  it('Format ▸ Bold bolds the selection; Insert ▸ Horizontal rule inserts a rule', async () => {
     h = createTestHost({ 'notes/a.labnote.md': 'a b c' });
     const m = await h.mount('notes/a.labnote.md');
     act(() => m.view().dispatch({ selection: { anchor: 2, head: 3 } }));
-    await act(() => runCommand(h.ctx, editorMenu(h.ctx, 'notes/a.labnote.md').find((i) => i.labelKey === 'cmd.format.bold')!.run!));
+    const items = () => editorMenu(h.ctx, 'notes/a.labnote.md');
+    await act(() => runCommand(h.ctx, submenuOf(items(), 'menu.format').find((i) => i.labelKey === 'cmd.format.bold')!.run!));
     expect(m.view().state.doc.toString()).toBe('a **b** c');
+    act(() => m.view().dispatch({ selection: { anchor: m.view().state.doc.length } }));
+    await act(() => runCommand(h.ctx, submenuOf(items(), 'menu.insert').find((i) => i.labelKey === 'menu.hr')!.run!));
+    expect(m.view().state.doc.toString()).toBe('a **b** c\n\n---\n');
   });
 
-  it('the context menu draws the separator as role=separator, not a menuitem', () => {
+  it('the context menu draws a separator, a section label and submenu parents', () => {
     h = createTestHost();
     render(<ContextMenu />);
     act(() => openMenu(h.ctx, { x: 10, y: 10 }, editorMenu(h.ctx, 'notes/a.labnote.md')));
     expect(screen.getAllByRole('separator')).toHaveLength(1);
-    expect(screen.getAllByRole('menuitem')).toHaveLength(1 + 3 + 18); // 샘플 추가, 넣기 명령, 서식
-    for (const el of document.querySelectorAll('[role="separator"]')) expect(el.hasAttribute('style')).toBe(false);
+    // 잘라내기·복사·붙여넣기·모두 선택, 삽입·서식, 샘플 추가
+    expect(screen.getAllByRole('menuitem')).toHaveLength(4 + 2 + 1);
+    expect(screen.getByRole('menuitem', { name: /삽입/ }).getAttribute('aria-haspopup')).toBe('menu');
+    expect(document.querySelector('.context-menu-section')?.textContent).toBe('실험 노트');
+    for (const el of document.querySelectorAll('[role="separator"], [role="menuitem"]')) expect(el.hasAttribute('style')).toBe(false);
   });
 
   it('menus have no style attribute', () => {

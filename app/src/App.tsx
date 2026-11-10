@@ -602,7 +602,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     e.preventDefault();
     // 키보드로 연 메뉴(좌표 0, 0)는 커서 자리에 연다
     const caret = e.clientX === 0 && e.clientY === 0 ? view.coordsAtPos(view.state.selection.main.head) : null;
-    openMenu(ctx, caret ? { x: caret.left, y: caret.bottom } : { x: e.clientX, y: e.clientY }, items);
+    openMenu(ctx, caret ? { x: caret.left, y: caret.bottom } : { x: e.clientX, y: e.clientY }, items, e);
   };
   // 보기 머리: 뒤로·앞으로, 경로 표시, 상태 칩, 주 동작, 표 넣기, QR, 보기 방식, ⋯ 메뉴, 오른쪽 사이드바 단추.
   const navButtons = (

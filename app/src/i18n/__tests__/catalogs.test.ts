@@ -72,7 +72,8 @@ describe('소스가 부르는 번역 키', () => {
     'src/tree/NewNote.tsx': ['error'], // createNote 가 주는 'newNote.error.*' 글자
     'src/onboarding/FirstRun.tsx': ["error ?? 'vault.error.generic'"], // useVault 의 VaultErrorKey
     'src/labnote/i18n.ts': ['key'], // overrideOr: OverrideKey 합집합의 글자
-    'src/labnote/ui/ContextMenu.tsx': ['item.labelKey'], // MenuItem.labelKey: 메뉴를 여는 쪽이 적은 키 글자
+    // MenuItem.labelKey·section·disabledReason: 메뉴를 여는 쪽(menus.ts 등)이 적은 키 글자
+    'src/labnote/ui/ContextMenu.tsx': ['item.labelKey', 'item.section', 'item.disabledReason'],
     'src/labnote/commands/fileOps.ts': ['GUARD_MESSAGE[guard]'], // GUARD_MESSAGE 의 'fileOps.renameGuarded.*' 글자
     'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'], // AppCommand.nameKey: appCommands.ts 에 적은 'cmd.*' 글자(appCommands.test.ts 가 ko·en 을 본다)
     'src/ui/Ribbon.tsx': ['item.labelKey'], // TOP/MIDDLE/BOTTOM 의 'ribbon.*'·'palette.open' 글자

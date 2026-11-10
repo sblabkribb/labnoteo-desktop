@@ -342,3 +342,38 @@ it('registerAllCommands registers insert-date, insert-datetime and insert-issue-
   expect(commandById('insert-issue-marker')?.nameKey).toBe('Insert issue marker');
   clearCommandsForTest();
 });
+
+describe('block inserts (Task 16: the editor menu Insert submenu)', () => {
+  it('insertHr after "text" yields "text\n\n---\n" with the caret below the rule', async () => {
+    const { insertHr } = await import('../editorInserts');
+    const m = await open('notes/a.md', 'text');
+    select(m, 'text', 4);
+    act(() => void insertHr(m.view()));
+    expect(docOf(m)).toBe('text\n\n---\n');
+    expect(m.view().state.selection.main.head).toBe(docOf(m).length);
+    undoRestores(m, 'text');
+  });
+
+  it('the math and code blocks put the caret inside; the callout on its body line', async () => {
+    const { insertCallout, insertCodeBlock, insertMathBlock } = await import('../editorInserts');
+    const m = await open('notes/a.md', '');
+    act(() => void insertMathBlock(m.view()));
+    expect(docOf(m)).toBe('$$\n\n$$');
+    expect(m.view().state.selection.main.head).toBe(3);
+    act(() => m.view().dispatch({ changes: { from: 0, to: m.view().state.doc.length, insert: '' } }));
+    act(() => void insertCodeBlock(m.view()));
+    expect(docOf(m)).toBe('```\n\n```');
+    expect(m.view().state.selection.main.head).toBe(4);
+    act(() => m.view().dispatch({ changes: { from: 0, to: m.view().state.doc.length, insert: '' } }));
+    act(() => void insertCallout(m.view()));
+    expect(docOf(m)).toBe('> [!note]\n> ');
+    expect(m.view().state.selection.main.head).toBe(docOf(m).length);
+  });
+
+  it('runBlockInsert with no note open says to open a note', async () => {
+    const { runBlockInsert, insertHr } = await import('../editorInserts');
+    h = createTestHost();
+    expect(runBlockInsert(h.ctx, insertHr)).toBe(false);
+    expect(h.notes).toEqual([{ kind: 'info', message: t('cmd.props.noNote') }]);
+  });
+});

@@ -50,7 +50,7 @@ describe('맥락 메뉴', () => {
     const menu = screen.getByRole('menu', { name: '메뉴' });
     const entries = screen.getAllByRole('menuitem');
     expect(entries.map((e) => e.textContent)).toEqual(['확인', '비활성', '셋째', '넷째']);
-    expect((entries[1] as HTMLButtonElement).disabled).toBe(true);
+    expect(entries[1].getAttribute('aria-disabled')).toBe('true');
     expect(document.activeElement).toBe(entries[0]); // 첫 항목에 초점
 
     await user.keyboard('{ArrowDown}');
@@ -151,5 +151,122 @@ describe('맥락 메뉴', () => {
     const menu = screen.getByRole('menu');
     expect(menu.style.left).toBe('40px');
     expect(menu.style.top).toBe('50px');
+  });
+
+  it('a disabled item shows its reason as a tooltip and runs nothing', () => {
+    renderMenuHost();
+    const run = vi.fn();
+    act(() => openMenu(makeCtx().ctx, { x: 0, y: 0 }, [{ labelKey: 'menu.cut', run, disabled: true, disabledReason: 'menu.needSelection' }, { label: 'b', run: vi.fn() }]));
+    const cut = screen.getByRole('menuitem', { name: '잘라내기' });
+    expect(cut.getAttribute('aria-disabled')).toBe('true');
+    expect(cut.getAttribute('title')).toBe('먼저 글을 선택하세요.');
+    fireEvent.click(cut);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('draws section labels, icons and a shortcut column', () => {
+    renderMenuHost();
+    act(() =>
+      openMenu(makeCtx().ctx, { x: 0, y: 0 }, [
+        { labelKey: 'menu.copy', icon: 'copy', shortcut: 'Ctrl+C', run: vi.fn() },
+        { label: 'x', section: 'menu.labnote', run: vi.fn() },
+      ]),
+    );
+    const copy = screen.getByRole('menuitem', { name: /복사/ });
+    expect(copy.querySelector('svg')).not.toBeNull();
+    expect(copy.querySelector('.context-menu-shortcut')?.textContent).toBe('Ctrl+C');
+    const section = document.querySelector('.context-menu-section')!;
+    expect(section.textContent).toBe('실험 노트');
+    expect(section.getAttribute('role')).toBe('presentation');
+  });
+
+  it('a submenu opens with ArrowRight and closes with ArrowLeft, focus going in and back', async () => {
+    const user = userEvent.setup();
+    renderMenuHost();
+    const inner = vi.fn(async () => 1);
+    act(() =>
+      openMenu(makeCtx().ctx, { x: 0, y: 0 }, [
+        { label: 'first', run: vi.fn() },
+        { labelKey: 'menu.insert', run: async () => undefined, submenu: [{ label: 'inner a', run: inner }, { label: 'inner b', run: vi.fn() }] },
+      ]),
+    );
+    const parent = screen.getByRole('menuitem', { name: /삽입/ });
+    expect(parent.getAttribute('aria-haspopup')).toBe('menu');
+    expect(parent.getAttribute('aria-expanded')).toBe('false');
+    await user.keyboard('{ArrowDown}{ArrowRight}');
+    expect(screen.getAllByRole('menu')).toHaveLength(2);
+    expect(parent.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'inner a' }));
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getAllByRole('menu')).toHaveLength(1);
+    expect(document.activeElement).toBe(parent);
+    // Enter 도 하위 메뉴를 연다. 안의 항목을 실행하면 메뉴 전체가 닫힌다
+    await user.keyboard('{Enter}{Enter}');
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('a submenu opens on hover after a short delay and flips left at the right edge', () => {
+    vi.useFakeTimers();
+    try {
+      const setProperty = vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty');
+      renderMenuHost();
+      act(() =>
+        openMenu(makeCtx().ctx, { x: window.innerWidth - 220, y: 0 }, [
+          { labelKey: 'menu.insert', run: async () => undefined, submenu: [{ label: 'inner a', run: vi.fn() }] },
+        ]),
+      );
+      const parent = screen.getByRole('menuitem', { name: /삽입/ });
+      const rect = (left: number, top: number, width: number, height: number) =>
+        ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        if (this === parent) return rect(window.innerWidth - 216, 4, 200, 28);
+        if (this.classList.contains('context-submenu')) return rect(0, 0, 180, 60);
+        return rect(window.innerWidth - 220, 0, 208, 40);
+      });
+      fireEvent.mouseEnter(parent);
+      expect(screen.getAllByRole('menu')).toHaveLength(1);
+      act(() => void vi.advanceTimersByTime(160));
+      expect(screen.getAllByRole('menu')).toHaveLength(2);
+      const sub = document.querySelector<HTMLElement>('.context-submenu')!;
+      // 오른쪽에 자리가 없으면 왼쪽으로 연다: 부모 메뉴의 왼쪽 끝에 붙는다
+      expect(parseFloat(sub.style.left) + 180).toBeLessThanOrEqual(window.innerWidth - 220 + 4);
+      expect(setProperty).toHaveBeenCalledWith('left', expect.stringMatching(/px$/));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('type-ahead moves focus to the next item starting with the typed letter', async () => {
+    const user = userEvent.setup();
+    renderMenuHost();
+    act(() =>
+      openMenu(makeCtx().ctx, { x: 0, y: 0 }, [
+        { label: 'Alpha', run: vi.fn() },
+        { label: 'Bravo', run: vi.fn() },
+        { label: 'Beta', run: vi.fn() },
+      ]),
+    );
+    await user.keyboard('b');
+    expect(document.activeElement?.textContent).toBe('Bravo');
+    await new Promise((r) => setTimeout(r, 600));
+    await user.keyboard('b');
+    expect(document.activeElement?.textContent).toBe('Beta');
+  });
+
+  it('opened by a pointer, the menu itself takes focus and ArrowDown goes to the first item', async () => {
+    const user = userEvent.setup();
+    const { trigger } = renderMenuHost();
+    const open = (e: Event) => openMenu(makeCtx().ctx, { x: 30, y: 40 }, items([vi.fn(), vi.fn(), vi.fn(), vi.fn()]), e);
+    trigger.addEventListener('contextmenu', open);
+    act(() => void trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 30, clientY: 40 })));
+    expect(document.activeElement).toBe(screen.getByRole('menu'));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0]);
+    act(() => closeMenu());
+    // 키보드로 띄운 contextmenu(좌표 0, 0)는 첫 항목에 초점
+    act(() => void trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 0, clientY: 0 })));
+    expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0]);
+    trigger.removeEventListener('contextmenu', open);
   });
 });

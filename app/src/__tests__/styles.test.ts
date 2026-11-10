@@ -107,6 +107,9 @@ describe('styles/*.css', () => {
       // 알림(Task 13)이 일부러 없앤 것: 종류 클래스는 이제 .toast-warn, .toast-error (띠 색)
       '.toast.warn',
       '.toast.error',
+      // 맥락 메뉴(Task 16)가 일부러 없앤 것: 꺼진 항목은 이제 aria-disabled(까닭 툴팁이 보이도록 disabled 를 쓰지 않는다)
+      '.context-menu-item:hover:not(:disabled)',
+      '.context-menu-item:disabled',
     ];
     expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);

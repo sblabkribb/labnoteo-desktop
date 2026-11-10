@@ -1,3 +1,4 @@
+pub mod attach;
 pub mod fs;
 pub mod journal;
 pub mod path;

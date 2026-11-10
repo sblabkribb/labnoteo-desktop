@@ -192,12 +192,15 @@ describe('runSampleDefinition', () => {
   });
 });
 
+/** 편집기 메뉴의 "실험 노트" 구역(샘플 항목은 그 앞쪽에 온다). */
+const labSection = (items: MenuItem[]) => items.slice(Math.max(0, items.findIndex((i) => i.section !== undefined)));
+
 describe('editor menu', () => {
   it('the editor menu has Go to definition on a reference and Add sample always', async () => {
     const th = host(SAMPLE_VAULT);
     const m = await th.mount(NOTE);
     act(() => m.view().dispatch({ selection: { anchor: SAMPLE_VAULT[NOTE].indexOf('DNA-1;pUC and') + 2 } }));
-    const items = editorMenu(th.ctx, NOTE);
+    const items = labSection(editorMenu(th.ctx, NOTE));
     expect(keys(items).slice(0, 2)).toEqual(['samples.menu.goToDefinition', 'samples.menu.addSample']);
     expect(t('samples.menu.goToDefinition')).toBe('Go to definition');
     await act(async () => void (await runCommand(th.ctx, (items[0] as MenuAction).run)));
@@ -228,7 +231,7 @@ describe('editor menu', () => {
     const cell = activeCellView(outer)!;
     expect(cell.state.selection.main.head).toBe(6);
     expect(outer.state.selection.main.head).toBe(text.indexOf('see DNA-1'));
-    const items = editorMenu(th.ctx, NOTE);
+    const items = labSection(editorMenu(th.ctx, NOTE));
     expect(keys(items).slice(0, 2)).toEqual(['samples.menu.goToDefinition', 'samples.menu.addSample']);
     await act(async () => void (await runCommand(th.ctx, (items[0] as MenuAction).run)));
     expect(openDialog.mock.calls[0][0].title).toContain('DNA-1');

@@ -6,6 +6,7 @@ import { fetchAppVersion } from '../../appVersion';
 import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
 import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultImage } from '../vaultImage';
+import { openWithDefaultApp, revealInFolder } from '../vaultOpen';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
@@ -102,6 +103,8 @@ describe('IPC 인자 이름 계약', () => {
     await offerPluginLlmKey({ confirm: async () => true, notify: () => undefined }, r.invoke);
     expect(await readVaultImage('a.png', r.invoke)).toBeInstanceOf(ArrayBuffer);
     expect(await listVaultImages(r.invoke)).toEqual([]);
+    await openWithDefaultApp('a.pdf', r.invoke);
+    await revealInFolder('a.pdf', r.invoke);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
     expect(await writeScanImage('e/images/scans', 'LN-7K3M9QX2_u1_p1_20261015.jpg', new Uint8Array([1]), r.invoke)).toBe(
       'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg',
