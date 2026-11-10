@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod error;
+pub mod fetch_page;
 pub mod http;
 pub mod import;
 pub mod bfw;

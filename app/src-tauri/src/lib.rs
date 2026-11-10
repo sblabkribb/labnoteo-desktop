@@ -139,6 +139,8 @@ macro_rules! register_commands {
             $crate::assistant::config::assistant_config_write,
             $crate::net::web_search::web_search,
             $crate::net::web_search::web_search_probe,
+            // SSRF-guarded readable page fetch (assistant Task 13).
+            $crate::net::fetch_page::fetch_page,
         ])
     };
 }
@@ -159,6 +161,10 @@ pub fn show_if_hidden<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A test exe built with `e2e-fakes` reads its fake loopback ports once,
+    // here; a release build has no such feature and never reads the variable.
+    #[cfg(feature = "e2e-fakes")]
+    let _ = net::fetch_page::app_policy();
     register_commands!(tauri::Builder::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

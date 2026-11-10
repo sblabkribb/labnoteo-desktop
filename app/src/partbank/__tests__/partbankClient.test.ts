@@ -320,6 +320,9 @@ describe('failures', () => {
     jsonDisabled: 'badRequest',
     rateLimited: 'badRequest',
     enginesDown: 'badRequest',
+    // fetch_page kinds (assistant Task 13); partbank never sees one, so they are app bugs like badInput.
+    blocked: 'badRequest',
+    unsupportedType: 'badRequest',
   };
 
   it.each(NET_ERROR_KINDS.filter((k) => k !== 'cancelled'))('NetError %s maps to a named PartbankErrorKind', (kind) => {

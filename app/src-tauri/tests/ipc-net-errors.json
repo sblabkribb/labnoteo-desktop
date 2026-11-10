@@ -23,5 +23,7 @@
   "mcpToolError": "mcpToolError",
   "jsonDisabled": "jsonDisabled",
   "rateLimited": "rateLimited",
-  "enginesDown": "enginesDown"
+  "enginesDown": "enginesDown",
+  "blocked": "blocked",
+  "unsupportedType": "unsupportedType"
 }

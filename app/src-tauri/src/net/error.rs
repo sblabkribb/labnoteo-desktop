@@ -54,6 +54,12 @@ pub enum NetErrorKind {
     RateLimited,
     /// A SearXNG search came back empty because its engines did not answer.
     EnginesDown,
+    /// `fetch_page` refused the address: not http/https, userinfo, a port off
+    /// the allowlist, or a loopback/private/link-local/reserved address (on
+    /// the first request or on any redirect hop).
+    Blocked,
+    /// `fetch_page` got a `Content-Type` other than HTML or plain text.
+    UnsupportedType,
 }
 
 /// `Debug` is safe: every constructor that takes response text also takes the

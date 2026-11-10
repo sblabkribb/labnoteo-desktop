@@ -250,6 +250,13 @@ fn ipc_argument_names_match_the_typescript_side() {
     );
     assert!(call("web_search", json!({"requestId": "ws2", "query": "x", "baseUrl": "https://evil.example"})).is_err(), "no base URL argument");
 
+    // fetch_page (assistant Task 13): loopback, private addresses, other
+    // schemes and ports are blocked before anything is sent.
+    for blocked in ["http://127.0.0.1:1/", "http://169.254.169.254/latest/meta-data/", "file:///c:/Windows/win.ini", "http://example.org:22/"] {
+        assert_eq!(call("fetch_page", args("fetch_page", vec![json!("fp1"), json!(blocked)])).unwrap_err()["kind"], "blocked", "{blocked}");
+    }
+    assert_eq!(call("fetch_page", args("fetch_page", vec![json!("fp2"), json!("not a url")])).unwrap_err()["kind"], "invalidUrl");
+
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
     assert_eq!(info["hasObsidianConfig"], false);
@@ -1029,12 +1036,13 @@ fn error_kinds_match_the_typescript_side() {
 fn net_error_kinds_match_the_fixture() {
     use labnoteo_app_lib::net::NetErrorKind as K;
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(NET_ERRORS).unwrap();
-    assert_eq!(fixture.len(), 25, "ipc-net-errors.json lists every kind");
+    assert_eq!(fixture.len(), 27, "ipc-net-errors.json lists every kind");
     let all = [
         K::NotConfigured, K::KeyMissing, K::InvalidUrl, K::ForbiddenPath, K::Offline, K::Timeout,
         K::Tls, K::Redirect, K::Status, K::NotJson, K::TooLarge, K::Cancelled, K::Keychain,
         K::BadInput, K::Remote, K::NoResult, K::Insecure, K::Io, K::McpAuth, K::McpProtocol,
-        K::McpModernOnly, K::McpToolError, K::JsonDisabled, K::RateLimited, K::EnginesDown,
+        K::McpModernOnly, K::McpToolError, K::JsonDisabled, K::RateLimited, K::EnginesDown, K::Blocked,
+        K::UnsupportedType,
     ];
     // Exhaustive on purpose: a new variant stops compiling here until it is
     // given a name (and an entry in the fixture).
@@ -1064,13 +1072,15 @@ fn net_error_kinds_match_the_fixture() {
         K::JsonDisabled => "jsonDisabled",
         K::RateLimited => "rateLimited",
         K::EnginesDown => "enginesDown",
+        K::Blocked => "blocked",
+        K::UnsupportedType => "unsupportedType",
     };
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-net-errors.json", name(k)));
         assert_eq!(serde_json::to_value(k).unwrap(), Value::String(expected.clone()), "kind {}", name(k));
     }
     let named: std::collections::BTreeSet<&str> = all.iter().map(name).collect();
-    assert_eq!(named.len(), 25);
+    assert_eq!(named.len(), 27);
 }
 
 /// What `McpError` puts in `kind`, one entry per `McpErrorKind`.

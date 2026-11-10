@@ -207,6 +207,7 @@ describe('IPC 인자 이름 계약', () => {
     await assistantConfig.writeAssistantConfig({ searxngUrl: 'https://s.example' }, r.invoke);
     await assistantConfig.probeWebSearch('https://s.example', r.invoke);
     await webIpcFor(r.invoke).search('대장균', { language: 'ko' });
+    await webIpcFor(r.invoke).fetchPage('https://example.org/a?b=1');
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

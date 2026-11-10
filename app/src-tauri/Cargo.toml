@@ -47,6 +47,15 @@ socket2 = "0.6"
 arboard = { version = "=3.6.1", default-features = false }
 # Chat history file keys (assistant spec §6.1); 0.10.9 is already in the lock.
 sha2 = "0.10"
+# Readable text for the assistant's fetch_page (assistant spec §7.2); shares the
+# lock's dom_query 0.28.0 with tauri-utils.
+dom_smoothie = "=0.18.0"
+
+[features]
+# Never in `default`, release or CI builds (guarded by src/__tests__/releaseFeatures.test.ts):
+# lets the test exe's fetch_page reach exactly the loopback ports listed in
+# LABNOTEO_E2E_FAKE_PORTS (the fake web pages of the real-app check).
+e2e-fakes = []
 
 [target.'cfg(windows)'.dependencies]
 # SO_EXCLUSIVEADDRUSE on the MCP listener (C2); 0.61.2 is already in the lock.
