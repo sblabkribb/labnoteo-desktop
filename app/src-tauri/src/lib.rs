@@ -155,6 +155,10 @@ macro_rules! register_commands {
             $crate::skins::store::skin_pick_sheet,
             $crate::skins::store::skin_build,
             $crate::skins::store::skin_export_staged,
+            // The community gallery (assistant Task 19): index from assistant.json and verified downloads and the submit page.
+            $crate::skins::gallery::skin_gallery_index,
+            $crate::skins::gallery::skin_gallery_fetch,
+            $crate::skins::gallery::skin_submit_open,
         ])
     };
 }
@@ -201,6 +205,8 @@ pub fn run() {
         .manage(skins::SkinStaging::default())
         // PNG sheets picked in the skin editor-lite, re-encoded, under random tokens (in memory only).
         .manage(skins::SheetStaging::default())
+        // The gallery index fetched last; downloads take an entry id from it only.
+        .manage(skins::GalleryState::default())
         // SP7 Part C: a page load in the main webview (reload, navigation,
         // crash recovery) stops the MCP server and fails its pending calls,
         // from Rust, because JS cannot reliably invoke during unload (C3).

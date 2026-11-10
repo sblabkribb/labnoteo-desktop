@@ -204,7 +204,7 @@ fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, SkinError> {
 }
 
 /// The manifest an install writes: the pack's, with each state's sheet renamed.
-fn installed_manifest(pack: &Manifest) -> Manifest {
+pub(crate) fn installed_manifest(pack: &Manifest) -> Manifest {
     let mut m = pack.clone();
     m.states.idle.sheet = sheet_name("idle");
     m.states.talk.sheet = sheet_name("talk");
@@ -423,7 +423,7 @@ pub struct StagedSkin {
 }
 
 /// Each state's sheet bytes of a validated pack (a shared sheet is repeated).
-fn per_state(pack: &ValidPack) -> Result<BTreeMap<String, Vec<u8>>, SkinError> {
+pub(crate) fn per_state(pack: &ValidPack) -> Result<BTreeMap<String, Vec<u8>>, SkinError> {
     let mut out = BTreeMap::new();
     for (state, spec) in pack.manifest.states.all() {
         let bytes = pack.sheets.get(&spec.sheet).ok_or_else(|| err(K::SheetMissing, &spec.sheet))?;

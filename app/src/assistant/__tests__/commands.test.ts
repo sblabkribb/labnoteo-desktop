@@ -51,6 +51,8 @@ describe('assistant commands (spec §10.2, the ones that work after Task 5)', ()
       'skins.import',
       'skins.export',
       'skins.editor',
+      'skins.gallery',
+      'skins.submit',
     ]);
     expect(assistantCommands().map((c) => c.id)).toEqual([...ASSISTANT_COMMAND_IDS]);
     const ids = appCommands().map((c) => c.id);

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
 import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
+import { DEFAULT_GALLERY_URL, browseGallery, submitToGallery } from '../../assistant/skins/gallery';
 import { openSkinEditor } from '../../assistant/skins/SkinEditor';
 import { exportSkinFile, importSkinFile } from '../../assistant/skins/transfer';
 import type { SkinManifest } from '../../assistant/skins/types';
@@ -19,7 +20,7 @@ import { SettingRow, Toggle } from './SettingRow';
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
  * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json),
- * 대화 기록(Task 10). 스킨 가져오기(Task 17)와 내 스킨 만들기(Task 18)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
+ * 갤러리 주소(Task 19), 대화 기록(Task 10). 스킨 가져오기(Task 17), 내 스킨 만들기(Task 18), 갤러리(Task 19)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
  */
 export function AssistantPage(props: { leave?: (after: () => Promise<void>) => void } = {}) {
   useLang();
@@ -48,6 +49,7 @@ export function AssistantPage(props: { leave?: (after: () => Promise<void>) => v
       />
       <SkinRow leave={props.leave} />
       <WebSearchRow />
+      <GalleryRow />
       <HistoryRow />
     </>
   );
@@ -68,6 +70,10 @@ export interface SkinRowDeps {
   exportSkin?: (id: string) => Promise<boolean>;
   /** 내 스킨 만들기 창(Task 18). */
   makeSkin?: () => Promise<unknown>;
+  /** 스킨 갤러리(Task 19): 미리 보기와 확인을 거쳐 설치. */
+  gallery?: () => Promise<unknown>;
+  /** 고른 스킨을 갤러리에 올리는 페이지를 연다(기본 스킨이면 안내만). */
+  submit?: (id: string) => Promise<boolean>;
   /** 설정 창을 닫고 그 뒤에 `after` 를 한다(가져오기의 창들이 설정 창 뒤에 줄 서지 않게). 없으면 바로 한다. */
   leave?: (after: () => Promise<void>) => void;
 }
@@ -90,6 +96,8 @@ export function SkinRow(deps: SkinRowDeps = {}) {
   const importSkin = deps.importSkin ?? (() => importSkinFile());
   const exportSkin = deps.exportSkin ?? ((id: string) => exportSkinFile(id));
   const makeSkin = deps.makeSkin ?? (() => openSkinEditor());
+  const gallery = deps.gallery ?? (() => browseGallery());
+  const submit = deps.submit ?? ((id: string) => submitToGallery(id));
   const [installed, setInstalled] = useState<SkinManifest[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -154,6 +162,15 @@ export function SkinRow(deps: SkinRowDeps = {}) {
     }
   };
 
+  const runSubmit = async () => {
+    setBusy(true);
+    try {
+      await submit(current.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const label = t('settings.assistant.skin');
   return (
     <SettingRow
@@ -176,6 +193,12 @@ export function SkinRow(deps: SkinRowDeps = {}) {
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => runOutside(makeSkin)}>
             {t('settings.assistant.skin.make')}
+          </button>
+          <button type="button" className="btn" disabled={busy} onClick={() => runOutside(gallery)}>
+            {t('settings.assistant.skin.gallery')}
+          </button>
+          <button type="button" className="btn" disabled={busy} onClick={() => void runSubmit()}>
+            {t('settings.assistant.skin.submit')}
           </button>
           <button type="button" className="btn danger" disabled={busy || current.builtin} onClick={() => void run()}>
             {t('settings.assistant.skin.remove')}
@@ -301,6 +324,97 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
           />
           <button type="button" className="btn" disabled={busy || value.trim() === ''} onClick={() => void check()}>
             {t('settings.assistant.search.check')}
+          </button>
+          <span role="status" className="setting-status">
+            {status}
+          </span>
+        </>
+      }
+    />
+  );
+}
+
+export interface GalleryRowDeps {
+  read?: () => Promise<AssistantConfig>;
+  /** 갤러리 주소만 바꾼다(빈 글은 기본 주소로). Rust 가 정리해 저장한 설정을 돌려준다. */
+  save?: (url: string) => Promise<AssistantConfig>;
+}
+
+/**
+ * 갤러리 주소 줄(assistant 명세 §8.5, §10.1, plan Task 19): 이 PC 의 `assistant.json` 에 스킨 갤러리 목록(index.json) 주소를 둔다.
+ * 비우면 기본 갤러리(자리 글로 보인다). Enter 나 칸을 떠나면 저장하고(Rust 가 https 만 받는다), "기본 주소로"는 지운다.
+ * 결과는 `role=status` 한 줄로 알린다. 한글 입력 중의 Enter 는 저장하지 않는다.
+ */
+export function GalleryRow(deps: GalleryRowDeps = {}) {
+  useLang();
+  const read = deps.read ?? (() => readAssistantConfig());
+  const save = deps.save ?? ((url: string) => updateAssistantConfig({ galleryUrl: url || undefined }));
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState('');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    read().then(
+      (cfg) => {
+        if (!live) return;
+        setValue(cfg.galleryUrl ?? '');
+        setSaved(cfg.galleryUrl ?? '');
+      },
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+    // Read once when the pane opens.
+  }, []);
+
+  const store = async (next: string) => {
+    try {
+      const stored = await save(next);
+      const url = stored.galleryUrl ?? '';
+      setSaved(url);
+      setValue(url);
+      setStatus(t(url ? 'settings.assistant.gallery.saved' : 'settings.assistant.gallery.cleared'));
+    } catch (e) {
+      const kind = (e as { kind?: unknown } | null)?.kind;
+      setStatus(kind === 'badUrl' ? t('settings.assistant.gallery.badUrl') : t('settings.assistant.gallery.saveFailed'));
+    }
+  };
+
+  const commit = async () => {
+    const next = value.trim();
+    if (next === saved) return;
+    await store(next);
+  };
+
+  const label = t('settings.assistant.gallery');
+  return (
+    <SettingRow
+      label={label}
+      description={t('settings.assistant.gallery.desc')}
+      control={
+        <>
+          <input
+            type="text"
+            className="setting-text"
+            aria-label={label}
+            autoComplete="off"
+            spellCheck={false}
+            inputMode="url"
+            maxLength={2048}
+            placeholder={DEFAULT_GALLERY_URL}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+              e.preventDefault();
+              void commit();
+            }}
+          />
+          <button type="button" className="btn" disabled={saved === '' && value.trim() === ''} onClick={() => void store('')}>
+            {t('settings.assistant.gallery.reset')}
           </button>
           <span role="status" className="setting-status">
             {status}

@@ -127,6 +127,19 @@ impl FetchPolicy {
     fn allows_loopback(&self, ip: IpAddr, port: u16) -> bool {
         ip.is_loopback() && self.loopback_ports.contains(&port)
     }
+
+    /// Whether `url` names a loopback IP literal (`127.0.0.1`, `[::1]`) on a
+    /// port this policy lists. Never true for the release policy. The skin
+    /// gallery uses this for its plain-http fake (assistant Task 19).
+    pub fn allows_loopback_url(&self, url: &Url) -> bool {
+        let Some(port) = url.port_or_known_default() else { return false };
+        let Some(host) = url.host_str() else { return false };
+        let ip = match host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+            Some(v6) => v6.parse::<Ipv6Addr>().ok().map(IpAddr::V6),
+            None => host.parse::<Ipv4Addr>().ok().map(IpAddr::V4),
+        };
+        ip.is_some_and(|ip| self.allows_loopback(ip, port))
+    }
 }
 
 /// The app's policy: public only, except in a test exe built with
@@ -672,6 +685,13 @@ mod tests {
         assert_eq!(check_host(&url("http://169.254.169.254/latest/meta-data/"), &policy), Err(Blocked::Address));
         assert_eq!(FetchPolicy::public_only(), FetchPolicy::default());
         assert_eq!(app_policy(), &FetchPolicy::public_only(), "no e2e-fakes in a test build");
+        // The URL form (gallery, Task 19): IP literals on a listed port only.
+        assert!(policy.allows_loopback_url(&url("http://127.0.0.1:47834/index.json")));
+        assert!(policy.allows_loopback_url(&url("http://[::1]:47834/index.json")));
+        assert!(!policy.allows_loopback_url(&url("http://127.0.0.1:47835/index.json")));
+        assert!(!policy.allows_loopback_url(&url("http://localhost:47834/index.json")));
+        assert!(!policy.allows_loopback_url(&url("http://10.0.0.1:47834/index.json")));
+        assert!(!FetchPolicy::public_only().allows_loopback_url(&url("http://127.0.0.1:47834/index.json")));
     }
 
     #[test]

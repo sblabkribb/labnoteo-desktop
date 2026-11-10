@@ -6,6 +6,7 @@
 //! is decoded and re-encoded before anything else sees it. There is no command
 //! that accepts pack bytes from the webview.
 
+pub mod gallery;
 pub mod pack;
 pub mod store;
 
@@ -13,4 +14,5 @@ pub mod store;
 pub(crate) mod testpacks;
 
 pub use pack::{validate_pack, Manifest, SkinError, SkinErrorKind, ValidPack};
+pub use gallery::GalleryState;
 pub use store::{SheetStaging, SkinData, SkinFileDialogs, SkinStaging, StagedSkin, BUILTIN_ID};

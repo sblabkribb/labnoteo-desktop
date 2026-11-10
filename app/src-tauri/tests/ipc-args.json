@@ -116,5 +116,8 @@
   "skin_export": ["id"],
   "skin_pick_sheet": [],
   "skin_build": ["draft"],
-  "skin_export_staged": ["stagingId"]
+  "skin_export_staged": ["stagingId"],
+  "skin_gallery_index": [],
+  "skin_gallery_fetch": ["entryId"],
+  "skin_submit_open": ["id"]
 }

@@ -108,6 +108,14 @@ pub enum SkinErrorKind {
     NotFound,
     /// An installed skin's files changed on disk: refused, not served.
     Tampered,
+    /// The gallery index or a pack could not be fetched: a network error, a
+    /// timeout, a redirect or a non-2xx answer (plan Task 19). No retry.
+    GalleryUnreachable,
+    /// The gallery index is not valid (not JSON, wrong schema, too many
+    /// entries) or its address is not allowed.
+    GalleryInvalid,
+    /// A downloaded pack's size or SHA-256 differs from the index.
+    GalleryMismatch,
     /// A disk error, or the skins folder resolves inside the open vault.
     Io,
 }

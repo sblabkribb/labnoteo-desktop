@@ -22,6 +22,7 @@ import { NewExperimentDialog } from '../ui/NewExperimentDialog';
 import { ContextSourcesDialog } from '../context/ContextSourcesDialog';
 import { SkinImportDialog } from '../../assistant/skins/ImportDialog';
 import { SkinEditorDialog } from '../../assistant/skins/SkinEditor';
+import { SkinGalleryDialog } from '../../assistant/skins/GalleryDialog';
 
 /** App.tsx 가 .shell 밖, 알림 층 뒤에 그리는 도우미 층의 id. */
 export const PET_LAYER_ID = 'pet-layer';
@@ -73,6 +74,8 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <SkinImportDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'skinEditor':
       return <SkinEditorDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'skinGallery':
+      return <SkinGalleryDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

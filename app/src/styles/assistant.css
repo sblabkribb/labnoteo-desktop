@@ -363,6 +363,50 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   overflow-wrap: anywhere;
 }
 
+/* 스킨 갤러리(Task 19): 목록(글자로만), 항목마다 미리 보기 단추, 내려받은 팩의 미리 보기와 라이선스 */
+.pet-skin-gallery { width: min(36rem, calc(100vw - 2 * var(--space-6))); }
+.pet-gallery-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.pet-gallery-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+}
+.pet-gallery-item.is-current { border-color: var(--border-strong); }
+.pet-gallery-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pet-gallery-meta,
+.pet-gallery-desc,
+.pet-gallery-empty { color: var(--text-muted); }
+.pet-gallery-meta,
+.pet-gallery-desc { font-size: 0.85em; }
+.pet-gallery-error p { margin: 0 0 var(--space-2); }
+.pet-gallery-url {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.pet-gallery-mismatch {
+  margin: 0 0 var(--space-4);
+  color: var(--danger);
+}
+
 /* 내 스킨 만들기(Task 18): 글 칸, 한 칸 크기, 상태마다 PNG·칸 수·초당 칸과 살아 있는 미리 보기(.pet-sprite, 배율 2) */
 .pet-skin-editor { width: min(46rem, 100%); }
 .pet-skin-editor-body {

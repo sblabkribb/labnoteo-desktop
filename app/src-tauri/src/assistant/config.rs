@@ -11,7 +11,8 @@
 //!   origin the open vault lists in `allowHttpOrigins` (the same rule as the
 //!   other integration URLs), and re-checked on every search.
 //! - The gallery index address is `https://` only (loopback `http://` only in
-//!   tests); it is used from Task 19 on.
+//!   tests and for the listed fake ports of an `e2e-fakes` test exe). Empty
+//!   means the default index (`skins::gallery::DEFAULT_INDEX_URL`, Task 19).
 //! - Reading is lenient: an unreadable file or an invalid entry gives "not set".
 
 use std::path::{Path, PathBuf};
@@ -54,14 +55,18 @@ pub fn config_path(settings_file: &Path) -> PathBuf {
     settings_file.with_file_name("assistant.json")
 }
 
-/// A gallery index URL: `parse_service_url`, https only (loopback http in tests).
+/// A gallery index URL: `parse_service_url`, https only. Plain http only for
+/// loopback in unit tests, or in a test exe built with `e2e-fakes` for a
+/// loopback port listed in `LABNOTEO_E2E_FAKE_PORTS` (the fake gallery); the
+/// release policy lists none.
 pub fn parse_gallery_url(raw: &str) -> Option<Url> {
     if raw.chars().count() > MAX_URL {
         return None;
     }
     let url = parse_service_url(raw)?;
-    let ok = url.scheme() == "https" || (cfg!(test) && url.scheme() == "http" && is_loopback(&url));
-    ok.then_some(url)
+    let http_ok = url.scheme() == "http"
+        && ((cfg!(test) && is_loopback(&url)) || crate::net::fetch_page::app_policy().allows_loopback_url(&url));
+    (url.scheme() == "https" || http_ok).then_some(url)
 }
 
 /// The text form stored for a URL: the parsed form without a lone trailing `/`.

@@ -4,6 +4,7 @@ import { openSettings } from '../ui/SettingsModal';
 import { captureFocus } from '../ui/returnFocus';
 import type { ChipId } from './chips';
 import { petStore } from './petStore';
+import { browseGallery, submitToGallery } from './skins/gallery';
 import { openSkinEditor } from './skins/SkinEditor';
 import { activeSkinForExport, exportSkinFile, importSkinFile } from './skins/transfer';
 import { assistantSession } from './useAssistantSession';
@@ -28,6 +29,8 @@ export const ASSISTANT_COMMAND_IDS = [
   'skins.import',
   'skins.export',
   'skins.editor',
+  'skins.gallery',
+  'skins.submit',
 ] as const;
 
 /** 말풍선을 열고(숨겨 두었으면 보이고) 지금 초점 자리를 기억한다: Esc 로 닫으면 거기로 돌아간다. 보관함 설정이 없어도 된다. */
@@ -173,6 +176,26 @@ const skinsEditor: AppCommand = {
   },
 };
 
+/** 스킨 갤러리(Task 19): 목록을 보고, 미리 보고, 확인한 뒤에만 설치한다. */
+const skinsGallery: AppCommand = {
+  id: 'skins.gallery',
+  nameKey: 'cmd.skins.gallery',
+  icon: 'image',
+  run: async (ctx) => {
+    await browseGallery({ notify: (kind, message) => ctx.host.notify(kind, message) });
+  },
+};
+
+/** 지금 쓰는 스킨을 갤러리에 올리는 페이지를 브라우저로 연다(기본 스킨이면 왜 안 되는지 말한다). */
+const skinsSubmit: AppCommand = {
+  id: 'skins.submit',
+  nameKey: 'cmd.skins.submit',
+  icon: 'external-link',
+  run: async (ctx) => {
+    await submitToGallery(await activeSkinForExport(), { notify: (kind, message) => ctx.host.notify(kind, message) });
+  },
+};
+
 export function assistantCommands(): AppCommand[] {
   return [
     open,
@@ -189,5 +212,7 @@ export function assistantCommands(): AppCommand[] {
     skinsImport,
     skinsExport,
     skinsEditor,
+    skinsGallery,
+    skinsSubmit,
   ];
 }

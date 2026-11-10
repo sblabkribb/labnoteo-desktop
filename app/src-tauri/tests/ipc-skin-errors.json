@@ -26,5 +26,8 @@
   "builtin": "builtin",
   "notFound": "notFound",
   "tampered": "tampered",
+  "galleryUnreachable": "galleryUnreachable",
+  "galleryInvalid": "galleryInvalid",
+  "galleryMismatch": "galleryMismatch",
   "io": "io"
 }

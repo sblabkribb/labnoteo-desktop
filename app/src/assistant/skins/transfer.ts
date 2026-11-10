@@ -37,7 +37,6 @@ export function skinImportDialog(staged: StagedSkin, urls?: SkinUrls): Promise<'
 export async function importSkinFile(deps: ImportDeps = {}): Promise<SkinManifest | undefined> {
   const invoke = deps.invoke ?? tauriInvoke;
   const notify = deps.notify ?? toast;
-  const setSkin = deps.setSkin ?? ((id: string) => layoutStore.setPet({ skin: id }));
   let staged: StagedSkin | null;
   try {
     staged = await pickSkinFile(invoke);
@@ -46,13 +45,26 @@ export async function importSkinFile(deps: ImportDeps = {}): Promise<SkinManifes
     return undefined;
   }
   if (!staged) return undefined;
-  const drop = () => discardStagedSkin(staged.stagingId, invoke).catch(() => undefined);
-  const { manifest } = staged;
-
   if ((await skinImportDialog(staged, deps.urls)) !== 'install') {
-    await drop();
+    await discardStagedSkin(staged.stagingId, invoke).catch(() => undefined);
     return undefined;
   }
+  return confirmAndInstall(staged, { ...deps, invoke, notify });
+}
+
+/**
+ * 임시 보관한 팩을 확인을 받고 설치한다(가져오기와 갤러리가 함께 쓴다). 확인 창은 스킨 이름·만든 사람·라이선스를 적는다.
+ * 같은 id 의 다른 스킨이 있으면 바꿀지 한 번 더 묻는다. 그만두거나 실패하면 임시 보관한 팩을 버린다. 설치하면 그 스킨으로 바꾼다.
+ */
+export async function confirmAndInstall(
+  staged: { stagingId: string; manifest: SkinManifest },
+  deps: ImportDeps = {},
+): Promise<SkinManifest | undefined> {
+  const invoke = deps.invoke ?? tauriInvoke;
+  const notify = deps.notify ?? toast;
+  const setSkin = deps.setSkin ?? ((id: string) => layoutStore.setPet({ skin: id }));
+  const drop = () => discardStagedSkin(staged.stagingId, invoke).catch(() => undefined);
+  const { manifest } = staged;
   const ok = await confirmDialog(t('skin.installConfirm', manifest.name, manifest.author, manifest.licence), {
     confirmLabel: t('skin.import.install'),
   });

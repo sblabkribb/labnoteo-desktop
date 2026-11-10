@@ -42,6 +42,9 @@ export const SKIN_ERROR_KINDS = [
   'builtin',
   'notFound',
   'tampered',
+  'galleryUnreachable',
+  'galleryInvalid',
+  'galleryMismatch',
   'io',
 ] as const;
 export type SkinErrorKind = (typeof SKIN_ERROR_KINDS)[number];
@@ -199,6 +202,12 @@ export function skinErrorText(e: unknown): string {
       return t('skin.error.notFound');
     case 'tampered':
       return t('skin.error.tampered');
+    case 'galleryUnreachable':
+      return t('gallery.unreachable');
+    case 'galleryInvalid':
+      return t('skin.error.galleryInvalid');
+    case 'galleryMismatch':
+      return t('skin.error.galleryMismatch');
     case 'io':
       return t('skin.error.io');
   }

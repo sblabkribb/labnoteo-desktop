@@ -17,6 +17,7 @@ import type { BuiltContext } from '../context/contextBuilder';
 import type { StagedSkin } from '../../assistant/skins/store';
 import type { SkinUrls } from '../../assistant/skins/useSkin';
 import type { SkinEditorDeps } from '../../assistant/skins/SkinEditor';
+import type { GalleryDialogDeps } from '../../assistant/skins/gallery';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -75,7 +76,9 @@ export type DialogSpec =
   // 어시스턴트 스킨 가져오기(assistant Task 17): Rust 가 검사해 임시 보관한 팩의 미리 보기. 'install' 이면 설치 확인으로, 닫으면 undefined
   | { kind: 'skinImport'; staged: StagedSkin; urls?: SkinUrls }
   /** 내 스킨 만들기(assistant Task 18). */
-  | { kind: 'skinEditor'; deps: SkinEditorDeps };
+  | { kind: 'skinEditor'; deps: SkinEditorDeps }
+  /** 스킨 갤러리(assistant Task 19): 끝나면 설치하려고 고른 미리 보기, 닫으면 undefined. */
+  | { kind: 'skinGallery'; deps: GalleryDialogDeps };
 
 
 /**
