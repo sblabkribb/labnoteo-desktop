@@ -36,6 +36,12 @@ const SLACK_ORIGIN: &str = "https://slack.com";
 /// The fixed origin the GitHub tokens are bound to.
 pub const GITHUB_ORIGIN: &str = "https://github.com";
 
+/// Appended to the GitHub slots' accounts in a build with the cargo feature
+/// `github-test-endpoints` (P-R15), so a test build driven against the fakes
+/// never reads or overwrites a real GitHub token in the same service. Empty
+/// in every other build.
+pub const GITHUB_ACCOUNT_SUFFIX: &str = if cfg!(feature = "github-test-endpoints") { "|test-build" } else { "" };
+
 /// Where keys are kept. The app uses `KeyringStore`; tests use `MemoryStore`.
 pub trait SecretStore: Send + Sync {
     fn get(&self, account: &str) -> Result<Option<String>, NetError>;
@@ -162,13 +168,16 @@ impl Slot {
 
 /// `"<slotName>|<origin>"`, `"bfwDesktop|loopback"`,
 /// `"slackBot|https://slack.com"`, `"github|https://github.com"` or
-/// `"githubRefresh|https://github.com"` (whatever the config is). A slot whose URL is
+/// `"githubRefresh|https://github.com"` (whatever the config is; a build with
+/// `github-test-endpoints` appends `|test-build` to the GitHub ones). A slot whose URL is
 /// missing or invalid is `notConfigured`.
 pub fn account(slot: Slot, cfg: &ServiceConfig) -> Result<String, NetError> {
     match slot {
         Slot::BfwDesktop => return Ok(format!("{}|loopback", slot.name())),
         Slot::SlackBot => return Ok(format!("{}|{SLACK_ORIGIN}", slot.name())),
-        Slot::Github | Slot::GithubRefresh => return Ok(format!("{}|{GITHUB_ORIGIN}", slot.name())),
+        Slot::Github | Slot::GithubRefresh => {
+            return Ok(format!("{}|{GITHUB_ORIGIN}{GITHUB_ACCOUNT_SUFFIX}", slot.name()))
+        }
         _ => {}
     }
     let url = slot.url(cfg).ok_or_else(|| {
@@ -449,12 +458,30 @@ mod tests {
         assert_eq!(store_secret_at_url(&store, Slot::SlackBot, &url, "xoxb-1").unwrap_err().kind, NetErrorKind::BadInput);
         assert_eq!(store_secret_at_url(&store, Slot::PartbankWeb, &url, "").unwrap_err().kind, NetErrorKind::BadInput);
     }
+    /// The account of a GitHub slot in this build.
+    fn gh(slot: &str) -> String {
+        format!("{slot}|https://github.com{GITHUB_ACCOUNT_SUFFIX}")
+    }
+    #[test] fn github_accounts_end_in_test_build_only_with_the_test_feature() {
+        let c = cfg("{}");
+        if cfg!(feature = "github-test-endpoints") {
+            assert_eq!(account(Slot::Github, &c).unwrap(), "github|https://github.com|test-build");
+            assert_eq!(account(Slot::GithubRefresh, &c).unwrap(), "githubRefresh|https://github.com|test-build");
+            assert_eq!(epoch_account(Slot::Github, &c).unwrap(), "epoch|github|https://github.com|test-build");
+        } else {
+            assert_eq!(account(Slot::Github, &c).unwrap(), "github|https://github.com");
+            assert_eq!(account(Slot::GithubRefresh, &c).unwrap(), "githubRefresh|https://github.com");
+            assert_eq!(epoch_account(Slot::Github, &c).unwrap(), "epoch|github|https://github.com");
+        }
+        // The suffix never touches another slot.
+        assert_eq!(account(Slot::SlackBot, &c).unwrap(), "slackBot|https://slack.com");
+    }
     #[test] fn github_slots_have_the_fixed_github_origin() {
         // Even with no vault URL configured, and whatever the vault names.
-        assert_eq!(account(Slot::Github, &cfg("{}")).unwrap(), "github|https://github.com");
-        assert_eq!(account(Slot::GithubRefresh, &cfg("{}")).unwrap(), "githubRefresh|https://github.com");
+        assert_eq!(account(Slot::Github, &cfg("{}")).unwrap(), gh("github"));
+        assert_eq!(account(Slot::GithubRefresh, &cfg("{}")).unwrap(), gh("githubRefresh"));
         let c = cfg(r#"{"partbankWebUrl":"https://a.example","llmEndpointOpenai":"bogus"}"#);
-        assert_eq!(account(Slot::Github, &c).unwrap(), "github|https://github.com");
+        assert_eq!(account(Slot::Github, &c).unwrap(), gh("github"));
         assert_eq!(Slot::Github.name(), "github");
         assert_eq!(Slot::GithubRefresh.name(), "githubRefresh");
         assert!(Slot::Github.url(&c).is_none() && Slot::GithubRefresh.url(&c).is_none());
@@ -477,11 +504,11 @@ mod tests {
     #[test] fn store_secret_keeps_a_github_token_and_bumps_its_epoch() {
         let store = MemoryStore::default();
         store_secret(&store, Slot::Github, &cfg("{}"), " ghp_xFAKE ").unwrap();
-        assert_eq!(store.get("github|https://github.com").unwrap().as_deref(), Some("ghp_xFAKE"));
+        assert_eq!(store.get(&gh("github")).unwrap().as_deref(), Some("ghp_xFAKE"));
         let st = status_of(&store, &cfg("{}"));
         assert_eq!((st.set.github, st.epoch.github, st.set.github_refresh), (true, 1, false));
         assert_eq!(store_secret(&store, Slot::GithubRefresh, &cfg("{}"), "ghp_x").unwrap_err().kind, NetErrorKind::BadInput);
-        assert_eq!(store.get("githubRefresh|https://github.com").unwrap(), None);
+        assert_eq!(store.get(&gh("githubRefresh")).unwrap(), None);
     }
     #[test] fn store_secret_at_url_refuses_the_github_slots() {
         let store = MemoryStore::default();
@@ -489,7 +516,7 @@ mod tests {
         for slot in [Slot::Github, Slot::GithubRefresh] {
             assert_eq!(store_secret_at_url(&store, slot, &url, "ghp_x").unwrap_err().kind, NetErrorKind::BadInput);
         }
-        assert_eq!(store.get("github|https://github.com").unwrap(), None);
+        assert_eq!(store.get(&gh("github")).unwrap(), None);
     }
     #[test] fn webview_secret_commands_refuse_the_github_slots() {
         for slot in [Slot::Github, Slot::GithubRefresh] {

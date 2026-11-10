@@ -45,6 +45,14 @@ getrandom = "0.2"
 socket2 = "0.6"
 # Copy the MCP token from Rust, excluded from clipboard history (USER RULE: the webview never sees it).
 arboard = { version = "=3.6.1", default-features = false }
+# The GitHub token is held in `Zeroizing` while Rust uses it (already in the lock).
+zeroize = "1.9.1"
+
+[features]
+# Test builds only (P-R7, P-R15): the GitHub endpoints may be overridden with a
+# loopback URL through LABNOTEO_GITHUB_TEST_BASE / LABNOTEO_GITHUB_TEST_GIT_BASE,
+# and the GitHub keychain accounts end in "|test-build". Never on in a release.
+github-test-endpoints = []
 
 [target.'cfg(windows)'.dependencies]
 # SO_EXCLUSIVEADDRUSE on the MCP listener (C2); 0.61.2 is already in the lock.
