@@ -288,10 +288,11 @@ fieldset.mcp-client-auth legend { padding: 0; }
   border-top: 1px solid var(--border);
 }
 .settings-page-title + .setting-row { border-top: 0; }
-.setting-info { flex: 1 1 auto; min-width: 0; }
+/* The name keeps a readable width; a row with many controls (the skin row) wraps its controls instead of overflowing */
+.setting-info { flex: 1 1 12rem; min-width: 12rem; }
 .setting-name { color: var(--text); }
 .setting-desc { margin-top: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; }
-.setting-control { flex: none; display: flex; align-items: center; gap: var(--space-4); }
+.setting-control { flex: 0 1 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-4); }
 .setting-text { width: 14rem; }
 .setting-status { max-width: 16rem; color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; }
 

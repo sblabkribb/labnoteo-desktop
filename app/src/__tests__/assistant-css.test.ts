@@ -49,6 +49,20 @@ describe('styles/assistant.css', () => {
     expect(decl(fc, '.pet-bubble', 'border')).toEqual(['1px solid CanvasText']);
   });
 
+  it('citations and source links use the accent colour, not the text-on-accent colour (white on the grey bubble, Task 22)', () => {
+    expect(decl(top, '.pet-cite', 'color')).toEqual(['var(--accent)']);
+    expect(decl(top, '.pet-source-link', 'color')).toEqual(['var(--accent)']);
+  });
+
+  it('a long source title is cut with an ellipsis inside its link, so the link never vanishes into "…" (Task 22)', () => {
+    expect(decl(top, '.pet-source', 'display')).toEqual(['flex']);
+    expect(decl(top, '.pet-source', 'min-width')).toEqual(['0']);
+    expect(decl(top, '.pet-source-link', 'min-width')).toEqual(['0']);
+    expect(decl(top, '.pet-source-link', 'overflow')).toEqual(['hidden']);
+    expect(decl(top, '.pet-source-link', 'text-overflow')).toEqual(['ellipsis']);
+    expect(decl(top, '.pet-source-link', 'white-space')).toEqual(['nowrap']);
+  });
+
   it('only pet selectors (and the layer) live here', () => {
     for (const r of rules.filter((x) => !x.atRule?.startsWith('@keyframes')))
       for (const s of r.selectors) expect(s, s).toMatch(/^(?:html\[data-reduced-motion\] )?(?:#pet-layer|\.pet)/);

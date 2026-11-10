@@ -164,7 +164,7 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   padding: 0;
   background: transparent;
   border: 0;
-  color: var(--accent-text);
+  color: var(--accent);
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
@@ -177,12 +177,20 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   list-style: none;
   font-size: var(--font-size-sm);
 }
+/* 한 줄에 번호와 링크: 긴 제목은 링크 안에서 말줄임표로 자른다(단추는 inline-block 이라 줄 전체의 말줄임표에 통째로 사라진다) */
 .pet-source {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.pet-source-link {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
 }
-.pet-source-n { color: var(--text-muted); }
+.pet-source-n { flex: none; color: var(--text-muted); }
 .pet-msg-actions {
   display: flex;
   justify-content: flex-end;
