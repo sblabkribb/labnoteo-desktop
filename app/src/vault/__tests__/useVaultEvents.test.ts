@@ -87,6 +87,37 @@ describe('보관함 이벤트 훅', () => {
     onChanged.mockRestore();
   });
 
+  it('a batch of only modified non-note files drops the image cache entries but skips the tree reload (spec §10.3)', async () => {
+    const f = fakeListen();
+    const onChanged = vi.spyOn(vaultImages, 'onChanged').mockImplementation(() => undefined);
+    const onChange = vi.fn();
+    renderHook(() => useVaultEvents(onChange, f.listen as never));
+    await vi.waitFor(() => expect(f.handlers.size).toBe(1));
+    const batch = async (...changes: VaultChange[]) =>
+      act(async () => {
+        changes.forEach((c) => f.emit(c));
+        await vi.advanceTimersByTimeAsync(SETTLE_MS);
+      });
+
+    await batch({ path: 'a/b.csv', kind: 'modified' }, { path: 'x.png', kind: 'modified' });
+    expect(onChanged).toHaveBeenLastCalledWith(['a/b.csv', 'x.png']);
+    expect(onChange).not.toHaveBeenCalled();
+
+    await batch({ path: 'x.png', kind: 'modified' }, { path: 'x.md', kind: 'modified' });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    await batch({ path: 'NOTE.MD', kind: 'modified' });
+    expect(onChange).toHaveBeenCalledTimes(2);
+    await batch({ path: 'new.png', kind: 'created' });
+    expect(onChange).toHaveBeenCalledTimes(3);
+    await batch({ path: 'old.csv', kind: 'removed' });
+    expect(onChange).toHaveBeenCalledTimes(4);
+    // '' is Rust's "rescan": everything may have changed
+    await batch({ path: '', kind: 'modified' });
+    expect(onChange).toHaveBeenCalledTimes(5);
+    expect(onChanged).toHaveBeenCalledTimes(6);
+    onChanged.mockRestore();
+  });
+
   it('몰려 온 이벤트는 한 번의 호출로 합친다', async () => {
     const f = fakeListen();
     const onChange = vi.fn();

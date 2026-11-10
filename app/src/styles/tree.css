@@ -179,6 +179,8 @@
   display: block;
   width: 100%;
   min-width: 0;
+  /* 글 링크처럼 보이는 단추: shell.css 의 button { min-height: 28px } 를 받지 않는다 */
+  min-height: 0;
   padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 0;
@@ -225,6 +227,7 @@
 .links-mention .links-context { flex: 1 1 auto; }
 .links-mention-link {
   flex: none;
+  min-height: 0;
   padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 1px solid var(--border);
@@ -239,6 +242,7 @@
   display: block;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   padding: var(--space-2) var(--space-4);
   background: transparent;
   border: 0;

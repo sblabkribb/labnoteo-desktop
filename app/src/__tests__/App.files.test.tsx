@@ -66,6 +66,8 @@ describe('Files tab (UI redesign Task 9)', () => {
 
     await user.click(screen.getByRole('button', { name: '시스템 파일 표시' }));
     expect(screen.getByRole('button', { name: '시스템 파일 표시' }).getAttribute('aria-pressed')).toBe('true');
+    // resources/ starts collapsed (spec §10.2): open it to see the system folders inside
+    await user.click(await within(tree).findByRole('treeitem', { name: 'resources' }));
     expect(await within(tree).findByRole('treeitem', { name: 'labsamples' })).toBeTruthy();
     expect(within(tree).getByRole('treeitem', { name: 'workflows' })).toBeTruthy();
 

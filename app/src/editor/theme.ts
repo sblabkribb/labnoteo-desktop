@@ -106,7 +106,8 @@ export const editorThemeSpec = {
   // 붙으므로 이긴다. 덮는 색: `&light … li[aria-selected]` 의 #17c/white, 비활성 목록의 #777, 구역 머리의 silver 밑줄,
   // 스니펫 칸의 #00000022 와 #888 점선. `&.cm-editor` 를 앞에 붙이지 않는다: theme-guard 는 같은 선택자 글자만 덮은 것으로 친다.
   '& .cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent-fill)', color: 'var(--accent-text)' },
-  '& .cm-tooltip-autocomplete-disabled ul li[aria-selected]': { background: 'var(--text-muted)' },
+  // 꺼진 목록(입력이 바뀌는 중)의 선택 줄: 위 규칙의 --accent-text 를 물려받으면 다크에서 읽히지 않는다. 짝을 따로 정한다.
+  '& .cm-tooltip-autocomplete-disabled ul li[aria-selected]': { background: 'var(--bg-selected)', color: 'var(--text)' },
   '& .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': { borderBottomColor: 'var(--border)' },
   '& .cm-snippetField': { backgroundColor: 'var(--bg-selection)' },
   '& .cm-snippetFieldPosition': { borderLeftColor: 'var(--text-muted)' },

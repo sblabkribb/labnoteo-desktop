@@ -48,6 +48,10 @@ export type OverrideKey =
   // 연동 설정(SP6 Task 13): 키는 보관함이 아니라 Windows 자격 증명 관리자에 있다. 스킴 없는 LLM 주소는 https:// 를 붙인다.
   | 'integrations.partbankIntro'
   | 'integrations.keyKeptHere'
+  // 연동 설정의 AI 칸(명세 §10.4): 플러그인 한국어 목록은 '프로바이더' 라고 쓴다. 앱은 어디서나 'AI 제공자'.
+  | 'integrations.aiProvider'
+  | 'integrations.provider'
+  | 'integrations.openaiOnlyHint'
   | 'ai.schemeHint'
   // 플러그인의 'Set up a partbank connection in the plugin settings first.': 앱에서는 연동 설정 대화상자(SP6 Task 16).
   | 'partbank.setupFirst'

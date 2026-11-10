@@ -806,10 +806,10 @@ export function IntegrationSettingsPage(props: {
         </section>
 
         <section className="integration-section">
-          <h3>{coreT('AI provider')}</h3>
+          <h3>{overrideOr('integrations.aiProvider') /* coreT('AI provider') */}</h3>
           <div className="integration-field">
             <label className="prompt-question" htmlFor={`${id}-provider`}>
-              {coreT('Provider')}
+              {overrideOr('integrations.provider') /* coreT('Provider') */}
             </label>
             <SelectField
               id={`${id}-provider`}
@@ -857,7 +857,7 @@ export function IntegrationSettingsPage(props: {
                   deps={deps}
                   slot="llmOpenai"
                   label={coreT('API key')}
-                  hints={[coreT('Only sent to OpenAI-compatible providers, never to Ollama.'), overrideOr('integrations.keyKeptHere')]}
+                  hints={[overrideOr('integrations.openaiOnlyHint'), overrideOr('integrations.keyKeptHere')]}
                   isSet={status.set.llmOpenai}
                   inputRef={keyRefs.llmOpenai}
                   beforeSave={() => commitEndpoint('llmEndpointOpenai')}

@@ -190,9 +190,15 @@ describe('노트 트리', () => {
     ];
     const row = (name: string) => screen.getByRole('treeitem', { name });
     const icon = (name: string) => row(name).querySelector('svg.tree-icon')!.getAttribute('class')!;
+    /** images/ and resources/ start collapsed (spec §10.2): open both, as a user would. */
+    const openAttachments = async (user = userEvent.setup()) => {
+      await user.click(row('images'));
+      await user.click(row('resources'));
+    };
 
-    it('names hide .labnote.md and .md; the title keeps the full file name', () => {
+    it('names hide .labnote.md and .md; the title keeps the full file name', async () => {
       render(<NoteTree entries={vault} onSelect={() => {}} />);
+      await openAttachments();
       expect(row('01_WD010_Design').getAttribute('title')).toBe('01_WD010_Design.labnote.md');
       expect(row('README').getAttribute('title')).toBe('README.labnote.md');
       expect(row('Plan').getAttribute('title')).toBe('Plan.md');
@@ -202,6 +208,7 @@ describe('노트 트리', () => {
     it('draws a Lucide icon per kind, folder-open while a folder is expanded', async () => {
       const user = userEvent.setup();
       render(<NoteTree entries={vault} onSelect={() => {}} />);
+      await openAttachments(user);
       expect(icon('001_PCR')).toContain('lucide-flask-conical');
       expect(icon('README')).toContain('lucide-flask-conical');
       expect(icon('01_WD010_Design')).toContain('lucide-workflow');
@@ -216,16 +223,18 @@ describe('노트 트리', () => {
       expect(icon('images')).toContain('lucide-folder');
     });
 
-    it('chevrons are Lucide icons on folders only; leaves keep an empty slot', () => {
+    it('chevrons are Lucide icons on folders only; leaves keep an empty slot', async () => {
       const { container } = render(<NoteTree entries={vault} onSelect={() => {}} />);
+      await openAttachments();
       expect(row('images').querySelector('.tree-chevron svg')).not.toBeNull();
       expect(row('gel.png').querySelector('.tree-chevron')).not.toBeNull();
       expect(row('gel.png').querySelector('.tree-chevron svg')).toBeNull();
       expect(container.querySelector('[style]')).toBeNull();
     });
 
-    it('attachments without an in-app viewer are dimmed; images and sheets are not', () => {
+    it('attachments without an in-app viewer are dimmed; images and sheets are not', async () => {
       render(<NoteTree entries={vault} onSelect={() => {}} />);
+      await openAttachments();
       expect(row('paper.pdf').classList.contains('dim')).toBe(true);
       expect(row('raw.zip').classList.contains('dim')).toBe(true);
       expect(row('gel.png').classList.contains('dim')).toBe(false);
@@ -238,6 +247,7 @@ describe('노트 트리', () => {
       const selected: string[] = [];
       const viewed: [string, string][] = [];
       render(<NoteTree entries={vault} onSelect={(p) => selected.push(p)} onView={(p, k) => viewed.push([p, k])} />);
+      await openAttachments(user);
       await user.click(row('gel.png'));
       await user.click(row('plate.csv'));
       await user.click(row('paper.pdf'));
@@ -250,12 +260,63 @@ describe('노트 트리', () => {
       ]);
     });
 
-    it('collapse all folds every folder', () => {
+    it('collapse all folds every folder', async () => {
       const ref = { current: undefined as undefined | (() => void) };
       render(<NoteTree entries={vault} onSelect={() => {}} collapseAllRef={ref} />);
+      await openAttachments();
       expect(screen.getAllByRole('treeitem')).toHaveLength(vault.length);
       act(() => ref.current!());
       expect(screen.getAllByRole('treeitem').map((e) => e.textContent)).toEqual(['labnote', 'Plan']);
+    });
+
+    it('images and resources folders (any depth, any case) start collapsed and their rows are not rendered', () => {
+      const mixed: TreeEntry[] = [
+        dir('Images', 0),
+        file('Images/top.png', 1),
+        dir('labnote', 0),
+        dir('labnote/001_PCR', 1),
+        dir('labnote/001_PCR/RESOURCES', 2),
+        file('labnote/001_PCR/RESOURCES/plate.csv', 3),
+        dir('labnote/001_PCR/images', 2),
+        dir('labnote/001_PCR/images/sub', 3),
+        file('labnote/001_PCR/images/sub/deep.png', 4),
+        dir('labnote/001_PCR/imagesets', 2),
+        file('labnote/001_PCR/imagesets/kept.png', 3),
+        file('labnote/001_PCR/README.labnote.md', 2),
+      ];
+      render(<NoteTree entries={mixed} onSelect={() => {}} />);
+      for (const name of ['Images', 'RESOURCES', 'images']) expect(row(name).getAttribute('aria-expanded'), name).toBe('false');
+      for (const name of ['top.png', 'plate.csv', 'sub', 'deep.png']) expect(screen.queryByRole('treeitem', { name }), name).toBeNull();
+      // only the exact names: a folder that merely starts with "images" stays open
+      expect(row('imagesets').getAttribute('aria-expanded')).toBe('true');
+      expect(row('kept.png')).toBeTruthy();
+      expect(row('README')).toBeTruthy();
+    });
+
+    it('an images folder the user expanded stays expanded across a tree reload in the same session', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<NoteTree entries={vault} onSelect={() => {}} />);
+      await user.click(row('images'));
+      expect(row('gel.png')).toBeTruthy();
+      rerender(<NoteTree entries={[...vault, file('labnote/001_PCR/images/blot.png', 3)]} onSelect={() => {}} />);
+      expect(row('images').getAttribute('aria-expanded')).toBe('true');
+      expect(row('blot.png')).toBeTruthy();
+      // resources was never opened: still collapsed
+      expect(row('resources').getAttribute('aria-expanded')).toBe('false');
+      // and the user can close it again
+      await user.click(row('images'));
+      expect(screen.queryByRole('treeitem', { name: 'gel.png' })).toBeNull();
+    });
+
+    it('revealing or opening a file inside a collapsed images folder expands it', () => {
+      const { rerender } = render(<NoteTree entries={vault} onSelect={() => {}} />);
+      expect(screen.queryByRole('treeitem', { name: 'gel.png' })).toBeNull();
+      rerender(<NoteTree entries={vault} onSelect={() => {}} reveal={{ path: 'labnote/001_PCR/images/gel.png', seq: 1 }} />);
+      expect(row('images').getAttribute('aria-expanded')).toBe('true');
+      expect(document.activeElement).toBe(row('gel.png'));
+      rerender(<NoteTree entries={vault} onSelect={() => {}} selected="LabNote/001_PCR/Resources/plate.csv" />);
+      expect(row('resources').getAttribute('aria-expanded')).toBe('true');
+      expect(row('plate.csv').getAttribute('aria-current')).toBe('true');
     });
   });
 });

@@ -150,3 +150,17 @@ describe('update button and toaster (spec §3.1)', () => {
     expect(decl('.update-pill[data-state="ready"]', 'background')).toEqual(['var(--accent-fill)']);
   });
 });
+
+describe('link-like buttons (spec §10.6)', () => {
+  it('the Links panel text-link buttons drop the 28px button min-height', () => {
+    const rules = parseRules(allCss());
+    for (const selector of ['.links-target', '.links-source', '.links-context', '.links-mention-link', 'button.sample-def-link', 'button.mcp-client-link']) {
+      const values = rules
+        .filter((r) => !r.atRule && r.selectors.includes(selector))
+        .flatMap((r) => declarations(r.body))
+        .filter((d) => d.prop === 'min-height')
+        .map((d) => d.value);
+      expect(values, selector).toContain('0');
+    }
+  });
+});

@@ -114,6 +114,9 @@ const ko: Record<string, string> = {
   'integrations.partbankIntro':
     'partbank의 DNA 부품·플라스미드·프라이머를 샘플로 등록하고, 보관 위치를 가져오고, partbank에서 열 수 있습니다. API 키는 partbank의 Profile → API Keys에서 발급하며, 보관함이 아니라 이 PC의 Windows 자격 증명 관리자에만 저장합니다.',
   'integrations.keyKeptHere': '이 PC의 Windows 자격 증명 관리자에만 보관하며 보관함에는 쓰지 않습니다.',
+  'integrations.aiProvider': 'AI 제공자',
+  'integrations.provider': '제공자',
+  'integrations.openaiOnlyHint': 'OpenAI 호환 제공자에만 보내고, Ollama에는 보내지 않아요.',
   'ai.schemeHint': 'http:// 나 https:// 없이 쓰면 https:// 를 붙입니다(이 PC 주소면 http://).',
   'ai.openaiEndpointHint': 'https://host 와 https://host/v1 둘 다 됩니다.',
   'ai.notFoundOpenai':
@@ -1013,6 +1016,9 @@ const en: Record<string, string> = {
   'integrations.partbankIntro':
     'Register DNA parts, plasmids and primers from partbank as samples, read their storage location, and open them in partbank. Issue an API key in partbank under Profile - API Keys; it is kept only in Windows Credential Manager on this PC, not in the vault.',
   'integrations.keyKeptHere': 'Kept only in Windows Credential Manager on this PC, never written to the vault.',
+  'integrations.aiProvider': 'AI provider',
+  'integrations.provider': 'Provider',
+  'integrations.openaiOnlyHint': 'Only sent to OpenAI-compatible providers, never to Ollama.',
   'ai.schemeHint': 'Without http:// or https://, https:// is added (http:// for an address on this PC).',
   'ai.openaiEndpointHint': 'Both https://host and https://host/v1 work.',
   'ai.notFoundOpenai':

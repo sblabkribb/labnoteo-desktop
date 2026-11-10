@@ -185,6 +185,16 @@ describe('IntegrationSettingsPage', () => {
     expect(t('integrations.partbankIntro')).toContain('Windows 자격 증명 관리자');
   });
 
+  it('in Korean the AI section says "AI 제공자" and never "프로바이더" (spec §10.4)', async () => {
+    setLang('ko');
+    const { container } = show(fakeDeps({ llmProvider: 'openai' }));
+    expect(await screen.findByText(t('integrations.openaiOnlyHint'))).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'AI 제공자' })).toBeTruthy();
+    expect(screen.getByText(t('integrations.provider'))).toBeTruthy();
+    expect(container.textContent).not.toContain('프로바이더');
+    expect(document.body.innerHTML).not.toContain('프로바이더');
+  });
+
   it('onIntegrationChange runs after the settings are saved', async () => {
     const order: string[] = [];
     const settings: AppSettings = fromPluginData(undefined);

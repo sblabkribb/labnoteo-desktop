@@ -250,6 +250,20 @@ describe('디자인 토큰', () => {
     }
   });
 
+  it('the selected item of a disabled autocomplete list sets its own text and background pair, readable in every theme (spec §10.5)', () => {
+    const theme = readFileSync('src/editor/theme.ts', 'utf-8');
+    const m = /cm-tooltip-autocomplete-disabled ul li\[aria-selected\][^{]*\{([^}]*)\}/.exec(theme);
+    expect(m, 'rule in src/editor/theme.ts').not.toBeNull();
+    const tokenOf = (prop: string) => new RegExp(`${prop}:\\s*'var\\((--[\\w-]+)\\)'`).exec(m![1])?.[1];
+    const bg = tokenOf('background');
+    const fg = tokenOf('color');
+    expect(bg, 'background token').toBeTruthy();
+    expect(fg, 'color token').toBeTruthy();
+    for (const [name, t] of Object.entries(themes)) {
+      expect(contrast(t, fg!, bg!), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it('편집기 밖의 텍스트 선택은 배경과 글자색을 함께 정한다', () => {
     const rules = parseRules(all).filter((r) => !r.atRule && r.selectors.includes('::selection'));
     expect(rules).toHaveLength(1);

@@ -59,6 +59,20 @@ function nest(entries: readonly TreeEntry[]): TreeNode[] {
 
 const entryOf = (node: TreeNode) => node.payload as TreeEntry;
 
+/**
+ * 처음에 접혀 있는 폴더(명세 §10.2): 어느 깊이든 이름이 `images` 나 `resources` 인 폴더(대소문자 무관). 실험마다 그림과 첨부가
+ * 수백 개라, 펼쳐 두면 파일 탭이 그 줄을 모두 그린다. 사용자가 편 것은 `opened` 에 남는다(이 세션 동안).
+ */
+const startsCollapsed = (key: string) => /^(images|resources)$/.test(key.slice(key.lastIndexOf('/') + 1));
+
+/** 접힘 키 `a/b/c` 의 조상 키 `a`, `a/b` (self 면 `a/b/c` 도). */
+function prefixes(key: string, self: boolean): string[] {
+  const parts = key.split('/');
+  const out: string[] = [];
+  for (let i = 1; i < parts.length + (self ? 1 : 0); i++) out.push(parts.slice(0, i).join('/'));
+  return out;
+}
+
 const NOTE_KINDS: readonly FileKind[] = ['note', 'readme', 'workflow'];
 const FOLDER_KINDS: readonly FileKind[] = ['folder', 'experiment'];
 
@@ -70,48 +84,62 @@ const dimClass = (node: TreeNode) => {
 
 /**
  * 보관함의 노트 트리. WAI-ARIA 트리(role=tree, treeitem, roving tabindex)는 TreeView 가 그린다: 화살표·Home·End 로 움직이고,
- * 왼쪽·오른쪽으로 접고 펴고, Enter·Space 로 노트를 연다. 폴더는 처음에 모두 펼쳐져 있고, 지금 열린 노트의 조상은
+ * 왼쪽·오른쪽으로 접고 펴고, Enter·Space 로 노트를 연다. 폴더는 처음에 펼쳐져 있되 images·resources 는 접혀 있고, 지금 열린 노트의 조상은
  * 그 노트가 열릴 때 다시 펼쳐진다.
  */
 export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, collapseAllRef, reveal }: Props) {
+  // 사용자가 접은 폴더, 그리고 처음에 접혀 있는 폴더(startsCollapsed) 가운데 사용자가 편 것
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const nodes = useMemo(() => nest(entries), [entries]);
   const expanded = useMemo(
-    () => new Set(entries.filter((e) => e.isDir && !collapsed.has(fold(e.path))).map((e) => fold(e.path))),
-    [entries, collapsed],
+    () =>
+      new Set(
+        entries
+          .filter((e) => e.isDir)
+          .map((e) => fold(e.path))
+          .filter((k) => !collapsed.has(k) && (!startsCollapsed(k) || opened.has(k))),
+      ),
+    [entries, collapsed, opened],
   );
   const selectedKey = selected === undefined ? undefined : fold(selected);
+
+  /** 이 폴더 키들을 펼친다(사용자가 접은 것도, 처음에 접혀 있던 것도). 바뀐 것이 없으면 상태를 그대로 둔다. */
+  const expandAll = (keys: readonly string[]) => {
+    setCollapsed((prev) => {
+      const hit = keys.filter((k) => prev.has(k));
+      if (hit.length === 0) return prev;
+      const next = new Set(prev);
+      hit.forEach((k) => next.delete(k));
+      return next;
+    });
+    setOpened((prev) => {
+      const add = keys.filter((k) => startsCollapsed(k) && !prev.has(k));
+      return add.length === 0 ? prev : new Set([...prev, ...add]);
+    });
+  };
 
   // 열린 노트의 조상 폴더는 펼친다: 노트를 열었는데 트리에서 그 줄이 접혀 안 보이는 일이 없게.
   useEffect(() => {
     if (selectedKey === undefined) return;
-    setCollapsed((prev) => {
-      const ancestors = [...prev].filter((dir) => selectedKey.startsWith(`${dir}/`));
-      if (ancestors.length === 0) return prev;
-      const next = new Set(prev);
-      ancestors.forEach((dir) => next.delete(dir));
-      return next;
-    });
+    expandAll(prefixes(selectedKey, false));
   }, [selectedKey]);
 
-  // 실험 탭이 고른 폴더: 그 폴더와 조상을 펼치고 그 줄에 초점을 둔다(TreeView focusRequest)
+  // 실험 탭이 고른 폴더(또는 파일): 그것과 조상을 펼치고 그 줄에 초점을 둔다(TreeView focusRequest)
   const revealKey = reveal === undefined ? undefined : fold(reveal.path);
   useEffect(() => {
     if (revealKey === undefined) return;
-    setCollapsed((prev) => {
-      const open = [...prev].filter((dir) => dir === revealKey || revealKey.startsWith(`${dir}/`));
-      if (open.length === 0) return prev;
-      const next = new Set(prev);
-      open.forEach((dir) => next.delete(dir));
-      return next;
-    });
+    expandAll(prefixes(revealKey, true));
   }, [revealKey, reveal?.seq]);
   const focusRequest = useMemo(() => (revealKey === undefined ? undefined : { id: revealKey, seq: reveal!.seq }), [revealKey, reveal?.seq]);
 
   // 파일 탭 머리의 "모두 접기": 지금 목록의 모든 폴더를 접는다.
   useEffect(() => {
     if (!collapseAllRef) return;
-    collapseAllRef.current = () => setCollapsed(new Set(entries.filter((e) => e.isDir).map((e) => fold(e.path))));
+    collapseAllRef.current = () => {
+      setCollapsed(new Set(entries.filter((e) => e.isDir).map((e) => fold(e.path))));
+      setOpened(new Set());
+    };
     return () => {
       collapseAllRef.current = undefined;
     };
@@ -119,14 +147,20 @@ export function NoteTree({ entries, selected, onSelect, onView, onContextMenu, c
 
   if (entries.length === 0) return <p>{t('tree.empty')}</p>;
 
-  const toggle = (id: string, open: boolean) =>
-    setCollapsed((prev) => {
-      if (open !== prev.has(id)) return prev;
+  const toggle = (id: string, open: boolean) => {
+    if (open === expanded.has(id)) return;
+    if (open) {
+      expandAll([id]);
+      return;
+    }
+    setCollapsed((prev) => new Set([...prev, id]));
+    setOpened((prev) => {
+      if (!prev.has(id)) return prev;
       const next = new Set(prev);
-      if (open) next.delete(id);
-      else next.add(id);
+      next.delete(id);
       return next;
     });
+  };
 
   return (
     <nav aria-label={t('tree.label')}>

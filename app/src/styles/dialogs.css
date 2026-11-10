@@ -125,7 +125,7 @@
 .sample-def-usages p { margin: 0; color: var(--text-muted); }
 .sample-def-usage-group summary { cursor: pointer; }
 .sample-def-usage-group ul { margin: 0; padding-left: var(--space-6); }
-button.sample-def-link { padding: 0; background: transparent; border: 0; color: var(--accent); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+button.sample-def-link { min-height: 0; padding: 0; background: transparent; border: 0; color: var(--accent); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 button.sample-def-link:hover { text-decoration: underline; }
 .sample-def-notice { margin: 0; color: var(--text-muted); font-size: 0.93em; }
 

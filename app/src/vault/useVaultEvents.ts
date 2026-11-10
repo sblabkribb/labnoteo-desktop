@@ -76,7 +76,16 @@ export function subscribeVaultChanges(
 }
 
 /**
- * 보관함 밖에서 파일이 바뀌면(Rust 가 200ms 디바운스 후 보낸다) `onChange` 를 부른다. 그 전에 바뀐 경로들을
+ * 이 묶음이 트리의 모양을 바꿀 수 있는가. 노트가 아닌 파일(그림, 표, 첨부)의 `modified` 만 있으면 줄이 그대로이므로 아니다(명세 §10.3).
+ * 감시(watcher.rs)는 이름 바꾸기를 `removed` + `created` 로 보내고 폴더를 `modified` 로 보내지 않는다. `.md` 는 제목·종류가 바뀔 수 있어
+ * 다시 읽고, 빈 경로(Rust 의 "다시 훑어라")도 다시 읽는다.
+ */
+export function changesTreeShape(changes: readonly VaultChange[]): boolean {
+  return !changes.every((c) => c.kind === 'modified' && c.path !== '' && !/\.md$/i.test(c.path));
+}
+
+/**
+ * 보관함 밖에서 파일이 바뀌면(Rust 가 200ms 디바운스 후 보낸다) 트리 모양이 바뀔 수 있을 때 `onChange` 를 부른다. 그 전에 바뀐 경로들을
  * `vaultImages.onChanged` 에 넘겨 이름 색인을 버리고(묶음마다) 지워진 이미지의 blob: URL 을 거둔다.
  * 이벤트가 몰려 와도 한 번만 부르되(끝없이 이어지면 `MAX_SETTLE_MS` 마다), 마운트가 끝나면 구독과 대기 중인 호출을 모두 거둔다.
  */
@@ -85,16 +94,17 @@ export function useVaultEvents(onChange: () => void, listen: ListenFn = tauriLis
   latest.current = onChange;
 
   useEffect(() => {
-    // 한 묶음에서 바뀐 경로들: 이름 색인은 묶음마다 버리고, 이미지 캐시는 그 이미지 경로만 버린다('' 이면 모두).
-    let paths: string[] = [];
+    // 한 묶음에서 바뀐 것들: 이름 색인은 묶음마다 버리고, 이미지 캐시는 그 이미지 경로만 버린다('' 이면 모두).
+    // 트리는 모양이 바뀔 수 있을 때만 다시 읽는다(노트가 아닌 파일의 수정만이면 건너뛴다).
+    let batch: VaultChange[] = [];
     const settler = createSettler(() => {
-      const changed = paths;
-      paths = [];
-      vaultImages.onChanged(changed);
-      latest.current();
+      const changed = batch;
+      batch = [];
+      vaultImages.onChanged(changed.map((c) => c.path));
+      if (changesTreeShape(changed)) latest.current();
     });
     const unsubscribe = subscribeVaultChanges(listen, (change) => {
-      paths.push(change.path);
+      batch.push(change);
       settler.poke();
     });
     return () => {
