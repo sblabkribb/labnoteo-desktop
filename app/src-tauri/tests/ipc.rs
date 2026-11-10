@@ -599,6 +599,22 @@ title: 실험
     assert_eq!(raw_call("scan_write_image", vec!["exp", "p.svg"], vec![1]).unwrap_err()["kind"], "notImage");
     assert_eq!(raw_call("scan_write_image", vec!["..", "p.png"], vec![1]).unwrap_err()["kind"], "escape");
     assert!(call("scan_write_image", json!({"dir": "exp", "name": "q.png"})).is_err());
+    // Non-image attachments: the same raw protocol, only into a resources folder.
+    assert_eq!(
+        raw_call("vault_write_attachment", vec!["exp%2Fresources", "plate.csv"], vec![9]).unwrap(),
+        json!("exp/resources/plate.csv")
+    );
+    assert_eq!(
+        raw_call("vault_write_attachment", vec!["exp/resources", "plate.csv"], vec![9]).unwrap(),
+        json!("exp/resources/plate 1.csv"),
+        "never overwrites"
+    );
+    assert_eq!(raw_call("vault_write_attachment", vec!["exp", "plate.csv"], vec![1]).unwrap_err()["kind"], "badInput");
+    assert_eq!(
+        raw_call("vault_write_attachment", vec!["exp/resources", "run.exe"], vec![1]).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert!(call("vault_write_attachment", json!({"dir": "exp/resources", "name": "q.csv"})).is_err());
     std::fs::remove_dir_all(dir.join("vault").join("exp")).unwrap();
 
     // The MCP token (Credential Manager; here the memory store): the webview

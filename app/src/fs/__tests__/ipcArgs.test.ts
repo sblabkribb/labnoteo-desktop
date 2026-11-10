@@ -5,7 +5,7 @@ import { fetchTree } from '../../tree/useTree';
 import { fetchAppVersion } from '../../appVersion';
 import { indexBodies, rebuildIndex, removeNote, searchNotes, upsertNote } from '../../search/indexApi';
 import { loadVaultSettings, saveVaultSettings } from '../../labnote/settings';
-import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultImage } from '../vaultImage';
+import { listVaultImages, readVaultImage, vaultCreatedTimes, writeScanImage, writeVaultAttachment, writeVaultImage } from '../vaultImage';
 import { openWithDefaultApp, revealInFolder } from '../vaultOpen';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
@@ -49,6 +49,7 @@ function recorder() {
       sent.set(cmd, Object.keys(args ?? {}).sort());
     }
     if (cmd === 'vault_write_image') return 'exp/images/p.png';
+    if (cmd === 'vault_write_attachment') return 'exp/resources/plate.csv';
     if (cmd === 'scan_write_image') return 'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg';
     if (cmd === 'vault_modify') return { kind: 'ok' };
     if (cmd === 'vault_read') return 'old';
@@ -106,6 +107,7 @@ describe('IPC 인자 이름 계약', () => {
     await openWithDefaultApp('a.pdf', r.invoke);
     await revealInFolder('a.pdf', r.invoke);
     expect(await writeVaultImage('exp/images', 'p.png', new Uint8Array([1]), r.invoke)).toBe('exp/images/p.png');
+    expect(await writeVaultAttachment('exp/resources', 'plate.csv', new Uint8Array([1]), r.invoke)).toBe('exp/resources/plate.csv');
     expect(await writeScanImage('e/images/scans', 'LN-7K3M9QX2_u1_p1_20261015.jpg', new Uint8Array([1]), r.invoke)).toBe(
       'e/images/scans/LN-7K3M9QX2_u1_p1_20261015.jpg',
     );
@@ -201,6 +203,15 @@ describe('IPC 인자 이름 계약', () => {
     expect(r.headers.get('vault_write_image')).toEqual({
       'x-lno-dir': '%EC%8B%A4%ED%97%98%2Fimages',
       'x-lno-name': '%EB%B6%99%EC%97%AC%20%EB%84%A3%EA%B8%B0.png',
+    });
+  });
+
+  it('writeVaultAttachment 는 writeVaultImage 와 같은 원시 본문과 퍼센트 인코딩 헤더로 보낸다', async () => {
+    const r = recorder();
+    await writeVaultAttachment('실험/resources', '결과 1.csv', new Uint8Array([1, 2]), r.invoke);
+    expect(r.headers.get('vault_write_attachment')).toEqual({
+      'x-lno-dir': '%EC%8B%A4%ED%97%98%2Fresources',
+      'x-lno-name': '%EA%B2%B0%EA%B3%BC%201.csv',
     });
   });
 });

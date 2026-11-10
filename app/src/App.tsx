@@ -758,6 +758,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
               }
               samples={sampleConfig}
               sampleEnv={() => ctx && createSampleEnv(ctx)}
+              imageFolder={settings?.imageFolder}
             />
           ) : (
             <>

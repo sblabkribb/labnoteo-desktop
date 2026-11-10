@@ -245,7 +245,7 @@ fn is_obsidian(rel: &str) -> bool {
 
 /// Confine for write-side commands: rejects `.obsidian/`, both by the name the
 /// caller gave and by where the path actually resolves (a link into it).
-fn confine_write(root: &Path, rel: &str) -> Result<PathBuf, FsError> {
+pub(crate) fn confine_write(root: &Path, rel: &str) -> Result<PathBuf, FsError> {
     if is_obsidian(rel) {
         return Err(FsError::Forbidden);
     }
@@ -775,7 +775,7 @@ pub fn write_image_free(locks: &PathLocks, root: &Path, dir: &str, name: &str, b
 /// when the name is taken (a file or a folder). Confined under the path lock
 /// right before the create, so a link planted in the folder is resolved first.
 /// A failed write removes the half-written file.
-fn create_new_image(locks: &PathLocks, root: &Path, rel: &str, bytes: &[u8]) -> Result<bool, FsError> {
+pub(crate) fn create_new_image(locks: &PathLocks, root: &Path, rel: &str, bytes: &[u8]) -> Result<bool, FsError> {
     locks.with(root, rel, || -> Result<bool, FsError> {
         let abs = confine_write(root, rel)?;
         let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&abs) {
@@ -903,7 +903,7 @@ pub async fn vault_trash(state: tauri::State<'_, super::VaultState>, path: Strin
         .map_err(|e| FsError::Io(std::io::Error::new(ErrorKind::Other, e.to_string())))?
 }
 
-fn join_error(e: impl std::fmt::Display) -> FsError {
+pub(crate) fn join_error(e: impl std::fmt::Display) -> FsError {
     FsError::Io(std::io::Error::new(ErrorKind::Other, e.to_string()))
 }
 
@@ -931,7 +931,7 @@ pub async fn vault_list_images(state: tauri::State<'_, super::VaultState>) -> Re
 }
 
 /// One header of a raw-body command, percent-decoded.
-fn header(request: &tauri::ipc::Request<'_>, name: &str) -> Result<String, FsError> {
+pub(crate) fn header(request: &tauri::ipc::Request<'_>, name: &str) -> Result<String, FsError> {
     let value = request
         .headers()
         .get(name)

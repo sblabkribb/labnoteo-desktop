@@ -203,16 +203,16 @@ describe('보관함별 설정', () => {
   });
 
   it('defaultExperimenter and imageFolder (app-only keys) have defaults, parse safely and survive a save and reload', async () => {
-    expect(fromPluginData(undefined)).toMatchObject({ defaultExperimenter: '', imageFolder: 'images' });
+    expect(fromPluginData(undefined)).toMatchObject({ defaultExperimenter: '', imageFolder: 'resources' });
     // not plugin keys: importing plugin data does not take them
-    expect(fromPluginData({ defaultExperimenter: 'Kim', imageFolder: 'resources' })).toMatchObject({ defaultExperimenter: '', imageFolder: 'images' });
-    expect(fromStored({ defaultExperimenter: '  Park Yaeseong \n', imageFolder: 'resources' })).toMatchObject({
+    expect(fromPluginData({ defaultExperimenter: 'Kim', imageFolder: 'images' })).toMatchObject({ defaultExperimenter: '', imageFolder: 'resources' });
+    expect(fromStored({ defaultExperimenter: '  Park Yaeseong \n', imageFolder: 'images' })).toMatchObject({
       defaultExperimenter: 'Park Yaeseong',
-      imageFolder: 'resources',
+      imageFolder: 'images',
     });
     expect(fromStored({ defaultExperimenter: 'a\u0000b\tc' }).defaultExperimenter).toBe('a b c');
     expect(fromStored({ defaultExperimenter: 'x'.repeat(500) }).defaultExperimenter).toHaveLength(120);
-    expect(fromStored({ defaultExperimenter: 42, imageFolder: '../etc' })).toMatchObject({ defaultExperimenter: '', imageFolder: 'images' });
+    expect(fromStored({ defaultExperimenter: 42, imageFolder: '../etc' })).toMatchObject({ defaultExperimenter: '', imageFolder: 'resources' });
     const store = fakeStore();
     const { settings } = await loadVaultSettings(store.invoke);
     await saveVaultSettings({ ...settings, defaultExperimenter: '박예성', imageFolder: 'resources' }, store.invoke);

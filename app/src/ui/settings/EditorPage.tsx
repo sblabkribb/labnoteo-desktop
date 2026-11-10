@@ -7,7 +7,7 @@ import { SettingRow } from './SettingRow';
 
 /**
  * 설정 → 편집기: 기본 편집 방식(라이브 미리보기 / 소스 보기, 이 PC 의 저장소 — Ctrl+E 와 같은 값)과
- * 그림 저장 폴더(보관함 설정 imageFolder, R1: images 가 기본이라 Obsidian·플러그인과 같다).
+ * 그림 저장 폴더(보관함 설정 imageFolder: 기본 resources, images 는 Obsidian·플러그인과 같다 — 2026-11-10 사용자 결정).
  */
 export function EditorPage(props: { settings: AppSettings; update: (patch: Partial<AppSettings>) => Promise<void> }) {
   const [mode, setModeState] = useState<EditorMode>(getMode);
@@ -43,8 +43,8 @@ export function EditorPage(props: { settings: AppSettings; update: (patch: Parti
             value={folder}
             onChange={chooseFolder}
             options={[
-              { value: 'images', label: t('settings.imageFolder.images') },
               { value: 'resources', label: t('settings.imageFolder.resources') },
+              { value: 'images', label: t('settings.imageFolder.images') },
             ]}
           />
         }

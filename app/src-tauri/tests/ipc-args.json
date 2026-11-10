@@ -20,6 +20,7 @@
   "vault_list_images": [],
   "vault_write_image": ["x-lno-dir", "x-lno-name"],
   "scan_write_image": ["x-lno-dir", "x-lno-name"],
+  "vault_write_attachment": ["x-lno-dir", "x-lno-name"],
   "vault_created_times": ["paths"],
   "print_open_in_browser": ["kind", "noteId", "html"],
   "settings_vault_read": [],

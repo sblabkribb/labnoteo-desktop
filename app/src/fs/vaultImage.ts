@@ -65,3 +65,20 @@ export function writeScanImage(
     headers: { 'x-lno-dir': encodeURIComponent(dir), 'x-lno-name': encodeURIComponent(name) },
   });
 }
+
+/**
+ * 붙여 넣거나 끌어 놓은 그림이 아닌 첨부를 보관함 폴더 `dir`(노트의 `resources` 폴더)에 새 파일로 쓴다
+ * (`vault_write_attachment`, UI 재설계 Task 17). 전송 방식은 `writeVaultImage` 와 같다. Rust 가 폴더(마지막 조각이
+ * resources, labsamples·workflows 아님), 이름, 막힌 확장자, 100 MiB 상한을 검사하고 절대 덮어쓰지 않는다
+ * (`이름 1.csv` .. `이름 99.csv`). 실제로 쓴 보관함 경로를 돌려준다.
+ */
+export function writeVaultAttachment(
+  dir: string,
+  name: string,
+  bytes: Uint8Array,
+  invoke: RawInvoke = tauriInvoke as RawInvoke,
+): Promise<string> {
+  return invoke<string>('vault_write_attachment', bytes, {
+    headers: { 'x-lno-dir': encodeURIComponent(dir), 'x-lno-name': encodeURIComponent(name) },
+  });
+}

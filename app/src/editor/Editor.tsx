@@ -20,7 +20,9 @@ import { followLinkAtCursor, linkClickHandler, type LinkOpenDeps, type OpenTarge
 import { imageLoader } from './live/imageWidget';
 import { vaultImages, type VaultImages } from './live/vaultImages';
 import { pasteImages } from './live/pasteImage';
-import { writeVaultImage, type RawInvoke } from '../fs/vaultImage';
+import { writeVaultAttachment, writeVaultImage, type RawInvoke } from '../fs/vaultImage';
+import { revealInFolder } from '../fs/vaultOpen';
+import type { ImageFolder } from '../labnote/settings';
 import { linkIndex } from '../links/linkIndex';
 import { completionGuards, wikiCompletionSource, wikiReopen, type WikiCompletionDeps } from '../links/complete';
 import { pendingSampleInsert, sampleCompletionSource, sampleOptionClass, sampleReopen, type SampleCompletionDeps } from '../samples/complete';
@@ -127,6 +129,8 @@ interface Props {
   samples?: SampleEditorConfig | null;
   /** 샘플 동작(완성의 동작 줄, 샘플 넣기)이 쓰는 SampleEnv. 명령 맥락이 아직 없으면 undefined. */
   sampleEnv?: () => SampleEnv | undefined;
+  /** 붙여 넣거나 끌어 놓은 그림을 둘 폴더(보관함 설정 imageFolder). 기본 'resources'. 붙여 넣을 때마다 최신 값을 읽는다. */
+  imageFolder?: ImageFolder;
 }
 
 export interface WindowApi {
@@ -164,6 +168,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     onChangeStatus,
     samples = null,
     sampleEnv,
+    imageFolder = 'resources',
   },
   ref,
 ) {
@@ -252,8 +257,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const checkQueued = useRef(false);
-  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv });
-  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv };
+  const latest = useRef({ invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder });
+  latest.current = { invoke, autosaveMs, maxAutosaveMs, onContextMenu, onOpenLink, onChangeStatus, sampleEnv, imageFolder };
 
   const [status, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
   /** 명령이 동기적으로 묻는 상태(busy). 렌더를 기다리지 않는다. */
@@ -617,8 +622,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         onChangeStatus: () => latest.current.onChangeStatus?.(),
         onOpenLink: (target) => latest.current.onOpenLink?.(target),
       }),
-      // 이미지 붙여 넣기·끌어 놓기 → 노트 폴더의 images/ 에 새 파일 + `![[이름]]`. 두 모드 모두에서 되도록 모드 칸 밖에 둔다.
-      // 쓴 뒤에는 pasteImages 가 이름 색인을 버리고(isUnique 가 새 파일을 보게) 이름만 넣을지 경로를 넣을지 정한다.
+      // 그림·첨부 붙여 넣기·끌어 놓기(Task 17) → 실험의 resources/(그림은 설정에 따라 노트 폴더의 images/)에 새 파일 + 링크.
+      // 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 쓴 뒤에는 pasteImages 가 이름 색인을 버리고(isUnique 가 새 파일을 보게)
+      // 이름만 넣을지 경로를 넣을지 정한다.
       pasteImages({
         // 감시자는 새 이미지를 알리지 않는다(D1): 쓴 경로를 링크 색인에 바로 넣어 `![[이름]]` 이 풀리게 한다.
         write: async (dir, name, bytes) => {
@@ -626,6 +632,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
           linkIndex.addFiles([written]);
           return written;
         },
+        writeAttachment: (dir, name, bytes) => writeVaultAttachment(dir, name, bytes, latest.current.invoke as unknown as RawInvoke),
+        // 첨부 이름이 보관함에서 하나뿐인가: 파일 트리(vault_tree, 첨부도 싣는다)에서 같은 이름(대소문자 무시)을 센다
+        isUniqueAttachment: async (name) => {
+          const want = name.toLowerCase();
+          const entries = await latest.current.invoke<{ path: string; isDir: boolean }[]>('vault_tree', {});
+          return entries.filter((e) => !e.isDir && e.path.slice(e.path.lastIndexOf('/') + 1).toLowerCase() === want).length === 1;
+        },
+        imageFolder: () => latest.current.imageFolder,
+        reveal: (p) => void revealInFolder(p, latest.current.invoke).catch(() => {}),
       }),
       editorTheme,
       // 섞인 줄바꿈 파일의 소수 쪽 줄 끝(CR 또는 LF)이 눈에 보이는 기호로 나온다 — 줄바꿈처럼 보이는데 줄이 아닌 것이 되지 않게.

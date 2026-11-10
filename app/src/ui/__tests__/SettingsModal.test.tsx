@@ -184,10 +184,11 @@ describe('Settings modal', () => {
     await user.click(within(dialog().getByRole('radiogroup', { name: '기본 편집 방식' })).getByRole('radio', { name: '소스 보기' }));
     expect(getMode()).toBe('source');
     const folder = dialog().getByRole('radiogroup', { name: '그림 저장 폴더' });
-    expect(within(folder).getByRole('radio', { name: 'images (기본)' }).getAttribute('aria-checked')).toBe('true');
-    await user.click(within(folder).getByRole('radio', { name: 'resources' }));
-    expect(deps.update).toHaveBeenCalledWith({ imageFolder: 'resources' });
-    expect(within(folder).getByRole('radio', { name: 'resources' }).getAttribute('aria-checked')).toBe('true');
+    // 2026-11-10 사용자 결정: 그림도 기본은 resources, images 는 Obsidian·플러그인과 같은 선택
+    expect(within(folder).getByRole('radio', { name: 'resources (기본)' }).getAttribute('aria-checked')).toBe('true');
+    await user.click(within(folder).getByRole('radio', { name: 'images (Obsidian·플러그인과 같음)' }));
+    expect(deps.update).toHaveBeenCalledWith({ imageFolder: 'images' });
+    expect(within(folder).getByRole('radio', { name: 'images (Obsidian·플러그인과 같음)' }).getAttribute('aria-checked')).toBe('true');
   });
 
   it('Experiments: toggling autoSyncUnitOpToc and autoUpdateLastUpdated persists through the settings store; the experimenter commits on blur', async () => {

@@ -3,11 +3,16 @@
 //! POSIX path and is confined to the vault here (links resolved first, so a
 //! junction out of the vault is `escape`). The JS opener capability stays
 //! URL-only (plan ruling R7): nothing here takes an absolute path from JS.
+//!
+//! Also the write side of non-image attachments (`vault_write_attachment`,
+//! plan Task 17): a file pasted or dropped into a note is created directly in
+//! the note's computed `resources/` folder, never anywhere else.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use super::fs::FsError;
-use super::path::confine;
+use super::fs::{confine_write, create_new_image, header, join_error, FsError, PathLocks};
+use super::path::{confine, is_safe_component, to_rel};
 
 /// Extensions (lowercase) that are never opened or written as attachments:
 /// running them would execute code, not show a document. Microsoft's
@@ -20,8 +25,8 @@ pub const BLOCKED_EXTS: &[&str] = &[
     "ocx", "drv", "cab", "diagcab", "application", "appref-ms", "gadget", "jar", "jnlp", "xll", "xbap", "vsix",
     // Windows scripts and script hosts
     "bat", "cmd", "ps1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2", "psm1", "psd1", "pssc", "cdxml", "msh", "msh1",
-    "msh2", "mshxml", "msh1xml", "msh2xml", "vb", "vbs", "vbe", "js", "jse", "ws", "wsf", "wsh", "wsc", "sct", "hta",
-    "mht", "mhtml", "shb", "shs", "inf", "ins", "isp", "reg", "msc", "mmc", "mst", "mcf",
+    "msh2", "mshxml", "msh1xml", "msh2xml", "vb", "vbs", "vbe", "js", "jse", "mjs", "cjs", "ws", "wsf", "wsh", "wsc", "sct", "hta",
+    "mht", "mhtml", "html", "htm", "xhtml", "xht", "shtml", "svgz", "shb", "shs", "inf", "ins", "isp", "reg", "msc", "mmc", "mst", "mcf",
     // other interpreters
     "py", "pyw", "pyz", "pyzw", "pyc", "pyo", "sh", "bash", "zsh", "ksh", "csh", "pl", "pm", "rb", "rbw", "php", "tcl",
     "lua", "r", "command", "tool", "vbproj", "csproj",
@@ -65,6 +70,76 @@ pub fn is_blocked_name(name: &str) -> bool {
 /// `OPENABLE_EXTS` (and, belt and braces, not in `BLOCKED_EXTS`).
 pub fn is_openable_name(name: &str) -> bool {
     !is_blocked_name(name) && last_ext(name).is_some_and(|ext| OPENABLE_EXTS.contains(&ext.as_str()))
+}
+
+/// Larger attachments are refused (`TooLarge`); TS checks the same cap before reading.
+pub const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
+
+fn bad(msg: impl Into<String>) -> FsError {
+    FsError::BadInput(msg.into())
+}
+
+/// Whether the '/'-separated `rel` names the plugin's system folders
+/// `resources/labsamples` or `resources/workflows` anywhere (case-insensitive).
+fn touches_system_folder(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    parts.windows(2).any(|w| {
+        w[0].eq_ignore_ascii_case("resources") && (w[1].eq_ignore_ascii_case("labsamples") || w[1].eq_ignore_ascii_case("workflows"))
+    })
+}
+
+/// The attachment folder rule, on the name the caller gave and again on where
+/// it resolves: the last component is `resources`, and the path never goes
+/// through `resources/labsamples` or `resources/workflows`.
+fn check_attachment_dir(rel: &str) -> Result<(), FsError> {
+    let last = rel.rsplit('/').next().unwrap_or(rel);
+    if !last.eq_ignore_ascii_case("resources") {
+        return Err(bad(format!("{rel}: attachments are written only into a resources folder")));
+    }
+    if touches_system_folder(rel) {
+        return Err(bad(format!("{rel}: attachments are never written into the sample or workflow catalog folders")));
+    }
+    Ok(())
+}
+
+/// Split an attachment's file name into `(stem, ".ext" or "")`. The name must
+/// be one safe path component, must not start with '.', and must not end in a
+/// blocked (executable or script) extension.
+fn safe_attachment_name(name: &str) -> Result<(String, String), FsError> {
+    if name.is_empty() || name.contains('/') || name.starts_with('.') || !is_safe_component(name) {
+        return Err(FsError::Vault(super::path::VaultError::Escape));
+    }
+    if is_blocked_name(name) {
+        return Err(bad(format!("{name}: this kind of file is never saved as an attachment")));
+    }
+    Ok(match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem.to_string(), format!(".{ext}")),
+        _ => (name.to_string(), String::new()),
+    })
+}
+
+/// Write a new attachment into vault folder `dir` (a `resources` folder, created
+/// when missing) without ever replacing an existing file: `stem.ext`, then
+/// `stem 1.ext` .. `stem 99.ext`, each with `create_new`. Returns the vault path written.
+pub fn write_attachment(locks: &PathLocks, root: &Path, dir: &str, name: &str, bytes: &[u8]) -> Result<String, FsError> {
+    check_attachment_dir(dir)?;
+    let (stem, ext) = safe_attachment_name(name)?;
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(FsError::TooLarge);
+    }
+    let abs_dir = confine_write(root, dir)?;
+    // A link planted in the path must not lead into a system folder or out of a resources folder.
+    let resolved = to_rel(root, &abs_dir)?;
+    check_attachment_dir(&resolved)?;
+    std::fs::create_dir_all(&abs_dir)?;
+    for k in 0..=99u32 {
+        let file = if k == 0 { format!("{stem}{ext}") } else { format!("{stem} {k}{ext}") };
+        let rel = format!("{dir}/{file}");
+        if create_new_image(locks, root, &rel, bytes)? {
+            return Ok(rel);
+        }
+    }
+    Err(FsError::Exists)
 }
 
 /// What actually opens things; a trait so tests never launch anything.
@@ -139,6 +214,27 @@ pub async fn vault_reveal<R: tauri::Runtime>(
 ) -> Result<(), FsError> {
     let root = state.root()?;
     reveal(&root, &path, &AppOpener(&app))
+}
+
+/// Paste and drop of a non-image file: the raw protocol of `vault_write_image`
+/// (bytes as the raw body, percent-encoded `x-lno-dir` and `x-lno-name`
+/// headers). Returns the vault path written.
+#[tauri::command]
+pub async fn vault_write_attachment(
+    state: tauri::State<'_, super::VaultState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, FsError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(bad("the attachment must be sent as raw bytes"));
+    };
+    let dir = header(&request, "x-lno-dir")?;
+    let name = header(&request, "x-lno-name")?;
+    let bytes = bytes.clone();
+    let root = state.root()?;
+    let locks = Arc::clone(&state.locks);
+    tauri::async_runtime::spawn_blocking(move || write_attachment(&locks, &root, &dir, &name, &bytes))
+        .await
+        .map_err(join_error)?
 }
 
 #[cfg(test)]
@@ -267,4 +363,80 @@ mod tests {
         assert!(!is_blocked_name("exe"));
         assert!(!is_blocked_name("report.pdf"));
     }
+
+    #[test]
+    fn writes_attachments_into_resources_and_never_overwrites() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        assert_eq!(write_attachment(&l, &t.0, "exp/resources", "plate.csv", b"a,b").unwrap(), "exp/resources/plate.csv");
+        assert_eq!(write_attachment(&l, &t.0, "exp/resources", "plate.csv", b"c,d").unwrap(), "exp/resources/plate 1.csv");
+        assert_eq!(std::fs::read(t.0.join("exp/resources/plate.csv")).unwrap(), b"a,b");
+        assert_eq!(std::fs::read(t.0.join("exp/resources/plate 1.csv")).unwrap(), b"c,d");
+        // a vault-root note's folder, a name without an extension, Korean names
+        assert_eq!(write_attachment(&l, &t.0, "resources", "README", b"x").unwrap(), "resources/README");
+        assert_eq!(write_attachment(&l, &t.0, "resources", "README", b"y").unwrap(), "resources/README 1");
+        assert_eq!(write_attachment(&l, &t.0, "exp/resources", "결과.xlsx", b"x").unwrap(), "exp/resources/결과.xlsx");
+    }
+
+    #[test]
+    fn gives_up_after_99_suffixes() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        for _ in 0..100 {
+            write_attachment(&l, &t.0, "exp/resources", "x.csv", b"1").unwrap();
+        }
+        assert!(matches!(write_attachment(&l, &t.0, "exp/resources", "x.csv", b"1"), Err(FsError::Exists)));
+    }
+
+    #[test]
+    fn refuses_system_folders_other_folders_blocked_types_escapes_and_oversize() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        let refused = |dir: &str, name: &str| write_attachment(&l, &t.0, dir, name, b"x").is_err();
+        assert!(refused("exp/resources/labsamples", "x.json"));
+        assert!(refused("resources/workflows", "x.json"));
+        assert!(refused("resources/Workflows/resources", "x.json"));
+        assert!(refused("exp/Resources/LabSamples/resources", "x.json"));
+        assert!(refused("exp/images", "plate.csv"));
+        assert!(refused("exp", "plate.csv"));
+        assert!(refused("", "plate.csv"));
+        assert!(refused("../resources", "x.csv"));
+        assert!(refused("exp/resources", "../x.csv"));
+        assert!(refused("exp/resources", "a/b.csv"));
+        assert!(refused(".obsidian/resources", "x.csv"));
+        for name in ["run.exe", "a.ps1", "b.BAT", "c.lnk", "d.js", "e.mjs", "f.html", "g.htm", "h.hta", "i.msi", "j.reg", "k.jar", "l.py"] {
+            assert!(matches!(write_attachment(&l, &t.0, "exp/resources", name, b"x"), Err(FsError::BadInput(_))), "{name}");
+        }
+        for name in [".hidden", "CON.csv", "a:b.csv", "x.csv.", "x.csv ", "a|b.csv"] {
+            assert!(refused("exp/resources", name), "{name}");
+        }
+        let big = vec![0u8; MAX_ATTACHMENT_BYTES as usize + 1];
+        assert!(matches!(write_attachment(&l, &t.0, "exp/resources", "big.zip", &big), Err(FsError::TooLarge)));
+        // nothing was created by the refusals
+        assert!(!t.0.join("exp/resources").exists() || std::fs::read_dir(t.0.join("exp/resources")).unwrap().next().is_none());
+        assert!(!t.0.join("resources").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_a_junction_into_a_system_folder() {
+        let t = Tmp::new();
+        let l = PathLocks::default();
+        std::fs::create_dir_all(t.0.join("resources/labsamples")).unwrap();
+        std::fs::create_dir_all(t.0.join("exp")).unwrap();
+        let link = t.0.join("exp").join("resources");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(t.0.join("resources").join("labsamples"))
+            .output()
+            .unwrap();
+        if !status.status.success() {
+            return; // no junctions on this file system
+        }
+        assert!(write_attachment(&l, &t.0, "exp/resources", "x.json", b"x").is_err());
+        assert!(std::fs::read_dir(t.0.join("resources/labsamples")).unwrap().next().is_none());
+        let _ = std::fs::remove_dir(&link);
+    }
+
 }

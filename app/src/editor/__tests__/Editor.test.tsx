@@ -817,18 +817,19 @@ describe('편집기 테마', () => {
 });
 
 describe('편집기: 창의 파일 끌어 놓기 막이와 함께', () => {
-  it('an image dropped into the real editor (inside its shadow root) is written and embedded', async () => {
+  it('an image and a CSV dropped into the real editor (inside its shadow root) are written to resources/ and linked', async () => {
     const dispose = installFileDropGuard(window);
     try {
       const s = setup({ [P]: 'a' });
       const writes: Array<{ dir: string; name: string }> = [];
       const invoke = (async (cmd: string, args: unknown, options?: { headers?: Record<string, string> }) => {
-        if (cmd === 'vault_write_image') {
+        if (cmd === 'vault_write_image' || cmd === 'vault_write_attachment') {
           const dir = decodeURIComponent(options!.headers!['x-lno-dir']);
           const name = decodeURIComponent(options!.headers!['x-lno-name']);
           writes.push({ dir, name });
           return `${dir}/${name}`;
         }
+        if (cmd === 'vault_tree') return [{ path: 'lab/resources/plate.csv', isDir: false }];
         return (s.invoke as unknown as (c: string, a: unknown) => Promise<unknown>)(cmd, args);
       }) as never;
       const images: VaultImages = {
@@ -843,21 +844,29 @@ describe('편집기: 창의 파일 끌어 놓기 막이와 함께', () => {
       const view = EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
       view.posAtCoords = (() => 1) as typeof view.posAtCoords;
       const file = new File([new Uint8Array([1])], 'gel.png', { type: 'image/png' });
+      const data = new File(['a,b'], 'plate.csv', { type: 'text/csv' });
+      const files = [file, data];
       const drop = new MouseEvent('drop', { bubbles: true, cancelable: true, composed: true, clientX: 0, clientY: 0 });
       Object.defineProperty(drop, 'dataTransfer', {
         value: {
-          files: Object.assign([file], { item: (i: number) => (i === 0 ? file : null) }),
-          items: [{ kind: 'file', type: file.type, getAsFile: () => file }],
+          files: Object.assign([...files], { item: (i: number) => files[i] ?? null }),
+          items: files.map((f) => ({ kind: 'file', type: f.type, getAsFile: () => f })),
           types: ['Files'],
           getData: () => '',
         },
       });
       view.contentDOM.dispatchEvent(drop);
       expect(drop.defaultPrevented).toBe(true);
-      await waitFor(() => expect(writes).toEqual([{ dir: 'lab/images', name: 'gel.png' }]));
-      await waitFor(() => expect(view.state.doc.toString()).toBe('a![[gel.png]]'));
+      // 그림 폴더 기본값은 resources(2026-11-10 사용자 결정): 그림과 첨부가 같은 resources/ 로 간다
+      await waitFor(() =>
+        expect(writes).toEqual([
+          { dir: 'lab/resources', name: 'gel.png' },
+          { dir: 'lab/resources', name: 'plate.csv' },
+        ]),
+      );
+      await waitFor(() => expect(view.state.doc.toString()).toBe('a![[gel.png]]\n[[plate.csv]]'));
       // The watcher never reports a new image (D1): the link index learns it from the write.
-      expect(linkIndex.files()).toContain('lab/images/gel.png');
+      expect(linkIndex.files()).toContain('lab/resources/gel.png');
     } finally {
       linkIndex.clear();
       dispose();

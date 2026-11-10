@@ -47,11 +47,14 @@ export type AppSettings = Pick<
   mcpPort: number;
   /** 앱에만 있는 키(UI 재설계): 새 실험의 실험자 칸에 미리 채울 이름. 기본 ''. 설정 → 실험·워크플로. */
   defaultExperimenter: string;
-  /** 앱에만 있는 키(UI 재설계 R1): 노트에 붙인 그림을 둘 폴더. 기본 'images'(Obsidian·플러그인과 같다). 설정 → 편집기. */
+  /**
+   * 앱에만 있는 키(UI 재설계 R1, 2026-11-10 사용자 결정): 노트에 붙인 그림을 둘 폴더. 기본 'resources'(다른 첨부와 같은
+   * 실험의 resources/). 'images' 는 노트 폴더의 images/(Obsidian·플러그인과 같다). 설정 → 편집기.
+   */
   imageFolder: ImageFolder;
 };
 
-/** 그림 저장 폴더: 노트 폴더의 images/(기본) 또는 실험의 resources/. */
+/** 그림 저장 폴더: 실험의 resources/(기본) 또는 노트 폴더의 images/. */
 export type ImageFolder = 'images' | 'resources';
 
 /** 실험자 이름의 최대 길이(글자). 넘는 것은 자른다. */
@@ -160,7 +163,7 @@ const APP_DEFAULTS = {
   bfwConnection: 'server',
   mcpPort: MCP_DEFAULT_PORT,
   defaultExperimenter: '',
-  imageFolder: 'images',
+  imageFolder: 'resources',
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {

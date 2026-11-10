@@ -19,7 +19,14 @@ import {
   pasteImages,
   pastedImageName,
   pendingPaste,
+  dropHint,
+  DROP_HINT_MS,
+  type PasteImageDeps,
 } from '../pasteImage';
+import { attachmentDir, attachmentName, imageDir, isBlockedName, linkFor, BLOCKED_EXTS } from '../attachments';
+import type { NotifyOpts } from '../../../labnote/host/toastStore';
+import { readFileSync } from 'node:fs';
+import { installFileDropGuard } from '../../../ui/fileDropGuard';
 import { setLang } from '../../../i18n/lang';
 import { t } from '../../../i18n/t';
 
@@ -51,7 +58,7 @@ function fakeImages(): VaultImages {
 function view(
   doc: string,
   pos: number,
-  opts: { notePath?: string; write: Write; readOnly?: boolean; extra?: Extension[] },
+  opts: { notePath?: string; write: Write; readOnly?: boolean; extra?: Extension[]; deps?: Partial<PasteImageDeps> },
 ): EditorView {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
@@ -69,7 +76,8 @@ function view(
         livePreview(),
         tableExtension({ save: () => {}, root: document }),
         imageLoader.of({ notePath: opts.notePath ?? 'exp/n.labnote.md', images: fakeImages() }),
-        pasteImages({ write: opts.write, toast, notice }),
+        // 옛 테스트는 그림 폴더 images(노트 폴더)를 본다. 기본(resources)은 아래 Task 17 묶음이 본다.
+        pasteImages({ write: opts.write, toast, notice, imageFolder: () => 'images', ...opts.deps }),
         opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
         ...(opts.extra ?? []),
       ],
@@ -500,5 +508,240 @@ describe('라이브 미리보기: 이미지 붙여 넣기와 끌어 놓기', () 
     w.contentDOM.dispatchEvent(pasteEvent([png()]));
     await flush();
     expect(toast).toHaveBeenCalledWith(t('live.image.saveFailed', 'disk full'));
+  });
+});
+
+describe('Task 17: 첨부는 resources/ 로, 그림 폴더 설정, 자세한 알림', () => {
+  const EXP = 'labnote/001_pUC19';
+  const NOTE = `${EXP}/WB030_assembly.labnote.md`;
+  const csv = (name = 'plate-reading.csv') => new File([new Uint8Array([97, 44, 98])], name, { type: 'text/csv' });
+
+  function setup(deps: Partial<PasteImageDeps> = {}, doc = 'a', pos = 1) {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const writeAttachment = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const saved = vi.fn<(message: string, opts: NotifyOpts) => void>();
+    const reveal = vi.fn<(path: string) => void>();
+    const v = view(doc, pos, {
+      notePath: NOTE,
+      write,
+      deps: { imageFolder: undefined, writeAttachment, isUniqueAttachment: async () => true, saved, reveal, ...deps },
+    });
+    // jsdom 에는 레이아웃이 없다: 놓은 자리를 커서 자리로 정한다
+    v.posAtCoords = (() => pos) as typeof v.posAtCoords;
+    return { v, write, writeAttachment, saved, reveal };
+  }
+
+  it('the folder helpers: attachments go to the experiment resources, pictures follow the setting', () => {
+    expect(attachmentDir(NOTE)).toBe(`${EXP}/resources`);
+    expect(attachmentDir(`${EXP}/README.labnote.md`)).toBe(`${EXP}/resources`);
+    expect(attachmentDir(`${EXP}/sub/deep.labnote.md`)).toBe(`${EXP}/resources`);
+    // 실험 밖의 노트: 노트 폴더의 resources, 보관함 루트면 resources
+    expect(attachmentDir('notes/meeting.md')).toBe('notes/resources');
+    expect(attachmentDir('todo.md')).toBe('resources');
+    expect(imageDir(NOTE, 'resources')).toBe(`${EXP}/resources`);
+    expect(imageDir(`${EXP}/sub/deep.labnote.md`, 'images')).toBe(`${EXP}/sub/images`);
+    expect(imageDir('todo.md', 'images')).toBe('images');
+  });
+
+  it('linkFor: plain link for data, embed for pictures and PDFs, the vault path when the name is not unique', () => {
+    expect(linkFor(`${EXP}/resources/plate-reading.csv`, true)).toBe('[[plate-reading.csv]]');
+    expect(linkFor(`${EXP}/resources/plate-reading.csv`, false)).toBe(`[[${EXP}/resources/plate-reading.csv]]`);
+    expect(linkFor(`${EXP}/resources/report.PDF`, true)).toBe('![[report.PDF]]');
+    expect(linkFor(`${EXP}/resources/gel.png`, true)).toBe('![[gel.png]]');
+    expect(linkFor(`${EXP}/resources/x.svg`, true)).toBe('![[x.svg]]');
+  });
+
+  it('attachmentName keeps a safe name and cleans the rest', () => {
+    const now = new Date(2026, 10, 10, 9, 30, 0);
+    expect(attachmentName('C:\\data\\plate-reading.csv', now)).toBe('plate-reading.csv');
+    expect(attachmentName('../../x.csv', now)).toBe('x.csv');
+    expect(attachmentName('a:b|c[1].csv', now)).toBe('a_b_c_1_.csv');
+    expect(attachmentName('결과 정리.xlsx', now)).toBe('결과 정리.xlsx');
+    expect(attachmentName('x.csv. ', now)).toBe('x.csv');
+    expect(attachmentName('CON.csv', now)).toBe('Pasted file 20261110093000.csv');
+    expect(attachmentName('.env', now)).toBe('Pasted file 20261110093000.env');
+    expect(attachmentName('', now)).toBe('Pasted file 20261110093000');
+  });
+
+  it('the blocked list matches Rust BLOCKED_EXTS', () => {
+    const rs = readFileSync('src-tauri/src/vault/attach.rs', 'utf-8');
+    const block = rs.slice(rs.indexOf('pub const BLOCKED_EXTS'), rs.indexOf('];', rs.indexOf('pub const BLOCKED_EXTS')));
+    const rust = [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect([...BLOCKED_EXTS].sort()).toEqual(rust.sort());
+    expect(isBlockedName('Setup.EXE')).toBe(true);
+    expect(isBlockedName('page.html')).toBe(true);
+    expect(isBlockedName('plate.csv')).toBe(false);
+    expect(isBlockedName('exe')).toBe(false);
+  });
+
+  it('dropping a CSV and a PNG writes both to the experiment resources/, links them in one undo step and shows the detailed toast (ko)', async () => {
+    setLang('ko');
+    const { v, write, writeAttachment, saved, reveal } = setup();
+    const ev = dropEvent([csv(), png('gel.png')]);
+    v.contentDOM.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    await flush();
+    expect(writeAttachment).toHaveBeenCalledWith(`${EXP}/resources`, 'plate-reading.csv', expect.any(Uint8Array));
+    expect(Array.from(writeAttachment.mock.calls[0][2])).toEqual([97, 44, 98]);
+    expect(write).toHaveBeenCalledWith(`${EXP}/resources`, 'gel.png', expect.any(Uint8Array));
+    expect(v.state.doc.toString()).toBe('a[[plate-reading.csv]]\n![[gel.png]]');
+    undo(v);
+    expect(v.state.doc.toString()).toBe('a');
+    expect(saved).toHaveBeenCalledTimes(1);
+    const [, opts] = saved.mock.calls[0];
+    expect(opts.title).toBe('첨부 2개 저장됨');
+    expect(opts.detail).toBe('plate-reading.csv → resources/, gel.png → resources/');
+    expect(opts.action?.label).toBe('폴더 열기');
+    opts.action!.run();
+    expect(reveal).toHaveBeenCalledWith(`${EXP}/resources/plate-reading.csv`);
+  });
+
+  it("with imageFolder='images' the picture goes to the note folder's images/ and the toast says so", async () => {
+    const { v, write, writeAttachment, saved } = setup({ imageFolder: () => 'images' });
+    v.contentDOM.dispatchEvent(dropEvent([csv(), png('gel.png')]));
+    await flush();
+    expect(writeAttachment).toHaveBeenCalledWith(`${EXP}/resources`, 'plate-reading.csv', expect.any(Uint8Array));
+    expect(write).toHaveBeenCalledWith(`${EXP}/images`, 'gel.png', expect.any(Uint8Array));
+    expect(saved.mock.calls[0][1].title).toBe('2 attachments saved');
+    expect(saved.mock.calls[0][1].detail).toBe('plate-reading.csv → resources/, gel.png → images/');
+  });
+
+  it('the setting is read at each paste, so a change applies at once', async () => {
+    let folder: 'images' | 'resources' = 'images';
+    const { v, write } = setup({ imageFolder: () => folder });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    folder = 'resources';
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(write.mock.calls.map((c) => c[0])).toEqual([`${EXP}/images`, `${EXP}/resources`]);
+  });
+
+  it('a dropped CSV is no longer swallowed: it is written and linked, without the "images only" notice', async () => {
+    const { v, writeAttachment } = setup();
+    const ev = dropEvent([csv()]);
+    v.contentDOM.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    await flush();
+    expect(writeAttachment).toHaveBeenCalledTimes(1);
+    expect(v.state.doc.toString()).toBe('a[[plate-reading.csv]]');
+    expect(notice).not.toHaveBeenCalled();
+  });
+
+  it('a pasted file (copied in Explorer) is taken too, under its own name', async () => {
+    const { v, writeAttachment } = setup();
+    v.contentDOM.dispatchEvent(pasteEvent([new File(['x'], 'report.pdf', { type: 'application/pdf' })]));
+    await flush();
+    expect(writeAttachment).toHaveBeenCalledWith(`${EXP}/resources`, 'report.pdf', expect.any(Uint8Array));
+    expect(v.state.doc.toString()).toBe('a![[report.pdf]]');
+  });
+
+  it('an .exe is refused with a warning and the rest of the drop still goes through', async () => {
+    const { v, writeAttachment } = setup();
+    v.contentDOM.dispatchEvent(dropEvent([new File(['MZ'], 'setup.exe', { type: 'application/x-msdownload' }), csv()]));
+    await flush();
+    expect(notice).toHaveBeenCalledWith(t('attach.blocked', 'setup.exe'));
+    expect(writeAttachment.mock.calls.map((c) => c[1])).toEqual(['plate-reading.csv']);
+    expect(v.state.doc.toString()).toBe('a[[plate-reading.csv]]');
+    notice.mockClear();
+    const only = setup();
+    only.v.contentDOM.dispatchEvent(dropEvent([new File(['x'], 'run.ps1', { type: '' })]));
+    await flush();
+    expect(only.writeAttachment).not.toHaveBeenCalled();
+    expect(notice).toHaveBeenCalledWith(t('attach.blocked', 'run.ps1'));
+    expect(only.v.state.doc.toString()).toBe('a');
+  });
+
+  it('a non-unique attachment name is linked by its vault path', async () => {
+    const { v } = setup({ isUniqueAttachment: async () => false });
+    v.contentDOM.dispatchEvent(dropEvent([csv()]));
+    await flush();
+    expect(v.state.doc.toString()).toBe(`a[[${EXP}/resources/plate-reading.csv]]`);
+  });
+
+  it('an attachment over 100 MiB is refused before its bytes are read', async () => {
+    const { v, writeAttachment } = setup();
+    const big = csv('huge.csv');
+    Object.defineProperty(big, 'size', { value: 100 * 1024 * 1024 + 1 });
+    v.contentDOM.dispatchEvent(dropEvent([big]));
+    await flush();
+    expect(writeAttachment).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(t('attach.saveFailed', 'huge.csv', t('attach.tooBig')));
+    expect(v.state.doc.toString()).toBe('a');
+  });
+
+  it('a refused attachment write names the file; nothing is announced when nothing was saved', async () => {
+    const { v, saved } = setup({ writeAttachment: async () => Promise.reject({ kind: 'badInput', message: 'not a resources folder' }) });
+    v.contentDOM.dispatchEvent(dropEvent([csv()]));
+    await flush();
+    expect(toast).toHaveBeenCalledWith(t('attach.saveFailed', 'plate-reading.csv', 'not a resources folder'));
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it('the 50-file cap counts pictures and attachments together', async () => {
+    const { v, write, writeAttachment } = setup();
+    const files = [...Array.from({ length: 30 }, (_, i) => png(`p${i}.png`)), ...Array.from({ length: 25 }, (_, i) => csv(`c${i}.csv`))];
+    v.contentDOM.dispatchEvent(dropEvent(files));
+    await vi.waitFor(() => expect(v.state.field(pendingPaste)).toEqual([]), { timeout: 5000 });
+    expect(write.mock.calls.length + writeAttachment.mock.calls.length).toBe(50);
+    expect(notice).toHaveBeenCalledWith(t('live.image.tooMany', 50, 5));
+  });
+
+  it('dragging files over the editor says where they will go, and the hint clears on drop', async () => {
+    setLang('ko');
+    const { v } = setup();
+    const over = (files: File[]) => {
+      const ev = new MouseEvent('dragover', { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer(files) });
+      v.contentDOM.dispatchEvent(ev);
+    };
+    over([csv()]);
+    expect(v.state.field(dropHint)).toBe('resources/에 첨부');
+    expect(v.dom.classList.contains('lno-drop-target')).toBe(true);
+    expect(v.dom.getAttribute('data-drop-hint')).toBe('resources/에 첨부');
+    v.contentDOM.dispatchEvent(dropEvent([csv()]));
+    expect(v.state.field(dropHint)).toBeNull();
+    expect(v.dom.classList.contains('lno-drop-target')).toBe(false);
+    await flush();
+    const images = setup({ imageFolder: () => 'images' });
+    const ev = new MouseEvent('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer([csv(), png()]) });
+    images.v.contentDOM.dispatchEvent(ev);
+    expect(images.v.state.field(dropHint)).toBe('resources/ · images/에 첨부');
+    // dragover 가 멈추면(편집기 밖으로 나감) 안내가 사라진다
+    await new Promise((r) => setTimeout(r, DROP_HINT_MS + 50));
+    expect(images.v.state.field(dropHint)).toBeNull();
+  });
+
+  it('no hint in a read-only editor', () => {
+    const write = vi.fn<Write>();
+    const ro = view('a', 1, { write, readOnly: true, deps: { writeAttachment: write } });
+    const ev = new MouseEvent('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer([csv()]) });
+    ro.contentDOM.dispatchEvent(ev);
+    expect(ro.state.field(dropHint)).toBeNull();
+  });
+
+  it('with the window file-drop guard installed, a dropped CSV still reaches the editor and is written', async () => {
+    const dispose = installFileDropGuard(window);
+    try {
+      const { v, writeAttachment } = setup();
+      const ev = dropEvent([csv()]);
+      Object.defineProperty(ev, 'composed', { value: true });
+      v.contentDOM.dispatchEvent(ev);
+      await flush();
+      expect(writeAttachment).toHaveBeenCalledTimes(1);
+      expect(v.state.doc.toString()).toBe('a[[plate-reading.csv]]');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('the default image folder is resources', async () => {
+    const write = vi.fn<Write>(async (dir, name) => `${dir}/${name}`);
+    const v = view('', 0, { notePath: NOTE, write, deps: { imageFolder: undefined } });
+    v.contentDOM.dispatchEvent(pasteEvent([png()]));
+    await flush();
+    expect(write).toHaveBeenCalledWith(`${EXP}/resources`, NAME, expect.any(Uint8Array));
   });
 });
