@@ -741,6 +741,180 @@ mod tests {
         assert_eq!(json, serde_json::json!({"outcome": "rejected", "kind": "nonFastForward", "lines": []}));
     }
 
+    // ---- Push over HTTP against the smart-HTTP stub (plan Task 8B) ----
+
+    use crate::gitsync::smart_http_stub::{base64, Mode, Stub};
+
+    /// A committed bare repo plus a stub serving `o/r.git`.
+    fn over_http(tag: &str, mode: Mode, also_127_0_0_2: bool) -> (Fx, Repository, Stub, Url, GitBase) {
+        let fx = Fx::new(tag);
+        let rels = first_files(&fx);
+        let repo = open_or_init(&fx.dirs, &fx.vault, LINK).unwrap();
+        fx.commit(&repo, &rels, None).unwrap();
+        let stub = Stub::start(mode, also_127_0_0_2);
+        let url = Url::parse(&format!("{}o/r.git", stub.base)).unwrap();
+        let allowed = GitBase::new(&Url::parse(&stub.base).unwrap()).unwrap();
+        (fx, repo, stub, url, allowed)
+    }
+
+    fn basic() -> String {
+        format!("Basic {}", base64(format!("x-access-token:{FAKE}").as_bytes()))
+    }
+
+    fn has_token(bytes: &[u8]) -> bool {
+        bytes.windows(FAKE.len()).any(|w| w == FAKE.as_bytes())
+    }
+
+    /// No copy of the token in the bare repo (config, FETCH_HEAD, packed-refs,
+    /// logs/ …), the temp app data, or anything the stub received besides the
+    /// `Authorization` header.
+    fn no_leaks(fx: &Fx, repo: &Repository, stub: &Stub) {
+        for f in ["config", "FETCH_HEAD", "packed-refs"] {
+            if let Ok(s) = fs::read(repo.path().join(f)) {
+                assert!(!has_token(&s), "{f}");
+            }
+        }
+        no_token_under(&fx.base);
+        for s in stub.seen() {
+            assert!(!s.target.contains(FAKE));
+            assert!(!has_token(&s.body));
+        }
+    }
+
+    #[test]
+    fn http_a_refused_token_is_tried_once_and_reported_as_auth_rejected() {
+        let (fx, repo, stub, url, allowed) = over_http("gh-http-401", Mode::always_unauthorized(), false);
+        let r = push(&repo, &url, "main", "main", &token(), &allowed, |_| true, &[]);
+        assert_eq!(r, Ok(PushResult::AuthRejected));
+        assert!(!format!("{r:?}").contains(FAKE));
+        // The token went out exactly once (one credential answer), as Basic
+        // `x-access-token`, and libgit2 then gave up.
+        assert_eq!(stub.authorizations(), vec![basic()]);
+        // Fetch and ls-remote say the same, each with one try.
+        assert_eq!(fetch(&repo, &url, "main", &token(), &allowed), Err(GitError::AuthRejected));
+        assert_eq!(ls_remote_tip(&repo, &url, "main", &token(), &allowed), Err(GitError::AuthRejected));
+        assert_eq!(stub.authorizations().len(), 3);
+        no_leaks(&fx, &repo, &stub);
+    }
+
+    #[test]
+    fn http_a_protected_branch_is_rejected() {
+        let (fx, repo, stub, url, allowed) = over_http("gh-http-ng", Mode::ng("protected branch hook declined"), false);
+        match push(&repo, &url, "main", "main", &token(), &allowed, |_| true, &[]).unwrap() {
+            PushResult::Rejected { kind: RejectKind::ProtectedBranch, lines } => {
+                assert!(lines.iter().any(|l| l.contains("protected branch hook declined")), "{lines:?}");
+            }
+            other => panic!("expected protectedBranch, got {other:?}"),
+        }
+        no_leaks(&fx, &repo, &stub);
+    }
+
+    #[test]
+    fn http_a_secret_rejection_is_classified_and_redacted() {
+        let leak = format!("remote:       - token: {FAKE}");
+        let mode = Mode::sideband(
+            &[
+                "remote: error: GH013: Repository rule violations found for refs/heads/main.",
+                "remote: - GITHUB PUSH PROTECTION",
+                leak.as_str(),
+                "remote:       - other: ghp_ABCDEFGH12345678abcdefgh",
+            ],
+            "push declined due to repository rule violations",
+        );
+        let (fx, repo, stub, url, allowed) = over_http("gh-http-gh013", mode, false);
+        match push(&repo, &url, "main", "main", &token(), &allowed, |_| true, &[]).unwrap() {
+            PushResult::Rejected { kind: RejectKind::SecretDetected, lines } => {
+                assert!(lines.iter().any(|l| l.contains("GH013")), "{lines:?}");
+                assert!(lines.iter().any(|l| l == "remote:       - token: ***"), "{lines:?}");
+                assert!(lines.iter().all(|l| !l.contains(FAKE) && !l.contains("ghp_ABCDEFGH")), "{lines:?}");
+                assert!(lines.iter().any(|l| l.contains("repository rule violations")), "{lines:?}");
+            }
+            other => panic!("expected secretDetected, got {other:?}"),
+        }
+        no_leaks(&fx, &repo, &stub);
+    }
+
+    #[test]
+    fn http_ok_sends_basic_x_access_token() {
+        let (fx, repo, stub, url, allowed) = over_http("gh-http-ok", Mode::ok(), false);
+        let mut stages = Vec::new();
+        let r = push(&repo, &url, "main", "labnoteo/20261110-1200", &token(), &allowed, |p| {
+            stages.push(p);
+            true
+        }, &[]);
+        assert_eq!(r, Ok(PushResult::Ok));
+        assert!(stages.contains(&Progress::Starting) && stages.contains(&Progress::Negotiated), "{stages:?}");
+        let seen = stub.seen();
+        // GitHub-like: the first request is anonymous and answered 401; every
+        // later one carries the one Basic credential.
+        assert_eq!(seen[0].authorization, None);
+        assert!(seen.len() >= 3, "{seen:?}");
+        for s in &seen[1..] {
+            assert_eq!(s.authorization.as_deref(), Some(basic().as_str()), "{}", s.target);
+        }
+        let post = seen.iter().find(|s| s.method == "POST").expect("a receive-pack POST");
+        assert!(post.target.ends_with("/o/r.git/git-receive-pack"), "{}", post.target);
+        assert!(post.body.windows(4).any(|w| w == b"PACK"));
+        assert!(post.body.windows(28).any(|w| w == b"refs/heads/labnoteo/20261110"));
+        no_leaks(&fx, &repo, &stub);
+    }
+
+    #[test]
+    fn http_the_token_never_goes_to_another_loopback_host() {
+        // A remote URL outside the allowed base is never contacted.
+        let (fx, repo, stub, _url, allowed) = over_http("gh-http-host", Mode::ok(), true);
+        for host in ["localhost", "127.0.0.2"] {
+            let other = Url::parse(&format!("http://{host}:{}/o/r.git", stub.port)).unwrap();
+            assert_eq!(push(&repo, &other, "main", "main", &token(), &allowed, |_| true, &[]), Err(GitError::NotAllowed));
+        }
+        assert!(stub.seen().is_empty());
+        // Past that pre-check, the credential callback itself refuses: libgit2
+        // reaches the same stub as `localhost` / `127.0.0.2`, gets the 401,
+        // asks the callback once (allowed base `127.0.0.1:<port>`), and no
+        // request ever carries a token.
+        let tok = token();
+        let mut asked = 0;
+        for host in ["localhost", "127.0.0.2"] {
+            let before = stub.seen().len();
+            let calls = Cell::new(0u32);
+            let r = {
+                let mut cb = RemoteCallbacks::new();
+                cb.credentials(credentials(&tok, &allowed, &calls));
+                let mut opts = PushOptions::new();
+                opts.remote_callbacks(cb);
+                let other = format!("http://{host}:{}/o/r.git", stub.port);
+                let mut remote = repo.remote_anonymous(&other).unwrap();
+                remote.push(&["refs/heads/main:refs/heads/main"], Some(&mut opts))
+            };
+            let e = r.expect_err(host);
+            assert!(!e.message().contains(FAKE), "{host}: {}", e.message());
+            if stub.seen().len() > before {
+                // The stub answered this host: the callback was asked and said no.
+                assert_eq!(calls.get(), 1, "{host}");
+                assert!(stub.seen()[before..].iter().all(|s| s.host.as_deref() != Some(&format!("127.0.0.1:{}", stub.port))));
+                asked += 1;
+            }
+        }
+        // `localhost` always reaches a 127.0.0.1 listener on Windows.
+        assert!(asked >= 1, "{:?}", stub.seen());
+        assert!(stub.authorizations().is_empty(), "{:?}", stub.seen());
+        no_leaks(&fx, &repo, &stub);
+        // A redirect from the allowed origin to another loopback host never
+        // gets the token either (libgit2 does not switch hosts; whatever it
+        // does, no request carries a token and the push fails).
+        for host in ["localhost", "127.0.0.2"] {
+            let stub = Stub::start(Mode::redirect_to(host), true);
+            let url = Url::parse(&format!("{}o/r.git", stub.base)).unwrap();
+            let allowed = GitBase::new(&Url::parse(&stub.base).unwrap()).unwrap();
+            let r = push(&repo, &url, "main", "main", &token(), &allowed, |_| true, &[]);
+            assert!(!matches!(r, Ok(PushResult::Ok)), "{host}: {r:?}");
+            assert!(!format!("{r:?}").contains(FAKE));
+            assert!(!stub.seen().is_empty(), "{host}: the stub was asked");
+            assert!(stub.authorizations().is_empty(), "{host}: {:?}", stub.seen());
+            no_leaks(&fx, &repo, &stub);
+        }
+    }
+
     /// No refspec in the GitHub code ever starts with `+` (no force push).
     /// Reads every `gitsync/*.rs` and `net/github/*.rs`, so files added later
     /// are covered too; `include_str!` pins the ones that exist now.

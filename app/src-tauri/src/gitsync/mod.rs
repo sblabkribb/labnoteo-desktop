@@ -10,5 +10,7 @@ pub mod plan;
 pub mod push;
 pub mod repo;
 pub mod scan;
+#[cfg(test)]
+pub mod smart_http_stub;
 pub mod state;
 pub mod walk;
