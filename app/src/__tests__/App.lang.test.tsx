@@ -217,6 +217,8 @@ describe('언어 선택', () => {
     await user.click(await screen.findByRole('treeitem', { name: 'Day 1' }));
     // 화면이 다시 마운트되면 main 도 새것이 된다: 매번 새로 찾아, 다시 마운트됐다면 아래 toBe(before) 가 그것을 드러내게 한다.
     const main = () => screen.getByRole('main');
+    // 저장 표시는 창 아래 상태 줄에 있다(본문 밖)
+    const statusbar = () => document.querySelector('.statusbar') as HTMLElement;
     // 편집기는 그림자 루트 안에 있다(CSP 때문에): 질의가 들어가지 못하므로 뷰로 직접 간다.
     const view = () => {
       const root = (main().querySelector('.editor-frame') as HTMLElement).shadowRoot!;
@@ -234,13 +236,13 @@ describe('언어 선택', () => {
     // 팔레트의 언어 명령이 하는 일(setLang)을 바로 부른다: 팔레트를 타이핑하면 userEvent 가 멈춘 시계를 기다린다
     const choose = (_name: string, value: 'ko' | 'en') => act(() => setLang(value));
     await act(async () => before.dispatch({ changes: { from: before.state.doc.length, insert: 'Tm 58 °C' }, userEvent: 'input.type' }));
-    expect(within(main()).getByText('저장 안 됨')).toBeTruthy();
+    expect(within(statusbar()).getByText('저장 안 됨')).toBeTruthy();
 
     await choose('언어', 'en');
 
     expect(view()).toBe(before); // 같은 편집기다: 다시 마운트하지 않았다
     expect(view().state.doc.toString()).toBe('PCR 결과\nTm 58 °C');
-    expect(within(main()).getByText('Unsaved')).toBeTruthy();
+    expect(within(statusbar()).getByText('Unsaved')).toBeTruthy();
     expect(within(main()).queryByText('저장 안 됨')).toBeNull();
     expect(view().contentDOM.getAttribute('aria-label')).toBe('Note editor'); // 편집기 안의 이름표도 따른다
 
@@ -250,7 +252,7 @@ describe('언어 선택', () => {
     await choose('Language', 'ko');
     expect(view()).toBe(before);
     expect(view().state.doc.toString()).toBe('PCR 결과\nTm 58 °C');
-    expect(within(main()).getByText('저장 안 됨')).toBeTruthy();
+    expect(within(statusbar()).getByText('저장 안 됨')).toBeTruthy();
     expect(view().contentDOM.getAttribute('aria-label')).toBe('노트 편집기');
     expect(saves()).toEqual([]);
 

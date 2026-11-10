@@ -1,0 +1,226 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { setLang } from '../../i18n/lang';
+import { clearEditorStatus, countWords, publishEditorStatus } from '../../editor/editorStatus';
+import { notePosition } from '../../labnote/notePosition';
+import { Breadcrumb, StatusChip } from '../Breadcrumb';
+import { NavButtons } from '../ViewHeader';
+import { StatusBar } from '../StatusBar';
+import { SelectMenu } from '../SelectMenu';
+import { Segmented } from '../Segmented';
+
+const EXP = 'labnote/003_E_coli_host';
+const WF = `${EXP}/002_WT020_Protein_Expression_Measurement_GFP.labnote.md`;
+const WF_TEXT = [
+  '## [WT020 Protein Expression Measurement] GFP',
+  '',
+  '### [UHW180 Incubation]',
+  "- End_date: '2026-11-09 08:00'",
+  '',
+  '### [UHW380 Microplate Reading] plate 1',
+  "- Start_date: '2026-11-09 09:00'",
+  "- End_date: ''",
+  '',
+].join('\n');
+
+afterEach(() => {
+  cleanup();
+  setLang('ko');
+  clearEditorStatus(WF);
+  clearEditorStatus(`${EXP}/README.labnote.md`);
+  clearEditorStatus('a/b.md');
+});
+
+describe('Breadcrumb', () => {
+  it('renders experiment › workflow; the last segment opens a UO menu whose choice jumps to the heading', async () => {
+    const onOpen = vi.fn();
+    const onJump = vi.fn();
+    const onMenu = vi.fn();
+    render(<Breadcrumb position={notePosition(WF, WF_TEXT, { now: '2026-11-10 12:00' })} onOpen={onOpen} onJump={onJump} onMenu={onMenu} />);
+    const nav = screen.getByRole('navigation', { name: '노트 위치' });
+    expect(nav.textContent).toBe('003E coli hostWT020GFP');
+    expect([...nav.querySelectorAll('li')].map((li) => li.getAttribute('aria-hidden'))).toEqual([null, 'true', null]);
+    await userEvent.click(within(nav).getByRole('button', { name: /E coli host/ }));
+    expect(onOpen).toHaveBeenCalledWith(`${EXP}/README.labnote.md`);
+    const last = within(nav).getByRole('button', { name: /WT020/ });
+    expect(last.getAttribute('aria-haspopup')).toBe('menu');
+    await userEvent.click(last);
+    const [anchor, items] = onMenu.mock.calls[0];
+    expect(anchor).toBe(last);
+    expect(items.map((i: { label: string }) => i.label)).toEqual(['✓ UHW180 Incubation', 'UHW380 plate 1']);
+    await items[1].run();
+    expect(onJump).toHaveBeenCalledWith(5);
+    // 상태 칩: 진행 중(반쪽 원), 워크플로에서는 단추가 아니다
+    const chip = document.querySelector('.chip.status') as HTMLElement;
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.textContent).toBe('진행 중');
+  });
+
+  it('a workflow with no UO offers a disabled hint in the menu', async () => {
+    const onMenu = vi.fn();
+    render(<Breadcrumb position={notePosition(WF, '')} onOpen={vi.fn()} onJump={vi.fn()} onMenu={onMenu} />);
+    await userEvent.click(screen.getByRole('button', { name: /WT020/ }));
+    expect(onMenu.mock.calls[0][1]).toEqual([expect.objectContaining({ label: '아직 유닛 오퍼레이션이 없습니다', disabled: true })]);
+  });
+
+  it('a README shows the experiment, a "워크플로 1/3" chip and a status chip that runs the status command', async () => {
+    const onStatus = vi.fn();
+    const text = '---\nstatus: planned\n---\n## 🗂️ Related Workflows\n\n- [x] [A](./001_WA010_A.labnote.md)\n- [ ] [B](./002_WB010_B.labnote.md)\n- [ ] [C](./003_WC010_C.labnote.md)\n';
+    render(<Breadcrumb position={notePosition(`${EXP}/README.labnote.md`, text)} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} onStatus={onStatus} />);
+    expect(screen.getByText('워크플로 1/3')).toBeTruthy();
+    const chip = screen.getByRole('button', { name: '계획' });
+    expect(chip.getAttribute('data-shape')).toBe('dashed');
+    await userEvent.click(chip);
+    expect(onStatus).toHaveBeenCalled();
+  });
+
+  it('a plain note shows its folder path, then its title', () => {
+    render(<Breadcrumb position={notePosition('Protocols/PCR/Colony PCR.labnote.md', '')} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} />);
+    const nav = screen.getByRole('navigation', { name: '노트 위치' });
+    expect(nav.textContent).toBe('ProtocolsPCRColony PCR');
+    expect(within(nav).getByText('Colony PCR').getAttribute('aria-current')).toBe('page');
+  });
+});
+
+describe('StatusChip', () => {
+  it('shows the localised label and the shape, in ko and en', () => {
+    const { rerender, container } = render(<StatusChip status="completed" />);
+    expect(container.textContent).toBe('완료');
+    expect(container.querySelector('.chip')?.getAttribute('data-shape')).toBe('check');
+    expect(container.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    act(() => setLang('en'));
+    rerender(<StatusChip status="in-progress" />);
+    expect(container.textContent).toBe('In progress');
+    expect(container.querySelector('.chip')?.getAttribute('title')).toBe('Status: In progress');
+  });
+});
+
+describe('NavButtons', () => {
+  it('back and forward are disabled when there is nowhere to go', async () => {
+    const onBack = vi.fn();
+    const { rerender } = render(<NavButtons canBack={false} canForward={false} onBack={onBack} onForward={vi.fn()} />);
+    expect((screen.getByRole('button', { name: '뒤로' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '앞으로' }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<NavButtons canBack canForward={false} onBack={onBack} onForward={vi.fn()} />);
+    const back = screen.getByRole('button', { name: '뒤로' });
+    expect(back.title).toBe('뒤로 (Alt+←)');
+    await userEvent.click(back);
+    expect(onBack).toHaveBeenCalled();
+  });
+});
+
+describe('StatusBar', () => {
+  it('shows "WT020 · UO 1/2 완료", the save state, the line and column and the word count', async () => {
+    const onReveal = vi.fn();
+    render(<StatusBar path={WF} onReveal={onReveal} />);
+    expect(document.querySelector('.statusbar')?.textContent).toBe('');
+    act(() => publishEditorStatus(WF, { text: WF_TEXT, words: countWords(WF_TEXT), line: 3, col: 5, save: 'saved' }));
+    const bar = within(screen.getByRole('contentinfo', { name: '상태 표시줄' }));
+    await userEvent.click(bar.getByRole('button', { name: /WT020 · UO 1\/2 완료/ }));
+    expect(onReveal).toHaveBeenCalled();
+    expect(bar.getByText('저장됨')).toBeTruthy();
+    expect(bar.getByText('줄 3, 열 5')).toBeTruthy();
+    expect(bar.getByText(`단어 ${countWords(WF_TEXT)}`)).toBeTruthy();
+    act(() => publishEditorStatus(WF, { save: 'dirty' }));
+    expect(bar.getByText('저장 안 됨')).toBeTruthy();
+    act(() => publishEditorStatus(WF, { save: 'saving' }));
+    expect(bar.getByText('저장 중…').parentElement?.querySelector('svg')?.classList.contains('spin')).toBe(true);
+    act(() => publishEditorStatus(WF, { save: 'error' }));
+    expect(bar.getByText('저장 실패').parentElement?.getAttribute('data-tone')).toBe('danger');
+    act(() => setLang('en'));
+    expect(bar.getByText('Ln 3, Col 5')).toBeTruthy();
+    expect(bar.getByText('Not saved')).toBeTruthy();
+  });
+
+  it('a README shows "003 · 워크플로 1/3"; another note no position; another path is ignored', () => {
+    const readme = `${EXP}/README.labnote.md`;
+    const { rerender } = render(<StatusBar path={readme} onReveal={vi.fn()} />);
+    act(() => publishEditorStatus(readme, { text: '## Related Workflows\n\n- [x] [A](./001_WA010_A.labnote.md)\n- [ ] [B](./002_WB010_B.labnote.md)\n- [ ] [C](./003_WC010_C.labnote.md)\n', save: 'saved' }));
+    expect(screen.getByRole('button', { name: /003 · 워크플로 1\/3/ })).toBeTruthy();
+    rerender(<StatusBar path="a/b.md" onReveal={vi.fn()} />);
+    act(() => publishEditorStatus('a/b.md', { text: 'x y', words: 2, save: 'saved' }));
+    expect(document.querySelector('.statusbar-position')).toBeNull();
+    expect(screen.getByText('단어 2')).toBeTruthy();
+    rerender(<StatusBar path="other.md" onReveal={vi.fn()} />);
+    expect(screen.queryByText('단어 2')).toBeNull();
+  });
+});
+
+describe('countWords', () => {
+  it('skips front matter and counts chunks with letters or digits', () => {
+    expect(countWords('---\ntitle: x y z\n---\n# 제목\n- 하나 둘 | 3 |')).toBe(4);
+    expect(countWords('')).toBe(0);
+  });
+});
+
+describe('SelectMenu', () => {
+  const OPTIONS = [
+    { value: 'ko', label: '한국어', lang: 'ko' },
+    { value: 'en', label: 'English', lang: 'en' },
+  ] as const;
+
+  it('is a listbox button: arrows, Enter, Esc and type-ahead', async () => {
+    const onChange = vi.fn();
+    render(<SelectMenu label="언어" value="ko" options={OPTIONS} onChange={onChange} />);
+    const button = screen.getByRole('button', { name: '언어: 한국어' });
+    expect(button.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.keyDown(button, { key: 'ArrowDown' });
+    const list = screen.getByRole('listbox', { name: '언어' });
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(within(list).getByRole('option', { name: '한국어' }).getAttribute('aria-selected')).toBe('true');
+    expect(within(list).getByRole('option', { name: 'English' }).getAttribute('lang')).toBe('en');
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    fireEvent.keyDown(list, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('en');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(button);
+    // 글자로 찾기
+    await userEvent.click(button);
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'e' });
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: ' ' });
+    expect(onChange).toHaveBeenLastCalledWith('en');
+    // Esc 는 고르지 않고 닫는다
+    onChange.mockClear();
+    await userEvent.click(button);
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('Segmented', () => {
+  it('is a radiogroup with roving tabindex; arrows choose', () => {
+    const onChange = vi.fn();
+    render(
+      <Segmented
+        label="테마"
+        value="light"
+        onChange={onChange}
+        options={[
+          { value: 'system', label: '시스템' },
+          { value: 'light', label: '밝게' },
+          { value: 'dark', label: '어둡게' },
+        ]}
+      />,
+    );
+    const radios = within(screen.getByRole('radiogroup', { name: '테마' })).getAllByRole('radio');
+    expect(radios.map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+    fireEvent.keyDown(radios[1], { key: 'ArrowRight' });
+    expect(onChange).toHaveBeenLastCalledWith('dark');
+    fireEvent.keyDown(radios[1], { key: 'ArrowLeft' });
+    expect(onChange).toHaveBeenLastCalledWith('system');
+  });
+});
+
+describe('CSP: no style attributes or React style props in the new chrome', () => {
+  it('the sources set positions only through the CSSOM', () => {
+    for (const f of ['ViewHeader.tsx', 'Breadcrumb.tsx', 'StatusBar.tsx', 'AppearancePopover.tsx', 'Popover.tsx', 'SelectMenu.tsx', 'Segmented.tsx']) {
+      expect(readFileSync(resolve(__dirname, '..', f), 'utf8'), f).not.toMatch(/style=/);
+    }
+    expect(readFileSync(resolve(__dirname, '..', 'Popover.tsx'), 'utf8')).toMatch(/style\.setProperty\('left'/);
+  });
+});

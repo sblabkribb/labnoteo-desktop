@@ -24,7 +24,7 @@
   .toaster,
   .dialog-layer,
   .context-menu,
-  .editor-path button { display: none; }
+  .view-header { display: none; }
   .shell { display: block; height: auto; min-height: 0; }
   .content { overflow: visible; padding: 0; }
   .editor-frame { border: none; }

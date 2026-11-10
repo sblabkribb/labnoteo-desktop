@@ -52,6 +52,16 @@ export class NavHistory {
     return to;
   }
 
+  /** 지금 노트(`current`)가 아닌 뒤로 갈 자리가 있는가(보기 머리의 뒤로 단추). */
+  canBack(current?: string): boolean {
+    return this.backStack.some((e) => e.path !== current);
+  }
+
+  /** canBack 의 반대. */
+  canForward(current?: string): boolean {
+    return this.forwardStack.some((e) => e.path !== current);
+  }
+
   /** back 의 반대. */
   forward(current?: NavEntry): NavEntry | undefined {
     const to = popOther(this.forwardStack, current);
@@ -78,13 +88,5 @@ export class NavHistory {
     };
     this.backStack = collapse(this.backStack.map(mapEntry));
     this.forwardStack = collapse(this.forwardStack.map(mapEntry));
-  }
-
-  canBack(): boolean {
-    return this.backStack.length > 0;
-  }
-
-  canForward(): boolean {
-    return this.forwardStack.length > 0;
   }
 }

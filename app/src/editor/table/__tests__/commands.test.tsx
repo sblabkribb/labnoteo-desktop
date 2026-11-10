@@ -572,7 +572,8 @@ describe('편집기의 표 넣기 단추', () => {
   it('읽기 전에는 꺼져 있고, 누르면 3×3 표를 넣고 머리 칸에 포커스를 준다', async () => {
     const e = mountEditor({ [P]: '# 노트\n' });
     const button = screen.getByRole('button', { name: catalogs.ko['table.insert'] }) as HTMLButtonElement;
-    expect(button.className).toBe('secondary');
+    expect(button.className).toBe('btn');
+    expect(button.closest('.view-header')).not.toBeNull(); // 보기 머리에 남아 있다
     await waitFor(() => expect(e.view().state.readOnly).toBe(false));
     await waitFor(() => expect(button.disabled).toBe(false));
     await act(async () => button.click());

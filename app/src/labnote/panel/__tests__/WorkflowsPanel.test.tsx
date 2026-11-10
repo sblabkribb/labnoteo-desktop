@@ -189,7 +189,8 @@ describe('WorkflowsPanel', () => {
     const user = userEvent.setup();
     mount();
     await findRow(/첫 실험/);
-    await user.selectOptions(screen.getByRole('combobox', { name: '묶는 기준' }), 'updated');
+    await user.click(screen.getByRole('button', { name: '묶는 기준: 상태별' }));
+    await user.click(screen.getByRole('option', { name: '마지막 수정일별' }));
     expect(h.ctx.settings.workflowViewGroupBy).toBe('updated');
     // 픽스처의 last_updated_date 는 2026-02-03: 지난주보다 앞이다
     expect(coreT('Earlier')).not.toBe('Earlier');
@@ -200,7 +201,9 @@ describe('WorkflowsPanel', () => {
     const user = userEvent.setup();
     mount();
     await findRow(/첫 실험/);
-    await user.selectOptions(screen.getByRole('combobox', { name: '묶는 기준' }), 'project');
+    await user.click(screen.getByRole('button', { name: '묶는 기준: 상태별' }));
+    await user.click(screen.getByRole('option', { name: '프로젝트별' }));
+    expect(screen.getByRole('button', { name: '묶는 기준: 프로젝트별' })).toBeTruthy();
     expect(h.ctx.settings.workflowViewGroupBy).toBe('project');
     expect(await findRow('단백질 [3]')).toBeTruthy();
 

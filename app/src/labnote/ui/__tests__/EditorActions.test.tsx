@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createFakeVault } from '../../../__tests__/fakeVault';
 import { setLang } from '../../../i18n/lang';
@@ -9,7 +9,7 @@ import { createWorkflow } from '../../commands/workflow';
 import { insertUnitOp } from '../../commands/unitOp';
 import { showBarcode } from '../../port/barcodeActions';
 import { coreT } from '../../i18n';
-import { EditorActions } from '../EditorActions';
+import { EditorActions, NoteQrButton } from '../EditorActions';
 
 vi.mock('../../commands/unitOp', () => ({ insertUnitOp: vi.fn(async () => undefined), unitOpCommands: [] }));
 vi.mock('../../port/barcodeActions', () => ({ showBarcode: vi.fn(async () => undefined) }));
@@ -37,66 +37,71 @@ afterEach(() => {
   setLang('ko');
 });
 
-describe('EditorActions', () => {
-  it("the header shows '유닛 오퍼레이션 삽입' on a workflow note and '워크플로 생성' on a README in ko, and nothing on a plain note", async () => {
+describe('EditorActions (the view header primary action)', () => {
+  it("is 'UO 추가' on a workflow note, '워크플로 추가' on a README, and absent elsewhere", async () => {
     const user = userEvent.setup();
     h = createTestHost();
     const { rerender, container } = render(<EditorActions ctx={h.ctx} path={WF_PATH} disabled={false} />);
-    const group = screen.getByRole('group', { name: '노트 작업' });
-    await user.click(within(group).getByRole('button', { name: '유닛 오퍼레이션 삽입' }));
+    const add = screen.getByRole('button', { name: 'UO 추가' });
+    expect(add.classList.contains('primary')).toBe(true);
+    expect(add.title).toBe(coreT('Insert unit operation'));
+    await user.click(add);
     expect(insertUnitOp).toHaveBeenCalledWith(h.ctx);
 
     rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled={false} />);
-    expect(screen.queryByRole('button', { name: '유닛 오퍼레이션 삽입' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: '워크플로 생성' }));
+    expect(screen.queryByRole('button', { name: 'UO 추가' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '워크플로 추가' }));
     expect(createWorkflow).toHaveBeenCalledWith(h.ctx);
 
-    // 그 밖의 노트(.labnote.md)에는 바코드 단추만
     rerender(<EditorActions ctx={h.ctx} path="notes/a.labnote.md" disabled={false} />);
-    expect(screen.queryByRole('button', { name: '워크플로 생성' })).toBeNull();
-    expect(screen.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([coreT('Show note barcode')]);
+    expect(container.innerHTML).toBe('');
     rerender(<EditorActions ctx={h.ctx} path="notes/a.md" disabled={false} />);
     expect(container.innerHTML).toBe('');
 
     // 언어를 바꾸면 다시 그린다
     rerender(<EditorActions ctx={h.ctx} path={WF_PATH} disabled={false} />);
     act(() => setLang('en'));
-    expect(screen.getByRole('button', { name: 'Insert unit operation' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add UO' })).toBeTruthy();
+    rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled={false} />);
+    expect(screen.getByRole('button', { name: 'Add workflow' })).toBeTruthy();
     expect(container.querySelectorAll('[style]')).toHaveLength(0);
   });
 
-  it('header shows the QR button on .labnote.md only, and it is disabled while busy', async () => {
+  it('is disabled while busy', () => {
+    h = createTestHost();
+    const { rerender } = render(<EditorActions ctx={h.ctx} path={WF_PATH} disabled />);
+    expect((screen.getByRole('button', { name: 'UO 추가' }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled />);
+    expect((screen.getByRole('button', { name: '워크플로 추가' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('NoteQrButton', () => {
+  it('shows the Lucide QR icon button on .labnote.md only, and it is disabled while busy', async () => {
     const user = userEvent.setup();
     h = createTestHost();
-    const { rerender } = render(<EditorActions ctx={h.ctx} path="e/01_x.labnote.md" disabled={false} />);
+    const { rerender, container } = render(<NoteQrButton ctx={h.ctx} path="e/01_x.labnote.md" disabled={false} />);
     const qr = screen.getByRole('button', { name: coreT('Show note barcode') }) as HTMLButtonElement;
     expect(qr.title).toBe(coreT('Show note barcode'));
     expect(qr.classList.contains('editor-qr')).toBe(true);
-    expect(qr.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(qr.querySelector('svg.icon')?.getAttribute('aria-hidden')).toBe('true');
     await user.click(qr);
     expect(showBarcode).toHaveBeenCalledWith(h.ctx, 'e/01_x.labnote.md');
 
-    rerender(<EditorActions ctx={h.ctx} path="e/README.md" disabled={false} />);
-    expect(screen.queryByRole('button', { name: coreT('Show note barcode') })).toBeNull();
-
-    rerender(<EditorActions ctx={h.ctx} path="e/01_x.labnote.md" disabled />);
+    rerender(<NoteQrButton ctx={h.ctx} path="e/README.md" disabled={false} />);
+    expect(container.innerHTML).toBe('');
+    rerender(<NoteQrButton ctx={h.ctx} path="e/01_x.labnote.md" disabled />);
     expect((screen.getByRole('button', { name: coreT('Show note barcode') }) as HTMLButtonElement).disabled).toBe(true);
     // 워크플로 노트와 README 에도 있다
-    rerender(<EditorActions ctx={h.ctx} path={WF_PATH} disabled={false} />);
+    rerender(<NoteQrButton ctx={h.ctx} path={WF_PATH} disabled={false} />);
     expect(screen.getByRole('button', { name: coreT('Show note barcode') })).toBeTruthy();
-    rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled={false} />);
+    rerender(<NoteQrButton ctx={h.ctx} path={README_PATH} disabled={false} />);
     expect(screen.getByRole('button', { name: coreT('Show note barcode') })).toBeTruthy();
   });
+});
 
-  it('both buttons are disabled while busy', () => {
-    h = createTestHost();
-    const { rerender } = render(<EditorActions ctx={h.ctx} path={WF_PATH} disabled />);
-    expect((screen.getByRole('button', { name: '유닛 오퍼레이션 삽입' }) as HTMLButtonElement).disabled).toBe(true);
-    rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled />);
-    expect((screen.getByRole('button', { name: '워크플로 생성' }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('the Editor renders headerActions next to Insert table and passes busy while loading', async () => {
+describe('the Editor view header', () => {
+  it('renders the primary action before Insert table and passes busy while loading', async () => {
     h = createTestHost();
     const vault = createFakeVault({ [WF_PATH]: '# 노트\n' });
     let release: () => void = () => undefined;
@@ -111,9 +116,10 @@ describe('EditorActions', () => {
     const m = mountEditor(gated, WF_PATH, {
       headerActions: (busy) => <EditorActions ctx={h.ctx} path={WF_PATH} disabled={busy} />,
     });
-    const button = () => screen.getByRole('button', { name: '유닛 오퍼레이션 삽입' }) as HTMLButtonElement;
-    // "표 넣기" 와 같은 줄
-    expect(button().parentElement?.closest('p')?.textContent).toContain('표 넣기');
+    const button = () => screen.getByRole('button', { name: 'UO 추가' }) as HTMLButtonElement;
+    const header = button().closest('.view-header')!;
+    const names = [...header.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? b.textContent);
+    expect(names.indexOf('UO 추가')).toBeLessThan(names.indexOf('표 넣기'));
     expect(button().disabled).toBe(true);
     release();
     await m.loaded();

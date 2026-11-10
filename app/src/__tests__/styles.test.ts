@@ -82,6 +82,14 @@ describe('styles/*.css', () => {
       '.sidebar-tab',
       '.sidebar-tab[aria-selected="true"]',
       '@media print .topbar',
+      // 보기 머리(Task 7)가 일부러 없앤 것: 편집기의 경로 줄과 그 안의 상태 표시·노트 단추 묶음(이제 .view-header 와 상태 줄),
+      // 상태 줄의 알림 묶음(이제 .statusbar-group)
+      '.editor-path',
+      '.editor-path [role="status"]',
+      '.editor-actions',
+      '.editor-actions .editor-qr',
+      '.status-notes',
+      '@media print .editor-path button',
     ];
     expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);

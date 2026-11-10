@@ -31,7 +31,7 @@ describe('앱 셸 CSS 계약', () => {
 
   it('print hides chrome', () => {
     const p = parseRules(css).filter((r) => r.atRule === '@media print').flatMap((r) => r.selectors).join(',');
-    for (const s of ['.ribbon', '.sidebar', '.dock-scrim', '.statusbar', '.notices', '.toaster', '.dialog-layer', '.context-menu', '.editor-path button']) expect(p).toContain(s);
+    for (const s of ['.ribbon', '.sidebar', '.dock-scrim', '.statusbar', '.notices', '.toaster', '.dialog-layer', '.context-menu', '.view-header']) expect(p).toContain(s);
   });
 
   it('print drops the full-window grid and the content scroller', () => {
@@ -126,7 +126,7 @@ describe('앱 셸 CSS 계약', () => {
     expect(sels.some((s) => /\.sidebar (nav|section) li/.test(s))).toBe(false);
     expect(ruleFor('.note-tree [role="treeitem"]')).not.toBeNull();
     expect(ruleFor('.search-results li > button')).not.toBeNull();
-    expect(ruleFor('.editor-path')).not.toBeNull();
+    expect(ruleFor('.view-header')).not.toBeNull();
     expect(ruleFor('.editor-frame')).not.toBeNull();
     expect(sels.some((s) => s.includes('.content [role="alertdialog"]'))).toBe(false);
   });

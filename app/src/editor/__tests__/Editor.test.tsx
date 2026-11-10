@@ -12,6 +12,7 @@ import type { VaultChange } from '../../vault/useVaultEvents';
 import { ERROR_KINDS_FIXTURE, EVENTS_FIXTURE } from '../../__tests__/fixtures';
 import { SYSTEM_COLOURS } from '../../__tests__/css';
 import { getOutline } from '../outline/outlineStore';
+import { editorStatus } from '../editorStatus';
 import { installFileDropGuard } from '../../ui/fileDropGuard';
 import { createImageCache } from '../live/imageCache';
 import type { VaultImages } from '../live/vaultImages';
@@ -77,7 +78,8 @@ function mount(files: Record<string, string>, autosaveMs = 60_000, extra: { fail
   return { ...s, ref, view, type, ctrlS, unmount: utils.unmount };
 }
 
-const dirtyMark = () => screen.queryByText('저장 안 됨');
+/** 저장 안 됨 표시(상태 줄이 읽는 편집기 상태). */
+const dirtyMark = () => (editorStatus()?.save === 'dirty' ? true : null);
 
 describe('편집기', () => {
   it('노트를 열면 본문이 보인다', async () => {
@@ -192,7 +194,7 @@ describe('편집기', () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(m.writes()).toBe(0);
     expect(m.files[P]).toBe('theirs\n');
-    expect(screen.getByText('저장하지 않았습니다: 디스크의 노트가 다릅니다')).toBeTruthy();
+    expect(editorStatus()?.save).toBe('conflict'); // 상태 줄이 "충돌" 을 보인다
     m.ctrlS();
     expect(await screen.findByRole('alertdialog')).toBeTruthy();
     expect(m.writes()).toBe(0);

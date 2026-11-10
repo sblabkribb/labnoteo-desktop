@@ -192,14 +192,17 @@ describe('Ctrl+E 와 모드 칸', () => {
     utils.unmount();
   });
 
-  it('the path line shows the current mode and follows changes', async () => {
+  it('the view header mode button names the current mode, follows changes and toggles it', async () => {
     const { utils } = await mountWithTable();
-    const label = () => utils.container.querySelector('.editor-path .editor-mode');
-    expect(label()?.getAttribute('role')).toBe('status');
-    expect(label()?.textContent).toBe(catalogs.ko['editor.mode.live']);
+    const button = () => utils.container.querySelector('.view-header button.editor-mode') as HTMLButtonElement;
+    expect(button().getAttribute('aria-label')).toBe(catalogs.ko['editor.mode.live']);
+    expect(button().title).toContain(catalogs.ko['editor.mode.live']);
     act(() => setMode('source'));
-    expect(label()?.textContent).toBe(catalogs.ko['editor.mode.source']);
-    expect(screen.getByText(catalogs.ko['editor.mode.source'])).toBe(label());
+    expect(button().getAttribute('aria-label')).toBe(catalogs.ko['editor.mode.source']);
+    expect(screen.getByRole('button', { name: catalogs.ko['editor.mode.source'] })).toBe(button());
+    act(() => button().click());
+    expect(getMode()).toBe('live');
+    expect(button().getAttribute('aria-label')).toBe(catalogs.ko['editor.mode.live']);
     utils.unmount();
   });
 

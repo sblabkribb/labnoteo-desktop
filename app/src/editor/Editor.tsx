@@ -46,6 +46,9 @@ import { samplesSync } from '../samples/sync';
 import { captureFocus } from '../ui/returnFocus';
 import { extractOutline, type OutlineItem } from './outline/extract';
 import { clearOutline, publishCursor, publishOutline } from './outline/outlineStore';
+import { clearEditorStatus, countWords, publishEditorStatus, type SaveState } from './editorStatus';
+import { ViewHeader } from '../ui/ViewHeader';
+import { Icon } from '../ui/Icon';
 
 /**
  * 앱이 쓰는 키. CodeMirror 기본 keymap 에서 뺀다: 뒤로·앞으로 가기(Alt+←/→, cursorSyntaxLeft/Right)와 오른쪽 사이드바
@@ -100,8 +103,14 @@ interface Props {
    * 메뉴를 띄우면 `e.preventDefault()` 로 기본 메뉴를 막는다.
    */
   onContextMenu?: (e: MouseEvent, view: EditorView) => void;
-  /** 머리의 "표 넣기" 옆에 그릴 단추들. 인자는 편집기가 바쁜지(읽는 중, 대화상자, 풀리지 않은 바깥 변경). */
+  /** 보기 머리의 "표 넣기" 앞에 그릴 주 동작. 인자는 편집기가 바쁜지(읽는 중, 대화상자, 풀리지 않은 바깥 변경). */
   headerActions?: (busy: boolean) => ReactNode;
+  /** 보기 머리 왼쪽: 뒤로·앞으로와 경로 표시. */
+  headerLead?: ReactNode;
+  /** "표 넣기" 뒤, 보기 방식 단추 앞에 그릴 단추(QR 등). 인자는 headerActions 와 같다. */
+  headerTools?: (busy: boolean) => ReactNode;
+  /** 보기 머리 오른쪽 끝(⋯ 메뉴, 오른쪽 사이드바 단추). */
+  headerTrail?: ReactNode;
   /**
    * 링크를 열 때(그냥 클릭, Ctrl/Cmd+클릭, Alt+Enter): 다른 노트(`note`, 위키링크의 `subpath` 나 마크다운의 `anchor`),
    * 없는 노트 만들기(`create`), 바깥 주소(`external`). 이 노트 안의 제목·`#앵커` 는 편집기가 직접 옮긴다.
@@ -147,6 +156,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     initialReveal,
     onContextMenu,
     headerActions,
+    headerLead,
+    headerTools,
+    headerTrail,
     onOpenLink,
     images = vaultImages,
     onChangeStatus,
@@ -216,6 +228,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     if (!view) return;
     // CodeMirror 의 줄로 읽는다: 번호가 doc.line(n) 과 같아야 한다(섞인 줄 끝에서 toString 은 줄을 더 나눈다)
     publishOutline(path, extractOutline(Array.from(view.state.doc.iterLines())));
+    // 상태 줄과 보기 머리가 읽는 본문과 단어 수도 같은 때에 낸다(타이핑마다 다시 그리지 않게).
+    const text = view.state.sliceDoc();
+    publishEditorStatus(path, { text, words: countWords(text) });
   };
   /** 커서 줄(1부터)을 낸다. 한 프레임에 한 번만(선택을 끌며 옮기는 동안 패널을 매번 그리지 않게). */
   const publishCursorLine = () => {
@@ -223,8 +238,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     cursorFrame.current = requestAnimationFrame(() => {
       cursorFrame.current = undefined;
       const view = viewRef.current;
-      if (view && alive.current) publishCursor(path, view.state.doc.lineAt(view.state.selection.main.head).number);
+      if (view && alive.current) publishCaret(view);
     });
+  };
+  /** 커서의 줄(개요)과 줄·열(상태 줄)을 낸다. */
+  const publishCaret = (view: EditorView) => {
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    publishCursor(path, line.number);
+    publishEditorStatus(path, { line: line.number, col: head - line.from + 1 });
   };
   const locked = useRef(true);
   /** 저장과 디스크 확인을 한 줄로 세운다: 확인이 저장 도중의 반쯤 쓰인 상태를 보지 않게. */
@@ -257,6 +279,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     setDialogOpenState(open);
   };
   const [saveError, setSaveError] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [closeAsk, setCloseAsk] = useState(false);
   const win = useRef<WindowApi>();
 
@@ -294,7 +317,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         requestAnimationFrame(() => (view.scrollDOM.scrollTop = top));
         // 개요는 읽자마자 낸다(다시 읽기 포함). setState 는 updateListener 를 부르지 않는다.
         publishItems();
-        publishCursor(path, next.doc.lineAt(next.selection.main.head).number);
+        publishCaret(view);
       }
       // 읽은(또는 다시 읽은) 본문의 링크를 곧바로 낸다. 조용한 다시 읽기도 낸다: 덧씌움이 디스크와 같아진다.
       if (view) publishLinks();
@@ -333,9 +356,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       const body = text();
       if (!force && body === baseline.current) return true;
       let result;
+      setSaving(true);
       try {
         result = await saveDocument(doc, body, { force: !!force, against: force?.against, invoke: latest.current.invoke });
       } catch {
+        setSaving(false);
         setSaveError(true);
         // 일시적인 실패(백신 잠금, 디스크 가득)면 키를 다시 칠 때까지 기다리지 않고 다시 시도한다 —
         // 간격을 두 배씩 늘리고, MAX_SAVE_ATTEMPTS 번 연달아 실패하면 멈춘다(경고는 남는다).
@@ -346,6 +371,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         }
         return false;
       }
+      setSaving(false);
       if (!result.ok) {
         setExternal({ kind: 'changed', current: result.current });
         setDialogOpen(true);
@@ -715,6 +741,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       if (cursorFrame.current !== undefined) cancelAnimationFrame(cursorFrame.current);
       cursorFrame.current = undefined;
       clearOutline(path);
+      clearEditorStatus(path);
       // 노트를 닫는데 저장 안 된 편집이 있으면 마지막으로 한 번 저장해 본다(충돌이면 쓰지 않는다).
       if (!externalRef.current && api.current.isDirty()) void api.current.save();
       view.destroy();
@@ -808,27 +835,46 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   // 명령 단추는 바깥 변경이 풀리지 않은 동안에도 쉰다("그대로 두기" 뒤 포함): 명령은 그 노트를 고치지 않는다(NoteBusyError)
   const commandsBusy = editLocked || external !== null;
   const liveMode = modeState === 'live';
+  const modeLabel = t(liveMode ? 'editor.mode.live' : 'editor.mode.source');
+  // 상태 줄의 저장 표시: 읽는 중, 바깥 변경(충돌), 저장 실패, 저장 중, 저장 안 됨, 저장됨 순으로 앞선 것.
+  const saveState: SaveState =
+    status !== 'ready' ? 'loading' : external ? 'conflict' : saveError ? 'error' : saving ? 'saving' : dirty ? 'dirty' : 'saved';
+  useEffect(() => publishEditorStatus(path, { save: saveState }), [path, saveState]);
   return (
-    <section aria-label={t('editor.label')}>
-      <p className="editor-path">
-        {path}{' '}
-        <span className="editor-mode" role="status">
-          {t(liveMode ? 'editor.mode.live' : 'editor.mode.source')}
-        </span>{' '}
-        {(external || dirty) && <span role="status">{external ? t('editor.conflicted') : t('editor.dirty')}</span>}{' '}
-        <button
-          type="button"
-          className="secondary"
-          disabled={editLocked}
-          onClick={() => {
-            const view = viewRef.current;
-            if (view) insertTable(view);
-          }}
-        >
-          {t('table.insert')}
-        </button>
-        {headerActions?.(commandsBusy)}
-      </p>
+    <section className="editor-view" data-path={path} aria-label={t('editor.label')}>
+      <ViewHeader
+        lead={headerLead}
+        actions={
+          <>
+            {headerActions?.(commandsBusy)}
+            <button
+              type="button"
+              className="btn"
+              title={t('table.insert')}
+              disabled={editLocked}
+              onClick={() => {
+                const view = viewRef.current;
+                if (view) insertTable(view);
+              }}
+            >
+              <Icon name="table" />
+              <span className="btn-label-collapsible">{t('table.insert')}</span>
+            </button>
+            {headerTools?.(commandsBusy)}
+            <button
+              type="button"
+              className="ibtn editor-mode"
+              aria-label={modeLabel}
+              title={t('header.mode', modeLabel, 'Ctrl+E')}
+              aria-keyshortcuts="Control+E"
+              onClick={() => toggleMode()}
+            >
+              <Icon name={liveMode ? 'book-open' : 'code'} />
+            </button>
+            {headerTrail}
+          </>
+        }
+      />
       {status === 'loading' && <p>{t('editor.loading')}</p>}
       {status === 'error' && <p role="alert">{t('editor.loadError')}</p>}
       {saveError && <p role="alert">{t('editor.saveError')}</p>}

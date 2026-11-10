@@ -90,3 +90,15 @@ describe('NavHistory', () => {
     expect(k).toBe(NAV_MAX);
   });
 });
+
+describe('NavHistory.canBack / canForward with the current note', () => {
+  it('an entry for the note that is open does not count (back skips it)', () => {
+    const n = new NavHistory();
+    n.push({ path: 'a.md', line: 0 });
+    expect(n.canBack('b.md')).toBe(true);
+    expect(n.canBack('a.md')).toBe(false);
+    expect(n.back({ path: 'b.md', line: 0 })).toEqual({ path: 'a.md', line: 0 });
+    expect(n.canForward('a.md')).toBe(true);
+    expect(n.canForward('b.md')).toBe(false);
+  });
+});

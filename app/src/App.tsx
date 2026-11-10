@@ -22,9 +22,9 @@ import { fetchAppVersion } from './appVersion';
 import { UpdateBanner } from './update/UpdateBanner';
 import { startUpdateChecks } from './update/updateStore';
 import { ThemeToggle } from './theme/ThemeToggle';
-import { useTheme } from './theme/useTheme';
+import { useTheme, type Theme } from './theme/useTheme';
 import { LanguageToggle } from './i18n/LanguageToggle';
-import { applyHtmlLang, setLang } from './i18n/lang';
+import { applyHtmlLang, getLang, setLang } from './i18n/lang';
 import { useLang } from './i18n/useLang';
 import { useVaultSettings } from './labnote/settings';
 import { offerPluginLlmKey } from './integrations/importLlmKey';
@@ -57,8 +57,8 @@ import { useCommandContext, useNoteSwitcher } from './labnote/commands/useComman
 import { openPalette, usePaletteHotkey } from './labnote/ui/CommandPalette';
 import { ContextMenu } from './labnote/ui/ContextMenu';
 import { closeMenu, openMenu } from './labnote/ui/menuStore';
-import { EditorActions } from './labnote/ui/EditorActions';
-import { editorMenu, noteTreeMenu } from './labnote/menus';
+import { EditorActions, NoteQrButton } from './labnote/ui/EditorActions';
+import { editorMenu, noteTreeMenu, viewMoreMenu } from './labnote/menus';
 import { WorkflowsPanel } from './labnote/panel/WorkflowsPanel';
 import { SamplesPanel } from './samples/SamplesPanel';
 import { OutlinePanel } from './editor/outline/OutlinePanel';
@@ -85,6 +85,11 @@ import { VaultBar } from './ui/VaultBar';
 import { layoutStore, useLayout, type LeftTab, type RightTab } from './ui/layoutStore';
 import { setWindowTitle } from './ui/windowTitle';
 import { runQuickSwitcher } from './ui/quickSwitcher';
+import { NavButtons, ViewHeader } from './ui/ViewHeader';
+import { NoteLead } from './ui/Breadcrumb';
+import { StatusBar } from './ui/StatusBar';
+import { AppearanceButton } from './ui/AppearancePopover';
+import { Icon } from './ui/Icon';
 
 /** 명령(showPanel)이 부르는 이름. 'workflows' 는 플러그인의 워크플로 뷰라 왼쪽 독의 실험 탭으로 간다. */
 type PanelName = 'files' | 'workflows' | 'samples' | 'outline' | 'links';
@@ -135,9 +140,11 @@ interface ViewProps {
   vault: VaultInfo;
   version: string;
   onChangeVault: () => void;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
 }
 
-function VaultView({ vault, version, onChangeVault }: ViewProps) {
+function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps) {
   const { entries, failed, reload } = useTree(vault.root);
   // 보관함 밖에서 파일이 바뀌면(git pull, 동기화, Obsidian, 탐색기) 트리를 다시 읽는다. 색인은 Rust 가 같은 변경으로 갱신한다.
   useVaultEvents(reload);
@@ -150,7 +157,10 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
   // 링크, 링크 탭, 팔레트의 명령, 파일 트리, 검색이 여는 노트는 모두 아래 openFile(=navigate)을 지난다.
   const nav = useRef<NavHistory>();
   nav.current ??= new NavHistory();
+  // 기록이 바뀌면 보기 머리의 뒤로·앞으로 단추를 다시 그린다.
+  const [, setNavTick] = useState(0);
   const navFns = useRef({
+    changed: () => setNavTick((n) => n + 1),
     /** 지금 노트와 커서 줄. 열린 노트가 없으면 undefined. */
     here(): NavEntry | undefined {
       const path = notes.activePath();
@@ -177,6 +187,7 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
       const from = navFns.here();
       await notes.openFile(path, at);
       if (from && notes.activePath() !== from.path) nav.current!.push(from);
+      navFns.changed();
     },
     busy: false,
     /** 기록을 따라 연다. 지금 노트를 저장하지 못해 넘어가지 않았으면 기록을 되돌린다. */
@@ -198,6 +209,7 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
         }
       } finally {
         navFns.busy = false;
+        navFns.changed();
       }
     },
   }).current;
@@ -230,10 +242,18 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
     // 이름 바꾸기는 기록의 경로를 옮기고, 지운 파일·폴더(앱에서든 감시자가 알린 것이든)는 기록에서 뺀다.
-    const offRename = renameEvents.subscribe((moves) => nav.current!.rename(moves));
-    const offDelete = deleteEvents.subscribe((path) => nav.current!.drop(path));
+    const offRename = renameEvents.subscribe((moves) => {
+      nav.current!.rename(moves);
+      navFns.changed();
+    });
+    const offDelete = deleteEvents.subscribe((path) => {
+      nav.current!.drop(path);
+      navFns.changed();
+    });
     const offWatch = subscribeVaultChanges(tauriListen as ListenFn, (change) => {
-      if (change.kind === 'removed' && change.path !== '') nav.current!.drop(change.path);
+      if (change.kind !== 'removed' || change.path === '') return;
+      nav.current!.drop(change.path);
+      navFns.changed();
     });
     return () => {
       window.removeEventListener('compositionstart', onCompositionStart, true);
@@ -482,11 +502,13 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
       if (ctx && c) void runCommand(ctx, c);
     },
   };
+  // "모든 설정 열기"(모양 창의 바닥, Ctrl+,). 설정 창이 생기기 전까지는 설정 명령이 모두 있는 명령 팔레트를 연다.
+  const openSettings = () => ribbonActions.palette();
   // 셸 단축키: Ctrl+\ 왼쪽 독, Ctrl+Shift+\ 오른쪽 사이드바(둘 다 code 로 맞춘다: 한국어 자판의 ₩ 키도 Backslash 다),
   // Ctrl+N 새 노트, Ctrl+O 빠른 이동. 편집기 키는 그림자 DOM 을 지나 window 까지 온다. CodeMirror 는 넷 다 묶지 않는다
   // (기본 keymap 의 Shift-Mod-\ 는 Editor.tsx 가 뺀다). 대화상자가 열려 있으면 듣지 않는다.
-  const shortcuts = useRef(ribbonActions);
-  shortcuts.current = ribbonActions;
+  const shortcuts = useRef({ ...ribbonActions, openSettings });
+  shortcuts.current = { ...ribbonActions, openSettings };
   useEffect(() => {
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -496,6 +518,7 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
         : e.code === 'Backslash' ? shortcuts.current.toggleLeft
         : e.code === 'KeyN' ? shortcuts.current.newNote
         : e.code === 'KeyO' ? shortcuts.current.quickSwitcher
+        : e.code === 'Comma' ? shortcuts.current.openSettings
         : undefined;
       if (!run) return;
       e.preventDefault();
@@ -549,6 +572,42 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
     const caret = e.clientX === 0 && e.clientY === 0 ? view.coordsAtPos(view.state.selection.main.head) : null;
     openMenu(ctx, caret ? { x: caret.left, y: caret.bottom } : { x: e.clientX, y: e.clientY }, items);
   };
+  // 보기 머리: 뒤로·앞으로, 경로 표시, 상태 칩, 주 동작, 표 넣기, QR, 보기 방식, ⋯ 메뉴, 오른쪽 사이드바 단추.
+  const navButtons = (
+    <NavButtons
+      canBack={nav.current.canBack(selected)}
+      canForward={nav.current.canForward(selected)}
+      onBack={() => void navFns.go('back')}
+      onForward={() => void navFns.go('forward')}
+    />
+  );
+  const rightToggle = (
+    <button
+      type="button"
+      className="ibtn"
+      aria-label={t('ribbon.toggleRight')}
+      title={t('ribbon.withKey', t('ribbon.toggleRight'), 'Ctrl+Shift+\\')}
+      aria-expanded={layout.rightOpen}
+      aria-controls="right-dock"
+      onClick={() => layoutStore.toggleRight()}
+    >
+      <Icon name="panel-right" />
+    </button>
+  );
+  const moreButton = (path: string) => (
+    <button
+      type="button"
+      className="ibtn"
+      aria-label={t('header.more')}
+      title={t('header.more')}
+      aria-haspopup="menu"
+      disabled={!ctx}
+      onClick={(e) => ctx && openMenu(ctx, { element: e.currentTarget }, viewMoreMenu(ctx, path))}
+    >
+      <Icon name="ellipsis" />
+    </button>
+  );
+  const changeStatus = ctx ? () => void runCommand(ctx, commandById('change-experiment-status')!) : undefined;
   return (
     <>
       <div className="shell" ref={shell}>
@@ -585,29 +644,68 @@ function VaultView({ vault, version, onChangeVault }: ViewProps) {
               initialReveal={notes.reveal}
               onContextMenu={onEditorMenu}
               onOpenLink={onOpenLink}
-              onChangeStatus={ctx ? () => void runCommand(ctx, commandById('change-experiment-status')!) : undefined}
+              onChangeStatus={changeStatus}
+              headerLead={
+                <>
+                  {navButtons}
+                  <NoteLead
+                    path={selected}
+                    onOpen={openNote}
+                    onJump={(line) => editor.current?.reveal({ line })}
+                    onMenu={(anchor, items) => ctx && openMenu(ctx, { element: anchor }, items)}
+                    onStatus={changeStatus}
+                  />
+                </>
+              }
               headerActions={ctx ? (busy) => <EditorActions ctx={ctx} path={selected} disabled={busy} /> : undefined}
+              headerTools={ctx ? (busy) => <NoteQrButton ctx={ctx} path={selected} disabled={busy} /> : undefined}
+              headerTrail={
+                <>
+                  {moreButton(selected)}
+                  {rightToggle}
+                </>
+              }
               samples={sampleConfig}
               sampleEnv={() => ctx && createSampleEnv(ctx)}
             />
           ) : (
-            <p className="empty-state">{t('editor.empty')}</p>
+            <>
+              <ViewHeader lead={navButtons} actions={rightToggle} />
+              <p className="empty-state">{t('editor.empty')}</p>
+            </>
           )}
         </main>
         <RightDock
           outline={<OutlinePanel onReveal={onOutlineReveal} />}
           links={<LinksPanel activePath={selected} onOpen={onLinksOpen} onCreate={onLinksCreate} ctx={ctx} />}
         />
-        <footer className="statusbar">
-          <div className="status-notes">
-            {indexing && <span>{t('search.indexing')}</span>}
-            {skipped > 0 && <span role="status">{t('search.skipped', skipped)}</span>}
-            {vault.hasObsidianConfig && <span>{t('vault.obsidian')}</span>}
-          </div>
-          <span className="status-version">
-            {t('app.ready')} {version}
-          </span>
-        </footer>
+        <StatusBar
+          path={selected}
+          onReveal={() => showLeft('experiments')}
+          notes={
+            <>
+              {indexing && <span className="statusbar-item">{t('search.indexing')}</span>}
+              {skipped > 0 && (
+                <span className="statusbar-item" role="status">
+                  {t('search.skipped', skipped)}
+                </span>
+              )}
+              {vault.hasObsidianConfig && (
+                <span className="statusbar-item statusbar-note" title={t('vault.obsidian')}>
+                  {t('vault.obsidian')}
+                </span>
+              )}
+            </>
+          }
+          trailing={
+            <>
+              <span className="statusbar-item status-version">
+                {t('app.ready')} {version}
+              </span>
+              <AppearanceButton theme={theme} onTheme={setTheme} lang={getLang()} onLang={setLang} onOpenSettings={openSettings} />
+            </>
+          }
+        />
       </div>
       {/* .shell 밖: 대화상자가 열려 있는 동안 .shell 은 inert 다. 알림과 메뉴는 그 위에 뜬다 */}
       <DialogLayer blockRef={shell} />
@@ -630,7 +728,7 @@ export function App() {
   useLayoutEffect(() => applyHtmlLang(lang), [lang]);
   // 보관함이 열린 화면은 VaultView 가 자기 main 을 가진다. 그 밖의 화면(불러오는 중, 선택)은 여기서 감싼다.
   if (state.status === 'ready') {
-    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} />;
+    return <VaultView key={state.vault.root} vault={state.vault} version={version} onChangeVault={change} theme={theme} setTheme={setTheme} />;
   }
   return (
     <main className="standalone">

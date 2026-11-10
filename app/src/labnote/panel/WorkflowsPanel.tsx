@@ -19,6 +19,7 @@ import { discussWords, keptExperiments, showMarkers, treeLabels } from '../port/
 import { openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
 import { ExperimentEntryCache } from './experimentEntries';
 import { TreeView } from './TreeView';
+import { SelectMenu } from '../../ui/SelectMenu';
 import { touchesDir, useVaultChanges } from './useVaultChanges';
 
 export interface WorkflowsPanelProps {
@@ -215,22 +216,23 @@ export function WorkflowsPanel({ ctx, activePath }: WorkflowsPanelProps) {
             setQuery(e.target.value);
           }}
         />
-        <select
+        <SelectMenu<ExperimentGrouping>
           className="workflows-group-by"
-          aria-label={t('workflows.groupBy')}
+          label={t('workflows.groupBy')}
           value={groupBy}
-          onChange={(e) => {
-            const next = (GROUPS as readonly string[]).includes(e.target.value) ? (e.target.value as ExperimentGrouping) : 'status';
+          onChange={(value) => {
+            const next = GROUPS.includes(value) ? value : 'status';
             setGroupBy(next);
             ctx.updateSettings({ workflowViewGroupBy: next });
           }}
-        >
-          <option value="status">{t('workflows.groupBy.status')}</option>
-          <option value="project">{t('workflows.groupBy.project')}</option>
-          <option value="author">{t('workflows.groupBy.author')}</option>
-          <option value="discuss">{t('workflows.groupBy.discuss')}</option>
-          <option value="updated">{t('workflows.groupBy.updated')}</option>
-        </select>
+          options={[
+            { value: 'status', label: t('workflows.groupBy.status') },
+            { value: 'project', label: t('workflows.groupBy.project') },
+            { value: 'author', label: t('workflows.groupBy.author') },
+            { value: 'discuss', label: t('workflows.groupBy.discuss') },
+            { value: 'updated', label: t('workflows.groupBy.updated') },
+          ]}
+        />
         <button type="button" onClick={newExperiment}>
           {t('workflows.newExperiment')}
         </button>

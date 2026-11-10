@@ -89,7 +89,7 @@ function currentView(): EditorView {
 /** 편집기가 `path` 를 열고 다 읽었다(바쁘지 않다). */
 async function editorReady(path: string, contains?: string) {
   await waitFor(() => {
-    expect(screen.getByRole('main').querySelector('section')?.textContent ?? '').toContain(path.split('/').pop()!.replace(/\.labnote\.md$/, ''));
+    expect(screen.getByRole('main').querySelector('section.editor-view')?.getAttribute('data-path')).toBe(path);
     const v = currentView();
     if (contains) expect(v.state.doc.toString()).toContain(contains);
   });
@@ -216,8 +216,8 @@ describe('하루의 흐름(앱 전체)', () => {
       expect(readmeAfterWorkflow).toContain(`${WF.id} ${WF.name} pET`);
       expect(readmeAfterWorkflow).toContain(WF_FILE.replace(/\.md$/, ''));
 
-      // 6. 머리 단추 "유닛 오퍼레이션 삽입" → HW 공정, 별칭 "37C"
-      const insertButton = await screen.findByRole('button', { name: '유닛 오퍼레이션 삽입' });
+      // 6. 보기 머리의 주 동작 "UO 추가" → HW 공정, 별칭 "37C"
+      const insertButton = await screen.findByRole('button', { name: 'UO 추가' });
       await waitFor(() => expect((insertButton as HTMLButtonElement).disabled).toBe(false));
       const beforeOp = currentView().state.doc.toString();
       const depthBefore = undoDepth(currentView().state);

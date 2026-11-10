@@ -13,6 +13,7 @@ import type { LinkHit } from '../editor/live/links';
 import { copyText, noteLinkText } from '../links/clipboard';
 import type { TreeEntry } from '../tree/useTree';
 import type { CommandContext } from './commands/context';
+import { commandById } from './commands/registry';
 import { insertDate, insertIssueMarker } from './commands/editorInserts';
 import { changeExperimentStatus, toggleDiscussionFlag } from './commands/experiment';
 import { deleteEntry, newFolder, newNoteIn, renameEntry } from './commands/fileOps';
@@ -140,6 +141,33 @@ function linkItems(ctx: CommandContext, link: { hit: LinkHit; text: string; open
 function stripAngles(href: string): string {
   const h = href.trim();
   return h.startsWith('<') && h.endsWith('>') ? h.slice(1, -1).trim() : h;
+}
+
+/** 보기 머리의 ⋯ 메뉴가 부르는 명령(있고 열린 노트에 맞는 것만, 이 순서로). */
+const MORE_COMMANDS = ['print-whole-note', 'print-experiment-worksheet', 'export-tables-csv', 'export-experiment-tables-csv'];
+
+/**
+ * 보기 머리의 ⋯ 메뉴(`path` 는 열린 노트): 경로 복사, 링크 복사, 인쇄·CSV 내보내기 명령(열린 노트에 맞는 것만),
+ * 그리고 실험 README 면 체크리스트 맞추기·상태 변경·논의 표시 전환.
+ */
+export function viewMoreMenu(ctx: CommandContext, path: string): MenuItem[] {
+  const commands = MORE_COMMANDS.map((id) => commandById(id)).filter(
+    (c): c is NonNullable<typeof c> => c !== undefined && (c.available?.(ctx) ?? true),
+  );
+  return [
+    { labelKey: 'header.copyPath', run: () => copyText(path, ctx.host.notify) },
+    { labelKey: 'menu.copyLink', run: () => copyText(noteLinkText(path), ctx.host.notify) },
+    ...(commands.length > 0 ? [MENU_SEPARATOR] : []),
+    ...commands.map((c): MenuItem => ({ label: coreT(c.nameKey), run: () => c.run(ctx) })),
+    ...(isExperimentReadme(path)
+      ? [
+          MENU_SEPARATOR,
+          { label: coreT('Sync workflow checklist with folder'), run: () => syncWorkflowChecklist(ctx) },
+          { label: coreT('Change experiment status'), run: () => changeExperimentStatus(ctx) },
+          { label: coreT('Toggle discussion flag'), run: () => toggleDiscussionFlag(ctx) },
+        ]
+      : []),
+  ];
 }
 
 function noteItems(ctx: CommandContext, path: string): MenuItem[] {

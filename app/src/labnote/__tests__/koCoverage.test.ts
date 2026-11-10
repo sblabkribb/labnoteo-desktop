@@ -24,6 +24,8 @@ const literals = (code: string) => [...code.matchAll(QUOTED)].map((m) => unescap
 const DYNAMIC_ARGS: Record<string, string[]> = {
   // 등록된 명령의 nameKey. commands/__tests__/registry.test.ts 가 registerAllCommands 뒤 모든 nameKey 가 obsidianKo 에 있는지 본다.
   'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'],
+  // 보기 머리 ⋯ 메뉴의 등록된 명령(MORE_COMMANDS)의 nameKey. 위와 같은 registry.test.ts 가 본다.
+  'src/labnote/menus.ts': ['c.nameKey'],
   // 같은 파일 위쪽의 `const NAME = '...'` 상수. 아래 '상수 인자의 글자도 obsidianKo 에 있다' 가 그 글자를 확인한다.
   'src/integrations/IntegrationSettingsDialog.tsx': ['CLEARTEXT', 'FULL_ADDRESS'],
 };

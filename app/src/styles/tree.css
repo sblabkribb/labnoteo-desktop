@@ -84,6 +84,8 @@
 }
 .workflows-search { flex: 1 1 100%; min-width: 0; }
 .workflows-group-by { flex: 1 1 auto; min-width: 0; }
+.workflows-group-by .select-menu-button { flex: 1 1 auto; min-width: 0; }
+.workflows-group-by .select-menu-list { left: 0; right: auto; }
 .workflows-hint { margin: 0; padding: 0 var(--space-5); color: var(--text-muted); }
 
 .wf-tree { margin: 0; padding: 0 0 0 var(--space-4); list-style: none; }

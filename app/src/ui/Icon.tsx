@@ -46,6 +46,7 @@ import {
   Keyboard,
   Languages,
   Link,
+  LoaderCircle,
   ListTree,
   Minus,
   Moon,
@@ -161,6 +162,7 @@ const ICONS = {
   download: Download,
   upload: Upload,
   vault: Vault,
+  loader: LoaderCircle,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
