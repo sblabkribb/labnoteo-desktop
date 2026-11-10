@@ -20,5 +20,11 @@
   "badPng": "badPng",
   "pngTooLarge": "pngTooLarge",
   "sheetSize": "sheetSize",
-  "animatedPng": "animatedPng"
+  "animatedPng": "animatedPng",
+  "stagingUnknown": "stagingUnknown",
+  "exists": "exists",
+  "builtin": "builtin",
+  "notFound": "notFound",
+  "tampered": "tampered",
+  "io": "io"
 }

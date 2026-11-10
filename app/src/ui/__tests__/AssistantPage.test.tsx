@@ -3,7 +3,9 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
-import { HistoryRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
+import { HistoryRow, SkinRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
+import type { SkinManifest } from '../../assistant/skins/types';
+import { BUILTIN_SKIN } from '../../assistant/skins/builtin';
 
 afterEach(() => {
   cleanup();
@@ -141,5 +143,93 @@ describe('Assistant pane: web search address row (plan Task 12)', () => {
     await setupSearch();
     expect(screen.getByRole('group', { name: 'Web search address' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Check' })).toBeTruthy();
+  });
+});
+
+describe('Assistant pane: skin row (plan Task 16)', () => {
+  const blue: SkinManifest = { ...BUILTIN_SKIN, id: 'flasko-blue', name: 'Flasko Blue', author: 'Hong', licence: 'CC-BY-4.0' };
+
+  function skinSetup(opts: { active?: string; confirm?: boolean; removeFails?: boolean } = {}) {
+    let installed: SkinManifest[] = [blue];
+    let active = opts.active ?? 'flasko';
+    const deps = {
+      list: vi.fn(async () => installed),
+      remove: vi.fn(async (id: string) => {
+        if (opts.removeFails) throw { kind: 'io' };
+        installed = installed.filter((m) => m.id !== id);
+        if (active === id) active = 'flasko';
+      }),
+      confirm: vi.fn(async () => opts.confirm ?? true),
+      notify: vi.fn(),
+      setSkin: vi.fn((id: string) => {
+        active = id;
+      }),
+    };
+    const view = render(<SkinRow {...deps} active={active} />);
+    const rerender = () => view.rerender(<SkinRow {...deps} active={active} />);
+    return { deps, rerender };
+  }
+
+  it('lists the built-in skin first, then installed skins, with author and licence as plain text', async () => {
+    skinSetup({ active: 'flasko-blue' });
+    await settle();
+    const select = screen.getByRole('combobox', { name: '스킨' }) as HTMLSelectElement;
+    expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+      ['flasko', 'Flasko (기본)'],
+      ['flasko-blue', 'Flasko Blue'],
+    ]);
+    expect(select.value).toBe('flasko-blue');
+    expect(screen.getByRole('group', { name: '스킨' }).textContent).toContain('만든 사람: Hong · 라이선스: CC-BY-4.0');
+  });
+
+  it('switching saves the id for this PC', async () => {
+    const { deps } = skinSetup();
+    await settle();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '스킨' }), 'flasko-blue');
+    expect(deps.setSkin).toHaveBeenCalledWith('flasko-blue');
+  });
+
+  it('an unknown active id shows the built-in skin; the built-in skin cannot be deleted', async () => {
+    skinSetup({ active: 'gone-skin' });
+    await settle();
+    expect((screen.getByRole('combobox', { name: '스킨' }) as HTMLSelectElement).value).toBe('flasko');
+    expect((screen.getByRole('button', { name: '삭제' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('delete asks first; refused removes nothing', async () => {
+    const { deps } = skinSetup({ active: 'flasko-blue', confirm: false });
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '삭제' }));
+    expect(deps.confirm).toHaveBeenCalledWith('Flasko Blue 스킨을 지울까요? 되돌릴 수 없어요.');
+    expect(deps.remove).not.toHaveBeenCalled();
+  });
+
+  it('confirmed: removes the skin, says so, and refreshes the list', async () => {
+    const { deps, rerender } = skinSetup({ active: 'flasko-blue' });
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '삭제' }));
+    await settle();
+    expect(deps.remove).toHaveBeenCalledWith('flasko-blue');
+    expect(deps.notify).toHaveBeenCalledWith('info', '스킨을 지웠어요.');
+    rerender();
+    await settle();
+    const select = screen.getByRole('combobox', { name: '스킨' }) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['flasko']);
+  });
+
+  it('a failed delete says so', async () => {
+    const { deps } = skinSetup({ active: 'flasko-blue', removeFails: true });
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '삭제' }));
+    await settle();
+    expect(deps.notify).toHaveBeenCalledWith('warn', '스킨을 지우지 못했어요.');
+  });
+
+  it('follows the language', async () => {
+    setLang('en');
+    skinSetup({ active: 'flasko-blue' });
+    await settle();
+    expect(screen.getByRole('combobox', { name: 'Skin' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Skin' }).textContent).toContain('By Hong · Licence: CC-BY-4.0');
   });
 });

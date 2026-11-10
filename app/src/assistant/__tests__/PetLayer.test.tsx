@@ -189,3 +189,61 @@ describe('PetLayer', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+describe('PetLayer skins', () => {
+  it('draws an installed skin from blob: URLs, falls back to the built-in skin, and revokes on switch and unmount', async () => {
+    const png = [0x89, 0x50, 0x4e, 0x47];
+    const manifest = {
+      format: 1,
+      id: 'flasko-blue',
+      name: 'Blue',
+      author: 'Hong',
+      licence: 'MIT',
+      version: '1.0.0',
+      frame: { width: 48, height: 40 },
+      states: {
+        idle: { sheet: 'idle.png', frames: 2, fps: 2 },
+        talk: { sheet: 'talk.png', frames: 2, fps: 2 },
+        think: { sheet: 'think.png', frames: 2, fps: 2 },
+        done: { sheet: 'done.png', frames: 2, fps: 2 },
+      },
+    };
+    const skinInvoke = (async (cmd: string, a?: Record<string, unknown>) => {
+      if (cmd !== 'skin_read') return null;
+      if (a?.id !== 'flasko-blue') throw { kind: 'notFound' };
+      return { manifest, sheets: { idle: png, talk: png, think: png, done: png } };
+    }) as import('../../integrations/netIpc').InvokeFn;
+    let n = 0;
+    const live = new Set<string>();
+    const urls = {
+      create: () => {
+        const u = `blob:pet/${++n}`;
+        live.add(u);
+        return u;
+      },
+      revoke: (u: string) => void live.delete(u),
+    };
+    const invoke = vi.fn(async (_c: string, a?: Record<string, unknown>) => (a?.prefs as UiPrefs | undefined) ?? null);
+    const layout = createLayoutStore({ storage: () => memoryStorage(), invoke });
+    layout.setPet({ skin: 'flasko-blue' });
+    const store = createPetStore({ layout });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const view = render(<PetLayer store={store} skinDeps={{ invoke: skinInvoke, urls }} />);
+    const sprite = () => wrap().querySelector('.pet-sprite') as HTMLElement;
+    await act(async () => undefined);
+    expect(sprite().style.getPropertyValue('--pet-sheet').startsWith('url("blob:pet/')).toBe(true);
+    expect(sprite().style.getPropertyValue('--pet-w')).toBe('48px');
+    expect(live.size).toBe(4);
+
+    // An id that is not installed: the built-in skin, and the old URLs are revoked.
+    await act(async () => layout.setPet({ skin: 'gone-skin' }));
+    expect(sprite().style.getPropertyValue('--pet-sheet')).toBe('url("/skins/flasko/idle.png")');
+    expect(live.size).toBe(0);
+
+    await act(async () => layout.setPet({ skin: 'flasko-blue' }));
+    expect(live.size).toBe(4);
+    view.unmount();
+    expect(live.size).toBe(0);
+    warn.mockRestore();
+  });
+});

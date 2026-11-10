@@ -142,6 +142,11 @@ macro_rules! register_commands {
             $crate::net::web_search::web_search_probe,
             // SSRF-guarded readable page fetch (assistant Task 13).
             $crate::net::fetch_page::fetch_page,
+            // Installed assistant skins in the app data dir (assistant Task 16).
+            $crate::skins::store::skin_install,
+            $crate::skins::store::skin_list,
+            $crate::skins::store::skin_read,
+            $crate::skins::store::skin_remove,
         ])
     };
 }
@@ -184,6 +189,8 @@ pub fn run() {
         .manage(mcp::ClipState(std::sync::Arc::new(mcp::ArboardClipboard)))
         // The skill installer's home folder (USERPROFILE, then HOME).
         .manage(skill::SkillPaths::from_env())
+        // Skin packs validated by Rust and waiting for an explicit install (in memory only).
+        .manage(skins::SkinStaging::default())
         // SP7 Part C: a page load in the main webview (reload, navigation,
         // crash recovery) stops the MCP server and fails its pending calls,
         // from Rust, because JS cannot reliably invoke during unload (C3).
@@ -213,7 +220,7 @@ pub fn run() {
             // Offline PartBank catalogs and integration state, per vault and
             // never in the vault (D13).
             app.manage(net::IntegrationDirs(data.join("integrations")));
-            // The assistant's chat history (and later its skins), never in a vault.
+            // The assistant's chat history and installed skins, never in a vault.
             app.manage(assistant::AssistantDirs(data.join("assistant")));
             // Integration keys: Windows Credential Manager only, never a file (D6).
             app.manage(net::secrets::Secrets::keyring());

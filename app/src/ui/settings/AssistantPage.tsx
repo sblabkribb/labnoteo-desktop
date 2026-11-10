@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
+import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
+import type { SkinManifest } from '../../assistant/skins/types';
 import type { WebSearchResult } from '../../assistant/web/ipc';
 import { assistantSession } from '../../assistant/useAssistantSession';
 import { t } from '../../i18n/t';
@@ -9,11 +11,13 @@ import { confirmDialog } from '../../labnote/host/dialogStore';
 import { notify as toast } from '../../labnote/host/toastStore';
 import { layoutStore, useLayout } from '../layoutStore';
 import { Segmented } from '../Segmented';
+import { SelectField } from '../SelectField';
 import { SettingRow, Toggle } from './SettingRow';
 
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
- * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 웹 검색 주소(Task 12, 이 PC 의 assistant.json), 대화 기록(Task 10).
+ * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json),
+ * 대화 기록(Task 10).
  */
 export function AssistantPage() {
   useLang();
@@ -40,9 +44,97 @@ export function AssistantPage() {
           />
         }
       />
+      <SkinRow />
       <WebSearchRow />
       <HistoryRow />
     </>
+  );
+}
+
+export interface SkinRowDeps {
+  /** 지금 고른 스킨 id(기본: 이 PC 의 ui.json pet.skin). */
+  active?: string;
+  setSkin?: (id: string) => void;
+  list?: () => Promise<SkinManifest[]>;
+  /** 지우고, 쓰던 스킨이면 기본 스킨으로 돌린다. */
+  remove?: (id: string) => Promise<void>;
+  confirm?: (message: string) => Promise<boolean>;
+  notify?: (kind: 'info' | 'warn', message: string) => void;
+}
+
+/**
+ * 스킨 줄(assistant 명세 §8.3, §10.1, plan Task 16): 기본 스킨(맨 앞)과 이 PC 에 설치한 스킨에서 고르고(ui.json pet.skin),
+ * 고른 스킨을 지운다(확인 후, 되돌릴 수 없다). 기본 스킨은 지울 수 없다. 모르는 id 는 기본 스킨으로 보인다.
+ * 이름·만든 사람·라이선스는 스킨 파일에서 온 글이라 글자로만 보인다(React 가 이스케이프한다).
+ */
+export function SkinRow(deps: SkinRowDeps = {}) {
+  useLang();
+  const { pet } = useLayout();
+  const active = deps.active ?? pet.skin;
+  const setSkin = deps.setSkin ?? ((skin: string) => layoutStore.setPet({ skin }));
+  const list = deps.list ?? (() => listSkins());
+  const remove = deps.remove ?? ((id: string) => removeSkinAndFallBack(id));
+  const confirm = deps.confirm ?? ((message: string) => confirmDialog(message, { confirmLabel: t('settings.assistant.skin.remove'), destructive: true }));
+  const notify = deps.notify ?? toast;
+  const [installed, setInstalled] = useState<SkinManifest[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () =>
+    list().then(
+      (l) => setInstalled(l),
+      () => setInstalled([])
+    );
+  useEffect(() => {
+    let live = true;
+    list().then(
+      (l) => live && setInstalled(l),
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+    // Read once when the pane opens.
+  }, []);
+
+  const choices = skinChoices(installed);
+  const current = choices.find((c) => c.id === active) ?? choices[0];
+
+  const run = async () => {
+    if (current.builtin) return;
+    if (!(await confirm(t('skin.removeConfirm', current.name)))) return;
+    setBusy(true);
+    try {
+      await remove(current.id);
+      notify('info', t('skin.removed'));
+    } catch (err) {
+      console.warn('[labnoteo] skin remove failed:', err);
+      notify('warn', t('skin.removeFailed'));
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  };
+
+  const label = t('settings.assistant.skin');
+  return (
+    <SettingRow
+      label={label}
+      description={`${t('settings.assistant.skin.desc')} ${t('settings.assistant.skin.info', current.author, current.licence)}`}
+      control={
+        <>
+          <SelectField aria-label={label} value={current.id} onChange={(e) => setSkin(e.currentTarget.value)}>
+            {choices.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.builtin ? t('settings.assistant.skin.builtin', c.name) : c.name}
+              </option>
+            ))}
+          </SelectField>
+          <button type="button" className="btn danger" disabled={busy || current.builtin} onClick={() => void run()}>
+            {t('settings.assistant.skin.remove')}
+          </button>
+        </>
+      }
+    />
   );
 }
 

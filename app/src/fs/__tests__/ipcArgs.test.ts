@@ -21,6 +21,7 @@ import { scholarIpcFor } from '../../integrations/scholar/ipc';
 import * as history from '../../assistant/history';
 import * as assistantConfig from '../../assistant/config';
 import { webIpcFor } from '../../assistant/web/ipc';
+import * as skins from '../../assistant/skins/store';
 
 // 공유 픽스처. Rust 쪽 src-tauri/tests/ipc.rs 가 같은 파일을 읽어 커맨드가 이 이름을 받는지 본다.
 const fixture: Record<string, string[]> = JSON.parse(
@@ -208,6 +209,10 @@ describe('IPC 인자 이름 계약', () => {
     await assistantConfig.probeWebSearch('https://s.example', r.invoke);
     await webIpcFor(r.invoke).search('대장균', { language: 'ko' });
     await webIpcFor(r.invoke).fetchPage('https://example.org/a?b=1');
+    await skins.listSkins(r.invoke);
+    await skins.readSkin('flasko-blue', r.invoke);
+    await skins.installSkin('ab'.repeat(16), false, r.invoke);
+    await skins.removeSkin('flasko-blue', r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

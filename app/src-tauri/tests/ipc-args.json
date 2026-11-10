@@ -106,5 +106,9 @@
   "assistant_config_write": ["cfg"],
   "web_search": ["requestId", "query", "opts"],
   "web_search_probe": ["url"],
-  "fetch_page": ["requestId", "url"]
+  "fetch_page": ["requestId", "url"],
+  "skin_install": ["stagingId", "replace"],
+  "skin_list": [],
+  "skin_read": ["id"],
+  "skin_remove": ["id"]
 }

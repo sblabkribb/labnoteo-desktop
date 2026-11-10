@@ -98,6 +98,18 @@ pub enum SkinErrorKind {
     SheetSize,
     /// An animated PNG (APNG).
     AnimatedPng,
+    /// A staging id that is unknown, expired or was evicted (store, Task 16).
+    StagingUnknown,
+    /// Another skin with the same id is installed: install again with `replace`.
+    Exists,
+    /// The built-in skin cannot be removed or replaced.
+    Builtin,
+    /// No installed skin has this id.
+    NotFound,
+    /// An installed skin's files changed on disk: refused, not served.
+    Tampered,
+    /// A disk error, or the skins folder resolves inside the open vault.
+    Io,
 }
 
 /// `{kind, detail?}`; `detail` (a file or field name) is sanitised like manifest text.
@@ -390,7 +402,7 @@ fn text_field(field: &str, value: &str, max: usize) -> Result<String, SkinError>
     Ok(v)
 }
 
-fn parse_manifest(bytes: &[u8]) -> Result<Manifest, SkinError> {
+pub(crate) fn parse_manifest(bytes: &[u8]) -> Result<Manifest, SkinError> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return fail(SkinErrorKind::TooLarge, MANIFEST);
     }

@@ -69,6 +69,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         // save dialog that picks a temp path once, then cancels.
         // The assistant's chat history: a temp app data dir, never the real one.
         .manage(labnoteo_app_lib::assistant::AssistantDirs(dir.join("data").join("assistant")))
+        .manage(labnoteo_app_lib::skins::SkinStaging::default())
         .manage(labnoteo_app_lib::skill::SkillPaths { home: Some(dir.join("home")) })
         .manage(labnoteo_app_lib::skill::SkillPicker(std::sync::Arc::new({
             let picked = dir.join("saved").join("SKILL.md");
@@ -257,6 +258,18 @@ fn ipc_argument_names_match_the_typescript_side() {
         assert_eq!(call("fetch_page", args("fetch_page", vec![json!("fp1"), json!(blocked)])).unwrap_err()["kind"], "blocked", "{blocked}");
     }
     assert_eq!(call("fetch_page", args("fetch_page", vec![json!("fp2"), json!("not a url")])).unwrap_err()["kind"], "invalidUrl");
+
+    // Installed skins (assistant Task 16): nothing installed at first; only a
+    // staging id made by Rust installs (none exists yet); the built-in skin
+    // cannot be removed; ids are checked.
+    assert_eq!(ok("skin_list", args("skin_list", vec![])), json!([]));
+    assert_eq!(
+        call("skin_install", args("skin_install", vec![json!("0123456789abcdef0123456789abcdef"), json!(false)])).unwrap_err()["kind"],
+        "stagingUnknown"
+    );
+    assert_eq!(call("skin_read", args("skin_read", vec![json!("../x")])).unwrap_err()["kind"], "notFound");
+    assert_eq!(call("skin_remove", args("skin_remove", vec![json!("flasko")])).unwrap_err()["kind"], "builtin");
+    assert!(!dir.join("vault").join("skins").exists());
 
     let info = ok("vault_open", args("vault_open", vec![json!(vault)]));
     assert_eq!(info["name"], "vault");
@@ -1185,8 +1198,14 @@ fn skin_error_kinds_match_the_fixture() {
         K::PngTooLarge => "pngTooLarge",
         K::SheetSize => "sheetSize",
         K::AnimatedPng => "animatedPng",
+        K::StagingUnknown => "stagingUnknown",
+        K::Exists => "exists",
+        K::Builtin => "builtin",
+        K::NotFound => "notFound",
+        K::Tampered => "tampered",
+        K::Io => "io",
     };
-    let all = [K::TooLarge, K::TooManyEntries, K::BadArchive, K::BadPath, K::FileNotAllowed, K::Symlink, K::Encrypted, K::UnsupportedMethod, K::Duplicate, K::SizeMismatch, K::CompressionRatio, K::ManifestMissing, K::ManifestInvalid, K::LicenceMissing, K::LicenceNotAllowed, K::StateMissing, K::SheetMissing, K::SheetUnused, K::BadPng, K::PngTooLarge, K::SheetSize, K::AnimatedPng];
+    let all = [K::TooLarge, K::TooManyEntries, K::BadArchive, K::BadPath, K::FileNotAllowed, K::Symlink, K::Encrypted, K::UnsupportedMethod, K::Duplicate, K::SizeMismatch, K::CompressionRatio, K::ManifestMissing, K::ManifestInvalid, K::LicenceMissing, K::LicenceNotAllowed, K::StateMissing, K::SheetMissing, K::SheetUnused, K::BadPng, K::PngTooLarge, K::SheetSize, K::AnimatedPng, K::StagingUnknown, K::Exists, K::Builtin, K::NotFound, K::Tampered, K::Io];
     assert_eq!(fixture.len(), all.len(), "ipc-skin-errors.json lists every kind");
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-skin-errors.json", name(k)));

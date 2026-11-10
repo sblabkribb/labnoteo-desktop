@@ -7,8 +7,10 @@
 //! that accepts pack bytes from the webview.
 
 pub mod pack;
+pub mod store;
 
 #[cfg(test)]
 pub(crate) mod testpacks;
 
 pub use pack::{validate_pack, Manifest, SkinError, SkinErrorKind, ValidPack};
+pub use store::{SkinData, SkinStaging, BUILTIN_ID};

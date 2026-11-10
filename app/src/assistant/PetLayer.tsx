@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalSto
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { notify } from '../labnote/host/toastStore';
-import { BUILTIN_SKIN } from './skins/builtin';
+import { useSkin, type SkinDeps } from './skins/useSkin';
 import { Bubble } from './Bubble';
 import type { BubbleActions } from './MessageView';
 
@@ -43,11 +43,20 @@ const ARROW: Readonly<Record<string, [number, number]>> = {
  * - 숨기면 아무것도 그리지 않는다. 리본 단추와 assistant.toggleVisible 이 다시 보인다.
  * - 대화 갈래(useAssistantSession)는 숨겨도, 말풍선을 닫아도 열린 노트의 실험 폴더를 따른다(폴더가 바뀌면 멈추고 바꾼다).
  */
-export function PetLayer(props: { store?: PetStore; session?: AssistantSession; activePath?: string; actions?: BubbleActions }) {
+export function PetLayer(props: {
+  store?: PetStore;
+  session?: AssistantSession;
+  activePath?: string;
+  actions?: BubbleActions;
+  /** 스킨 읽기(테스트용 가짜 invoke·blob 주소). */
+  skinDeps?: SkinDeps;
+}) {
   useLang();
   const store = props.store ?? defaultStore;
   const snap = useSyncExternalStore(store.subscribe, store.get);
   const chat = useAssistantSession({ activePath: props.activePath, session: props.session });
+  // 이 PC 에서 고른 스킨(ui.json pet.skin). 모르는 id 나 읽기 실패는 기본 스킨이다. 설치한 스킨은 blob: 주소로 그린다.
+  const skin = useSkin(snap.skin, props.skinDeps);
   const wrap = useRef<HTMLDivElement>(null);
   const sprite = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -73,9 +82,8 @@ export function PetLayer(props: { store?: PetStore; session?: AssistantSession; 
   }, [snap.pos.x, snap.pos.y, snap.scale, snap.hidden]);
 
   useLayoutEffect(() => {
-    // 지금은 기본 스킨만 있다(설치한 스킨은 스킨 작업에서 붙는다)
-    if (sprite.current) applySkinVars(sprite.current, BUILTIN_SKIN, snap.state);
-  }, [snap.state, snap.hidden]);
+    if (sprite.current) applySkinVars(sprite.current, skin.manifest, snap.state, skin.sheetUrl);
+  }, [snap.state, snap.hidden, skin]);
 
   if (snap.hidden) return null;
 
