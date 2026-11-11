@@ -25,6 +25,16 @@ describe('settings rows', () => {
     expect(decl('.setting-control', 'justify-content')).toEqual(['flex-end']);
   });
 
+  it('the skin buttons form an even grid of three columns (3+3), not ragged wrapped rows (visual QA)', () => {
+    expect(decl('.setting-skin-actions', 'display')).toEqual(['grid']);
+    expect(decl('.setting-skin-actions', 'grid-template-columns')).toEqual(['repeat(3, auto)']);
+  });
+
+  it('a text field shrinks with its control instead of pushing the row out of the pane (ko-dark web search, ~13px)', () => {
+    expect(decl('.setting-control', 'min-width')).toEqual(['0']);
+    expect(decl('.setting-text', 'max-width')).toEqual(['100%']);
+  });
+
   it('the name and description keep a readable minimum width', () => {
     // 16rem: the skin row's buttons wrap instead of squeezing the description to ~190 px (Visual QA)
     expect(decl('.setting-info', 'flex')).toEqual(['1 1 16rem']);

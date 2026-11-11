@@ -298,8 +298,11 @@ fieldset.mcp-client-auth legend { padding: 0; }
 /* 한국어는 낱말 중간에서 끊지 않는다(keep-all). 긴 주소는 그래도 어디서든 끊는다(anywhere) */
 .setting-desc { margin-top: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; word-break: keep-all; overflow-wrap: anywhere; }
 .setting-desc-line { display: block; }
-.setting-control { flex: 0 1 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-4); }
-.setting-text { width: 14rem; }
+.setting-control { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-4); }
+/* 칸은 조작 칸과 함께 줄어든다: 좁은 창에서 고정 폭 칸이 줄을 창 밖으로 밀지 않는다 */
+.setting-text { width: 14rem; max-width: 100%; }
+/* 스킨 단추 여섯은 고르기 아래에 3+3 으로 고르게 놓인다(들쭉날쭉 접히지 않게) */
+.setting-skin-actions { flex-basis: 100%; display: grid; grid-template-columns: repeat(3, auto); justify-content: end; gap: var(--space-3); }
 .setting-status { max-width: 16rem; color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; }
 
 /* Switch: a 36×20 track with a knob. On is the accent fill */

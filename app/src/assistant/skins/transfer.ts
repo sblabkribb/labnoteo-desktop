@@ -35,16 +35,29 @@ export function skinImportDialog(staged: StagedSkin, urls?: SkinUrls): Promise<'
 
 /** 파일을 골라 미리 보고, 확인을 받아 설치한다. 설치한 스킨의 manifest, 그만두거나 실패하면 undefined. */
 export async function importSkinFile(deps: ImportDeps = {}): Promise<SkinManifest | undefined> {
+  const staged = await pickSkin(deps);
+  return staged ? installPickedSkin(staged, deps) : undefined;
+}
+
+/**
+ * 가져오기의 앞 단계: Rust 열기 창으로 파일을 고르고 검사해 임시 보관한다. 닫으면 undefined, 못 읽으면 알리고 undefined.
+ * 설정 창은 이 동안 그대로 둔다(열기 창은 대화상자 줄과 상관없다): 창이 사라졌다 나타나는 깜박임이 없다.
+ */
+export async function pickSkin(deps: ImportDeps = {}): Promise<StagedSkin | undefined> {
   const invoke = deps.invoke ?? tauriInvoke;
   const notify = deps.notify ?? toast;
-  let staged: StagedSkin | null;
   try {
-    staged = await pickSkinFile(invoke);
+    return (await pickSkinFile(invoke)) ?? undefined;
   } catch (e) {
     notify('warn', t('skin.importFailed', skinErrorText(e)));
     return undefined;
   }
-  if (!staged) return undefined;
+}
+
+/** 가져오기의 뒷 단계: 고른 팩을 미리 보이고 확인을 받아 설치한다. 그만두면 임시 보관한 팩을 버린다. */
+export async function installPickedSkin(staged: StagedSkin, deps: ImportDeps = {}): Promise<SkinManifest | undefined> {
+  const invoke = deps.invoke ?? tauriInvoke;
+  const notify = deps.notify ?? toast;
   if ((await skinImportDialog(staged, deps.urls)) !== 'install') {
     await discardStagedSkin(staged.stagingId, invoke).catch(() => undefined);
     return undefined;

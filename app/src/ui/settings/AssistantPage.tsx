@@ -4,7 +4,8 @@ import { clearAllHistory, historyStats, type HistoryStats } from '../../assistan
 import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
 import { DEFAULT_GALLERY_URL, browseGallery, submitToGallery } from '../../assistant/skins/gallery';
 import { openSkinEditor } from '../../assistant/skins/SkinEditor';
-import { exportSkinFile, importSkinFile } from '../../assistant/skins/transfer';
+import { exportSkinFile, installPickedSkin, pickSkin } from '../../assistant/skins/transfer';
+import type { StagedSkin } from '../../assistant/skins/store';
 import type { SkinManifest } from '../../assistant/skins/types';
 import type { WebSearchResult } from '../../assistant/web/ipc';
 import { assistantSession } from '../../assistant/useAssistantSession';
@@ -81,8 +82,10 @@ export interface SkinRowDeps {
   remove?: (id: string) => Promise<void>;
   confirm?: (message: string) => Promise<boolean>;
   notify?: (kind: 'info' | 'warn', message: string) => void;
-  /** 스킨 파일 가져오기(미리 보기와 확인을 거쳐 설치). */
-  importSkin?: () => Promise<unknown>;
+  /** 스킨 파일 고르기(Rust 열기 창). 설정 창을 연 채로 기다린다. 닫으면 undefined. */
+  pickSkin?: () => Promise<StagedSkin | undefined>;
+  /** 고른 스킨 파일을 미리 보기와 확인을 거쳐 설치한다(설정 창을 닫은 뒤). */
+  installPicked?: (staged: StagedSkin) => Promise<unknown>;
   /** 스킨 파일 내보내기(Rust 저장 창). */
   exportSkin?: (id: string) => Promise<boolean>;
   /** 내 스킨 만들기 창(Task 18). */
@@ -99,7 +102,7 @@ export interface SkinRowDeps {
  * 스킨 줄(assistant 명세 §8.3, §10.1, plan Task 16): 기본 스킨(맨 앞)과 이 PC 에 설치한 스킨에서 고르고(ui.json pet.skin),
  * 고른 스킨을 지운다(확인 후, 되돌릴 수 없다). 기본 스킨은 지울 수 없다. 모르는 id 는 기본 스킨으로 보인다.
  * 이름·만든 사람·라이선스는 스킨 파일에서 온 글이라 글자로만 보인다(React 가 이스케이프한다).
- * "가져오기"는 설정 창을 닫고 파일을 골라 미리 보기·확인을 거쳐 설치한다(Task 17). "내보내기"는 고른 스킨(기본 스킨도)을 파일로 저장한다.
+ * "가져오기"는 설정 창을 연 채로 파일을 고르고, 고른 뒤에 설정 창을 닫고 미리 보기·확인을 거쳐 설치한다(Task 17). "내보내기"는 고른 스킨(기본 스킨도)을 파일로 저장한다.
  */
 export function SkinRow(deps: SkinRowDeps = {}) {
   useLang();
@@ -110,13 +113,15 @@ export function SkinRow(deps: SkinRowDeps = {}) {
   const remove = deps.remove ?? ((id: string) => removeSkinAndFallBack(id));
   const confirm = deps.confirm ?? ((message: string) => confirmDialog(message, { confirmLabel: t('settings.assistant.skin.remove'), destructive: true }));
   const notify = deps.notify ?? toast;
-  const importSkin = deps.importSkin ?? (() => importSkinFile());
+  const pick = deps.pickSkin ?? (() => pickSkin());
+  const installPicked = deps.installPicked ?? ((staged: StagedSkin) => installPickedSkin(staged));
   const exportSkin = deps.exportSkin ?? ((id: string) => exportSkinFile(id));
   const makeSkin = deps.makeSkin ?? (() => openSkinEditor());
   const gallery = deps.gallery ?? (() => browseGallery());
   const submit = deps.submit ?? ((id: string) => submitToGallery(id));
   const [installed, setInstalled] = useState<SkinManifest[]>([]);
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const refresh = () =>
     list().then(
@@ -168,7 +173,25 @@ export function SkinRow(deps: SkinRowDeps = {}) {
       void refresh();
     });
   };
-  const runImport = () => runOutside(importSkin);
+  /**
+   * 가져오기: 파일은 설정 창을 연 채로 고른다(열기 창이 떠 있는 동안 설정 창이 사라지면 깜박인다). 고른 뒤에야 설정 창을
+   * 닫고 미리 보기·확인 창을 연다. 고르는 동안은 단추가 꺼지고 "파일을 고르는 중" 을 알린다.
+   */
+  const runImport = async () => {
+    setBusy(true);
+    setPicking(true);
+    let staged: StagedSkin | undefined;
+    try {
+      staged = await pick();
+    } finally {
+      setPicking(false);
+      setBusy(false);
+    }
+    if (staged) {
+      const chosen = staged;
+      runOutside(() => installPicked(chosen));
+    }
+  };
 
   const runExport = async () => {
     setBusy(true);
@@ -202,24 +225,31 @@ export function SkinRow(deps: SkinRowDeps = {}) {
               </option>
             ))}
           </SelectField>
-          <button type="button" className="btn" {...softOff(busy, runImport)}>
-            {t('settings.assistant.skin.import')}
-          </button>
-          <button type="button" className="btn" {...softOff(busy, () => void runExport())}>
-            {t('settings.assistant.skin.export')}
-          </button>
-          <button type="button" className="btn" {...softOff(busy, () => runOutside(makeSkin))}>
-            {t('settings.assistant.skin.make')}
-          </button>
-          <button type="button" className="btn" {...softOff(busy, () => runOutside(gallery))}>
-            {t('settings.assistant.skin.gallery')}
-          </button>
-          <button type="button" className="btn" {...softOff(busy, () => void runSubmit())}>
-            {t('settings.assistant.skin.submit')}
-          </button>
-          <button type="button" className="btn danger" {...softOff(busy || current.builtin, () => void run())}>
-            {t('settings.assistant.skin.remove')}
-          </button>
+          <div className="setting-skin-actions">
+            <button type="button" className="btn" {...softOff(busy, () => void runImport())}>
+              {t('settings.assistant.skin.import')}
+            </button>
+            <button type="button" className="btn" {...softOff(busy, () => void runExport())}>
+              {t('settings.assistant.skin.export')}
+            </button>
+            <button type="button" className="btn" {...softOff(busy, () => runOutside(makeSkin))}>
+              {t('settings.assistant.skin.make')}
+            </button>
+            <button type="button" className="btn" {...softOff(busy, () => runOutside(gallery))}>
+              {t('settings.assistant.skin.gallery')}
+            </button>
+            <button type="button" className="btn" {...softOff(busy, () => void runSubmit())}>
+              {t('settings.assistant.skin.submit')}
+            </button>
+            <button type="button" className="btn danger" {...softOff(busy || current.builtin, () => void run())}>
+              {t('settings.assistant.skin.remove')}
+            </button>
+          </div>
+          {picking ? (
+            <span role="status" className="setting-status">
+              {t('settings.assistant.skin.picking')}
+            </span>
+          ) : null}
         </>
       }
     />

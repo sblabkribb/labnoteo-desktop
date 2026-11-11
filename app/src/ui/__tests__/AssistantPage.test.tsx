@@ -6,6 +6,8 @@ import { setLang } from '../../i18n/lang';
 import { ExternalAssistantsRow, HistoryRow, SkinRow, WebSearchKeyRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
 import { secretStatusOf } from '../../integrations/__tests__/fakeNet';
 import type { SkinManifest } from '../../assistant/skins/types';
+import type { StagedSkin } from '../../assistant/skins/store';
+import { t } from '../../i18n/t';
 import { BUILTIN_SKIN } from '../../assistant/skins/builtin';
 
 afterEach(() => {
@@ -451,11 +453,14 @@ describe('Assistant pane: skin row (plan Task 16)', () => {
 describe('Assistant pane: skin import and export (Task 17)', () => {
   const blue: SkinManifest = { ...BUILTIN_SKIN, id: 'flasko-blue', name: 'Flasko Blue', author: 'Hong', licence: 'CC-BY-4.0' };
 
-  it('export saves the chosen skin (the built-in one too); import leaves the settings window first', async () => {
+  const staged = { stagingId: 's1', manifest: blue } as unknown as StagedSkin;
+
+  it('export saves the chosen skin (the built-in one too); import picks the file first, then leaves the settings window', async () => {
     const exportSkin = vi.fn(async () => true);
-    const importSkin = vi.fn(async () => undefined);
+    const pickSkin = vi.fn(async () => staged);
+    const installPicked = vi.fn(async () => undefined);
     const leave = vi.fn(async (after: () => Promise<void>) => after());
-    const deps = { list: vi.fn(async () => [blue]), exportSkin, importSkin, leave, notify: vi.fn() };
+    const deps = { list: vi.fn(async () => [blue]), exportSkin, pickSkin, installPicked, leave, notify: vi.fn() };
     const view = render(<SkinRow {...deps} active="flasko-blue" />);
     await settle();
     await userEvent.click(screen.getByRole('button', { name: '내보내기' }));
@@ -464,20 +469,49 @@ describe('Assistant pane: skin import and export (Task 17)', () => {
     await userEvent.click(screen.getByRole('button', { name: '내보내기' }));
     expect(exportSkin).toHaveBeenLastCalledWith('flasko');
     await userEvent.click(screen.getByRole('button', { name: '가져오기' }));
-    expect(leave).toHaveBeenCalledTimes(1);
     await settle();
-    expect(importSkin).toHaveBeenCalledTimes(1);
+    expect(pickSkin).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(installPicked).toHaveBeenCalledWith(staged);
+  });
+
+  it('while the file picker is open the settings window stays and says it is waiting; closing the picker leaves it open (visual QA)', async () => {
+    let answer: (v: StagedSkin | undefined) => void = () => undefined;
+    const pickSkin = vi.fn(() => new Promise<StagedSkin | undefined>((r) => (answer = r)));
+    const installPicked = vi.fn(async () => undefined);
+    const leave = vi.fn(async (after: () => Promise<void>) => after());
+    render(<SkinRow list={vi.fn(async () => [blue])} pickSkin={pickSkin} installPicked={installPicked} leave={leave} active="flasko" />);
+    await settle();
+    const button = screen.getByRole('button', { name: '가져오기' });
+    await userEvent.click(button);
+    expect(leave).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toBe(t('settings.assistant.skin.picking'));
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => answer(undefined));
+    await settle();
+    expect(leave).not.toHaveBeenCalled();
+    expect(installPicked).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(button.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('without a settings window, import runs in place and the list is read again', async () => {
     const list = vi.fn(async () => [blue]);
-    const importSkin = vi.fn(async () => undefined);
-    render(<SkinRow list={list} importSkin={importSkin} active="flasko" />);
+    const installPicked = vi.fn(async () => undefined);
+    render(<SkinRow list={list} pickSkin={async () => staged} installPicked={installPicked} active="flasko" />);
     await settle();
     await userEvent.click(screen.getByRole('button', { name: '가져오기' }));
     await settle();
-    expect(importSkin).toHaveBeenCalledTimes(1);
+    expect(installPicked).toHaveBeenCalledTimes(1);
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('the six skin buttons sit together in their own group, apart from the select (visual QA)', async () => {
+    render(<SkinRow list={vi.fn(async () => [blue])} active="flasko-blue" />);
+    await settle();
+    const group = document.querySelector('.setting-skin-actions')!;
+    expect(group.querySelectorAll('button')).toHaveLength(6);
+    expect(group.contains(screen.getByRole('combobox', { name: '스킨' }))).toBe(false);
   });
 
   it('"내 스킨 만들기" leaves the settings window first, then opens the editor (Task 18)', async () => {
