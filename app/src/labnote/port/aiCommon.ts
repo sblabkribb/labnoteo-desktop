@@ -18,6 +18,8 @@ import { loopDetail } from '../../ai/loopDetail';
 import { getLang } from '../../i18n/lang';
 import { t as appT } from '../../i18n/t';
 import { withProgress } from '../../integrations/progressStore';
+import { labToolTitle } from '../../labservices';
+import { labFailureText } from '../../labservices/common';
 import { entryEvents } from '../commands/entryEvents';
 import { readmeStamp } from '../commands/stamp';
 import { overrideOr } from '../i18n';
@@ -198,6 +200,9 @@ export function failureReasonText(env: AiEnv, code: string, params: readonly str
       return env.host.t('The note has no "{0}" section.', a);
     case 'web_failed':
       return webFailureText(a === 'page' ? 'page' : 'search', b, params[2] ?? '');
+    case 'lab_failed':
+      // The assistant's read-only partbank / Workflow server tools: [service, failure, extra].
+      return labFailureText(a, b, params[2] ?? '');
     default:
       // The experiment-scope codes of the context tools, worded from the app catalog (not the vendor one).
       return scopeErrorText(code, params);
@@ -238,7 +243,7 @@ function toolNameShown(name: string): string {
     case 'fetch_page':
       return appT('tool.name.fetchPage');
     default:
-      return name;
+      return labToolTitle(name) ?? name;
   }
 }
 

@@ -168,6 +168,36 @@ describe('tool-run notice', () => {
     }
   });
 
+  it('failureReasons words a lab-service tool failure (lab_failed) in the UI language and names the tool in words', () => {
+    const th = host({});
+    const { env } = aiEnv(th, () => reply('x'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const busy: AgentRun['executed'][number] = {
+      call: call('workflow_list_designs', {}),
+      outcome: 'failed',
+      mutates: false,
+      error: '<untrusted-data …>The Workflow server is busy</untrusted-data …>',
+      code: 'lab_failed',
+      params: ['workflow', 'rateLimited'],
+    };
+    try {
+      setLang('ko');
+      const ko = failureReasons(env, [busy]);
+      expect(ko).toBe(`실패: ${t('tool.name.workflowListDesigns')} — ${t('pet.labTools.fail.rateLimited', 'Workflow 서버')}`);
+      expect(ko).toContain('Workflow 서버');
+      expect(ko).not.toMatch(/untrusted|workflow_list_designs/);
+      expect(failureReasons(env, [{ ...busy, call: call('partbank_lookup_part'), params: ['partbank', 'forbidden'] }])).toBe(
+        `실패: ${t('tool.name.partbankLookupPart')} — ${t('pet.labTools.fail.forbidden')}`,
+      );
+      setLang('en');
+      expect(failureReasons(env, [{ ...busy, params: ['workflow', 'status', '502'] }])).toBe(
+        'Failed: Workflow server designs — An error answer from the Workflow server (HTTP 502).',
+      );
+    } finally {
+      setLang('en');
+    }
+  });
+
   it('failureReasons names at most 3, each cut to 80 chars', () => {
     const th = host({});
     const { env } = aiEnv(th, () => reply('x'));

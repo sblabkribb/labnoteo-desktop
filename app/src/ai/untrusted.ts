@@ -12,8 +12,11 @@
  */
 
 export interface UntrustedSource {
-  kind: 'mcp' | 'scholar' | 'web';
-  /** source 속성에 들어가는 이름(예: `mcp:RAPID/search_parts`, `scholar:pubmed`, 웹은 `web search` 나 페이지의 호스트). */
+  kind: 'mcp' | 'scholar' | 'web' | 'lab';
+  /**
+   * source 속성에 들어가는 이름(예: `mcp:RAPID/search_parts`, `scholar:pubmed`, 웹은 `web search` 나 페이지의 호스트,
+   * 실험실 도구는 `partbank:search_parts`·`workflow:get_design`).
+   */
   label: string;
   serverId?: string;
 }

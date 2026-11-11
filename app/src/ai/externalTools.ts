@@ -15,8 +15,11 @@ import { scholarIpcFor } from '../integrations/scholar/ipc';
 import type { AiEnv } from './aiEnv';
 
 export interface ExternalToolMeta {
-  /** `web` 은 도우미의 `web_search`/`fetch_page`(assistant/web/agentTools.ts, assistant spec §7). */
-  kind: 'mcp' | 'scholar' | 'web';
+  /**
+   * `web` 은 도우미의 `web_search`/`fetch_page`(assistant/web/agentTools.ts, assistant spec §7). `lab` 은 도우미의 읽기 전용
+   * 실험실 도구(partbank·Workflow 서버, labservices/): 결과는 바깥 글이지만 읽기만 하고 확인을 묻지 않는다.
+   */
+  kind: 'mcp' | 'scholar' | 'web' | 'lab';
   serverId?: string;
   serverName?: string;
   toolTitle?: string;

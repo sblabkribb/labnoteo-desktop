@@ -16,6 +16,7 @@ import { openInBrowser } from '../../labnote/print/openInBrowser';
 import * as scan from '../../labnote/scan/scanIpc';
 import * as mcp from '../../labnote/mcp/mcpIpc';
 import { readClipboardLink } from '../../partbank/clipboardIpc';
+import { partbankRead } from '../../labservices/ipc';
 import { DEFAULT_PREFS, readUiPrefs, writeUiPrefs } from '../../ui/layoutStore';
 import { skillInstall, skillSaveAs, skillStatus } from '../../labnote/skill/skillIpc';
 import { scholarIpcFor } from '../../integrations/scholar/ipc';
@@ -39,9 +40,9 @@ const fixture: Record<string, string[]> = JSON.parse(
  * MCP 클라이언트 커맨드 여덟 개(Task 5a, Rust)는 Task 5b 의 netIpc.ts 래퍼가 비웠다.
  * 문헌 검색 커맨드 두 개(Task 11, Rust)는 Task 13 의 scholar/ipc.ts 래퍼가 비웠다.
  * feat/github-upload: github_* 커맨드 열여덟은 Task 11 의 githubIpc.ts 래퍼로 비웠다.
- * 어시스턴트의 읽기 전용 partbank 도구용 partbank_read(Rust)는 labservices/ipc.ts 래퍼가 생기면 비운다.
+ * 어시스턴트의 읽기 전용 partbank 도구용 partbank_read(Rust)는 labservices/ipc.ts 의 partbankRead 래퍼로 비웠다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = ['partbank_read'];
+const PENDING_TS_WRAPPERS: readonly string[] = [];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.
@@ -150,6 +151,7 @@ describe('IPC 인자 이름 계약', () => {
     await net.llmProbe({ provider: 'ollama', endpoint: 'http://127.0.0.1:11434', model: 'm' }, r.invoke);
     await net.llmChatStream({ provider: 'openai', body: {}, onFrame: () => undefined }, r.invoke, (async () => () => undefined) as unknown as net.ListenFn).catch(() => undefined);
     await net.bfwRequest({ path: '/api/auth/me' }, r.invoke);
+    await partbankRead({ method: 'GET', path: '/groups/' }, r.invoke);
     await net.bfwProbe({ connection: 'server' }, r.invoke);
     await net.bfwBase(r.invoke);
     const listen = (async () => () => undefined) as unknown as net.ListenFn;
