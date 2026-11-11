@@ -32,7 +32,7 @@ import { NoteBusyError, NoteSaveError } from '../noteErrors';
 import { processNote } from '../openNotes';
 import { README, VAULT_ROOT, samePath } from '../paths';
 import {
-  catalogDescription,
+  catalogDescriptionShown,
   catalogKoFields,
   readChecklistLabels,
   workflowAliasHint,
@@ -129,7 +129,8 @@ async function askWorkflowAlias(ctx: CommandContext, labnoteDir: string, chosen:
     catalogName: chosen.name,
     placeholder: host.t('Enter a name for this workflow'),
     about: workflowConcept(host),
-    description: chosen.description ? catalogDescription(chosen.id, chosen.description, locale) : undefined,
+    // 보이기만 하는 설명: 한국어 화면의 용어 규칙(koTerms)을 따른다
+    description: chosen.description ? catalogDescriptionShown(chosen.id, chosen.description, locale) : undefined,
     hint: (value) => {
       const hint = fullHint(value);
       return hint.warn || workflowAliasLength(value) >= budget - ALIAS_COUNTER_NEAR ? hint : undefined;

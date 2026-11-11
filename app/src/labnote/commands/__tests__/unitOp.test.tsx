@@ -130,6 +130,22 @@ describe('insert-unit-operation', () => {
     expect(doc).not.toContain('### [UHW380 ');
   });
 
+  it('the alias step (UO 추가) shows the catalog description with Workflow / Unit Operation in English in ko (term rule)', async () => {
+    const OLD_TERMS = /워크플로|단위\s*공정|유닛\s*오퍼레이션/;
+    const m = await openWorkflow();
+    for (const id of ['UHW100', 'UHW120']) {
+      cursorAt(m, '### [UHW180 Incubation]', 5);
+      h.answer.pick(pickOp(id));
+      h.answer.alias('');
+      await act(() => runCommand(h.ctx, () => insertUnitOp(h.ctx)));
+    }
+    const shown = h.asked.alias.map((a) => a.description ?? '');
+    expect(shown).toHaveLength(2);
+    expect(shown.every((d) => d.length > 0 && /[가-힣]/.test(d))).toBe(true);
+    expect(shown.filter((d) => OLD_TERMS.test(d))).toEqual([]);
+    expect(shown.some((d) => /Unit Operation|Workflow/.test(d))).toBe(true);
+  });
+
   it('a single undo removes the block and the TOC entry together and restores the exact original text', async () => {
     const original = workflowNote();
     const m = await openWorkflow(original);

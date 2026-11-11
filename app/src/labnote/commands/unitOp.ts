@@ -18,7 +18,7 @@ import { coreLocale } from '../i18n';
 import { NoteBusyError } from '../noteErrors';
 import { openNote } from '../openNotes';
 import { VAULT_ROOT, samePath } from '../paths';
-import { catalogDescription, catalogKoFields, unitOpAliasHint, workflowAliasValidator } from '../port/aliasHints';
+import { catalogDescriptionShown, catalogKoFields, unitOpAliasHint, workflowAliasValidator } from '../port/aliasHints';
 import { ensureVaultCatalogs } from '../port/catalogUpdate';
 import { insertUnitOpAndUpdateToc } from '../port/insertUnitOpAndUpdateToc';
 import { pickThen, type AliasBack } from '../host/dialogStore';
@@ -167,7 +167,8 @@ export async function insertUnitOp(ctx: CommandContext, chosen?: ChosenUnitOp, i
         about: host.t(
           'A unit operation is a single task within a workflow (one step using a piece of equipment or software). The alias tells repeats of the same task apart by run or condition and appears in its heading and the table of contents. You can leave it empty.',
         ),
-        description: input.opDescription ? catalogDescription(input.opId, input.opDescription, coreLocale()) : undefined,
+        // 보이기만 하는 설명: 한국어 화면의 용어 규칙(koTerms, Workflow / Unit Operation 은 영어)을 따른다
+        description: input.opDescription ? catalogDescriptionShown(input.opId, input.opDescription, coreLocale()) : undefined,
         // UO 별칭은 파일 이름에 들지 않아 길이 제한이 없다: 글자 수는 보이지 않고 같은 별칭 경고만 보인다
         hint: (value) => {
           const hint = fullHint(value);

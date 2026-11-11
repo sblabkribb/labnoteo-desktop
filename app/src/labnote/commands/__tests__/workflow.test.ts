@@ -127,6 +127,17 @@ describe('create-workflow', () => {
     expect(h.notes[1].message).toContain('폴더와 Workflow 체크리스트 맞추기');
   });
 
+  it('the alias step shows the catalog description with Workflow in English in ko (term rule)', async () => {
+    h = createTestHost({ [README_PATH]: readme() });
+    h.setActive(README_PATH);
+    h.answer.pick(byId('WB001'));
+    h.answer.alias('');
+    await createWorkflow(h.ctx);
+    const shown = h.asked.alias[0].description ?? '';
+    expect(shown).toContain('범용 Workflow입니다');
+    expect(shown).not.toMatch(/워크플로|단위\s*공정|유닛\s*오퍼레이션/);
+  });
+
   it('README open and busy: the note is still created, refreshed, opened and announced, with a warning that the README checklist was not updated', async () => {
     const before = readme();
     h = createTestHost({ [README_PATH]: before });
