@@ -4,7 +4,15 @@
    useTheme 이 data-theme 을 지우므로 시스템 다크 블록은 :root:not([data-theme]) 에만 걸린다. 두 다크 블록은 같아야 한다(tokens.test.ts).
    대비 표(글자 4.5:1, --text-faint 3:1, 강조 채움 위 글자 4.5:1)도 tokens.test.ts 가 이 파일을 읽어 잰다. */
 
-/* 라이트(기본값). Obsidian 처럼 중립 회색에 강조색(보라) 하나. */
+/* 색의 출처: 국가바이오파운드리사업단 전용 색상 규정(CI). 메인 Royal Purple #472c7b, 서브 Baby Blue #83ccd2 · Purple #7d4698,
+   확장색 Yellow rgb(255, 241, 0) · Lime Green #8fc31f, 그라데이션 Baby Blue(0%) → Purple(100%), 중간점 35%.
+   글자로 쓰기에 대비가 모자란 CI 색(Baby Blue 라이트, Coral Red, Hot Pink)은 글자에 쓰지 않는다: 라이트 --info 는 Baby Blue 를 어둡게 한 값이고,
+   다크 강조색(#c3a6e6)과 채움(#955ab4), 채움 hover(#8d52ab)는 CI 보라를 밝힌 값이다. 라이트에서 Royal Purple 은 채움(흰 글자 10.97:1)에만 쓰고,
+   글자·링크·포커스 링의 --accent 는 서브 Purple 이다: Royal Purple 은 본문 글자(#1f1f23)와 1.5:1 이라 색으로만 표시하는 링크가 묻힌다.
+   그라데이션 각도는 CI 의 약 -112° 대신 90° 다: 2–3px 가로 띠에서는 차이가 보이지 않고, 색 정지점과 중간점은 CI 그대로다. --brand-gradient 는 얇은 띠 세 곳(업데이트 진행선, 정보 창, 첫 화면 카드)에만 쓰고
+   글자 뒤에는 깔지 않는다. */
+
+/* 라이트(기본값). 중립 회색에 국가바이오파운드리 CI 보라 하나(채움은 Royal Purple, 글자는 서브 Purple). */
 :root, :root[data-theme="light"] {
   --bg: #ffffff;
   --bg-side: #f6f6f7;
@@ -16,22 +24,24 @@
   /* 보조 단추 채움: 다크에서는 떠 있는 면(--bg-elevated, 대화상자·첫 화면 카드) 위에서도 단추로 보이게 한 단계 밝다 */
   --btn-bg: #e9e9ec;
   --btn-bg-hover: #e2e2e6;
-  --bg-selection: rgba(103, 65, 217, 0.18);
+  --bg-selection: rgba(71, 44, 123, 0.16);
   --border: #e3e3e7;
   --border-strong: #cfcfd5;
   --guide: #dcdce2;
   --text: #1f1f23;
   --text-muted: #5b5b66;
   --text-faint: #80808b;
-  --accent: #6741d9;
-  --accent-fill: #6741d9;
-  --accent-fill-hover: #5f3cc8;
+  --accent: #7d4698;
+  --accent-fill: #472c7b;
+  --accent-fill-hover: #7d4698;
   --accent-text: #ffffff;
-  --accent-soft: rgba(103, 65, 217, 0.1);
-  --search-hit: rgba(255, 208, 0, 0.4);
+  --accent-soft: rgba(71, 44, 123, 0.1);
+  --search-hit: rgba(255, 241, 0, 0.45);
   --danger: #b3261e;
   --warning: #8a5a00;
   --success: #1a6b34;
+  --info: #1b6870;
+  --brand-gradient: linear-gradient(90deg, #83ccd2, 35%, #7d4698);
   --shadow: rgba(0, 0, 0, 0.16);
   --shadow-menu: 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
   --scrim: rgba(0, 0, 0, 0.35);
@@ -64,22 +74,24 @@
   --bg-selected: #363636;
   --btn-bg: #3a3a3f;
   --btn-bg-hover: #45454b;
-  --bg-selection: rgba(176, 154, 251, 0.25);
+  --bg-selection: rgba(195, 166, 230, 0.25);
   --border: #333336;
   --border-strong: #46464b;
   --guide: #3a3a3e;
   --text: #dcdcdc;
   --text-muted: #a6a6ad;
   --text-faint: #7f7f88;
-  --accent: #b09afb;
-  --accent-fill: #6d4ae0;
-  --accent-fill-hover: #6444ce;
+  --accent: #c3a6e6;
+  --accent-fill: #955ab4;
+  --accent-fill-hover: #8d52ab;
   --accent-text: #ffffff;
-  --accent-soft: rgba(176, 154, 251, 0.14);
-  --search-hit: rgba(255, 208, 0, 0.32);
+  --accent-soft: rgba(195, 166, 230, 0.14);
+  --search-hit: rgba(255, 241, 0, 0.2);
   --danger: #ff7b72;
   --warning: #e3b341;
-  --success: #5cc882;
+  --success: #8fc31f;
+  --info: #83ccd2;
+  --brand-gradient: linear-gradient(90deg, #83ccd2, 35%, #7d4698);
   --shadow: rgba(0, 0, 0, 0.5);
   --shadow-menu: 0 6px 24px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
   --scrim: rgba(0, 0, 0, 0.55);
@@ -112,22 +124,24 @@
     --bg-selected: #363636;
     --btn-bg: #3a3a3f;
     --btn-bg-hover: #45454b;
-    --bg-selection: rgba(176, 154, 251, 0.25);
+    --bg-selection: rgba(195, 166, 230, 0.25);
     --border: #333336;
     --border-strong: #46464b;
     --guide: #3a3a3e;
     --text: #dcdcdc;
     --text-muted: #a6a6ad;
     --text-faint: #7f7f88;
-    --accent: #b09afb;
-    --accent-fill: #6d4ae0;
-    --accent-fill-hover: #6444ce;
+    --accent: #c3a6e6;
+    --accent-fill: #955ab4;
+    --accent-fill-hover: #8d52ab;
     --accent-text: #ffffff;
-    --accent-soft: rgba(176, 154, 251, 0.14);
-    --search-hit: rgba(255, 208, 0, 0.32);
+    --accent-soft: rgba(195, 166, 230, 0.14);
+    --search-hit: rgba(255, 241, 0, 0.2);
     --danger: #ff7b72;
     --warning: #e3b341;
-    --success: #5cc882;
+    --success: #8fc31f;
+    --info: #83ccd2;
+    --brand-gradient: linear-gradient(90deg, #83ccd2, 35%, #7d4698);
     --shadow: rgba(0, 0, 0, 0.5);
     --shadow-menu: 0 6px 24px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
     --scrim: rgba(0, 0, 0, 0.55);
@@ -248,6 +262,8 @@ html[data-reduced-motion] {
     --accent-fill: Highlight;
     --accent-fill-hover: Highlight;
     --accent-text: HighlightText;
+    --info: Highlight;
+    --brand-gradient: none;
     --border: CanvasText;
     --border-strong: CanvasText;
     --guide: CanvasText;
@@ -267,22 +283,24 @@ html[data-reduced-motion] {
     --bg-selected: #e2e2e6;
     --btn-bg: #e9e9ec;
     --btn-bg-hover: #e2e2e6;
-    --bg-selection: rgba(103, 65, 217, 0.18);
+    --bg-selection: rgba(71, 44, 123, 0.16);
     --border: #e3e3e7;
     --border-strong: #cfcfd5;
     --guide: #dcdce2;
     --text: #1f1f23;
     --text-muted: #5b5b66;
     --text-faint: #80808b;
-    --accent: #6741d9;
-    --accent-fill: #6741d9;
-    --accent-fill-hover: #5f3cc8;
+    --accent: #7d4698;
+    --accent-fill: #472c7b;
+    --accent-fill-hover: #7d4698;
     --accent-text: #ffffff;
-    --accent-soft: rgba(103, 65, 217, 0.1);
-    --search-hit: rgba(255, 208, 0, 0.4);
+    --accent-soft: rgba(71, 44, 123, 0.1);
+    --search-hit: rgba(255, 241, 0, 0.45);
     --danger: #b3261e;
     --warning: #8a5a00;
     --success: #1a6b34;
+    --info: #1b6870;
+    --brand-gradient: linear-gradient(90deg, #83ccd2, 35%, #7d4698);
     --shadow: rgba(0, 0, 0, 0.16);
     --shadow-menu: 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
     --scrim: rgba(0, 0, 0, 0.35);

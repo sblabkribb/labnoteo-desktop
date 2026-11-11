@@ -1,20 +1,19 @@
 # labnoteO Desktop
 
-**The labnoteO lab notebook as one Windows app. No Obsidian, no plugins, no setup.**
+**The labnoteO lab notebook as one Windows app. One installer, no plugins, no setup.**
 
 labnoteO Desktop is a standalone Windows app for [labnoteO](https://github.com/sblabkribb/labnoteo),
-the Markdown lab notebook for biology and bioinformatics experiments. Today, using labnoteO means
-installing Obsidian, adding the BRAT community plugin and then installing labnoteO through it.
-This app replaces all of that with a single installer. Your notes stay plain `.labnote.md` files in a
-folder on your PC, so the same folder still opens in Obsidian.
+the Markdown lab notebook for biology and bioinformatics experiments. It installs with a single
+installer and needs no other software or plugins. Your notes stay plain `.labnote.md` Markdown files
+in a folder on your PC, so the same folder also works with the labnoteO plugin and any Markdown editor.
 
 **English** · [한국어](README.ko.md)
 
 [Features](#features) · [Install](#install) · [Build from source](#build-from-source) · [Roadmap](#roadmap) · [Apache-2.0 License](LICENSE)
 
 > **Version 0.1.0.** labnoteO's plugin features are now ported to the desktop app: samples,
-> workflows, PartBank, bfworkflow, the LLM assistant, note IDs and scan import all work without
-> Obsidian. See the [roadmap](#roadmap) for what is still planned.
+> workflows, PartBank, bfworkflow, the LLM assistant, note IDs and scan import all work in the
+> desktop app. See the [roadmap](#roadmap) for what is still planned.
 
 ## Features
 
@@ -23,8 +22,8 @@ The GIFs below were recorded from the app's own interface, running against a dem
 ### Start with one installer
 
 Create a new vault or open an existing notes folder on first launch. The app remembers it and opens
-straight into it next time. An existing Obsidian vault opens as is; its `.obsidian` folder is never
-touched.
+straight into it next time. An existing notes folder opens as is, and settings folders that other
+apps keep in it are never touched.
 
 ![Create a new vault on first launch and land in the note list](docs/images/en/labnoteo-start.gif)
 
@@ -37,9 +36,9 @@ or deleted outside the app.
 
 ### Edit with live preview
 
-Formatting shows as you type, the way it does in Obsidian, and a note's front matter appears as a
-Properties grid. Press Ctrl+E to switch to the plain Markdown source and back. Edits save
-automatically, and if a note changes on disk while you are editing, the app asks before overwriting it.
+Formatting shows as you type, and a note's front matter appears as a Properties grid. Press Ctrl+E
+to switch to the plain Markdown source and back. Edits save automatically, and if a note changes on
+disk while you are editing, the app asks before overwriting it.
 
 ![Type into an experiment note with live preview, watch it save, then switch to source view with Ctrl+E](docs/images/en/labnoteo-editor.gif)
 
@@ -173,14 +172,14 @@ The installer is written to
 For development, run `npm run tauri dev`.
 
 The labnoteO core (`@labnoteo/core`) is included as a git submodule at `app/vendor/labnoteo`, so
-the app and the Obsidian plugin share the same note logic. A scheduled workflow
+the app and the labnoteO plugin share the same note logic. A scheduled workflow
 (`sync-core`) checks for a new labnoteO release every 6 hours. When the app's tests and build pass on
 it, the update goes into `main` automatically; when they fail, an issue reports which release broke
 the app.
 
 ## Roadmap
 
-labnoteO Desktop aims to carry over every labnoteO feature, so nobody needs Obsidian to use it.
+labnoteO Desktop aims to carry over every labnoteO feature, so everything works from this one app.
 
 | Area | Status |
 |---|---|

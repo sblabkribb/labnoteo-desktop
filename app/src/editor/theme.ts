@@ -202,7 +202,7 @@ export const editorThemeSpec = {
   '.lno-quote': { borderLeft: '3px solid var(--border-strong)', color: 'var(--text-muted)' },
   '.lno-callout': { borderLeft: '3px solid var(--border)', backgroundColor: 'var(--bg-side)' },
   '.lno-callout-note': { borderLeftColor: 'var(--accent)' },
-  '.lno-callout-info': { borderLeftColor: 'var(--accent)' },
+  '.lno-callout-info': { borderLeftColor: 'var(--info)' },
   '.lno-callout-tip': { borderLeftColor: 'var(--success)' },
   '.lno-callout-warning': { borderLeftColor: 'var(--warning)' },
   '.lno-callout-danger': { borderLeftColor: 'var(--danger)' },

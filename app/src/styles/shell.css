@@ -520,7 +520,9 @@ button.crumb:hover:not(:disabled) { background: var(--bg-hover); color: var(--te
   left: 0;
   bottom: 0;
   height: 2px;
-  background: var(--accent);
+  /* CI 그라데이션(Baby Blue → Purple). forced-colors 에서는 --brand-gradient 가 none 이라 단색(Highlight)으로 돌아간다 */
+  background-color: var(--accent);
+  background-image: var(--brand-gradient);
 }
 .update-pill[data-state="determinate"]::after { width: var(--update-progress, 0%); }
 .update-pill[data-state="indeterminate"]::after { width: 30%; animation: update-indeterminate 1.4s ease-in-out infinite; }

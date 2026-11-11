@@ -1,18 +1,18 @@
 # labnoteO Desktop
 
-**labnoteO 연구노트를 설치 파일 하나로. Obsidian도, 플러그인도, 따로 할 준비도 필요 없습니다.**
+**labnoteO 연구노트를 설치 파일 하나로. 플러그인도, 따로 할 준비도 필요 없습니다.**
 
 labnoteO Desktop은 생물학·생물정보학 실험용 마크다운 연구노트 [labnoteO](https://github.com/sblabkribb/labnoteo)를
-Windows 독립 앱으로 만든 것입니다. 지금 labnoteO를 쓰려면 Obsidian을 설치하고, 커뮤니티 플러그인 BRAT을 깔고,
-그것으로 labnoteO를 설치해야 합니다. 이 앱은 그 과정을 설치 파일 하나로 바꿉니다. 노트는 그대로 내 PC 폴더의
-`.labnote.md` 평문 파일이라, 같은 폴더를 Obsidian에서 열어도 그대로 보입니다.
+Windows 독립 앱으로 만든 것입니다. 설치 파일 하나로 설치하며, 다른 프로그램이나 플러그인이 필요 없습니다.
+노트는 내 PC 폴더의 `.labnote.md` 평문 마크다운 파일이라, 같은 폴더를 labnoteO 플러그인이나 다른 마크다운
+편집기에서도 그대로 쓸 수 있습니다.
 
 [English](README.md) · **한국어**
 
 [기능](#기능) · [설치](#설치) · [소스에서 빌드](#소스에서-빌드) · [로드맵](#로드맵) · [Apache-2.0 라이선스](LICENSE)
 
 > **버전 0.1.0.** labnoteO 플러그인의 기능을 데스크톱 앱으로 모두 옮겼습니다. 샘플, 워크플로, PartBank,
-> bfworkflow, LLM 보조, 노트 ID, 스캔 가져오기를 Obsidian 없이 쓸 수 있습니다. 아직 남은 일은
+> bfworkflow, LLM 보조, 노트 ID, 스캔 가져오기를 데스크톱 앱에서 바로 쓸 수 있습니다. 아직 남은 일은
 > [로드맵](#로드맵)을 보세요.
 
 ## 기능
@@ -22,7 +22,7 @@ Windows 독립 앱으로 만든 것입니다. 지금 labnoteO를 쓰려면 Obsid
 ### 설치 하나로 시작
 
 처음 실행하면 새 보관함을 만들거나 노트가 있는 폴더를 엽니다. 한 번 정하면 다음부터는 바로 열립니다.
-기존 Obsidian 보관함도 그대로 열 수 있고, `.obsidian` 폴더는 건드리지 않습니다.
+기존 노트 폴더도 그대로 열 수 있고, 다른 앱이 그 안에 둔 설정 폴더는 건드리지 않습니다.
 
 ![처음 실행에서 새 보관함을 만들고 노트 목록으로 들어가기](docs/images/ko/labnoteo-start.gif)
 
@@ -35,7 +35,7 @@ Windows 독립 앱으로 만든 것입니다. 지금 labnoteO를 쓰려면 Obsid
 
 ### 라이브 미리보기로 편집
 
-Obsidian처럼 쓰는 대로 서식이 보이고, 노트의 프런트매터는 속성 표로 나타납니다. Ctrl+E를 누르면 마크다운
+쓰는 대로 서식이 보이고, 노트의 프런트매터는 속성 표로 나타납니다. Ctrl+E를 누르면 마크다운
 원본 보기와 미리보기를 오갑니다. 편집은 자동으로 저장되고, 편집 중에 디스크의 노트가 바뀌면 덮어쓰기 전에
 물어봅니다.
 
@@ -168,14 +168,14 @@ npm run tauri:build
 설치 파일은 `app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/` 에 만들어집니다.
 개발할 때는 `npm run tauri dev` 를 실행합니다.
 
-labnoteO 코어(`@labnoteo/core`)는 `app/vendor/labnoteo` 에 git 서브모듈로 들어 있어, 앱과 Obsidian 플러그인이
+labnoteO 코어(`@labnoteo/core`)는 `app/vendor/labnoteo` 에 git 서브모듈로 들어 있어, 앱과 labnoteO 플러그인이
 같은 노트 로직을 함께 씁니다. 예약된 워크플로(`sync-core`)가 6시간마다 labnoteO의 새 릴리스를 확인합니다.
 새 릴리스에서 앱의 테스트와 빌드가 통과하면 자동으로 `main`에 반영하고, 실패하면 어느 릴리스가 앱을
 깨뜨렸는지 이슈로 알립니다.
 
 ## 로드맵
 
-labnoteO Desktop은 labnoteO의 기능을 모두 옮겨, 누구도 Obsidian 없이 쓸 수 있게 하는 것을 목표로 합니다.
+labnoteO Desktop은 labnoteO의 기능을 모두 옮겨, 이 앱 하나로 모든 것을 할 수 있게 하는 것을 목표로 합니다.
 
 | 영역 | 상태 |
 |---|---|
