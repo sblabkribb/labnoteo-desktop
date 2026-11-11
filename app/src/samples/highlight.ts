@@ -11,6 +11,7 @@ import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView
 import { findDefinedSampleIds } from '@labnoteo/core/lib/sampleStorage';
 import { getMode, subscribeMode } from '../editor/live/mode';
 import { touchedLines } from '../editor/live/reveal';
+import { langChanged } from '../editor/live/editorLang';
 import { activeCellView, outerOf } from '../editor/table/cellEditor';
 import { coreT } from '../labnote/i18n';
 import { sampleTokenRanges, type SampleHighlightInput } from '../labnote/port/sampleHighlightRanges';
@@ -84,7 +85,8 @@ class SampleHighlightPlugin {
     const { state, cell } = sourceState(u.view);
     const cfg = state.facet(sampleEditorConfig);
     const path = state.facet(sampleNotePath);
-    const configChanged = cfg !== this.drawnCfg || path !== this.drawnPath;
+    // 화면 언어가 바뀌면 샘플 표시의 title(레지스트리에 없음 …)을 다시 단다
+    const configChanged = cfg !== this.drawnCfg || path !== this.drawnPath || langChanged(u);
     // 라이브 모드에서 커서가 다른 줄로 가면 구분자 감추기가 달라진다(셀 편집기는 감추지 않는다).
     const linesChanged = !cell && u.selectionSet && getMode() === 'live' && lineKey(u.view) !== this.drawnLines;
     if (this.pending || u.docChanged || u.viewportChanged || configChanged || linesChanged) {

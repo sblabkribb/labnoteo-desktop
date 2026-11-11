@@ -17,6 +17,7 @@ import { EditorView, ViewPlugin, keymap, type KeyBinding, type ViewUpdate } from
 import { isolateHistory, redo, undo } from '@codemirror/commands';
 import { completionStatus } from '@codemirror/autocomplete';
 import { t } from '../../i18n/t';
+import { langChanged } from '../live/editorLang';
 import { markdownHighlighting } from '../theme';
 import { labnoteMarkdown } from '../markdownSyntax';
 import { cellAt, escapeCellText, insertRow, parseTable, rows, setCell, type Change, type TableModel } from './model';
@@ -242,10 +243,15 @@ function placeRange(place: Place, text: string): { anchor: number; head: number 
  */
 const completing = (v: EditorView) => completionStatus(v.state) === 'active';
 
+/** 셀 편집 영역의 이름표(지금 언어). */
+const cellLabel = () => EditorView.contentAttributes.of({ 'aria-label': t('table.cellEditor') });
+
 class Session implements CellHandle {
   dead = false;
   readonly nested: EditorView;
   private readonly lock = new Compartment();
+  /** 셀 편집기의 이름표. 바깥 편집기의 언어가 바뀌면(editorLang) 다시 단다. */
+  private readonly label = new Compartment();
 
   constructor(
     readonly outer: EditorView,
@@ -269,7 +275,7 @@ class Session implements CellHandle {
           labnoteMarkdown(),
           markdownHighlighting,
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of({ 'aria-label': t('table.cellEditor') }),
+          this.label.of(cellLabel()),
           this.lock.of(isLocked(outer.state) ? LOCKED : []),
           lockFilter,
           escapeFilter,
@@ -401,6 +407,7 @@ class Session implements CellHandle {
     if (locked !== isLocked(u.startState)) {
       this.nested.dispatch({ effects: this.lock.reconfigure(locked ? LOCKED : []), annotations: fromOuter.of(true) });
     }
+    if (langChanged(u)) this.nested.dispatch({ effects: this.label.reconfigure(cellLabel()), annotations: fromOuter.of(true) });
     const undoing = u.transactions.some((tr) => tr.isUserEvent('undo') || tr.isUserEvent('redo'));
     if (!u.state.field(activeCell, false)) this.close({ refocus: !undoing, clear: false });
     else if (u.transactions.some((tr) => tr.docChanged && tr.annotation(cellEdit) === undefined)) this.pull();

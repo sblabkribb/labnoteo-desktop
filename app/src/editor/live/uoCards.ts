@@ -3,6 +3,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { classifyMetaEndDate, findMetaDateFieldInLine, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { UNIT_OP_HEADING_PATTERN } from '../../../vendor/labnoteo/packages/labnoteo-core/src/sections/workflowSectionParser';
 import { t } from '../../i18n/t';
+import { langChanged } from './editorLang';
 import { iconElement } from '../../ui/iconElement';
 
 /**
@@ -170,7 +171,7 @@ const uoCardPlugin = ViewPlugin.fromClass(
         if (u.docChanged) this.decorations = this.decorations.map(u.changes);
         return;
       }
-      if (u.docChanged || u.selectionSet || u.viewportChanged) this.decorations = build(u.view);
+      if (u.docChanged || u.selectionSet || u.viewportChanged || langChanged(u)) this.decorations = build(u.view);
     }
   },
   { decorations: (p) => p.decorations },
