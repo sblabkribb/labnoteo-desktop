@@ -287,7 +287,7 @@ saved first). **Check for updates** in the command palette checks right away.
 Windows 10 or 11 (64-bit).
 
 Installers are published on the [Releases](https://github.com/sblabkribb/labnoteo-desktop/releases)
-page. **No release has been published yet**; until then, [build from source](#build-from-source).
+page. To build it yourself, see [build from source](#build-from-source).
 
 - The installer is not code-signed, so Windows SmartScreen shows a warning on first install.
   Choose **More info → Run anyway**.

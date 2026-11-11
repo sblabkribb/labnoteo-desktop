@@ -256,7 +256,7 @@ Harness(`dsh`) 같은 다른 AI 도구는 앱에 넣지 않으며, 그 도구를
 Windows 10 또는 11 (64비트).
 
 설치 파일은 [Releases](https://github.com/sblabkribb/labnoteo-desktop/releases) 페이지에 올라갑니다.
-**아직 공개된 릴리스는 없습니다.** 그때까지는 [소스에서 빌드](#소스에서-빌드)하세요.
+직접 빌드하려면 [소스에서 빌드](#소스에서-빌드)를 보세요.
 
 - 설치 파일에 코드 서명이 없어 처음 설치할 때 Windows SmartScreen 경고가 뜹니다.
   **추가 정보 → 실행**을 누르세요.
