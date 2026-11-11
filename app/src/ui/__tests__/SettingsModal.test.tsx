@@ -191,6 +191,12 @@ describe('Settings modal', () => {
     await user.click(within(folder).getByRole('radio', { name: 'images (Obsidian·플러그인과 같음)' }));
     expect(deps.update).toHaveBeenCalledWith({ imageFolder: 'images' });
     expect(within(folder).getByRole('radio', { name: 'images (Obsidian·플러그인과 같음)' }).getAttribute('aria-checked')).toBe('true');
+    // 2026-11-11 사용자 결정: AI 초안 표시는 기본으로 노트에 쓰지 않는다
+    const note = sw('AI 초안 표시를 노트에 남기기');
+    expect(note.getAttribute('aria-checked')).toBe('false');
+    await user.click(note);
+    expect(deps.update).toHaveBeenCalledWith({ aiDraftNoteInFile: true });
+    expect(sw('AI 초안 표시를 노트에 남기기').getAttribute('aria-checked')).toBe('true');
   });
 
   it('Experiments: toggling autoSyncUnitOpToc and autoUpdateLastUpdated persists through the settings store; the experimenter commits on blur', async () => {

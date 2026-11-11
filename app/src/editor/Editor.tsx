@@ -41,6 +41,7 @@ import { sampleEditorConfig, sampleNotePath, type SampleEditorConfig } from '../
 import { sampleHighlight } from '../samples/highlight';
 import type { SampleEnv } from '../samples/env';
 import { LIST_KEYS } from './live/listKeys';
+import { aiDraftReview } from './live/aiDraftReview';
 import { FORMAT_KEYS, formatExtensions, runFormat } from './commands/formatCommands';
 import { notify } from '../labnote/host/toastStore';
 import { ERROR_KINDS, hasErrorKind } from '../fs/errorKinds';
@@ -615,6 +616,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       // 남겨 두면 커서를 옮기며 preventDefault 해 window 의 탐색 처리기가 건너뛴다.
       keymap.of([...defaultKeymap.filter((b) => !NAV_KEYS.has(b.key ?? '')), ...historyKeymap]),
       labnoteMarkdown(),
+      // AI 초안 검토 표시: 두 모드 모두에서, 파일에는 쓰지 않는다(live/aiDraftReview.ts).
+      aiDraftReview(),
       // 자동 완성: 두 모드 모두에서 되도록 모드 칸 밖에 둔다. 마크다운 언어의 HTML 태그 완성은 꺼 두었다(markdownSyntax.ts).
       // `[[` 뒤의 노트·별칭·제목·(`![[` 뒤) 이미지 완성. 조합 중에도 목록은 열려 거르지만, 받아들이기는 조합이 끝난 뒤에만 한다
       // (completionGuards: 조합 중 Enter/Tab 은 IME 몫, compositionend 뒤 `[[`·`@` 안이면 목록을 다시 연다).

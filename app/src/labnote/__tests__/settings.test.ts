@@ -51,6 +51,7 @@ describe('보관함별 설정', () => {
     expect(s.customSampleTypes).toEqual(['Strain']);
     expect(Object.keys(s).sort()).toEqual(
       [
+        'aiDraftNoteInFile',
         'allowHttpOrigins',
         'autoSyncUnitOpToc',
         'autoUpdateLastUpdated',
@@ -238,6 +239,19 @@ describe('보관함별 설정', () => {
     await saveVaultSettings({ ...settings, githubReadmeOverlay: false }, store.invoke);
     expect(JSON.parse(store.stored()!)).toMatchObject({ githubReadmeOverlay: false });
     expect((await loadVaultSettings(store.invoke)).settings.githubReadmeOverlay).toBe(false);
+  });
+
+  it('aiDraftNoteInFile (app-only key) defaults off, keeps only a stored true and survives a save and reload', async () => {
+    expect(fromPluginData(undefined).aiDraftNoteInFile).toBe(false);
+    expect(fromPluginData({ aiDraftNoteInFile: true }).aiDraftNoteInFile).toBe(false); // not a plugin key
+    expect(fromStored({}).aiDraftNoteInFile).toBe(false);
+    expect(fromStored({ aiDraftNoteInFile: true }).aiDraftNoteInFile).toBe(true);
+    for (const odd of ['true', 1, null, [true]]) expect(fromStored({ aiDraftNoteInFile: odd }).aiDraftNoteInFile).toBe(false);
+    const store = fakeStore();
+    const { settings } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings({ ...settings, aiDraftNoteInFile: true }, store.invoke);
+    expect(JSON.parse(store.stored()!)).toMatchObject({ aiDraftNoteInFile: true });
+    expect((await loadVaultSettings(store.invoke)).settings.aiDraftNoteInFile).toBe(true);
   });
 
   it('llmContextWindow (app-only key) defaults to 8192, is clamped to 2048-1,000,000 and survives a save and reload', async () => {

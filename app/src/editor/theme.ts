@@ -237,6 +237,21 @@ export const editorThemeSpec = {
   },
   // `[WB150]` 은 마크다운 링크 참조로 읽혀 안쪽 span 에 강조색(링크 색)이 붙는다: 칩 안에서는 칩과 같은 흐린 색(--text-muted)이다.
   '.lno-uo-code span': { color: 'var(--text-muted)' },
+  // AI 초안 검토 표시(live/aiDraftReview.ts): 넣은 줄의 왼쪽 강조색 선과 옅은 바탕, 끝의 작은 "검토 완료" 단추. 파일에는 없다.
+  '.cm-line.cm-ai-draft': { backgroundColor: 'var(--accent-soft)', boxShadow: 'inset 2px 0 0 var(--accent)' },
+  '.cm-ai-draft-done': {
+    marginLeft: 'var(--space-3)',
+    padding: '0 var(--space-3)',
+    fontSize: '0.75em',
+    lineHeight: '1.6',
+    verticalAlign: 'middle',
+    color: 'var(--accent-text)',
+    backgroundColor: 'transparent',
+    border: '1px solid var(--accent)',
+    borderRadius: 'var(--radius-s)',
+    cursor: 'pointer',
+  },
+  '.cm-ai-draft-done:hover': { backgroundColor: 'var(--accent-soft)' },
   // UO 카드(live/uoCards.ts): 구역의 줄마다 옅은 바탕과 좌우 선, 첫 줄·끝 줄에 위·아래 선과 둥근 모서리. 커서가 든 카드는 강조색 선.
   // 카드는 본문 글 칸(줄의 좌우 padding)과 같은 자리에 선다: 좌우 바깥 여백이 줄 padding 만큼이라 속성 카드·본문 글과 가장자리가
   // 맞는다. 위아래 여백(margin)은 CodeMirror 의 높이 계산을 흐리므로 쓰지 않는다(좌우 여백은 높이에 들지 않는다).

@@ -78,6 +78,12 @@ export type AppSettings = Pick<
    * 기본 켬. 저장된 값이 꼭 false 일 때만 끈다. Rust `ServiceConfig::github_readme_overlay` 도 같은 규칙이다.
    */
   githubReadmeOverlay?: boolean;
+  /**
+   * 앱에만 있는 키(2026-11-11 사용자 결정): AI 초안 위에 `> [!note] AI 초안 (모델, 날짜) — 검토 후 이 줄을 지우세요` 줄을
+   * 함께 넣어 노트에 출처를 남긴다. 기본 끔: 초안은 보통 내용으로 들어가고 편집기에서만 잠깐 표시된다(editor/live/aiDraftReview.ts).
+   * 저장된 값이 꼭 true 일 때만 켠다. 설정 → 편집기.
+   */
+  aiDraftNoteInFile: boolean;
 };
 
 /** 문헌 검색 출처별 켬/끔. */
@@ -312,6 +318,8 @@ const KEYS = [
   'crossrefMailto',
   // feat/github-upload(Task 1): GitHub 첫 화면용 README. 앱 키다. clientId·forgetOnExit 는 앱 전체 설정이라 Rust 에만 있다.
   'githubReadmeOverlay',
+  // AI 초안 표시를 노트에 남기기(2026-11-11). 앱 키다.
+  'aiDraftNoteInFile',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -326,6 +334,7 @@ const APP_DEFAULTS = {
   ncbiEmail: '',
   crossrefMailto: '',
   githubReadmeOverlay: true,
+  aiDraftNoteInFile: false,
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -385,6 +394,8 @@ export function fromStored(raw: unknown): AppSettings {
     settings.crossrefMailto = cleanContactEmail(lit.crossrefMailto);
     // feat/github-upload(Task 1): 저장된 값이 꼭 false 일 때만 끈다.
     if ((raw as { githubReadmeOverlay?: unknown }).githubReadmeOverlay === false) settings.githubReadmeOverlay = false;
+    // AI 초안 표시(2026-11-11): 저장된 값이 꼭 true 일 때만 켠다.
+    if ((raw as { aiDraftNoteInFile?: unknown }).aiDraftNoteInFile === true) settings.aiDraftNoteInFile = true;
   }
   return settings;
 }
