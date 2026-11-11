@@ -56,6 +56,9 @@ const MAX_LLM_PATH: usize = 64;
 pub struct ServiceConfig {
     pub partbank_desktop: Option<Url>,
     pub partbank_web: Option<Url>,
+    /// `partbankDefaultConnection`: the connection the assistant's read-only
+    /// tools use (`partbank_read`). `web` unless the setting is `desktop`.
+    pub partbank_default: PbConnection,
     pub llm_provider: LlmKind,
     pub llm_ollama: Option<Url>,
     pub llm_openai: Option<Url>,
@@ -280,6 +283,10 @@ impl ServiceConfig {
             Some("openai") => LlmKind::Openai,
             _ => LlmKind::None,
         };
+        let partbank_default = match settings.get("partbankDefaultConnection").and_then(Value::as_str) {
+            Some("desktop") => PbConnection::Desktop,
+            _ => PbConnection::Web,
+        };
         let bfw_connection = match settings.get("bfwConnection").and_then(Value::as_str) {
             Some("desktop") => BfwConnection::Desktop,
             _ => BfwConnection::Server,
@@ -299,6 +306,7 @@ impl ServiceConfig {
         ServiceConfig {
             partbank_desktop: url_setting(&settings, "partbankDesktopUrl", DEFAULT_PARTBANK_DESKTOP, parse_origin_url),
             partbank_web: url_setting(&settings, "partbankWebUrl", DEFAULT_PARTBANK_WEB, parse_origin_url),
+            partbank_default,
             llm_provider,
             llm_ollama: url_setting(&settings, "llmEndpointOllama", DEFAULT_LLM_OLLAMA, parse_llm_endpoint),
             llm_openai: url_setting(&settings, "llmEndpointOpenai", DEFAULT_LLM_OPENAI, parse_llm_endpoint),
@@ -575,6 +583,16 @@ pub mod tests {
         let c = ServiceConfig::from_settings_json(r#"{"llmProvider":"ollama","bfwConnection":"desktop"}"#);
         assert_eq!(c.llm_provider, LlmKind::Ollama);
         assert_eq!(c.bfw_connection, BfwConnection::Desktop);
+    }
+
+    #[test]
+    fn partbank_default_connection_is_web_unless_desktop() {
+        let read = |json: &str| ServiceConfig::from_settings_json(json).partbank_default;
+        assert_eq!(read("{}"), PbConnection::Web);
+        assert_eq!(read(r#"{"partbankDefaultConnection":"web"}"#), PbConnection::Web);
+        assert_eq!(read(r#"{"partbankDefaultConnection":"desktop"}"#), PbConnection::Desktop);
+        assert_eq!(read(r#"{"partbankDefaultConnection":"Desktop"}"#), PbConnection::Web);
+        assert_eq!(read(r#"{"partbankDefaultConnection":1}"#), PbConnection::Web);
     }
 
     #[test]

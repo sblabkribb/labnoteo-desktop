@@ -619,6 +619,17 @@ fn ipc_argument_names_match_the_typescript_side() {
         call("partbank_request", args("partbank_request", vec![json!("desktop"), json!("GET"), json!("//evil.example/x"), Value::Null, Value::Null])).unwrap_err()["kind"],
         "forbiddenPath"
     );
+    // The assistant tools' read-only door: the connection is the saved
+    // default (the webview cannot name one), and a write route is refused
+    // before the key is looked up.
+    assert_eq!(
+        call("partbank_read", args("partbank_read", vec![json!("GET"), json!("/auth/me"), Value::Null, Value::Null])).unwrap_err()["kind"],
+        "keyMissing"
+    );
+    assert_eq!(
+        call("partbank_read", args("partbank_read", vec![json!("PUT"), json!("/labnoteo/usages/notes"), Value::Null, json!({})])).unwrap_err()["kind"],
+        "forbiddenPath"
+    );
     assert_eq!(
         call("partbank_probe", args("partbank_probe", vec![json!("web"), json!("https://x.example/path"), json!("typed")])).unwrap_err()["kind"],
         "invalidUrl"

@@ -39,8 +39,9 @@ const fixture: Record<string, string[]> = JSON.parse(
  * MCP 클라이언트 커맨드 여덟 개(Task 5a, Rust)는 Task 5b 의 netIpc.ts 래퍼가 비웠다.
  * 문헌 검색 커맨드 두 개(Task 11, Rust)는 Task 13 의 scholar/ipc.ts 래퍼가 비웠다.
  * feat/github-upload: github_* 커맨드 열여덟은 Task 11 의 githubIpc.ts 래퍼로 비웠다.
+ * 어시스턴트의 읽기 전용 partbank 도구용 partbank_read(Rust)는 labservices/ipc.ts 래퍼가 생기면 비운다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [];
+const PENDING_TS_WRAPPERS: readonly string[] = ['partbank_read'];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.

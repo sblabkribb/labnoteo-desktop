@@ -75,6 +75,7 @@ macro_rules! register_commands {
             $crate::net::net_cancel,
             $crate::net::partbank::partbank_request,
             $crate::net::partbank::partbank_probe,
+            $crate::net::partbank::partbank_read,
             $crate::net::llm::llm_chat,
             $crate::net::llm::llm_probe,
             $crate::net::stream::llm_chat_stream,
