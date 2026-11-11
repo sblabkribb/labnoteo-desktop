@@ -2,7 +2,7 @@ import { useId } from 'react';
 import type { UnitOperationItem, WorkflowItem } from '@labnoteo/core';
 import { t } from '../../i18n/t';
 import { coreT } from '../i18n';
-import { catalogDescription } from '../port/aliasHints';
+import { catalogDescriptionShown } from '../port/aliasHints';
 import { Popover } from '../../ui/Popover';
 
 /** 카탈로그 항목 하나: 워크플로, 또는 HW/SW 유닛 오퍼레이션. */
@@ -33,7 +33,7 @@ export function CatalogPopover(p: {
   const reasonId = useId();
   const { entry, target } = p;
   const { id, name, description } = entry.item;
-  const translated = description ? catalogDescription(id, description, p.locale) : '';
+  const translated = description ? catalogDescriptionShown(id, description, p.locale) : '';
   const isWorkflow = entry.kind === 'workflow';
   const kindLabel = isWorkflow ? entry.item.category : entry.opType === 'hw' ? t('catalog.hw') : t('catalog.sw');
   const tool = entry.kind === 'uo' ? (entry.item.equipment ? [coreT('Equipment'), entry.item.equipment] : entry.item.software ? [coreT('Software'), entry.item.software] : undefined) : undefined;

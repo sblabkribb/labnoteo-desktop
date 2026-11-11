@@ -16,7 +16,7 @@ import { insertUnitOp } from '../commands/unitOp';
 import { createWorkflow, toggleWorkflowTick } from '../commands/workflow';
 import { coreLocale, coreT } from '../i18n';
 import { samePath, VAULT_ROOT } from '../paths';
-import { catalogDescription } from '../port/aliasHints';
+import { catalogDescriptionShown } from '../port/aliasHints';
 import { CATALOG_DIR, ensureVaultCatalogs } from '../port/catalogUpdate';
 import { statusNames } from '../port/status';
 import { discussWords, showMarkers, treeLabels } from '../port/workflowView';
@@ -578,7 +578,7 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
       catalog
         ? relabelCatalog(
             buildWorkflowTree(catalog, {
-              describe: (id, d) => catalogDescription(id, d, coreLocale()),
+              describe: (id, d) => catalogDescriptionShown(id, d, coreLocale()),
               equipment: coreT('Equipment'),
               software: coreT('Software'),
             }),

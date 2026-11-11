@@ -130,6 +130,16 @@ export function catalogDescription(id: string, description: string, locale: stri
 }
 
 /**
+ * A catalog item's description as the screen shows it: catalogDescription, and in the Korean UI the app's term rule
+ * (koTerms: "Workflow" / "Unit Operation" in English). Only for what the screen shows (picker, catalog popover, catalog
+ * tree tooltip); the text written into notes stays catalogDescription, like the plugin's.
+ */
+export function catalogDescriptionShown(id: string, description: string, locale: string): string {
+  const text = catalogDescription(id, description, locale);
+  return locale.toLowerCase().startsWith('ko') ? koTerms(text) : text;
+}
+
+/**
  * A catalog item's picker lines: in the Korean UI its Korean name before the
  * category; its Korean name and search words (#163) are keywords in any UI language; its description translated
  * (#213). The English description then stays searchable as a keyword.
@@ -148,7 +158,7 @@ export function catalogKoFields(
   // The app's term rule: the Korean UI shows "Workflow" / "Unit Operation" in English (koTerms); the plugin's
   // Korean words stay searchable below.
   const shown = (text: string) => (korean ? koTerms(text) : text);
-  const detail = shown(catalogDescription(id, description, locale));
+  const detail = catalogDescriptionShown(id, description, locale);
   // The Korean name ranks as a name; its search words (`PCR` for UHW100 열 순환) and the English description rank below
   // every name match (spec §5.3: exact code > name > word-prefix name > search words and description), so `PCR` puts
   // UHW110 Real-time PCR above UHW100 Thermocycling.

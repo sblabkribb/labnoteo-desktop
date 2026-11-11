@@ -482,17 +482,56 @@ describe('Assistant pane: skin import and export (Task 17)', () => {
     const leave = vi.fn(async (after: () => Promise<void>) => after());
     render(<SkinRow list={vi.fn(async () => [blue])} pickSkin={pickSkin} installPicked={installPicked} leave={leave} active="flasko" />);
     await settle();
+    // the live region is there, empty, before anything happens: it is filled, not inserted filled
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
     const button = screen.getByRole('button', { name: '가져오기' });
     await userEvent.click(button);
     expect(leave).not.toHaveBeenCalled();
-    expect(screen.getByRole('status').textContent).toBe(t('settings.assistant.skin.picking'));
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(t('settings.assistant.skin.picking'));
     expect(button.getAttribute('aria-disabled')).toBe('true');
     await act(async () => answer(undefined));
     await settle();
     expect(leave).not.toHaveBeenCalled();
     expect(installPicked).not.toHaveBeenCalled();
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe('');
     expect(button.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('settings closed while the picker is up: the picked skin still goes to the preview (not dropped in staging)', async () => {
+    let answer: (v: StagedSkin | undefined) => void = () => undefined;
+    const pickSkin = vi.fn(() => new Promise<StagedSkin | undefined>((r) => (answer = r)));
+    const installPicked = vi.fn(async () => undefined);
+    // the real leave does nothing once Settings is closing
+    const leave = vi.fn();
+    const view = render(<SkinRow list={vi.fn(async () => [blue])} pickSkin={pickSkin} installPicked={installPicked} leave={leave} active="flasko" />);
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '가져오기' }));
+    view.unmount();
+    await act(async () => answer(staged));
+    await settle();
+    expect(leave).not.toHaveBeenCalled();
+    expect(installPicked).toHaveBeenCalledWith(staged);
+  });
+
+  it('a picker that throws is reported, not left as an unhandled rejection, and the buttons come back', async () => {
+    const notify = vi.fn();
+    const installPicked = vi.fn(async () => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const pickSkin = vi.fn(async (): Promise<StagedSkin | undefined> => {
+      throw new Error('boom');
+    });
+    render(<SkinRow list={vi.fn(async () => [blue])} pickSkin={pickSkin} installPicked={installPicked} notify={notify} active="flasko" />);
+    await settle();
+    const button = screen.getByRole('button', { name: '가져오기' });
+    await userEvent.click(button);
+    await settle();
+    expect(notify).toHaveBeenCalledWith('warn', expect.any(String));
+    expect(installPicked).not.toHaveBeenCalled();
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    warn.mockRestore();
   });
 
   it('without a settings window, import runs in place and the list is read again', async () => {

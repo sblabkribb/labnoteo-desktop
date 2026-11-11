@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
-import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
+import { listSkins, removeSkinAndFallBack, skinChoices, skinErrorText } from '../../assistant/skins/store';
 import { DEFAULT_GALLERY_URL, browseGallery, submitToGallery } from '../../assistant/skins/gallery';
 import { openSkinEditor } from '../../assistant/skins/SkinEditor';
 import { exportSkinFile, installPickedSkin, pickSkin } from '../../assistant/skins/transfer';
@@ -122,6 +122,15 @@ export function SkinRow(deps: SkinRowDeps = {}) {
   const [installed, setInstalled] = useState<SkinManifest[]>([]);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
+  // Whether the row is still on screen. Settings can close while the file picker is up (if the picker is not modal);
+  // then `leave` does nothing, so the import has to go on without it.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const refresh = () =>
     list().then(
@@ -183,14 +192,23 @@ export function SkinRow(deps: SkinRowDeps = {}) {
     let staged: StagedSkin | undefined;
     try {
       staged = await pick();
+    } catch (err) {
+      // the default picker reports its own errors; an injected one may throw
+      console.warn('[labnoteo] skin pick failed:', err);
+      notify('warn', t('skin.importFailed', skinErrorText(err)));
     } finally {
       setPicking(false);
       setBusy(false);
     }
-    if (staged) {
-      const chosen = staged;
-      runOutside(() => installPicked(chosen));
+    if (!staged) return;
+    const chosen = staged;
+    if (!mounted.current) {
+      // Settings already closed while the picker was up: `leave` would drop the flow and leave the staged skin in the
+      // staging folder. Nothing is in the way now, so preview and install (or discard) right away.
+      void installPicked(chosen).catch((err: unknown) => console.warn('[labnoteo] skin import failed:', err));
+      return;
     }
+    runOutside(() => installPicked(chosen));
   };
 
   const runExport = async () => {
@@ -245,11 +263,10 @@ export function SkinRow(deps: SkinRowDeps = {}) {
               {t('settings.assistant.skin.remove')}
             </button>
           </div>
-          {picking ? (
-            <span role="status" className="setting-status">
-              {t('settings.assistant.skin.picking')}
-            </span>
-          ) : null}
+          {/* always mounted: some screen readers skip a live region that appears already filled */}
+          <span role="status" className="setting-status">
+            {picking ? t('settings.assistant.skin.picking') : ''}
+          </span>
         </>
       }
     />

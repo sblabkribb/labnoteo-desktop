@@ -4,7 +4,7 @@ import obsidianKo from '../../../vendor/labnoteo/src/l10n.ko';
 import workflows from '../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/workflows_en.json';
 import hw from '../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_hw_en.json';
 import { coreT, koTerms, vendorKo } from '../../labnote/i18n';
-import { catalogKoFields } from '../../labnote/port/aliasHints';
+import { catalogDescription, catalogDescriptionShown, catalogKoFields } from '../../labnote/port/aliasHints';
 import { KOREAN_TERMS_INSTRUCTION, replyLanguageInstruction } from '../../labnote/port/aiCommon';
 import { setLang } from '../lang';
 import { catalogs } from '../t';
@@ -67,6 +67,22 @@ describe('용어 규칙: Workflow / Unit Operation 은 한국어 화면에서도
     expect(retired.description).toBe('빈 Workflow · General');
     expect(retired.keywords).toEqual(['빈 워크플로', '빈 Workflow']);
     expect(catalogKoFields('WG010', 'General', 'Generic empty workflow', 'en').detail).toBe('Generic empty workflow');
+  });
+
+  it('카탈로그 작은 창과 카탈로그 트리 설명(catalogDescriptionShown)도 한국어에서 용어 규칙을 따르고, 노트에 쓰는 설명은 그대로다', () => {
+    const items = [
+      ...(workflows as { workflows: { id: string; description: string }[] }).workflows,
+      ...(hw as { unitOperations: { id: string; description: string }[] }).unitOperations,
+      { id: 'WG010', description: 'Generic empty workflow' },
+    ];
+    const bad = items.map((i) => catalogDescriptionShown(i.id, i.description, 'ko')).filter((v) => OLD_TERMS.test(v));
+    expect(bad).toEqual([]);
+    // 원문 번역에 옛 낱말이 실제로 있었다(검사가 헛돌지 않는다)
+    expect(items.filter((i) => OLD_TERMS.test(catalogDescription(i.id, i.description, 'ko'))).length).toBeGreaterThan(5);
+    const wb001 = items.find((i) => i.id === 'WB001')!;
+    expect(catalogDescriptionShown('WB001', wb001.description, 'ko')).toContain('범용 Workflow입니다');
+    expect(catalogDescription('WB001', wb001.description, 'ko')).toContain('범용 워크플로입니다');
+    expect(catalogDescriptionShown('WB001', wb001.description, 'en')).toBe(wb001.description);
   });
 
   it('koTerms 는 세 옛 낱말을 바꾸고, vendorKo 는 플러그인 원문을 준다', () => {

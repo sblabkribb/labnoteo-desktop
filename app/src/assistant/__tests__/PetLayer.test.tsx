@@ -141,6 +141,49 @@ describe('PetLayer', () => {
     expect(wrap().style.getPropertyValue('--pet-y')).toBe(px(400 - 64));
   });
 
+  it('the left dock opening or widening moves a pet that sits over it right away, without saving', () => {
+    const dock = document.createElement('aside');
+    dock.className = 'sidebar dock';
+    document.body.appendChild(dock);
+    const seen: ResizeObserverCallback[] = [];
+    const disconnect = vi.fn();
+    const had = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver');
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: class {
+        constructor(cb: ResizeObserverCallback) {
+          seen.push(cb);
+        }
+        observe(el: Element) {
+          expect(el).toBe(dock);
+        }
+        unobserve() {}
+        disconnect = disconnect;
+      },
+    });
+    try {
+      const invoke = vi.fn(async (_c: string, a?: Record<string, unknown>) => (a?.prefs as UiPrefs | undefined) ?? null);
+      const layout = createLayoutStore({ storage: () => memoryStorage(), invoke });
+      let left = 0;
+      const store = createPetStore({ layout, viewport: () => ({ w: window.innerWidth, h: window.innerHeight, left }) });
+      const view = render(<PetLayer store={store} />);
+      act(() => layout.setPet({ x: 1024 - 64, y: 40 })); // at the left edge
+      expect(wrap().style.getPropertyValue('--pet-x')).toBe(px(1024 - 64));
+      expect(seen).toHaveLength(1);
+      left = 300; // the dock opened
+      act(() => seen[0]([], {} as ResizeObserver));
+      expect(wrap().style.getPropertyValue('--pet-x')).toBe(px(1024 - 300 - 64));
+      expect(layout.get().pet.x).toBe(1024 - 64); // not saved, like a window resize
+      view.unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      if (had) Object.defineProperty(globalThis, 'ResizeObserver', had);
+      else delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+      dock.remove();
+    }
+  });
+
   it('Alt+Arrow moves 8 px, Alt+Shift+Arrow 32 px, Alt+Home resets and announces; each prevents the default (WebView2 history)', () => {
     const { layout } = setup();
     const b = pet();

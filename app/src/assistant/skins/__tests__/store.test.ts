@@ -245,7 +245,12 @@ describe('loadSkin / useSkin', () => {
       seen.push(s.id);
       return s;
     });
-    await waitFor(() => expect(result.current.manifest.frame.width).toBe(32));
+    // the built-in skin's frame is 32x32 too, so wait for the id as well: clearing `seen` before flasko-blue is shown
+    // would let a later built-in render slip in and hide a real flash
+    await waitFor(() => {
+      expect(result.current.id).toBe('flasko-blue');
+      expect(result.current.manifest.frame.width).toBe(32);
+    });
     seen.length = 0;
     version = 2;
     await act(async () => void (await installSkin('stage-3', true, invoke)));

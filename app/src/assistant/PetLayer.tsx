@@ -77,7 +77,15 @@ export function PetLayer(props: {
     };
     fit();
     window.addEventListener('resize', fit);
-    return () => window.removeEventListener('resize', fit);
+    // 왼쪽 독이 열리거나 닫히거나 넓어지면 창 틀의 왼쪽 끝이 바뀐다: 독 위에 앉아 있던 도우미를 바로 독 밖으로 민다
+    // (다음 옮기기나 창 크기 바꾸기를 기다리지 않는다). 독은 늘 붙어 있고, 닫으면 display: none 이라 크기가 0 이 된다.
+    const dock = document.querySelector('.sidebar.dock');
+    const watch = dock && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => fit()) : undefined;
+    if (dock) watch?.observe(dock);
+    return () => {
+      window.removeEventListener('resize', fit);
+      watch?.disconnect();
+    };
   }, [store]);
 
   useLayoutEffect(() => {

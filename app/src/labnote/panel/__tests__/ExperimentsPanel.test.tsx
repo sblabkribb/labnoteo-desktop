@@ -429,6 +429,22 @@ describe('ExperimentsPanel', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('the Korean catalog description in the tree title and the popover writes Workflow in English (term rule)', async () => {
+    const user = userEvent.setup();
+    mount();
+    const pop = await openCatalogEntry(user, /^Workflow/, [/^Build/], 'WB001');
+    const catalog = screen.getByRole('tree', { name: '카탈로그' });
+    const row = within(catalog)
+      .getAllByRole('treeitem')
+      .find((li) => li.querySelector('.meta.code')?.textContent === 'WB001')!;
+    const title = row.querySelector('[title]')?.getAttribute('title') ?? row.getAttribute('title') ?? '';
+    expect(title).toContain('범용 Workflow입니다');
+    expect(title).not.toMatch(/워크플로/);
+    const ko = [...pop.querySelectorAll('.catalog-popover-desc')].find((el) => !el.hasAttribute('lang'))!;
+    expect(ko.textContent).toContain('범용 Workflow입니다');
+    expect(pop.textContent).not.toMatch(/워크플로|유닛\s*오퍼레이션|단위\s*공정/);
+  });
+
   it('a catalog UO with only an experiment README open is disabled with the workflow reason', async () => {
     const user = userEvent.setup();
     mount({ active: `${EXP}/README.labnote.md` });
