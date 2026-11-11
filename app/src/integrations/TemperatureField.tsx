@@ -1,13 +1,16 @@
 // The temperature field under "Advanced" in the AI provider part of Integration settings (real-server check,
 // 2026-11-11: thinking models such as qwen3 loop at the app's 0.2). Blank keeps each request's own value, as
-// before; a number 0-2 replaces it for every request of this vault (llmProvider temperatureOf).
+// before, or the model's recommended sampling when it has one (qwen3 → 0.6, top_p 0.95; the placeholder says so); a
+// number 0-2 replaces it for every request of this vault (llmProvider samplingOf).
 import { useId, useRef, useState } from 'react';
 import { t } from '../i18n/t';
-import { parseTemperatureInput } from '../labnote/settings';
+import { parseTemperatureInput, recommendedSampling } from '../labnote/settings';
 
 export interface TemperatureFieldProps {
   /** The saved `llmTemperature` (null = blank). */
   value: number | null | undefined;
+  /** The chosen model (`llmModel`): a blank field shows its recommended temperature, if any. */
+  model?: string;
   commit(patch: { llmTemperature: number | null }): Promise<void>;
 }
 
@@ -17,6 +20,7 @@ export function TemperatureField(props: TemperatureFieldProps) {
   const [draft, setDraft] = useState(props.value == null ? '' : String(props.value));
   const draftRef = useRef(draft);
   const [invalid, setInvalid] = useState(false);
+  const rec = recommendedSampling(props.model);
 
   const commit = async () => {
     const n = parseTemperatureInput(draftRef.current);
@@ -46,7 +50,9 @@ export function TemperatureField(props: TemperatureFieldProps) {
         inputMode="decimal"
         autoComplete="off"
         spellCheck={false}
-        placeholder={t('integrations.ai.temperaturePlaceholder')}
+        placeholder={
+          rec ? t('integrations.ai.temperatureRecommended', String(rec.temperature), rec.family) : t('integrations.ai.temperaturePlaceholder')
+        }
         value={draft}
         aria-invalid={invalid || undefined}
         onChange={(e) => {

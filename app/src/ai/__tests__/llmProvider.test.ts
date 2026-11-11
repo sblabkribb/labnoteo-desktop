@@ -188,6 +188,33 @@ describe('provider.chat', () => {
     expect('temperature' in chatBody(b.calls, 1) && chatBody(b.calls, 1).temperature !== undefined).toBe(false);
   });
 
+  it('a blank temperature uses the model recommended sampling for qwen3 (0.6, top_p 0.95) on both providers; a typed value wins', async () => {
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
+    const o = replying({ choices: [{ message: { content: 'x' } }] });
+    const openai = createLlmProvider(withProvider('openai', { llmModel: 'qwen3.6-35b', llmTemperature: null }), o.invoke)!;
+    await openai.chat(msgs, { temperature: 0.2 });
+    expect(chatBody(o.calls, 0)).toMatchObject({ temperature: 0.6, top_p: 0.95 });
+    const l = replying({ message: { content: 'x' } });
+    const ollama = createLlmProvider(withProvider('ollama', { llmModel: 'qwen3:8b', llmTemperature: null }), l.invoke)!;
+    await ollama.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
+    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0.6, top_p: 0.95, num_ctx: 4096 });
+    // A typed value always wins, and then no top_p is added
+    const ty = replying({ choices: [{ message: { content: 'x' } }] });
+    const typed = createLlmProvider(withProvider('openai', { llmModel: 'qwen3:8b', llmTemperature: 0.3 }), ty.invoke)!;
+    await typed.chat(msgs, { temperature: 0.2 });
+    expect(chatBody(ty.calls, 0).temperature).toBe(0.3);
+    expect(chatBody(ty.calls, 0).top_p).toBeUndefined();
+    const tl = replying({ message: { content: 'x' } });
+    const typedOllama = createLlmProvider(withProvider('ollama', { llmModel: 'qwen3:8b', llmTemperature: 1 }), tl.invoke)!;
+    await typedOllama.chat(msgs);
+    expect(chatBody(tl.calls, 0).options).toEqual({ temperature: 1 });
+    // Other models keep today's behaviour
+    const n = replying({ message: { content: 'x' } });
+    const other = createLlmProvider(withProvider('ollama', { llmModel: 'llama3.1:8b', llmTemperature: null }), n.invoke)!;
+    await other.chat(msgs, { temperature: 0.2 });
+    expect(chatBody(n.calls, 0).options).toEqual({ temperature: 0.2 });
+  });
+
   it('openai body is identical with and without contextWindow', async () => {
     const f = replying({ choices: [{ message: { content: 'x' } }] });
     const p = createLlmProvider(withProvider('openai', { llmModel: 'm' }), f.invoke)!;

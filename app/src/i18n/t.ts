@@ -135,8 +135,9 @@ const ko: Record<string, string> = {
   'integrations.ai.advanced': '고급',
   'integrations.ai.temperature': 'Temperature',
   'integrations.ai.temperaturePlaceholder': '비워 두면 기본값',
+  'integrations.ai.temperatureRecommended': '비우면 모델 권장값: {0} ({1})',
   'integrations.ai.temperatureHint':
-    '0에서 2 사이의 수입니다. 비워 두면 지금처럼 요청마다 정한 값을 보냅니다. 생각하는 모델(qwen3 등)이 같은 생각을 되풀이하면 0.6 정도로 올려 보세요.',
+    '0에서 2 사이의 수입니다. 비워 두면 권장값이 알려진 모델(qwen3 계열: 0.6, top_p 0.95)은 그 값을, 그 밖의 모델은 지금처럼 요청마다 정한 값을 보냅니다. 값을 넣으면 언제나 그 값이 쓰입니다.',
   'integrations.ai.temperatureInvalid': '0에서 2 사이의 수를 넣거나 비워 두세요.',
   'tool.name.webSearch': '웹 검색',
   'tool.name.fetchPage': '웹 페이지 읽기',
@@ -1539,8 +1540,9 @@ const en: Record<string, string> = {
   'integrations.ai.advanced': 'Advanced',
   'integrations.ai.temperature': 'Temperature',
   'integrations.ai.temperaturePlaceholder': 'Blank for the default',
+  'integrations.ai.temperatureRecommended': 'Blank: model recommended {0} ({1})',
   'integrations.ai.temperatureHint':
-    'A number from 0 to 2. Left blank, each request sends its own value as before. If a thinking model (qwen3 and others) keeps repeating its reasoning, try about 0.6.',
+    'A number from 0 to 2. Left blank, a model with a known recommendation (the qwen3 family: 0.6, top_p 0.95) gets it, and any other model gets the value each request asks for as before. A typed value always wins.',
   'integrations.ai.temperatureInvalid': 'Enter a number from 0 to 2, or leave it blank.',
   'tool.name.webSearch': 'web search',
   'tool.name.fetchPage': 'reading a web page',

@@ -176,6 +176,22 @@ export function parseTemperatureInput(raw: string): number | null | 'invalid' {
   return cleanTemperature(Number(s)) ?? 'invalid';
 }
 
+/** 모델이 권하는 샘플링 값(temperature, top_p)과 그 모델 계열 이름. */
+export interface RecommendedSampling {
+  family: string;
+  temperature: number;
+  topP: number;
+}
+
+/**
+ * temperature 칸이 빈칸일 때 쓸 모델 권장 샘플링(2026-11-11): 생각하는 모델 qwen3 계열(qwen3.5/3.6 이름 포함)은
+ * temperature 0.6, top_p 0.95(Qwen3 모델 카드의 thinking 모드 권장값). 그 밖의 모델은 null(지금처럼 요청이 정한 값).
+ */
+export function recommendedSampling(model: string | null | undefined): RecommendedSampling | null {
+  if (model && /qwen3/i.test(model)) return { family: 'qwen3', temperature: 0.6, topP: 0.95 };
+  return null;
+}
+
 /** MCP 서버의 기본 포트(플러그인과 같다). */
 export const MCP_DEFAULT_PORT = 3987;
 

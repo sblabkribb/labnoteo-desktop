@@ -4,7 +4,7 @@
 import type { ToolDef } from '@labnoteo/core';
 import { llmChat, llmChatStream, NetError, type InvokeFn, type ListenFn } from '../../integrations/netIpc';
 import { OllamaAssembler, OpenAiAssembler, type StreamAssembler } from '../../ai/streamAssembler';
-import type { AppSettings } from '../settings';
+import { recommendedSampling, type AppSettings } from '../settings';
 import { LlmHttpError } from './llmError';
 
 /** One tool invocation the model asked for, in provider-neutral form. */
@@ -57,20 +57,26 @@ export interface ChatOptions {
   contextWindow?: number;
 }
 
-/** Ollama's `options`: temperature and num_ctx when given, otherwise omitted. */
-function ollamaOptions(opts: ChatOptions | undefined): Record<string, number> | undefined {
+/** Ollama's `options`: temperature, top_p and num_ctx when given, otherwise omitted. */
+function ollamaOptions(opts: ChatOptions | undefined, topP: number | undefined): Record<string, number> | undefined {
   const out: Record<string, number> = {};
   if (opts?.temperature != null) out.temperature = opts.temperature;
+  if (topP != null) out.top_p = topP;
   if (opts?.contextWindow != null) out.num_ctx = opts.contextWindow;
   return Object.keys(out).length ? out : undefined;
 }
 
 /**
- * The temperature a request sends: the vault's `llmTemperature` when it is set (Settings > Integrations > AI provider >
- * Advanced, real-server check 2026-11-11: thinking models such as qwen3 loop at 0.2), else what the caller asked for.
+ * The sampling a request sends. The vault's `llmTemperature` when it is set (Settings > Integrations > AI provider >
+ * Advanced, real-server check 2026-11-11: thinking models such as qwen3 loop at 0.2) always wins and adds no top_p.
+ * Blank: the model's recommended sampling when it has one (settings recommendedSampling: qwen3 → 0.6, top_p 0.95),
+ * else what the caller asked for, as before. Every LLM call goes through a provider body, so this covers them all.
  */
-function temperatureOf(settings: AppSettings, opts: ChatOptions | undefined): number | undefined {
-  return settings.llmTemperature ?? opts?.temperature;
+function samplingOf(settings: AppSettings, opts: ChatOptions | undefined): { temperature: number | undefined; topP: number | undefined } {
+  if (settings.llmTemperature != null) return { temperature: settings.llmTemperature, topP: undefined };
+  const rec = recommendedSampling(settings.llmModel);
+  if (rec) return { temperature: rec.temperature, topP: rec.topP };
+  return { temperature: opts?.temperature, topP: undefined };
 }
 
 export interface LlmProvider {
@@ -325,12 +331,13 @@ class OllamaProvider implements LlmProvider {
   }
 
   private body(messages: ChatMessage[], opts?: ChatOptions): Record<string, unknown> {
+    const { temperature, topP } = samplingOf(this.settings, opts);
     return {
       model: this.settings.llmModel,
       messages: OllamaProvider.toWire(messages),
       stream: false,
       tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
-      options: ollamaOptions({ ...opts, temperature: temperatureOf(this.settings, opts) }),
+      options: ollamaOptions({ ...opts, temperature }, topP),
     };
   }
 
@@ -406,10 +413,12 @@ class OpenAiProvider implements LlmProvider {
   }
 
   private body(messages: ChatMessage[], opts?: ChatOptions): Record<string, unknown> {
+    const { temperature, topP } = samplingOf(this.settings, opts);
     return {
       model: this.settings.llmModel,
       messages: OpenAiProvider.toWire(messages),
-      temperature: temperatureOf(this.settings, opts),
+      temperature,
+      top_p: topP,
       tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
     };
   }

@@ -7,6 +7,7 @@ import {
   isServiceUrl,
   loadVaultSettings,
   parseTemperatureInput,
+  recommendedSampling,
   saveVaultSettings,
   type AppSettings,
 } from '../settings';
@@ -288,6 +289,14 @@ describe('보관함별 설정', () => {
     expect(parseTemperatureInput('  0.6 ')).toBe(0.6);
     expect(parseTemperatureInput('1,5')).toBe(1.5);
     for (const bad of ['3', '-1', 'abc', '0.5.1', '1e0']) expect(parseTemperatureInput(bad)).toBe('invalid');
+  });
+
+  it('recommendedSampling: the qwen3 family (incl. qwen3.5/3.6 names) gets temperature 0.6 and top_p 0.95; other models none', () => {
+    const qwen = { family: 'qwen3', temperature: 0.6, topP: 0.95 };
+    for (const m of ['qwen3:8b', 'Qwen3-32B', 'qwen/qwen3.5-plus', 'Qwen3.6-235B-A22B', 'hf.co/x/QWEN3-30B-A3B-GGUF'])
+      expect(recommendedSampling(m)).toEqual(qwen);
+    for (const m of ['', 'llama3.1:8b', 'qwen2.5:7b', 'gpt-4o-mini', 'qwq:32b']) expect(recommendedSampling(m)).toBeNull();
+    expect(recommendedSampling(undefined)).toBeNull();
   });
 
   it('literature search (app-only keys): sources default on, emails default empty, both survive a save and reload', async () => {

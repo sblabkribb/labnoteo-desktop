@@ -876,7 +876,7 @@ export function IntegrationSettingsPage(props: {
               {/* 고급: 비워 두면 지금처럼 요청마다 정한 temperature. 저장된 값이 있으면 펼쳐 둔다(숨은 설정이 되지 않게). */}
               <details className="integration-advanced" open={val.llmTemperature != null || undefined}>
                 <summary>{t('integrations.ai.advanced')}</summary>
-                <TemperatureField value={val.llmTemperature} commit={async (patch) => { await save(patch); }} />
+                <TemperatureField value={val.llmTemperature} model={val.llmModel} commit={async (patch) => { await save(patch); }} />
               </details>
               {provider === 'openai' ? (
                 <KeyField

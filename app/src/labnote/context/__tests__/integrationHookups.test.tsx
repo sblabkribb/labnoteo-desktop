@@ -84,6 +84,22 @@ describe('Integration settings hook-ups (Task 17)', () => {
     expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(true);
   });
 
+  it('the blank temperature placeholder shows the model recommended value for qwen3, else the plain default', async () => {
+    const q = deps({ llmProvider: 'ollama', llmModel: 'qwen3:8b' });
+    render(<IntegrationSettingsPage deps={q.d} onLeave={async () => {}} />);
+    await flush();
+    const input = screen.getByLabelText(t('integrations.ai.temperature')) as HTMLInputElement;
+    expect(input.placeholder).toBe(t('integrations.ai.temperatureRecommended', '0.6', 'qwen3'));
+    expect(input.placeholder).toContain('0.6');
+    cleanup();
+    const o = deps({ llmProvider: 'openai', llmModel: 'gpt-4o-mini' });
+    render(<IntegrationSettingsPage deps={o.d} onLeave={async () => {}} />);
+    await flush();
+    expect((screen.getByLabelText(t('integrations.ai.temperature')) as HTMLInputElement).placeholder).toBe(
+      t('integrations.ai.temperaturePlaceholder'),
+    );
+  });
+
   it('mounts the SKILL.md section after the MCP section and calls only skill_status for it', async () => {
     const r = fakeInvoke({
       mcp_status: () => ({ running: false, port: null, tokenSet: false, tokenEpoch: 0 }),
