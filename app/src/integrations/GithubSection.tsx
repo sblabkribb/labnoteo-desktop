@@ -464,7 +464,9 @@ export function GithubSection(props: { deps: GithubDeps; onLeave(): Promise<void
                 type="text"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder={app.clientIdDefault ? t('github.settings.clientIdDefault') : ''}
+                placeholder={
+                  !app.clientIdDefault ? '' : app.builtinAvailable ? t('github.settings.clientIdDefault') : t('github.settings.clientIdNeeded')
+                }
                 value={clientDraft}
                 onChange={(e) => setClientDraft(e.target.value)}
                 onBlur={commitClientId}

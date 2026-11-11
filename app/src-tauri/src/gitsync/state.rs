@@ -131,14 +131,22 @@ pub fn github_client_id(app: &GithubAppSettings) -> Option<String> {
     client_id_from(app.client_id.as_deref(), option_env!("LABNOTEO_GITHUB_CLIENT_ID"), DEFAULT_GITHUB_CLIENT_ID)
 }
 
+/// Whether the build carries a client ID of its own (`LABNOTEO_GITHUB_CLIENT_ID`
+/// or the constant), so that leaving the setting empty can still sign in.
+fn builtin_client_id_available() -> bool {
+    client_id_from(None, option_env!("LABNOTEO_GITHUB_CLIENT_ID"), DEFAULT_GITHUB_CLIENT_ID).is_some()
+}
+
 /// What the webview learns: the stored client ID (not secret), whether the
-/// built-in default is in use instead, and the forget-on-exit flag.
+/// built-in default is in use instead, whether such a default exists at all
+/// (so the field does not claim one that is missing), and the forget-on-exit flag.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubAppSettingsView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
     pub client_id_default: bool,
+    pub builtin_available: bool,
     pub forget_on_exit: bool,
 }
 
@@ -147,6 +155,7 @@ fn view_of(app: &GithubAppSettings) -> GithubAppSettingsView {
     GithubAppSettingsView {
         client_id: own.map(str::to_string),
         client_id_default: own.is_none(),
+        builtin_available: builtin_client_id_available(),
         forget_on_exit: app.forget_on_exit,
     }
 }
@@ -322,16 +331,17 @@ mod tests {
         let store = MemoryStore::default();
         let gh = GithubState::default();
         let v = app_settings_get_at(&dir).unwrap();
+        let builtin = builtin_client_id_available();
         assert_eq!(
             serde_json::to_value(&v).unwrap(),
-            serde_json::json!({"clientIdDefault": true, "forgetOnExit": false})
+            serde_json::json!({"clientIdDefault": true, "builtinAvailable": builtin, "forgetOnExit": false})
         );
         let v = app_settings_set_at(&dir, &store, &gh, patch(r#"{"forgetOnExit":true}"#)).unwrap();
         assert!(v.forget_on_exit && v.client_id_default);
         let v = app_settings_set_at(&dir, &store, &gh, patch(r#"{"clientId":" Iv1.lab "}"#)).unwrap();
         assert_eq!(
             serde_json::to_value(&v).unwrap(),
-            serde_json::json!({"clientId": "Iv1.lab", "clientIdDefault": false, "forgetOnExit": true})
+            serde_json::json!({"clientId": "Iv1.lab", "clientIdDefault": false, "builtinAvailable": builtin, "forgetOnExit": true})
         );
         assert_eq!(app_settings_get_at(&dir).unwrap(), v);
         assert_eq!(

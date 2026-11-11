@@ -55,6 +55,8 @@ export type TokenOutcome =
 export interface GithubAppSettings {
   clientId?: string;
   clientIdDefault: boolean;
+  /** 이 빌드에 기본 Client ID 가 있는지. 없으면(또는 옛 Rust 가 보내지 않으면) 칸은 기본값을 쓴다고 하지 않는다. */
+  builtinAvailable?: boolean;
   forgetOnExit: boolean;
 }
 

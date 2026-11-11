@@ -233,7 +233,7 @@ describe('GithubSection', () => {
   });
 
   it('client ID: the placeholder says the default is in use; a new value is saved on Enter', async () => {
-    const deps = fake();
+    const deps = fake({ app: { clientIdDefault: true, builtinAvailable: true, forgetOnExit: false } });
     show(deps);
     await userEvent.click(await section().findByRole('button', { name: t('github.settings.advanced') }));
     const input = section().getByLabelText(t('github.settings.clientId')) as HTMLInputElement;
@@ -241,6 +241,14 @@ describe('GithubSection', () => {
     fireEvent.change(input, { target: { value: 'Iv1.new' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(deps.setAppSettings).toHaveBeenCalledWith({ clientId: 'Iv1.new' }));
+  });
+
+  it('client ID: with no built-in default the placeholder asks for one instead of claiming a default (visual QA)', async () => {
+    show(fake({ app: { clientIdDefault: true, builtinAvailable: false, forgetOnExit: false } }));
+    await userEvent.click(await section().findByRole('button', { name: t('github.settings.advanced') }));
+    const input = section().getByLabelText(t('github.settings.clientId')) as HTMLInputElement;
+    expect(input.placeholder).toBe(t('github.settings.clientIdNeeded'));
+    expect(input.placeholder).not.toBe(t('github.settings.clientIdDefault'));
   });
 
   it('connect shows the sign-in code inline (copied, browser opened) and a successful wait shows @login', async () => {
@@ -273,6 +281,8 @@ describe('GithubSection', () => {
     show(deps);
     await userEvent.click(await section().findByRole('button', { name: t('github.settings.connect') }));
     expect(await section().findByText(t('github.signin.notConfigured'))).toBeTruthy();
+    // the message points at the Client ID field and the token fallback, not "not ready yet"
+    expect(t('github.signin.notConfigured')).toContain('Client ID');
     await userEvent.click(section().getByRole('button', { name: t('github.signin.useToken') }));
     await waitFor(() => expect(document.activeElement).toBe(section().getByLabelText(t('github.settings.token'))));
   });
