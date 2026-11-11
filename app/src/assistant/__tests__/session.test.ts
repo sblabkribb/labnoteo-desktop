@@ -252,6 +252,17 @@ describe('assistant session', () => {
     expect(mem.writes).toHaveLength(0);
   });
 
+  it('an error with a detail (the repeated part of a reasoning loop) keeps the detail on the reply, unsaved', async () => {
+    const detail = { label: 'Show the repeated part', text: 'again and again' };
+    const { rt } = runtime(async () => ({ error: '고리', errorDetail: detail }));
+    const { session, mem } = setup({ rt });
+    session.setActivePath(NOTE_A);
+    await flush();
+    await session.send('q');
+    expect(session.get().messages[1]).toMatchObject({ error: '고리', errorDetail: detail });
+    expect(mem.writes).toHaveLength(0);
+  });
+
   it('compacts first when needed: the turn gets the summary and the saved doc keeps it', async () => {
     const { rt, turns } = runtime(async () => ({ content: '답' }));
     const mem = memoryHistory({ [A]: stored(A, ['1', '2', '3', '4']) });

@@ -126,6 +126,9 @@ const ko: Record<string, string> = {
   'ai.reasoningLoop':
     'AI 모델이 같은 생각을 되풀이해서 멈췄습니다(생각을 끄고 한 번 더 해 봤지만 같았습니다). 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꿔 보세요. 요청을 더 짧고 분명하게 바꿔도 됩니다.',
   'ai.retrying': '생각을 끄고 다시 시도하는 중…',
+  'ai.loopDetail.show': '반복된 부분 보기',
+  'ai.loopDetail.repeated': '되풀이된 대목:',
+  'ai.loopDetail.before': '그 앞의 생각:',
   'ai.outputLimit': '출력 한도에 닿아 답을 끝내지 못했어요. 요청을 더 짧게 나누거나, {0} 값을 늘리거나 비워 두세요(생각 모드를 끄면 한도가 답에 더 많이 쓰여요).',
   'ai.err.emptyEndpoint': 'AI 서버 주소가 비어 있습니다. {0} 에 주소를 넣어 주세요.',
   'ai.err.badScheme': 'AI 서버 주소가 http:// 나 https:// 주소가 아닙니다. {0} 을(를) 확인해 주세요.',
@@ -1687,6 +1690,9 @@ const en: Record<string, string> = {
   'ai.reasoningLoop':
     'The AI model kept repeating the same reasoning, so it was stopped (one more try with thinking off did the same). Set Thinking to Off in Integration settings → AI provider → Advanced, or make the request shorter and clearer.',
   'ai.retrying': 'Trying again with thinking off…',
+  'ai.loopDetail.show': 'Show the repeated part',
+  'ai.loopDetail.repeated': 'The repeated passage:',
+  'ai.loopDetail.before': 'Just before it:',
   'ai.outputLimit': 'The answer hit the output limit before it was finished. Split the request into smaller parts, or raise or clear {0} (with thinking off more of the limit goes to the answer).',
   'ai.err.emptyEndpoint': 'The AI server address is empty. Enter it in {0}.',
   'ai.err.badScheme': 'The AI server address is not an http:// or https:// address. Check {0}.',

@@ -234,6 +234,21 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   color: var(--danger);
   font-size: var(--font-size-sm);
 }
+/* 생각 고리의 되풀이된 대목(반복된 부분 보기): 글 그대로, 줄 바꿈 유지 */
+.pet-msg-detail {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.pet-msg-detail > summary { cursor: pointer; }
+.pet-msg-detail-text {
+  margin: var(--space-1) 0 0;
+  max-height: 12em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
 
 /* 인용 [n] 과 출처 목록: 단추지만 글처럼 보인다(밑줄, 강조색) */
 .pet-cite,

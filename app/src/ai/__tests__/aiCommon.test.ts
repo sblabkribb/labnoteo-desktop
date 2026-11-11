@@ -26,6 +26,7 @@ import {
   toolContext,
   toolRunNotice,
 } from '../../labnote/port/aiCommon';
+import { ReasoningLoopError } from '../../labnote/port/llmError';
 import { createAiEnv, type AiEnv } from '../aiEnv';
 
 const NOTE = 'labnote/001_Test/001_WD010_A.labnote.md';
@@ -217,6 +218,28 @@ describe('complete', () => {
     expect(currentDialog()).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(th.notes).toEqual([]);
+  });
+
+  it('a reasoning loop warning carries an action that shows the repeated part in the plain-text answer dialog', async () => {
+    renderLayer();
+    const th = host({});
+    const base = createAiEnv(th.ctx);
+    const chat = vi.fn(async () => {
+      throw new ReasoningLoopError('again and again', 'first');
+    });
+    const env: AiEnv = { ...base, provider: { ...base.provider!, chat } };
+    await act(async () => {
+      await complete(env, [{ role: 'user', content: 'hi' }]);
+    });
+    expect(th.notes).toEqual([{ kind: 'warn', message: t('ai.reasoningLoop') }]);
+    const action = th.noteOpts[0].action!;
+    expect(action.label).toBe(t('ai.loopDetail.show'));
+    await act(async () => {
+      action.run();
+      await tick();
+    });
+    expect(currentDialog()?.spec.kind).toBe('aiAnswer');
+    expect(document.querySelector('pre.ai-answer')?.textContent).toContain('again and again');
   });
 
   it('complete without opts calls chat exactly as before; with contextWindow passes it on', async () => {

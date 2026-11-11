@@ -46,6 +46,8 @@ export interface ChatItem {
   status?: string;
   /** 사람에게 보일 오류(번역됨). */
   error?: string;
+  /** 오류 아래에 펼쳐 볼 글(생각 고리의 되풀이된 대목). */
+  errorDetail?: { label: string; text: string };
   /** 도구 사용 요약 같은 끝 알림: 그릴 때 지금 언어로 만든다. */
   notice?: () => string;
   /** 멈췄다. */
@@ -271,7 +273,7 @@ export function createAssistantSession(initial: SessionDeps = {}): AssistantSess
         return;
       }
       if (res.error) {
-        patchItem(reply.id, { pending: false, status: undefined, error: res.error });
+        patchItem(reply.id, { pending: false, status: undefined, error: res.error, ...(res.errorDetail ? { errorDetail: res.errorDetail } : {}) });
         pet('idle');
         return;
       }

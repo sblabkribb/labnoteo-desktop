@@ -70,6 +70,12 @@ export function MessageView({ item, actions }: { item: ChatItem; actions?: Bubbl
       {item.pending && item.status ? <p className="pet-msg-status">{item.status}</p> : null}
       {item.stopped ? <p className="pet-msg-status">{t('pet.stopped')}</p> : null}
       {item.error ? <p className="pet-msg-error">{item.error}</p> : null}
+      {item.error && item.errorDetail ? (
+        <details className="pet-msg-detail">
+          <summary>{item.errorDetail.label}</summary>
+          <pre className="pet-msg-detail-text">{item.errorDetail.text}</pre>
+        </details>
+      ) : null}
       {item.notice ? <p className="pet-msg-status">{item.notice()}</p> : null}
       {sources.length > 0 ? (
         <ol className="pet-sources" aria-label={t('pet.sources')}>

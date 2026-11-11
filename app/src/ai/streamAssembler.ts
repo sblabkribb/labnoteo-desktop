@@ -7,7 +7,8 @@
  *   생각 글은 `reasoning_content` 나 `reasoning`(vLLM) 이다. 생각만 있고 답이 없으면 `thinkingOnly`.
  * - Ollama(NDJSON): 줄마다 `message.content` 를 잇고, `message.tool_calls` 는 나온 줄(보통 마지막 줄)에서 모은다.
  *   `message.thinking` 만 있고 답이 없으면 `thinkingOnly`.
- * - 생각 글이 같은 대목을 되풀이하면(생각 고리) {@link ReasoningLoopError} 를 던진다: `llmChatStream` 이 요청을 멈추고
+ * - 생각 글이 같은 대목을 되풀이하면(생각 고리) {@link ReasoningLoopError} 를 던진다(되풀이된 끝 대목과 처음 되풀이 앞의
+ *   `LOOP_BEFORE` 자를 싣는다): `llmChatStream` 이 요청을 멈추고
  *   그 오류로 거절한다. 고리에 빠진 모델은 LLM_TIMEOUT(300초) 내내 생각만 흘리다 "연결할 수 없다"로 끝났다(real-app check).
  * - `reasoningOnly()` 는 생각 글만 왔는지 알려 준다: 그때의 시간 초과는 llmProvider 가 생각을 끄고 한 번 더 보낸다.
  * - `finish_reason`(OpenAI) 이나 `done_reason`(Ollama) 이 'length' 면 결과에 `truncated` 를 단다(출력 한도에서 멈춘 답).
@@ -58,7 +59,9 @@ function throwIfError(frame: Json): void {
 }
 
 /** 고리로 보는 끝 대목의 길이(글자), 그 대목이 최근 글에 나와야 하는 횟수, 살펴보는 최근 글의 길이, 살펴보는 간격. */
-const LOOP_TAIL = 240;
+export const LOOP_TAIL = 240;
+/** 고리 오류에 함께 싣는, 되풀이가 처음 나온 곳 앞의 글자 수(오류 말풍선의 "반복된 부분 보기"). */
+export const LOOP_BEFORE = 300;
 const LOOP_REPEATS = 4;
 const LOOP_WINDOW = 24_000;
 const LOOP_STEP = 400;
@@ -78,8 +81,9 @@ class Thinking {
     const recent = this.text.slice(-LOOP_WINDOW);
     const tail = recent.slice(-LOOP_TAIL);
     let count = 0;
-    for (let at = recent.indexOf(tail); at !== -1; at = recent.indexOf(tail, at + LOOP_TAIL)) {
-      if (++count >= LOOP_REPEATS) throw new ReasoningLoopError();
+    const first = recent.indexOf(tail);
+    for (let at = first; at !== -1; at = recent.indexOf(tail, at + LOOP_TAIL)) {
+      if (++count >= LOOP_REPEATS) throw new ReasoningLoopError(tail, recent.slice(Math.max(0, first - LOOP_BEFORE), first));
     }
   }
 }

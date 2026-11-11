@@ -17,6 +17,7 @@ import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { openNote } from '../../labnote/openNotes';
 import { askAgentCommand } from '../../labnote/port/aiAskAgent';
+import { ReasoningLoopError } from '../../labnote/port/llmError';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
 import {
   builtinRuntime,
@@ -610,6 +611,29 @@ describe('builtinRuntime', () => {
       { role: 'assistant', content: '둘째 답' },
       { role: 'user', content: '셋째' },
     ]);
+  });
+
+  it('a reasoning loop that the retry did not cure carries the repeated part (redacted) under the error', async () => {
+    const p = new Script([
+      () => {
+        throw new ReasoningLoopError('call https://llm.example.test/v1 again, then add_section again', 'I will plan.');
+      },
+    ]);
+    const { rt } = await setup(p);
+    const r = await rt.run(turnOf('섹션 만들어 줘'), recordSink().sink, go());
+    expect(r.error).toBe(t('ai.reasoningLoop'));
+    expect(r.errorDetail?.label).toBe(t('ai.loopDetail.show'));
+    expect(r.errorDetail?.text).toContain('add_section again');
+    expect(r.errorDetail?.text).toContain('I will plan.');
+    expect(r.errorDetail?.text).not.toContain('llm.example.test');
+    // Other errors have no detail.
+    const q = new Script([
+      () => {
+        throw { kind: 'offline', message: 'raw-rust-text' };
+      },
+    ]);
+    const b = await setup(q);
+    expect((await b.rt.run(turnOf('hi'), recordSink().sink, go())).errorDetail).toBeUndefined();
   });
 
   it('a model error becomes a localised error, not a throw', async () => {

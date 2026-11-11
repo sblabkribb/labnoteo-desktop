@@ -65,6 +65,8 @@ export interface AssistantResult {
   cancelled?: boolean;
   /** 사람에게 보일 오류 글(번역됨). */
   error?: string;
+  /** 오류 아래에 펼쳐 볼 글(생각 고리의 되풀이된 대목, ai/loopDetail). 글 그대로 그린다. */
+  errorDetail?: { label: string; text: string };
   /** 도구 사용 요약 같은 끝 알림. 부를 때의 언어로 만든다(언어를 바꾸면 지난 답의 알림도 따라 바뀐다). */
   notice?: () => string;
 }

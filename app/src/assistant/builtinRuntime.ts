@@ -17,6 +17,7 @@
  * - 만들기 칩(섹션·Unit Operation·Workflow)은 한 번에 끝나는 일이라 저장된 기록도 요약도 보내지 않는다(real-server check,
  *   2026-11-11: 기록이 있는 실험에서 섹션 만들기가 4번 모두 생각 고리에 빠졌고, 기록이 없는 실험에서는 25초에 미리보기까지
  *   갔다). 대화는 기록을 보내되 답이 없던 차례는 뺀다(`answeredTurns`). 저장된 기록 파일은 그대로다.
+ * - 생각을 끄고 다시 보내도 생각 고리로 끝나면 오류에 되풀이된 대목(`errorDetail`, ai/loopDetail)을 싣는다.
  * - 웹 도구(Task 14): 대화 칩에서, 이 PC 의 `assistant.json` 에 검색 주소가 있을 때만 `web_search`/`fetch_page` 를 준다.
  *   `fetch_page` 의 허용 목록은 이번 차례의 사용자 글과 이 폴더 기록의 사용자 글, 검색 결과, 문헌 검색 결과의 링크다.
  *   검색 중 상태 줄은 보낼 검색어를 그대로 보인다(`web.queryShown`). 한도(검색 3번, 페이지 5개)는 실행마다 새로 센다.
@@ -24,6 +25,7 @@
 import type { ToolDef, ToolResult, Translator } from '@labnoteo/core';
 import type { AiEnv } from '../ai/aiEnv';
 import { externalAgentTools, externalApprovalMessage, type ExternalToolMeta } from '../ai/externalTools';
+import { loopDetail } from '../ai/loopDetail';
 import { UNTRUSTED_RULES } from '../ai/untrusted';
 import { t as appT } from '../i18n/t';
 import { vaultGuard } from '../integrations/netIpc';
@@ -571,7 +573,9 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     const message = describeLlmError(err, env.settings(), env.t);
     if (!message) return empty({ cancelled: true });
     console.error('[labnoteo] assistant run failed:', err);
-    return empty({ error: message });
+    // A reasoning loop that the retry with thinking off did not cure: the bubble can show what repeated.
+    const detail = loopDetail(err, env.settings());
+    return empty({ error: message, ...(detail ? { errorDetail: detail } : {}) });
   } finally {
     signal.removeEventListener('abort', stop);
     guard?.signal.removeEventListener('abort', stop);
