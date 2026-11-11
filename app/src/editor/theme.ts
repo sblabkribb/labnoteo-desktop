@@ -237,15 +237,15 @@ export const editorThemeSpec = {
   },
   // `[WB150]` 은 마크다운 링크 참조로 읽혀 안쪽 span 에 강조색(링크 색)이 붙는다: 칩 안에서는 칩과 같은 흐린 색(--text-muted)이다.
   '.lno-uo-code span': { color: 'var(--text-muted)' },
-  // AI 초안 검토 표시(live/aiDraftReview.ts): 넣은 줄의 왼쪽 강조색 선과 옅은 바탕, 끝의 작은 "검토 완료" 단추. 파일에는 없다.
-  '.cm-line.cm-ai-draft': { backgroundColor: 'var(--accent-soft)', borderLeft: '2px solid var(--accent)' },
+  // AI 초안 검토 표시(live/aiDraftReview.ts): 끝의 작은 "검토 완료" 단추. 줄의 바탕·선은 UO 카드 규칙 뒤에 있다(아래).
+  // 글자는 강조색이다: --accent-text 는 강조 채움 위의 흰 글자라 --bg-elevated(라이트에서 흰색) 위에서는 보이지 않았다.
   '.cm-ai-draft-done': {
     marginLeft: 'var(--space-3)',
     padding: '0 var(--space-3)',
     fontSize: '0.75em',
     lineHeight: '1.6',
     verticalAlign: 'middle',
-    color: 'var(--accent-text)',
+    color: 'var(--accent)',
     backgroundColor: 'var(--bg-elevated)',
     border: '1px solid var(--accent)',
     borderRadius: 'var(--radius-s)',
@@ -276,6 +276,9 @@ export const editorThemeSpec = {
   },
   '.cm-line.cm-uo-card-active': { borderColor: 'var(--accent)' },
   '.cm-line.cm-uo-card.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
+  // AI 초안 줄: 왼쪽 강조색 선과 옅은 바탕(파일에는 없다). 계획·Method 초안은 늘 UO 카드 안이므로 카드 규칙(커서 줄 포함)보다
+  // 뒤에, 카드 안에서는 더 높은 특이도로 선다. 그러지 않으면 카드 바탕과 1px 선에 묻혀 보통 카드 줄처럼 보였다.
+  '.cm-line.cm-ai-draft, .cm-line.cm-ai-draft.cm-uo-card': { backgroundColor: 'var(--accent-soft)', borderLeft: '2px solid var(--accent)' },
   // 카드 안의 `#### Meta` 등: 작은 대문자 흐린 이름표(파일의 제목 글은 그대로)
   '.cm-line.cm-uo-label': { fontSize: '0.78em', fontWeight: '600', letterSpacing: '0.05em', textTransform: 'uppercase', paddingTop: 'var(--space-3)' },
   '.cm-uo-label, .cm-uo-label *': { color: 'var(--text-muted)' },
