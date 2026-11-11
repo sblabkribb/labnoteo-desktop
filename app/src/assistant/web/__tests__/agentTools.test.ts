@@ -8,7 +8,7 @@ import { MemFileSystem } from '@labnoteo/core';
 import type { AiEnv } from '../../../ai/aiEnv';
 import { setLang } from '../../../i18n/lang';
 import { format, t } from '../../../i18n/t';
-import { NetError } from '../../../integrations/netIpc';
+import { NetError, type InvokeFn } from '../../../integrations/netIpc';
 import { runAgent } from '../../../labnote/port/llmAgent';
 import type { ChatMessage, ChatResult, LlmProvider, ToolCall } from '../../../labnote/port/llmProvider';
 import { approvalConfirm } from '../../builtinRuntime';
@@ -20,7 +20,7 @@ import {
   WEB_SEARCH_MAX,
   webAgentTools,
 } from '../agentTools';
-import type { FetchPageResult, WebIpc, WebSearchResult } from '../ipc';
+import { webIpcFor, type FetchPageResult, type WebIpc, type WebSearchResult } from '../ipc';
 
 const HITS: WebSearchResult = {
   hits: [
@@ -232,6 +232,62 @@ describe('webAgentTools', () => {
       }),
     });
     await expect(c.run('web_search', { query: 'q' })).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
+  it('a refused search key (unauthorized) tells the model to ask for the key and the person once per run', async () => {
+    const f = fakeIpc({
+      search: async () => {
+        throw new NetError('unauthorized', 'raw-rust-text');
+      },
+    });
+    const notify = vi.fn();
+    const web = webAgentTools(f.ipc, { allowedUrls: new UrlAllowlist(), ledger: new SourceLedger(), newRequestId: () => 'rid', notify });
+    const search = web.tools.find((x) => x.name === 'web_search')!;
+    const ctx = { fs: new MemFileSystem(), workspaceRoot: '.' } as ToolContext;
+    const a = await search.handler(ctx, { query: 'q' });
+    expect(a.ok).toBe(false);
+    const text = JSON.stringify(a);
+    expect(text).not.toContain('raw-rust-text');
+    expect(text).toMatch(/key/i);
+    expect(text).toMatch(/Settings > Assistant/);
+    await search.handler(ctx, { query: 'q2' });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(t('web.unauthorized'));
+    // A 403 with JSON turned off is a different message, and no key notice.
+    const g = fakeIpc({
+      search: async () => {
+        throw new NetError('jsonDisabled', 'raw-rust-text');
+      },
+    });
+    const notify2 = vi.fn();
+    const web2 = webAgentTools(g.ipc, { allowedUrls: new UrlAllowlist(), ledger: new SourceLedger(), notify: notify2 });
+    const b = await web2.tools.find((x) => x.name === 'web_search')!.handler(ctx, { query: 'q' });
+    expect(JSON.stringify(b)).toMatch(/JSON/);
+    expect(notify2).not.toHaveBeenCalled();
+  });
+
+  it('the exact Rust rejection of a gateway 401, through webIpcFor, shows the plain Korean key notice', async () => {
+    // The error `web_search` rejects with (see src-tauri/tests/web_search_gateway.rs, step 5).
+    const rustError = { kind: 'unauthorized', message: 'the search server needs a valid key (the search key or the LLM key)' };
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === 'web_search') throw rustError;
+      return undefined;
+    }) as unknown as InvokeFn;
+    setLang('ko');
+    const notify = vi.fn();
+    const web = webAgentTools(webIpcFor(invoke), { allowedUrls: new UrlAllowlist(), ledger: new SourceLedger(), notify });
+    const ctx = { fs: new MemFileSystem(), workspaceRoot: '.' } as ToolContext;
+    const a = await web.tools.find((x) => x.name === 'web_search')!.handler(ctx, { query: '대장균' });
+    setLang('en');
+    expect(a.ok).toBe(false);
+    expect(JSON.stringify(a)).not.toContain(rustError.message);
+    expect(notify).toHaveBeenCalledWith('웹 검색 서버가 키를 거절했어요. 설정 › 어시스턴트에서 검색 서버 키(또는 LLM 키)를 넣으세요.');
+  });
+
+  it('the key notice reads in Korean too', () => {
+    setLang('ko');
+    expect(t('web.unauthorized')).toContain('검색 서버 키');
+    setLang('en');
   });
 });
 

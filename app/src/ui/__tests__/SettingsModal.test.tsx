@@ -276,7 +276,7 @@ describe('Settings modal', () => {
     const panel = within(panelEl);
     const rows = panel.getAllByRole('group').filter((g) => g.classList.contains('setting-row'));
     const names = rows.map((g) => g.querySelector('.setting-name')?.textContent);
-    expect(names).toEqual(['어시스턴트 보이기', '크기', '스킨', '웹 검색 주소', '갤러리 주소', '대화 기록', '외부 도우미']);
+    expect(names).toEqual(['어시스턴트 보이기', '크기', '스킨', '웹 검색 주소', '검색 서버 키', '갤러리 주소', '대화 기록', '외부 도우미']);
     for (const g of rows) expect(g.getAttribute('aria-labelledby'), String(g.textContent)).toBeTruthy();
     const controls = panelEl.querySelectorAll<HTMLElement>('button, input, select, textarea, [role="switch"], [role="radio"]');
     expect(controls.length).toBeGreaterThan(10);

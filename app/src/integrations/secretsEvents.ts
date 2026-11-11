@@ -14,7 +14,9 @@ export type Slot =
   // NCBI E-utilities API 키(문헌 검색, 선택). 주소가 고정이다: https://eutils.ncbi.nlm.nih.gov
   | 'ncbiEutils'
   | 'github'
-  | 'githubRefresh';
+  | 'githubRefresh'
+  // 웹 검색 서버(API 게이트웨이 뒤)의 키(선택). 이 PC 의 assistant.json 검색 주소의 origin 에 묶인다.
+  | 'webSearch';
 
 /**
  * 웹뷰가 secret_set / secret_clear 로 직접 저장하거나 지울 수 있는 슬롯. GitHub 토큰 두 슬롯은 Rust 의 GitHub 로그인만

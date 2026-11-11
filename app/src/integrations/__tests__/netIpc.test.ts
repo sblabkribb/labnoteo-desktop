@@ -32,9 +32,9 @@ describe('netIpc', () => {
     expect(toNetError('plain').kind).toBe('badInput');
   });
 
-  it('NET_ERROR_KINDS lists the 27 kinds Rust serializes', () => {
+  it('NET_ERROR_KINDS lists the 28 kinds Rust serializes', () => {
     const pinned = JSON.parse(readFileSync('src-tauri/tests/ipc-net-errors.json', 'utf-8')) as Record<string, string>;
-    expect(NET_ERROR_KINDS).toHaveLength(27);
+    expect(NET_ERROR_KINDS).toHaveLength(28);
     expect([...NET_ERROR_KINDS].sort()).toEqual(Object.values(pinned).sort());
   });
 
@@ -159,8 +159,8 @@ describe('netIpc', () => {
 
   it('secretStatusOf fills the missing slots', () => {
     expect(secretStatusOf({ partbankWeb: true }, { partbankWeb: 2 })).toEqual({
-      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false, github: false, githubRefresh: false },
-      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0, github: 0, githubRefresh: 0 },
+      set: { partbankDesktop: false, partbankWeb: true, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false, github: false, githubRefresh: false, webSearch: false },
+      epoch: { partbankDesktop: 0, partbankWeb: 2, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0, github: 0, githubRefresh: 0, webSearch: 0 },
     });
   });
 
@@ -174,7 +174,7 @@ describe('netIpc', () => {
     const st = secretStatusOf({ ncbiEutils: true }, { ncbiEutils: 3 });
     expect(st.set.ncbiEutils).toBe(true);
     expect(st.epoch.ncbiEutils).toBe(3);
-    expect(Object.keys(st.set)).toHaveLength(9);
+    expect(Object.keys(st.set)).toHaveLength(10);
   });
 
   it('setSecret passes the ncbiEutils slot through and surfaces badInput', async () => {

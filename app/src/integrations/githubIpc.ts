@@ -512,6 +512,7 @@ export function githubErrorText(e: unknown): string {
     case 'enginesDown':
     case 'blocked':
     case 'unsupportedType':
+    case 'unauthorized':
       return t('github.err.apiLeg');
   }
 }

@@ -161,6 +161,7 @@ export function SettingsModal(props: {
         return (
           <AssistantPage
             showPage={(next) => go(next, true)}
+            llmEndpoint={() => deps.settings().llmEndpointOpenai}
             leave={(after) =>
               void finish(async () => {
                 await after();

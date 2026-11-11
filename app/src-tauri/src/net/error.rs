@@ -60,6 +60,9 @@ pub enum NetErrorKind {
     Blocked,
     /// `fetch_page` got a `Content-Type` other than HTML or plain text.
     UnsupportedType,
+    /// A web search server (behind a gateway) answered 401, or 403 with an
+    /// authentication error: the search key (or the LLM key) is missing or wrong.
+    Unauthorized,
 }
 
 /// `Debug` is safe: every constructor that takes response text also takes the

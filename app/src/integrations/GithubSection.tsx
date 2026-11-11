@@ -86,6 +86,7 @@ const EMPTY: SecretStatus['set'] = {
   ncbiEutils: false,
   github: false,
   githubRefresh: false,
+  webSearch: false,
 };
 
 /**

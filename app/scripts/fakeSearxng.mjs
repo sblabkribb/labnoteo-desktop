@@ -3,6 +3,7 @@
  * Fake SearXNG for the real-app check (assistant plan Task 12). TEST HELPER ONLY: never bundled.
  *
  *   node scripts/fakeSearxng.mjs [--port 47833] [--mode json|forbidden|ratelimit|down] [--web-base http://127.0.0.1:<port>]
+ *                                [--require-bearer <test key>]
  *
  * - Binds 127.0.0.1 only. `--port 0` picks a free port; the base URL is printed on stdout. Put that URL (any path
  *   prefix works: `<base>/searxng`) in Settings › Assistant › Web search address of the test exe.
@@ -12,19 +13,28 @@
  *   when given, otherwise at `https://example.org/…` (never fetched by this script).
  * - Without `format=json` it answers 403, like a stock SearXNG whose `search.formats` lacks json.
  * - `--mode forbidden`: every search is a plain 403. `ratelimit`: 429. `down`: no results, engines unresponsive.
- * - GET /__log: the request log as JSON (host, path, q, format, language). No headers are logged.
+ * - `--require-bearer <key>`: like a SearXNG behind an API gateway (the search URL on the LLM host, e.g. `<base>/v1`):
+ *   a search without `Authorization: Bearer <key>` gets 401 `{"error":{"message":"invalid API key","type":
+ *   "authentication_error"}}` before any other mode applies. Use a test key only (e.g. `test-token-123`).
+ * - GET /__log: the request log as JSON (host, path, q, format, language, auth: none|ok|wrong). No header value
+ *   (and so never the key) is logged.
  */
 import { createServer } from 'node:http';
 
 const MODES = ['json', 'forbidden', 'ratelimit', 'down'];
 
 function parseArgs(argv) {
-  const o = { port: 47833, mode: 'json', webBase: 'https://example.org' };
+  const o = { port: 47833, mode: 'json', webBase: 'https://example.org', bearer: undefined };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port') o.port = Number(argv[++i]);
     else if (a === '--mode') o.mode = String(argv[++i]);
     else if (a === '--web-base') o.webBase = String(argv[++i]).replace(/\/+$/, '');
+    else if (a === '--require-bearer') {
+      const key = argv[++i];
+      if (!key || key.startsWith('--')) throw new Error('--require-bearer needs a test key');
+      o.bearer = key;
+    }
     else throw new Error(`unknown argument: ${a}`);
   }
   if (!Number.isInteger(o.port) || o.port < 0 || o.port > 65535) throw new Error('--port must be 0..65535');
@@ -75,9 +85,15 @@ const server = createServer((req, res) => {
   }
   const q = url.searchParams.get('q') ?? '';
   const format = url.searchParams.get('format') ?? '';
-  log.push({ host: req.headers.host ?? '', method: req.method, path: url.pathname, q, format, language: url.searchParams.get('language') ?? '' });
+  const authHeader = req.headers.authorization;
+  const auth = authHeader === undefined ? 'none' : opts.bearer !== undefined && authHeader === `Bearer ${opts.bearer}` ? 'ok' : 'wrong';
+  log.push({ host: req.headers.host ?? '', method: req.method, path: url.pathname, q, format, language: url.searchParams.get('language') ?? '', auth });
   if (req.method !== 'GET' || !url.pathname.endsWith('/search')) {
     res.writeHead(404).end();
+    return;
+  }
+  if (opts.bearer !== undefined && auth !== 'ok') {
+    json(res, 401, { error: { message: 'invalid API key', type: 'authentication_error' } });
     return;
   }
   if (opts.mode === 'forbidden' || format !== 'json') {

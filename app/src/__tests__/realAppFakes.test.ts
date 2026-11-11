@@ -307,6 +307,32 @@ describe('fake SearXNG (plan Task 12)', () => {
   it('refuses an unknown --mode', async () => {
     await expect(start('fakeSearxng.mjs', '--mode', 'weird')).rejects.toThrow(/exited/);
   });
+
+  it('--require-bearer answers like an API gateway: 401 JSON without the right Bearer key, results with it', async () => {
+    const base = await start('fakeSearxng.mjs', '--require-bearer', TOKEN);
+    const url = `${base}/v1/search?q=pcr&format=json`;
+    const gateway = { error: { message: 'invalid API key', type: 'authentication_error' } };
+    const none = await fetch(url);
+    expect(none.status).toBe(401);
+    expect(none.headers.get('content-type')).toContain('application/json');
+    expect(await none.json()).toEqual(gateway);
+    const wrong = await fetch(url, { headers: { Authorization: 'Bearer test-wrong-key' } });
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toEqual(gateway);
+    const ok = await fetch(url, { headers: { Authorization: `Bearer ${TOKEN}` } });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as Answer).results.length).toBeGreaterThan(0);
+    // The log says whether a key came and matched, never the key itself.
+    const logText = await (await fetch(`${base}/__log`)).text();
+    expect(logText).not.toContain(TOKEN);
+    expect(logText).not.toContain('test-wrong-key');
+    const log = JSON.parse(logText) as Array<{ auth: string }>;
+    expect(log.map((e) => e.auth)).toEqual(['none', 'wrong', 'ok']);
+  });
+
+  it('refuses --require-bearer without a key', async () => {
+    await expect(start('fakeSearxng.mjs', '--require-bearer')).rejects.toThrow(/exited/);
+  });
 });
 
 describe('fake web pages (plan Task 13)', () => {

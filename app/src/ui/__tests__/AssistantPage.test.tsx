@@ -3,7 +3,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
-import { ExternalAssistantsRow, HistoryRow, SkinRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
+import { ExternalAssistantsRow, HistoryRow, SkinRow, WebSearchKeyRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
+import { secretStatusOf } from '../../integrations/__tests__/fakeNet';
 import type { SkinManifest } from '../../assistant/skins/types';
 import { BUILTIN_SKIN } from '../../assistant/skins/builtin';
 
@@ -200,6 +201,162 @@ describe('Assistant pane: web search address row (plan Task 12)', () => {
     await setupSearch();
     expect(screen.getByRole('group', { name: 'Web search address' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Check' })).toBeTruthy();
+  });
+
+  it('a gateway 401 (unauthorized) asks for the search key or the LLM key, not the settings.yml hint', async () => {
+    const { NetError } = await import('../../integrations/netIpc');
+    await setupSearch({
+      stored: 'https://llm.example/v1',
+      probe: async () => {
+        throw new NetError('unauthorized', 'raw-rust-text');
+      },
+    });
+    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await settle();
+    const text = screen.getByRole('status').textContent ?? '';
+    expect(text).toBe('검색 서버가 키를 거절했어요. 아래 검색 서버 키를 넣으세요. LLM과 같은 서버라면 LLM 키를 확인하세요.');
+    expect(text).not.toContain('settings.yml');
+    expect(text).not.toContain('raw-rust-text');
+  });
+
+  it('a saved address tells the pane (so the key row re-reads its state)', async () => {
+    const onSaved = vi.fn();
+    const deps = {
+      read: vi.fn(async () => ({})),
+      save: vi.fn(async (url: string) => ({ searxngUrl: url })),
+      probe: vi.fn(),
+      onSaved,
+    };
+    render(<WebSearchRow {...(deps as unknown as WebSearchRowDeps)} />);
+    await settle();
+    await userEvent.type(screen.getByRole('textbox', { name: '웹 검색 주소' }), 'https://llm.example/v1{Enter}');
+    await settle();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Assistant pane: search server key row', () => {
+  const KEY = 'test-search-key-123';
+
+  async function setupKey(opts: { set?: boolean; setSecret?: (v: string) => Promise<void> } = {}) {
+    let isSet = opts.set ?? false;
+    const deps = {
+      status: vi.fn(async () => secretStatusOf({ webSearch: isSet })),
+      setSecret: vi.fn(
+        opts.setSecret ??
+          (async () => {
+            isSet = true;
+          })
+      ),
+      clearSecret: vi.fn(async () => {
+        isSet = false;
+      }),
+    };
+    render(<WebSearchKeyRow {...deps} />);
+    await settle();
+    return deps;
+  }
+
+  it('is a write-only password field with the same-host hint, and shows only whether a key is set', async () => {
+    await setupKey();
+    const row = screen.getByRole('group', { name: '검색 서버 키' });
+    expect(row.textContent).toContain('LLM과 같은 서버면 LLM 키를 자동으로 써요');
+    expect(row.textContent).toContain('설정 안 됨');
+    const box = screen.getByLabelText('검색 서버 키', { selector: 'input' }) as HTMLInputElement;
+    expect(box.type).toBe('password');
+    expect(box.getAttribute('autocomplete')).toBe('off');
+    expect(screen.queryByRole('button', { name: '키 지우기' })).toBeNull();
+  });
+
+  it('Enter saves the trimmed key to the webSearch slot, clears the field and never shows the key', async () => {
+    const deps = await setupKey();
+    const box = screen.getByLabelText('검색 서버 키', { selector: 'input' }) as HTMLInputElement;
+    await userEvent.type(box, `  ${KEY}  {Enter}`);
+    await settle();
+    expect(deps.setSecret).toHaveBeenCalledWith(KEY);
+    expect(box.value).toBe('');
+    expect(document.body.innerHTML).not.toContain(KEY);
+    const row = screen.getByRole('group', { name: '검색 서버 키' });
+    expect(row.textContent).toContain('설정됨');
+    expect(screen.getByRole('status').textContent).toBe('키를 저장했어요.');
+  });
+
+  it('Remove clears the key', async () => {
+    const deps = await setupKey({ set: true });
+    await userEvent.click(screen.getByRole('button', { name: '키 지우기' }));
+    await settle();
+    expect(deps.clearSecret).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status').textContent).toBe('키를 지웠어요.');
+    expect(screen.queryByRole('button', { name: '키 지우기' })).toBeNull();
+  });
+
+  it('without a saved address it asks for the address first; other failures say plainly that saving failed', async () => {
+    const { NetError } = await import('../../integrations/netIpc');
+    await setupKey({
+      setSecret: async () => {
+        throw new NetError('notConfigured', 'raw-rust-text');
+      },
+    });
+    const box = screen.getByLabelText('검색 서버 키', { selector: 'input' }) as HTMLInputElement;
+    await userEvent.type(box, `${KEY}{Enter}`);
+    await settle();
+    expect(screen.getByRole('status').textContent).toBe('먼저 웹 검색 주소를 저장하세요.');
+    cleanup();
+    await setupKey({
+      setSecret: async () => {
+        throw new NetError('keychain', 'raw-rust-text');
+      },
+    });
+    await userEvent.click(screen.getByRole('button', { name: '키 저장' }));
+    expect(screen.getByRole('status').textContent).toBe('');
+    await userEvent.type(screen.getByLabelText('검색 서버 키', { selector: 'input' }), KEY);
+    await userEvent.click(screen.getByRole('button', { name: '키 저장' }));
+    await settle();
+    expect(screen.getByRole('status').textContent).toBe('키를 저장하지 못했어요.');
+    expect(document.body.textContent).not.toContain('raw-rust-text');
+  });
+
+  it('when the saved search address is on the LLM server, says the LLM key is used (no second entry needed)', async () => {
+    const status = (set: boolean) => vi.fn(async () => secretStatusOf({ webSearch: set }));
+    const same = { status: status(false), searchUrl: async () => 'https://LLM.example:443/v1', llmEndpoint: () => 'https://llm.example/v1' };
+    render(<WebSearchKeyRow {...same} />);
+    await settle();
+    const row = () => screen.getByRole('group', { name: '검색 서버 키' });
+    expect(row().textContent).toContain('검색 주소가 LLM과 같은 서버라 LLM 키를 써요. 따로 넣지 않아도 돼요.');
+    cleanup();
+    // Another origin (port, host or scheme): no such hint.
+    for (const searchUrl of ['https://llm.example:8443/v1', 'https://search.example/v1', 'http://llm.example/v1']) {
+      render(<WebSearchKeyRow status={status(false)} searchUrl={async () => searchUrl} llmEndpoint={() => 'https://llm.example/v1'} />);
+      await settle();
+      expect(row().textContent, searchUrl).not.toContain('따로 넣지 않아도 돼요');
+      cleanup();
+    }
+    // No search address saved yet, or no LLM address: no hint.
+    render(<WebSearchKeyRow status={status(false)} searchUrl={async () => undefined} llmEndpoint={() => 'https://llm.example/v1'} />);
+    await settle();
+    expect(row().textContent).not.toContain('따로 넣지 않아도 돼요');
+    cleanup();
+    render(<WebSearchKeyRow status={status(false)} searchUrl={async () => 'https://llm.example/v1'} llmEndpoint={() => ''} />);
+    await settle();
+    expect(row().textContent).not.toContain('따로 넣지 않아도 돼요');
+    cleanup();
+    // A search key of its own wins: the hint goes away.
+    render(<WebSearchKeyRow status={status(true)} searchUrl={async () => 'https://llm.example/v1'} llmEndpoint={() => 'https://llm.example/v1'} />);
+    await settle();
+    expect(row().textContent).not.toContain('따로 넣지 않아도 돼요');
+    cleanup();
+    setLang('en');
+    render(<WebSearchKeyRow {...same} />);
+    await settle();
+    expect(screen.getByRole('group', { name: 'Search server key' }).textContent).toContain('same server as the LLM');
+  });
+
+  it('follows the language', async () => {
+    setLang('en');
+    await setupKey();
+    const row = screen.getByRole('group', { name: 'Search server key' });
+    expect(row.textContent).toContain('the LLM key is used automatically');
+    expect(screen.getByRole('button', { name: 'Save key' })).toBeTruthy();
   });
 });
 

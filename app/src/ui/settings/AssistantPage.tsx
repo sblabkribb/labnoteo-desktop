@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { probeWebSearch, readAssistantConfig, updateAssistantConfig, type AssistantConfig } from '../../assistant/config';
 import { clearAllHistory, historyStats, type HistoryStats } from '../../assistant/history';
 import { listSkins, removeSkinAndFallBack, skinChoices } from '../../assistant/skins/store';
@@ -9,6 +9,9 @@ import type { SkinManifest } from '../../assistant/skins/types';
 import type { WebSearchResult } from '../../assistant/web/ipc';
 import { assistantSession } from '../../assistant/useAssistantSession';
 import { t } from '../../i18n/t';
+import { clearSecret, secretStatus, setSecret, type SecretStatus } from '../../integrations/netIpc';
+import { notifySecretsChange } from '../../integrations/secretsEvents';
+import { resolveEndpoint } from '../../integrations/UrlField';
 import { useLang } from '../../i18n/useLang';
 import { confirmDialog } from '../../labnote/host/dialogStore';
 import { notify as toast } from '../../labnote/host/toastStore';
@@ -20,14 +23,22 @@ import { SettingRow, Toggle } from './SettingRow';
 
 /**
  * 설정 → 어시스턴트(assistant 명세 §10.1). 이 PC 의 ui.json(layoutStore 의 pet)에 산다. 줄은 그 기능이 동작하게 되는 작업에서
- * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json),
+ * 하나씩 늘어난다: 보이기, 크기(정수 배율 2·3), 스킨(Task 16, 고르기와 삭제), 웹 검색 주소(Task 12, 이 PC 의 assistant.json)와
+ * 검색 서버 키(API 게이트웨이 뒤의 검색 서버, 자격 증명 관리자의 `webSearch` 슬롯),
  * 갤러리 주소(Task 19), 대화 기록(Task 10), 외부 도우미(Task 21, MCP 서버가 있는 연동 쪽으로 가는 단추). 줄 차례는 명세 §10.1 과 같다. 스킨 가져오기(Task 17), 내 스킨 만들기(Task 18), 갤러리(Task 19)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
  */
 export function AssistantPage(
-  props: { leave?: (after: () => Promise<void>) => void; showPage?: (page: 'integrations') => void } = {},
+  props: {
+    leave?: (after: () => Promise<void>) => void;
+    showPage?: (page: 'integrations') => void;
+    /** 보관함 설정의 OpenAI 호환 LLM 주소(검색 서버 키 줄의 "LLM 키를 써요" 안내용). */
+    llmEndpoint?: () => string;
+  } = {},
 ) {
   useLang();
   const { pet } = useLayout();
+  // 키는 저장된 검색 주소의 origin 에 묶인다: 주소를 저장할 때마다 키 줄을 새로 읽는다.
+  const [searchRev, setSearchRev] = useState(0);
   return (
     <>
       <SettingRow
@@ -51,7 +62,8 @@ export function AssistantPage(
         }
       />
       <SkinRow leave={props.leave} />
-      <WebSearchRow />
+      <WebSearchRow onSaved={() => setSearchRev((n) => n + 1)} />
+      <WebSearchKeyRow key={searchRev} llmEndpoint={props.llmEndpoint} />
       <GalleryRow />
       <HistoryRow />
       <ExternalAssistantsRow showPage={props.showPage} />
@@ -232,6 +244,8 @@ export interface WebSearchRowDeps {
   save?: (url: string) => Promise<AssistantConfig>;
   /** 저장하지 않은 주소로 시험 검색. */
   probe?: (url: string) => Promise<WebSearchResult>;
+  /** 주소를 저장하거나 지운 뒤(키 줄이 새 주소의 키 상태를 다시 읽게). */
+  onSaved?: () => void;
 }
 
 /** 시험 검색이나 저장의 거절을 짧은 안내로. `message` 는 Rust 글이라 보이지 않는다. */
@@ -243,6 +257,8 @@ function searchErrorText(e: unknown): string {
       return t('settings.assistant.search.badUrl');
     case 'insecure':
       return t('settings.assistant.search.insecure');
+    case 'unauthorized':
+      return t('settings.assistant.search.unauthorized');
     case 'jsonDisabled':
       return t('settings.assistant.search.jsonDisabled');
     case 'rateLimited':
@@ -315,6 +331,7 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
       setSaved(url);
       setValue(url);
       setStatus(t(url ? 'settings.assistant.search.saved' : 'settings.assistant.search.cleared'));
+      deps.onSaved?.();
     } catch (e) {
       const kind = (e as { kind?: unknown } | null)?.kind;
       setStatus(kind === 'badUrl' ? searchErrorText(e) : t('settings.assistant.search.saveFailed'));
@@ -370,6 +387,147 @@ export function WebSearchRow(deps: WebSearchRowDeps = {}) {
           </button>
           <span role="status" className="setting-status">
             {status}
+          </span>
+        </>
+      }
+    />
+  );
+}
+
+export interface WebSearchKeyRowDeps {
+  /** 키마다 '설정됨' 여부(값은 오지 않는다). */
+  status?: () => Promise<SecretStatus>;
+  /** `webSearch` 슬롯에 저장(저장된 검색 주소의 origin 에 묶인다). 주소가 없으면 `notConfigured`. */
+  setSecret?: (value: string) => Promise<void>;
+  clearSecret?: () => Promise<void>;
+  /** 이 PC 에 저장된 웹 검색 주소(없으면 undefined). */
+  searchUrl?: () => Promise<string | undefined>;
+  /** 보관함 설정의 OpenAI 호환 LLM 주소(Rust 가 같은 origin 이면 이 키를 대신 쓴다). */
+  llmEndpoint?: () => string;
+}
+
+/** 두 주소가 같은 origin(스킴·호스트·포트)인가. 읽을 수 없는 주소는 아니다. Rust `search_key` 와 같은 규칙. */
+function sameOrigin(searchUrl: string | undefined, llmEndpoint: string | undefined): boolean {
+  if (!searchUrl || !llmEndpoint) return false;
+  const llm = resolveEndpoint(llmEndpoint);
+  let search: URL;
+  try {
+    search = new URL(searchUrl);
+  } catch {
+    return false;
+  }
+  return !!llm && llm.origin === search.origin;
+}
+
+/**
+ * 검색 서버 키 줄: API 게이트웨이 뒤의 검색 서버가 `Authorization: Bearer` 를 요구할 때 넣는 키(선택). 쓰기만 하는 칸이다(D17):
+ * 친 값은 React 상태에 두지 않고, 저장하면 칸을 비우며, 웹뷰는 '설정됨' 여부만 안다. 키는 Rust 가 자격 증명 관리자의
+ * `webSearch|<검색 주소 origin>` 에 두고, 검색 주소가 LLM 주소와 같은 origin 이면 이 키가 없을 때 LLM 키를 쓴다.
+ * 한글 조합 중의 Enter 는 저장하지 않는다.
+ */
+export function WebSearchKeyRow(deps: WebSearchKeyRowDeps = {}) {
+  useLang();
+  const status = deps.status ?? (() => secretStatus());
+  const save = deps.setSecret ?? ((value: string) => setSecret('webSearch', value));
+  const clear = deps.clearSecret ?? (() => clearSecret('webSearch'));
+  const readSearchUrl = deps.searchUrl ?? (async () => (await readAssistantConfig()).searxngUrl);
+  const input = useRef<HTMLInputElement>(null);
+  const [isSet, setIsSet] = useState(false);
+  const [usesLlmKey, setUsesLlmKey] = useState(false);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    status().then(
+      (s) => live && setIsSet(s.set.webSearch === true),
+      () => undefined
+    );
+    readSearchUrl().then(
+      (url) => live && setUsesLlmKey(sameOrigin(url, deps.llmEndpoint?.())),
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+    // Read once when the row mounts (it is remounted when the address is saved).
+  }, []);
+
+  /** 저장·삭제 뒤: 새 상태를 읽고 구독자(다른 키 칸)에게도 알린다. */
+  const refresh = async () => {
+    try {
+      const s = await status();
+      setIsSet(s.set.webSearch === true);
+      notifySecretsChange(s);
+    } catch {
+      // 상태를 못 읽어도 저장·삭제는 끝났다.
+    }
+  };
+
+  const store = async () => {
+    const value = input.current?.value.trim() ?? '';
+    if (!value) return;
+    setBusy(true);
+    try {
+      await save(value);
+      if (input.current) input.current.value = '';
+      setMessage(t('settings.assistant.searchKey.saved'));
+      await refresh();
+    } catch (e) {
+      const kind = (e as { kind?: unknown } | null)?.kind;
+      setMessage(kind === 'notConfigured' ? t('settings.assistant.searchKey.needUrl') : t('settings.assistant.searchKey.failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await clear();
+      setMessage(t('settings.assistant.searchKey.removed'));
+      await refresh();
+    } catch {
+      setMessage(t('settings.assistant.searchKey.removeFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const label = t('settings.assistant.searchKey');
+  return (
+    <SettingRow
+      label={label}
+      description={t('settings.assistant.searchKey.desc')}
+      control={
+        <>
+          <input
+            ref={input}
+            type="password"
+            className="setting-text"
+            aria-label={label}
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={4096}
+            defaultValue=""
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+              e.preventDefault();
+              if (!busy) void store();
+            }}
+          />
+          <span className="setting-status">{isSet ? t('integrations.keySet') : t('integrations.keyNotSet')}</span>
+          {usesLlmKey && !isSet ? <span className="setting-status">{t('settings.assistant.searchKey.usesLlm')}</span> : null}
+          <button type="button" className="btn" {...softOff(busy, () => void store())}>
+            {t('integrations.saveKey')}
+          </button>
+          {isSet ? (
+            <button type="button" className="btn" {...softOff(busy, () => void remove())}>
+              {t('integrations.removeKey')}
+            </button>
+          ) : null}
+          <span role="status" className="setting-status">
+            {message}
           </span>
         </>
       }
