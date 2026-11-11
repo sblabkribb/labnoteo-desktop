@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- labnoteO app icon, large master (48 px and up). Small sizes use icon-16.svg / icon-24.svg. -->
+  <defs>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#52348c"/>
+      <stop offset="0.5" stop-color="#472c7b"/>
+      <stop offset="1" stop-color="#3c2469"/>
+    </linearGradient>
+    <linearGradient id="spine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#83ccd2"/>
+      <stop offset="1" stop-color="#8f8ccb"/>
+    </linearGradient>
+    <clipPath id="coverClip"><rect x="64" y="64" width="816" height="816" rx="112"/></clipPath>
+    <clipPath id="flaskClip"><path id="flaskBody" d="M500 250 H604 V420 L774 728 Q800 780 742 780 H362 Q304 780 330 728 L500 420 Z"/></clipPath>
+  </defs>
+  <!-- page block: book thickness on the right and bottom -->
+  <rect x="104" y="104" width="848" height="848" rx="120" fill="#f7f5fb" stroke="#9c8cc4" stroke-width="16"/>
+  <rect x="96" y="96" width="808" height="808" rx="116" fill="none" stroke="#b9add6" stroke-width="12"/>
+  <rect x="96" y="96" width="836" height="836" rx="118" fill="none" stroke="#b9add6" stroke-width="12"/>
+  <!-- cover with CI spine -->
+  <g clip-path="url(#coverClip)">
+    <rect x="64" y="64" width="816" height="816" fill="url(#cover)"/>
+    <rect x="64" y="64" width="160" height="816" fill="url(#spine)"/>
+    <rect x="224" y="64" width="18" height="816" fill="#2c1850" opacity="0.5"/>
+  </g>
+  <!-- bookmark ribbon (left out below 64 px) -->
+  <path id="ribbon" d="M752 860 H808 V992 L780 966 L752 992 Z" fill="#8fc31f"/>
+  <!-- flask: white glass, Baby Blue liquid in the lower part -->
+  <rect x="456" y="206" width="192" height="52" rx="18" fill="#f4f1fa"/>
+  <path d="M500 250 H604 V420 L774 728 Q800 780 742 780 H362 Q304 780 330 728 L500 420 Z" fill="#f4f1fa"/>
+  <g clip-path="url(#flaskClip)">
+    <path d="M280 560 Q356 528 432 560 T584 560 T736 560 T888 560 V820 H280 Z" fill="#83ccd2"/>
+  </g>
+</svg>
