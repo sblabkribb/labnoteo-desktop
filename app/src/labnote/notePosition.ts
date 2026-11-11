@@ -131,3 +131,16 @@ export function notePosition(path: string, text: string, opts: { line?: number; 
   }
   return { kind: 'note', folder, title: posix.basename(path).replace(NOTE_EXT, '') };
 }
+
+/**
+ * README 글에서 그 Workflow 노트(`workflowPath`)의 완료 체크: 플러그인처럼 "Related Workflows" 체크리스트의 [ ] / [x] 하나가
+ * 기준이다(Workflow 머리말에는 상태 키가 없다). 항목의 파일 이름은 대소문자를 가리지 않고 맞춘다(실험 탭과 같다).
+ * 체크리스트에 그 항목이 없으면 undefined.
+ */
+export function workflowTickIn(readmeText: string, workflowPath: string): boolean | undefined {
+  const want = posix.basename(workflowPath).toLowerCase();
+  const item = parseWorkflowChecklistFromReadme(frontMatterText(readmeText)).find(
+    (i) => i.fileName && posix.basename(i.fileName).toLowerCase() === want,
+  );
+  return item?.done;
+}

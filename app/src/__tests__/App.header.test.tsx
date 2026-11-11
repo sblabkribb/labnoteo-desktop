@@ -127,10 +127,10 @@ describe('view header and status bar', () => {
     const exp = crumbs.getByRole('button', { name: /003\s*E coli host/ });
     const wf = await crumbs.findByRole('button', { name: /WT020\s*GFP/ });
     expect(wf.getAttribute('aria-current')).toBe('page');
-    // 상태 칩: UO 하나가 끝나고 하나가 남았다 → 진행 중, 반쪽 원
-    const chip = document.querySelector('.view-header .chip.status') as HTMLElement;
-    expect(chip.textContent).toBe('진행 중');
-    expect(chip.getAttribute('data-shape')).toBe('half');
+    // UO 진행 칩(하나 끝나고 하나 남음)과 README 체크리스트의 Workflow 완료 체크박스(체크 안 함)
+    await waitFor(() => expect(header().getByText('Unit Operation 1/2')).toBeTruthy());
+    const done = await header().findByRole('checkbox', { name: 'Workflow 완료' });
+    expect(done.getAttribute('aria-checked')).toBe('false');
     expect(header().getByRole('button', { name: 'UO 추가' })).toBeTruthy();
     expect(header().getByRole('button', { name: '표 넣기' })).toBeTruthy();
     expect(header().queryByRole('button', { name: 'Workflow 추가' })).toBeNull();
@@ -164,6 +164,24 @@ describe('view header and status bar', () => {
     await openPath(WF);
     fireEvent.keyDown(window, { key: 'ArrowRight', altKey: true });
     await openPath(README);
+  });
+
+  it('the Workflow done checkbox in the header ticks and unticks the README checklist line', async () => {
+    const user = userEvent.setup();
+    const vault = installFakeVault(FILES);
+    render(<App />);
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
+    await user.click(await screen.findByTitle(WF_NAME));
+    await openPath(WF);
+    const box = await header().findByRole('checkbox', { name: 'Workflow 완료' });
+    await user.click(box);
+    await waitFor(() => expect(vault.files()[README]).toContain(`- [x] [WT020 Protein Expression Measurement GFP](./${WF_NAME})`));
+    await waitFor(() => expect(header().getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('true'));
+    await user.click(header().getByRole('checkbox', { name: 'Workflow 완료' }));
+    await waitFor(() => expect(vault.files()[README]).toContain(`- [ ] [WT020 Protein Expression Measurement GFP](./${WF_NAME})`));
+    await waitFor(() => expect(header().getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('false'));
+    // 다른 줄은 그대로다
+    expect(vault.files()[README]).toContain('- [x] [WB150 PCR](./001_WB150_PCR.labnote.md)');
   });
 
   it('a plain note has no primary action and no structure position; the status bar counts words', async () => {

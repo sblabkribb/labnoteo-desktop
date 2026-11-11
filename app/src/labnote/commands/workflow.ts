@@ -29,7 +29,8 @@ import {
 import { t } from '../../i18n/t';
 import { coreLocale } from '../i18n';
 import { NoteBusyError, NoteSaveError } from '../noteErrors';
-import { processNote } from '../openNotes';
+import { openNote, processNote } from '../openNotes';
+import { workflowTickIn } from '../notePosition';
 import { README, VAULT_ROOT, samePath } from '../paths';
 import {
   catalogDescriptionShown,
@@ -276,6 +277,53 @@ export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: str
   // 상태 권유(Task 19): 계획 실험의 첫 체크 → 진행 중, 마지막 체크 → 완료를 알림 단추로 묻는다
   else if (counts) offerStatusNudge(ctx, readmePath, counts.prev, counts.next);
   return after;
+}
+
+/**
+ * README 의 지금 글: 편집기에 열려 있으면 그 버퍼(저장하지 않은 체크도 본다), 아니면 디스크. 없으면 undefined.
+ */
+export async function readReadmeText(ctx: CommandContext, readmePath: string): Promise<string | undefined> {
+  const view = openNote(readmePath)?.view();
+  if (view) return view.state.doc.toString();
+  if (!(await ctx.host.fs.exists(readmePath))) return undefined;
+  return ctx.host.fs.read(readmePath);
+}
+
+/** 그 Workflow 노트의 README 체크 상태(항목이 없거나 README 가 없으면 undefined). */
+export async function readWorkflowTick(ctx: CommandContext, workflowPath: string): Promise<boolean | undefined> {
+  const text = await readReadmeText(ctx, posix.join(posix.dirname(workflowPath), README));
+  return text === undefined ? undefined : workflowTickIn(text, workflowPath);
+}
+
+/** 열린 Workflow 노트의 완료 표시를 바꾼다(팔레트 명령, 보기 머리의 칩). 바뀐 뒤의 체크 상태, 못 했으면 undefined. */
+export function toggleWorkflowDone(ctx: CommandContext, workflowPath: string): Promise<boolean | undefined> {
+  return toggleWorkflowTick(ctx, posix.dirname(workflowPath), posix.basename(workflowPath));
+}
+
+/**
+ * 모든 Unit Operation 이 끝났을 때(편집기의 uoAllDoneWatch) README 에서 아직 체크하지 않은 Workflow 면 알림의 단추 하나로
+ * 완료 표시를 권한다. 누르지 않으면 아무것도 바뀌지 않는다. 이미 체크했거나 체크리스트에 없으면 묻지 않는다. 물었으면 true.
+ */
+export async function offerWorkflowDoneNudge(ctx: CommandContext, workflowPath: string): Promise<boolean> {
+  let ticked: boolean | undefined;
+  try {
+    ticked = await readWorkflowTick(ctx, workflowPath);
+  } catch {
+    return false;
+  }
+  if (ticked !== false) return false;
+  ctx.host.notify('info', t('nudge.wfDone'), {
+    ms: 10000,
+    action: {
+      label: t('nudge.wfDone.mark'),
+      // 그 사이 다른 곳에서 체크했으면 풀지 않는다
+      run: () =>
+        void readWorkflowTick(ctx, workflowPath)
+          .then((now) => (now === false ? toggleWorkflowDone(ctx, workflowPath) : undefined))
+          .catch(() => {}),
+    },
+  });
+  return true;
 }
 
 /** 그 실험 폴더에 카탈로그 워크플로를 만들고 연다(파일 트리 메뉴: 열린 노트가 아니라 누른 폴더의 실험). */

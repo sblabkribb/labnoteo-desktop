@@ -8,7 +8,7 @@ import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { DISCUSS_FLAG_KEY, isDiscussFlagged, parseFrontMatterYaml, setFrontMatterKeys } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
-import { parseWorkflowChecklistFromReadme } from '@labnoteo/core/lib/workflowStructure';
+import { parseWorkflowChecklistFromReadme, unitOpsAllEnded } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
 import { frontMatterText } from '../frontMatterText';
 import { processNote } from '../openNotes';
@@ -92,5 +92,19 @@ export function checklistTickWatch(onTick: (prev: ChecklistCounts, next: Checkli
     const prev = checklistCounts(u.startState.doc.toString());
     const next = checklistCounts(u.state.doc.toString());
     if (prev.done !== next.done || prev.total !== next.total) onTick(prev, next);
+  });
+}
+
+/**
+ * Workflow 노트 편집기에서 사용자의 입력(명령 거래 'input.labnote' 와 되돌리기는 빼고)이 마지막 Unit Operation 의
+ * End_date 를 채워 모든 UO 가 끝났을 때 한 번 `onAllDone` 을 부른다(코어 unitOpsAllEnded: 끝나지 않음 → 모두 끝남).
+ * 부르는 쪽(App)이 README 에서 아직 체크하지 않았으면 Workflow 도 완료로 표시할지 묻는다. 저절로 바꾸지는 않는다.
+ */
+export function uoAllDoneWatch(onAllDone: () => void): Extension {
+  return EditorView.updateListener.of((u) => {
+    if (!u.docChanged) return;
+    const user = u.transactions.some((tr) => tr.docChanged && tr.isUserEvent('input') && !tr.isUserEvent('input.labnote'));
+    if (!user) return;
+    if (!unitOpsAllEnded(u.startState.doc.toString()) && unitOpsAllEnded(u.state.doc.toString())) onAllDone();
   });
 }

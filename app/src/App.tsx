@@ -57,7 +57,8 @@ import { activeEditTarget, flushAllNotes, openNote as openEditor } from './labno
 import { registerAllCommands } from './labnote/commands/registerAll';
 import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
-import { createWorkflow, isExperimentReadme } from './labnote/commands/workflow';
+import { createWorkflow, isExperimentReadme, offerWorkflowDoneNudge, readWorkflowTick, toggleWorkflowDone } from './labnote/commands/workflow';
+import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { createUpkeep, setAppUpkeep } from './labnote/commands/autoUpkeep';
 import { offerStatusNudge, type ChecklistCounts } from './labnote/commands/statusNudge';
 import { findCommand, registerAllAppCommands } from './editor/commands/appCommands';
@@ -726,6 +727,23 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   const checklistTick = (readme: string) => (prev: ChecklistCounts, next: ChecklistCounts) => {
     if (ctx) offerStatusNudge(ctx, readme, prev, next);
   };
+  // Workflow 노트: 머리의 완료 체크 칩(README 체크리스트 [ ] / [x])과, 모든 Unit Operation 이 끝났을 때의 완료 권유
+  const workflowOpen = !!selected && isValidWorkflowPath(selected);
+  const workflowTick = ctx
+    ? {
+        read: (path: string) => readWorkflowTick(ctx, path),
+        toggle: async (path: string) => {
+          let after: boolean | undefined;
+          await runCommand(ctx, async () => {
+            after = await toggleWorkflowDone(ctx, path);
+          });
+          return after;
+        },
+      }
+    : undefined;
+  const uoAllDone = (path: string) => () => {
+    if (ctx) void offerWorkflowDoneNudge(ctx, path);
+  };
   return (
     <>
       <div className="shell" ref={shell}>
@@ -852,6 +870,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
                     onJump={(line) => editor.current?.reveal({ line })}
                     onMenu={(anchor, items) => ctx && openMenu(ctx, { element: anchor }, items)}
                     onStatus={changeStatus}
+                    workflowTick={workflowTick}
                   />
                 </>
               }
@@ -868,6 +887,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
               imageFolder={settings?.imageFolder}
               onAddWorkflow={readmeOpen ? addFirstWorkflow(selected) : undefined}
               onChecklistTick={readmeOpen ? checklistTick(selected) : undefined}
+              onUoAllDone={workflowOpen ? uoAllDone(selected) : undefined}
               upkeep={upkeep}
             />
           ) : (

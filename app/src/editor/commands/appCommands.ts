@@ -8,6 +8,8 @@ import { TOGGLE_MODE_KEY, toggleMode } from '../live/mode';
 import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/properties';
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
+import { toggleWorkflowDone } from '../../labnote/commands/workflow';
+import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { openSettings } from '../../ui/SettingsModal';
 import { runOpenLabnoteoLink } from '../../partbank/linkCommand';
 import { bfwReady } from '../../bfworkflow/bfwApp';
@@ -167,6 +169,24 @@ const convertLegacyNotes: AppCommand = {
   id: 'app.convert-legacy-notes',
   nameKey: 'cmd.convertLegacyNotes',
   run: (ctx) => convertLegacyNotesCommand(ctx),
+};
+
+/**
+ * 열린 Workflow 노트의 완료 표시 바꾸기: 플러그인처럼 실험 README "Related Workflows" 체크리스트의 그 줄 [ ] / [x] 를 바꾼다
+ * (실험 탭의 체크박스, 보기 머리의 칩과 같은 일). Workflow 노트가 열려 있을 때만 보인다.
+ */
+const toggleWorkflowDoneCommand: AppCommand = {
+  id: 'app.toggleWorkflowDone',
+  icon: 'square-check',
+  nameKey: 'cmd.toggleWorkflowDone',
+  available: (ctx) => {
+    const path = ctx.activePath();
+    return path !== undefined && isValidWorkflowPath(path);
+  },
+  run: (ctx) => {
+    const path = ctx.activePath();
+    return path && isValidWorkflowPath(path) ? toggleWorkflowDone(ctx, path) : undefined;
+  },
 };
 
 /** 연동 설정(SP6 D17): partbank, AI 제공자, bfworkflow 의 주소와 키. 키는 Windows 자격 증명 관리자에만 저장한다. */
@@ -372,7 +392,7 @@ const insertBlockCommands: AppCommand[] = [
 ];
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, palette, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, appearance, switchVault, showSystemFiles, revealInTree, insertTableCommand, ...insertBlockCommands, ...themeCommands, ...langCommands, ...contextAppCommands, ...assistantCommands(), ...githubAppCommands];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, toggleWorkflowDoneCommand, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, palette, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, appearance, switchVault, showSystemFiles, revealInTree, insertTableCommand, ...insertBlockCommands, ...themeCommands, ...langCommands, ...contextAppCommands, ...assistantCommands(), ...githubAppCommands];
 }
 
 export function appCommandById(id: string): AppCommand | undefined {
