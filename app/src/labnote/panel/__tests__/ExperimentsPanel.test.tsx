@@ -13,7 +13,7 @@ import { ExperimentsPanel } from '../ExperimentsPanel';
 import { resetGithubStatusesForTest, setGithubStatuses } from '../../../github/statusStore';
 import type { FolderStatus } from '../../../integrations/githubIpc';
 import { WorkflowsPanel } from '../WorkflowsPanel';
-import { DONE, EXP, experimentVault, expReadme, PLAN, WF1, WF2 } from './experimentFixtures';
+import { DONE, EXP, experimentVault, expReadme, PLAN, uo, WF1, WF2, workflowNote } from './experimentFixtures';
 import workflowsJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/workflows_en.json';
 import hwJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_hw_en.json';
 import swJson from '../../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_sw_en.json';
@@ -240,6 +240,47 @@ describe('ExperimentsPanel', () => {
     // UO 줄의 Space 는 그대로 연다(체크박스가 없다)
     expect(row(/Gibson run/).getAttribute('aria-checked')).toBe('true');
     expect(row(/^README/).getAttribute('aria-checked')).toBeNull();
+  });
+
+  it('a legacy experiment (README.md, NNN_Wxxx_*.md, bare CRLF lines) lists its Workflows and the checkbox writes README.md', async () => {
+    const user = userEvent.setup();
+    const LEG = 'labnote/001_new';
+    const legacyReadme = expReadme('예전 실험', 'in-progress', [
+      '[ ] [WD090 Genome Editing Design test](./001_WD090_Genome_Editing_Design_test.md)',
+      '[x] [WB010 DNA Oligomer Assembly](./002_WB010_DNA_Oligomer_Assembly.md)',
+      '[ ] [WD010 General Design of Experiment](./003_WD010_General_Design_of_Experiment.labnote.md)',
+    ]).replace(/\n/g, '\r\n');
+    const files = {
+      [`${LEG}/README.md`]: legacyReadme,
+      [`${LEG}/001_WD090_Genome_Editing_Design_test.md`]: workflowNote('WD090', 'Genome Editing Design', 'test', [uo('UHW010', 'Prep', '', '')]).replace(/\n/g, '\r\n'),
+      [`${LEG}/002_WB010_DNA_Oligomer_Assembly.md`]: workflowNote('WB010', 'DNA Oligomer Assembly', '', []),
+      [`${LEG}/003_WD010_General_Design_of_Experiment.labnote.md`]: workflowNote('WD010', 'General Design of Experiment', '', []),
+    };
+    mount({ files });
+    const exp = await findRow(/001 · 예전 실험/);
+    fireEvent.keyDown(exp, { key: 'ArrowRight' });
+    await waitFor(() => expect(exp.getAttribute('aria-expanded')).toBe('true'));
+    await waitFor(() => expect(row(/test/).getAttribute('aria-expanded')).toBe('false'));
+    const level3 = items()
+      .filter((li) => li.getAttribute('aria-level') === '3')
+      .map((li) => li.querySelector('.wf-tree-label')?.textContent);
+    expect(level3).toEqual(['test', 'DNA Oligomer Assembly', 'General Design of Experiment', 'README', 'Workflow 추가']);
+    // 실험 줄의 진행도 예전 꼴의 줄을 센다
+    expect(exp.querySelector('.tree-meta')?.textContent).toBe('1/3');
+    const rows = [row(/test/), row(/DNA Oligomer Assembly/), row(/General Design of Experiment/)];
+    expect(rows.map((li) => li.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
+    await user.click(within(row(/test/)).getByRole('checkbox', { name: /Workflow 완료/ }));
+    await waitFor(async () => expect(await h.vault.mem.read(`${LEG}/README.md`)).toContain('\r\n[x] [WD090 Genome Editing Design test](./001_WD090_Genome_Editing_Design_test.md)\r\n'));
+    row(/General Design of Experiment/).focus();
+    fireEvent.keyDown(row(/General Design of Experiment/), { key: ' ' });
+    await waitFor(async () => expect(await h.vault.mem.read(`${LEG}/README.md`)).toContain('\r\n[x] [WD010 General Design of Experiment]'));
+    const text = await h.vault.mem.read(`${LEG}/README.md`);
+    expect(text.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(await h.host.fs.exists(`${LEG}/README.labnote.md`)).toBe(false);
+    expect(h.notes.filter((n) => n.kind === 'warn')).toEqual([]);
+    // README 줄은 README.md 를 연다
+    await user.click(row(/^README/));
+    await waitFor(() => expect(h.opened).toEqual([`${LEG}/README.md`]));
   });
 
   it('clicking images/ reveals that folder in the Files tab', async () => {

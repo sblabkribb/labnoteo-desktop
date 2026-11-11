@@ -8,8 +8,9 @@ import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { DISCUSS_FLAG_KEY, isDiscussFlagged, parseFrontMatterYaml, setFrontMatterKeys } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
-import { parseWorkflowChecklistFromReadme, unitOpsAllEnded } from '@labnoteo/core/lib/workflowStructure';
+import { unitOpsAllEnded } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
+import { checklistEntries } from '../checklistTick';
 import { frontMatterText } from '../frontMatterText';
 import { processNote } from '../openNotes';
 import { confirmCompleted, readNoteForFrontMatterEdit } from '../port/status';
@@ -29,7 +30,8 @@ export type StatusNudge = 'inProgress' | 'done';
 /** README 글에서 체크리스트 셈과 상태를 읽는다. */
 export function checklistCounts(readme: string): ChecklistCounts {
   const text = frontMatterText(readme);
-  const items = parseWorkflowChecklistFromReadme(text);
+  // 예전 보관함의 줄(`.md` 링크)도 센다
+  const items = checklistEntries(text);
   const status = parseFrontMatterYaml(text).frontMatter.status;
   return { done: items.filter((i) => i.done).length, total: items.length, status: typeof status === 'string' ? status.trim() : '' };
 }

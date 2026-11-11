@@ -57,8 +57,8 @@ import { activeEditTarget, flushAllNotes, openNote as openEditor } from './labno
 import { registerAllCommands } from './labnote/commands/registerAll';
 import { commandById } from './labnote/commands/registry';
 import { runCommand } from './labnote/commands/runCommand';
+import { isWorkflowNote, resolveReadmePath } from './labnote/paths';
 import { createWorkflow, isExperimentReadme, offerWorkflowDoneNudge, readWorkflowTick, toggleWorkflowDone } from './labnote/commands/workflow';
-import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { createUpkeep, setAppUpkeep } from './labnote/commands/autoUpkeep';
 import { offerStatusNudge, type ChecklistCounts } from './labnote/commands/statusNudge';
 import { findCommand, registerAllAppCommands } from './editor/commands/appCommands';
@@ -310,6 +310,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     else showLeft(next === 'workflows' ? 'experiments' : next);
   };
   const openNote = (path: string) => openFile(path);
+  // 보기 머리의 실험 칸(README): 예전 보관함의 실험이면 README.md 를 연다(README.labnote.md 가 먼저다)
+  const openCrumb = (path: string) => {
+    if (ctx && isExperimentReadme(path)) {
+      void resolveReadmePath(ctx.host.fs, path.slice(0, path.lastIndexOf('/'))).then(openFile, () => openFile(path));
+    } else openFile(path);
+  };
   // 파일 탭에서 펼쳐 보일 경로(실험 탭의 images/·resources/ 줄). seq 는 같은 경로를 다시 골라도 다시 보이게 한다.
   const [fileReveal, setFileReveal] = useState<{ path: string; seq: number }>();
   const revealInFiles = (path: string) => {
@@ -728,7 +734,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     if (ctx) offerStatusNudge(ctx, readme, prev, next);
   };
   // Workflow 노트: 머리의 완료 체크 칩(README 체크리스트 [ ] / [x])과, 모든 Unit Operation 이 끝났을 때의 완료 권유
-  const workflowOpen = !!selected && isValidWorkflowPath(selected);
+  const workflowOpen = !!selected && isWorkflowNote(selected);
   const workflowTick = ctx
     ? {
         read: (path: string) => readWorkflowTick(ctx, path),
@@ -866,7 +872,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
                   {navButtons}
                   <NoteLead
                     path={selected}
-                    onOpen={openNote}
+                    onOpen={openCrumb}
                     onJump={(line) => editor.current?.reveal({ line })}
                     onMenu={(anchor, items) => ctx && openMenu(ctx, { element: anchor }, items)}
                     onStatus={changeStatus}

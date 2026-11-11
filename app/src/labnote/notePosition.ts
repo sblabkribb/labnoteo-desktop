@@ -8,18 +8,17 @@ import * as posix from '@labnoteo/core/posix';
 import { classifyMetaEndDate, findMetaDateFieldInLine, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { experimentTitleFromFolderName } from '@labnoteo/core/lib/labnoteStructure';
 import {
-  isValidWorkflowPath,
-  parseWorkflowChecklistFromReadme,
   parseWorkflowFileName,
   parseWorkflowHeading,
 } from '@labnoteo/core/lib/workflowStructure';
+import { checklistEntries, checklistTickOf } from './checklistTick';
 import { isExperimentReadme } from './commands/workflow';
 import { frontMatterText } from './frontMatterText';
-import { README } from './paths';
+import { isWorkflowNote, README } from './paths';
 
 export interface ExperimentRef {
   folder: string;
-  /** 그 실험의 README 경로. */
+  /** 그 실험의 README 경로. README 를 연 노트면 그 경로(예전 README.md 도), 아니면 README.labnote.md(여는 쪽이 예전 이름을 고른다). */
   readme: string;
   /** 폴더 이름의 세 자리 번호(`003`). */
   code: string;
@@ -58,11 +57,11 @@ export type NotePosition =
 
 const NOTE_EXT = /(\.labnote)?\.md$/i;
 
-function experimentRef(folder: string, title?: string): ExperimentRef {
+function experimentRef(folder: string, title?: string, readme?: string): ExperimentRef {
   const name = posix.basename(folder);
   return {
     folder,
-    readme: posix.join(folder, README),
+    readme: readme ?? posix.join(folder, README),
     code: /^(\d{3})_/.exec(name)?.[1] ?? '',
     title: title?.trim() || experimentTitleFromFolderName(name),
   };
@@ -79,7 +78,8 @@ const filled = (v: unknown) => v !== null && v !== undefined && String(v).trim()
  */
 export function notePosition(path: string, text: string, opts: { line?: number; now?: string } = {}): NotePosition {
   const folder = posix.dirname(path) === '.' ? '' : posix.dirname(path);
-  if (isValidWorkflowPath(path)) {
+  // 예전 보관함의 `NNN_Wxxx_*.md` 도 Workflow 노트다(완료 칩, UO 진행)
+  if (isWorkflowNote(path)) {
     const now = opts.now ?? getSeoulDateTimeString();
     const lines = text.split(/\r?\n/);
     const uos: UoItem[] = [];
@@ -120,10 +120,10 @@ export function notePosition(path: string, text: string, opts: { line?: number; 
   }
   if (isExperimentReadme(path)) {
     const fm = frontMatter(text);
-    const items = parseWorkflowChecklistFromReadme(frontMatterText(text));
+    const items = checklistEntries(frontMatterText(text));
     return {
       kind: 'readme',
-      experiment: experimentRef(folder, typeof fm.title === 'string' ? fm.title : undefined),
+      experiment: experimentRef(folder, typeof fm.title === 'string' ? fm.title : undefined, path),
       wfDone: items.filter((i) => i.done).length,
       wfTotal: items.length,
       ...(typeof fm.status === 'string' && fm.status.trim() ? { status: fm.status.trim() } : {}),
@@ -135,12 +135,8 @@ export function notePosition(path: string, text: string, opts: { line?: number; 
 /**
  * README 글에서 그 Workflow 노트(`workflowPath`)의 완료 체크: 플러그인처럼 "Related Workflows" 체크리스트의 [ ] / [x] 하나가
  * 기준이다(Workflow 머리말에는 상태 키가 없다). 항목의 파일 이름은 대소문자를 가리지 않고 맞춘다(실험 탭과 같다).
- * 체크리스트에 그 항목이 없으면 undefined.
+ * 예전 보관함의 줄(`.md` 링크, 앞의 "- " 없음)도 읽는다(checklistTick.ts). 체크리스트에 그 항목이 없으면 undefined.
  */
 export function workflowTickIn(readmeText: string, workflowPath: string): boolean | undefined {
-  const want = posix.basename(workflowPath).toLowerCase();
-  const item = parseWorkflowChecklistFromReadme(frontMatterText(readmeText)).find(
-    (i) => i.fileName && posix.basename(i.fileName).toLowerCase() === want,
-  );
-  return item?.done;
+  return checklistTickOf(frontMatterText(readmeText), posix.basename(workflowPath));
 }

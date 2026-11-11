@@ -82,8 +82,9 @@ export function workflowState(wf: WfNode): 'ticked' | 'tickedOpen' | 'partial' |
 }
 
 function workflowNode(path: string, fileName: string, ticked: boolean, text: string | undefined): WfNode {
-  const parsed = parseWorkflowFileName(fileName);
-  const fallback = parsed ? parsed.safeName.replace(/_/g, ' ') : fileName.replace(/\.labnote\.md$/i, '');
+  // 예전 이름(`001_WD090_X.md`)은 `.labnote.md` 로 바꿔 읽는다: 본문을 읽기 전에도 같은 이름이 보인다
+  const parsed = parseWorkflowFileName(fileName.replace(/(?<!\.labnote)\.md$/i, '.labnote.md'));
+  const fallback = parsed ? parsed.safeName.replace(/_/g, ' ') : fileName.replace(/(\.labnote)?\.md$/i, '');
   const heading = text === undefined ? undefined : parseWorkflowHeading(text);
   const pos = text === undefined ? undefined : notePosition(path, text);
   const uos: UoNode[] =

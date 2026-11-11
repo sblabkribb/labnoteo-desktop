@@ -29,7 +29,7 @@ import { experimentMarkerSpots, formatMarkerSpots } from '../../../vendor/labnot
 import { coreLocale, overrideOr } from '../i18n';
 import { processNote } from '../openNotes';
 import { frontMatterText } from '../frontMatterText';
-import { README, VAULT_ROOT, samePath } from '../paths';
+import { README, resolveReadmePath, VAULT_ROOT, samePath } from '../paths';
 import {
   experimentFolderNames,
   experimentReadmes,
@@ -139,7 +139,7 @@ export async function createExperiment(
 /** `folder` 의 실험을 다시 하는 실험을 만든다: 제목은 원래 것에서 다음 차수로, retry_of 는 원래 실험으로. */
 export async function retryExperiment(ctx: CommandContext, folder: string): Promise<void> {
   const { host } = ctx;
-  const readmePath = posix.join(folder, README);
+  const readmePath = await resolveReadmePath(host.fs, folder);
   const text = (await host.fs.exists(readmePath)) ? await host.fs.read(readmePath) : '';
   const { frontMatter } = parseFrontMatterYaml(frontMatterText(text));
   const original =
@@ -166,7 +166,7 @@ export async function retryFromActive(ctx: CommandContext): Promise<void> {
   const { host } = ctx;
   const folder = resolveLabnoteDir(host, ctx.activePath());
   if (!folder) return;
-  const readmePath = posix.join(folder, README);
+  const readmePath = await resolveReadmePath(host.fs, folder);
   if (!(await host.fs.exists(readmePath))) {
     host.notify('warn', host.t('This experiment has no README.labnote.md.'));
     return;
@@ -195,7 +195,7 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
   const labnoteDir = experimentDir ?? resolveLabnoteDir(host, ctx.activePath());
   if (!labnoteDir) return;
 
-  const readmePath = posix.join(labnoteDir, README);
+  const readmePath = await resolveReadmePath(host.fs, labnoteDir);
   if (!(await host.fs.exists(readmePath))) {
     host.notify('warn', host.t('This experiment has no README.labnote.md.'));
     return;
@@ -291,7 +291,7 @@ export async function toggleDiscussionFlag(ctx: CommandContext, experimentDir?: 
   const labnoteDir = experimentDir ?? resolveLabnoteDir(host, ctx.activePath());
   if (!labnoteDir) return;
 
-  const readmePath = posix.join(labnoteDir, README);
+  const readmePath = await resolveReadmePath(host.fs, labnoteDir);
   if (!(await host.fs.exists(readmePath))) {
     host.notify('warn', host.t('This experiment has no README.labnote.md.'));
     return;

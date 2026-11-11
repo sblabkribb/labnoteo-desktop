@@ -17,7 +17,7 @@ import type { CommandContext } from '../labnote/commands/context';
 import { registerWorkflowInReadme } from '../labnote/commands/workflow';
 import { NoteBusyError, NoteGoneError, NoteSaveError } from '../labnote/noteErrors';
 import { processNote } from '../labnote/openNotes';
-import { README } from '../labnote/paths';
+import { resolveReadmePath } from '../labnote/paths';
 import { experimentReadmes, resolveLabnoteDir, warnIfWindowsPathTooLong } from '../labnote/port/experiments';
 import {
   bfwGenerateNotes,
@@ -248,7 +248,7 @@ async function writeEntries(
     warnIfWindowsPathTooLong(host, ctx.vaultRoot, path);
     await guard.check();
     try {
-      await registerWorkflowInReadme(ctx, posix.join(dir, README), { title, fileName });
+      await registerWorkflowInReadme(ctx, await resolveReadmePath(ctx.host.fs, dir), { title, fileName });
     } catch (err) {
       if (!(err instanceof NoteBusyError || err instanceof NoteSaveError)) throw err;
       host.notify('warn', t('workflow.readmeNotUpdated', host.t('Sync workflow checklist with folder')));

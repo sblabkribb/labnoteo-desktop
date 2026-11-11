@@ -13,7 +13,7 @@ import * as posix from '@labnoteo/core/posix';
 import { parseWorkflowFileName, planWorkflowChecklistSync, workflowLabelFor } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
 import { processNote } from '../openNotes';
-import { README } from '../paths';
+import { resolveReadmePath } from '../paths';
 import { resolveLabnoteDir } from '../port/experiments';
 import { sampleListHeaders } from '../port/sampleListTable';
 import { offerSamplesLeftBehind } from '../port/sampleRelocation';
@@ -46,7 +46,8 @@ export async function syncWorkflowChecklist(ctx: CommandContext): Promise<void> 
   const { host } = ctx;
   const labnoteDir = resolveLabnoteDir(host, ctx.activePath());
   if (!labnoteDir) return;
-  const readmePath = posix.join(labnoteDir, README);
+  // 예전 보관함의 실험은 README.md 다
+  const readmePath = await resolveReadmePath(host.fs, labnoteDir);
   if (!(await host.fs.exists(readmePath))) {
     host.notify('warn', host.t('This experiment has no README.labnote.md.'));
     return;

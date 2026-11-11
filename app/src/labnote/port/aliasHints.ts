@@ -5,7 +5,7 @@
 // Changes: catalogKoFields is exported and takes a `locale` parameter instead of reading `getObsidianLanguage()`.
 // Changes: catalogKoFields adds the Korean name and search words as keywords in every locale, not only in Korean (UI redesign spec §5.3).
 // Changes: catalogKoFields shows the Korean name and description through koTerms in Korean (Workflow / Unit Operation in English) and keeps the plugin's Korean name as a keyword.
-// Changes: readChecklistLabels takes `LabnoteFs`; README is imported from ../paths; the imports below replace the top of commands.ts.
+// Changes: readChecklistLabels takes `LabnoteFs` and reads a legacy README.md when there is no README.labnote.md (resolveReadmePath); the imports below replace the top of commands.ts.
 
 import type { LabnoteFs, LabnoteHost, PromptHint, UnitOpBlock } from '@labnoteo/core';
 import { catalogDescriptionFor, catalogKoEntry, findSameAliasUnitOp } from '@labnoteo/core';
@@ -18,7 +18,7 @@ import {
   workflowChecklistLabels,
 } from '@labnoteo/core/lib/workflowStructure';
 import { koTerms } from '../i18n';
-import { README } from '../paths';
+import { resolveReadmePath } from '../paths';
 
 /**
  * The alias modal's check (#411): a `#` breaks links to the heading, and a
@@ -44,7 +44,7 @@ export function workflowAliasValidator(
 
 /** The README checklist label of each workflow in experiment folder `labnoteDir`; empty without a README. */
 export async function readChecklistLabels(fs: LabnoteFs, labnoteDir: string): Promise<Map<string, string>> {
-  const readmePath = posix.join(labnoteDir, README);
+  const readmePath = await resolveReadmePath(fs, labnoteDir);
   return (await fs.exists(readmePath)) ? workflowChecklistLabels(await fs.read(readmePath)) : new Map();
 }
 

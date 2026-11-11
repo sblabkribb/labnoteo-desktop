@@ -21,17 +21,16 @@ import {
   hasWorkflowChecklistSection,
   insertWorkflowChecklistEntries,
   parseExperimenterFromReadme,
-  workflowChecklistEntryLink,
   workflowAliasBudget,
   workflowAliasLength,
-  workflowChecklistSectionRange,
 } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
 import { coreLocale } from '../i18n';
 import { NoteBusyError, NoteSaveError } from '../noteErrors';
 import { openNote, processNote } from '../openNotes';
+import { toggleChecklistTick } from '../checklistTick';
 import { workflowTickIn } from '../notePosition';
-import { README, VAULT_ROOT, samePath } from '../paths';
+import { isReadmeName, resolveReadmePath, samePath, VAULT_ROOT } from '../paths';
 import {
   catalogDescriptionShown,
   catalogKoFields,
@@ -173,7 +172,8 @@ async function writeWorkflowFile(ctx: CommandContext, labnoteDir: string, chosen
   const locale = coreLocale();
   const cleanAlias = alias.trim();
 
-  const readmePath = posix.join(labnoteDir, README);
+  // 예전 보관함의 실험은 README.md 다: 있는 것을 고른다
+  const readmePath = await resolveReadmePath(host.fs, labnoteDir);
   let experimenter = '';
   if (await host.fs.exists(readmePath)) experimenter = parseExperimenterFromReadme(await host.fs.read(readmePath));
 
@@ -246,32 +246,24 @@ export async function createWorkflow(ctx: CommandContext, chosen?: WorkflowItem,
  */
 export async function toggleWorkflowTick(ctx: CommandContext, experimentDir: string, fileName: string): Promise<boolean | undefined> {
   const { host } = ctx;
-  const readmePath = posix.join(experimentDir, README);
+  const readmePath = await resolveReadmePath(host.fs, experimentDir);
   if (!(await host.fs.exists(readmePath))) {
     host.notify('warn', host.t('This experiment has no README.labnote.md, so the workflow was not added to a checklist.'));
     return undefined;
   }
   const stamp = readmeStamp(ctx.settings);
-  const want = fileName.toLowerCase();
   let after: boolean | undefined;
   let counts: { prev: ChecklistCounts; next: ChecklistCounts } | undefined;
   await processNote(host.fs, readmePath, (text) => {
     counts = undefined;
-    const range = workflowChecklistSectionRange(text);
-    if (!range) return text;
-    const lines = text.split('\n');
-    for (let i = range.header + 1; i < range.end; i++) {
-      const link = workflowChecklistEntryLink(lines[i].replace(/\r$/, ''));
-      if (!link || posix.basename(link).toLowerCase() !== want) continue;
-      const box = /\[( |x|X)\]/.exec(lines[i]);
-      if (!box) continue;
-      after = box[1] === ' ';
-      lines[i] = lines[i].slice(0, box.index) + (after ? '[x]' : '[ ]') + lines[i].slice(box.index + box[0].length);
-      const written = stamp(lines.join('\n'), readmePath);
-      counts = { prev: checklistCounts(text), next: checklistCounts(written) };
-      return written;
-    }
-    return text;
+    after = undefined;
+    // 예전 보관함의 줄(`.md` 링크, 앞의 "- " 없음)도 찾는다. 상자 글자만 바꾼다
+    const toggled = toggleChecklistTick(text, fileName);
+    if (!toggled) return text;
+    after = toggled.ticked;
+    const written = stamp(toggled.text, readmePath);
+    counts = { prev: checklistCounts(text), next: checklistCounts(written) };
+    return written;
   });
   if (after === undefined) host.notify('warn', t('experiments.notInChecklist', fileName, host.t('Sync workflow checklist with folder')));
   // 상태 권유(Task 19): 계획 실험의 첫 체크 → 진행 중, 마지막 체크 → 완료를 알림 단추로 묻는다
@@ -289,9 +281,9 @@ export async function readReadmeText(ctx: CommandContext, readmePath: string): P
   return ctx.host.fs.read(readmePath);
 }
 
-/** 그 Workflow 노트의 README 체크 상태(항목이 없거나 README 가 없으면 undefined). */
+/** 그 Workflow 노트의 README 체크 상태(항목이 없거나 README 가 없으면 undefined). README 는 실험마다 고른다(README.labnote.md, 없으면 README.md). */
 export async function readWorkflowTick(ctx: CommandContext, workflowPath: string): Promise<boolean | undefined> {
-  const text = await readReadmeText(ctx, posix.join(posix.dirname(workflowPath), README));
+  const text = await readReadmeText(ctx, await resolveReadmePath(ctx.host.fs, posix.dirname(workflowPath)));
   return text === undefined ? undefined : workflowTickIn(text, workflowPath);
 }
 
@@ -334,11 +326,15 @@ export async function createWorkflowIn(ctx: CommandContext, labnoteDir: string, 
   notifyWorkflowCreated(ctx, created);
 }
 
-/** 그 경로가 실험의 README(labnote 아래 ###_ 폴더 바로 안의 README.labnote.md)인가. 편집기 메뉴가 "워크플로 삽입"을 보일지 정한다. */
+/**
+ * 그 경로가 실험의 README(labnote 아래 ###_ 폴더 바로 안의 README.labnote.md, 예전 보관함이면 README.md)인가.
+ * 편집기 메뉴가 "워크플로 삽입"을 보일지, 보기 머리가 체크리스트 칩을 그릴지 정한다. 경로만 본다(두 이름이 다 있는 폴더의
+ * README.md 도 참이다: 드문 일이고, 명령은 쓸 때 resolveReadmePath 로 README.labnote.md 를 고른다).
+ */
 export function isExperimentReadme(path: string | undefined): boolean {
-  if (!path || posix.basename(path).toLowerCase() !== README.toLowerCase()) return false;
+  if (!path || !isReadmeName(posix.basename(path))) return false;
   const found = diagnoseExperimentPath(path);
-  return found.kind === 'ok' && samePath(posix.join(found.folder, README), path);
+  return found.kind === 'ok' && samePath(posix.join(found.folder, posix.basename(path)), path);
 }
 
 /**

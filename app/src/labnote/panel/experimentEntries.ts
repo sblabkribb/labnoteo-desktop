@@ -7,13 +7,17 @@ import type { ExperimentEntry, LabnoteFs } from '@labnoteo/core';
 import { frontMatterNames, isDiscussFlagged, linkRetries, parseFrontMatterYaml } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import { retryOfLinkpath } from '@labnoteo/core/lib/labnoteStructure';
-import { parseWorkflowChecklistFromReadme } from '@labnoteo/core/lib/workflowStructure';
 import { experimentMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerIndex';
 import { frontMatterText } from '../frontMatterText';
-import { README } from '../paths';
+import { checklistEntries, checklistTickOf } from '../checklistTick';
+import { isReadmeName, README, readmeNameIn } from '../paths';
 import { checklistProgress } from '../port/workflowView';
 
 const NOTE = /\.labnote\.md$/i;
+/** 예전(VS Code 시절) Workflow 노트의 이름: `NNN_Wxxx_*.md`(paths.ts 의 isWorkflowNote 와 같은 규칙). */
+const LEGACY_NOTE = /^\d{3}_[A-Z]{2}\d{3}_.+\.md$/;
+/** 실험 폴더 바로 안의 Workflow 노트 이름인가: `.labnote.md`(README 빼고), 또는 예전 이름. */
+const isWorkflowName = (n: string) => !isReadmeName(n) && (NOTE.test(n) || LEGACY_NOTE.test(n));
 /** 실험 폴더 안의 그림 폴더와 첨부 폴더(실험 탭이 개수와 함께 보인다). */
 const IMAGES = 'images';
 const RESOURCES = 'resources';
@@ -63,9 +67,11 @@ async function countIn(fs: LabnoteFs, folder: string, names: readonly string[], 
 
 /** 폴더 목록 `names` 를 이미 읽은 실험 폴더의 항목. */
 async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[], markers?: number): Promise<PanelEntry> {
+  // 실험마다 README 를 고른다: README.labnote.md, 없으면 예전 보관함의 README.md
+  const readme = posix.join(folder, readmeNameIn(names) ?? README);
   let text = '';
   try {
-    text = await fs.read(posix.join(folder, README));
+    text = await fs.read(readme);
   } catch {
     // 읽지 못한 README: 폴더 이름만으로 보인다
   }
@@ -78,7 +84,8 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
 
   // 체크리스트 항목의 노트가 있는가: 폴더 목록에서, 없으면 그 링크 경로(보관함 기준)에서 본다
   const present = new Set(names.map((n) => fold(posix.join(folder, n))));
-  const items = parseWorkflowChecklistFromReadme(text);
+  // 예전 보관함의 줄(`.md` 링크)도 센다(checklistTick.ts)
+  const items = checklistEntries(text).map((e) => ({ done: e.done, fileName: e.link }));
   for (const item of items) {
     const link = item.fileName;
     if (!link || present.has(fold(posix.join(folder, link)))) continue;
@@ -89,12 +96,12 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     }
   }
 
-  // 워크플로 노트: 파일 이름(번호) 차례. 체크 여부는 체크리스트에서 그 파일 이름(대소문자 무시)의 항목을 본다
-  const tickedNames = new Set(items.filter((i) => i.done && i.fileName).map((i) => fold(posix.basename(i.fileName))));
+  // 워크플로 노트: 파일 이름(번호) 차례. 예전 이름(`NNN_Wxxx_*.md`)도 든다. 체크 여부는 체크리스트에서 그 노트의 줄을 본다
+  // (파일 이름 대소문자 무시, 예전 꼴의 `.md` 링크도: checklistTick.ts)
   const workflowFiles = names
-    .filter((n) => NOTE.test(n) && fold(n) !== fold(README))
+    .filter(isWorkflowName)
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    .map((fileName) => ({ path: posix.join(folder, fileName), fileName, ticked: tickedNames.has(fold(fileName)) }));
+    .map((fileName) => ({ path: posix.join(folder, fileName), fileName, ticked: checklistTickOf(text, fileName) === true }));
   const [images, resources] = await Promise.all([
     countIn(fs, folder, names, IMAGES),
     countIn(fs, folder, names, RESOURCES, SYSTEM_IN_RESOURCES),
@@ -104,7 +111,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
   const retryOf = linkpath ? posix.dirname(linkpath) : undefined;
   return {
     folder,
-    readme: posix.join(folder, README),
+    readme,
     workflowFiles,
     ...(images !== undefined ? { images } : {}),
     ...(resources !== undefined ? { resources } : {}),
@@ -116,7 +123,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     progress: checklistProgress(folder, items, (p) => present.has(fold(p)), fold),
     project: typeof fm.project === 'string' || typeof fm.project === 'number' ? String(fm.project) : undefined,
     authors: frontMatterNames(fm.author),
-    workflowNames: names.filter((n) => NOTE.test(n) && n !== README).map((n) => n.replace(NOTE, '').replace(/_/g, ' ')),
+    workflowNames: names.filter(isWorkflowName).map((n) => n.replace(/(\.labnote)?\.md$/i, '').replace(/_/g, ' ')),
     markers: markers ?? 0,
     ...(retryOf && fold(retryOf) !== fold(folder) ? { retryOf } : {}),
     ...(parsed.parseError ? { frontMatterError: parsed.parseError } : {}),
@@ -171,7 +178,8 @@ export class ExperimentEntryCache {
         if (cached !== undefined) return cached;
         const before = this.version(key);
         const kids = await listNames(this.fs, folder);
-        const entry = kids.some((k) => fold(k) === fold(README)) ? await entryFrom(this.fs, folder, kids) : null;
+        // README.labnote.md 또는 예전 README.md 가 있는 번호 폴더가 실험이다
+        const entry = readmeNameIn(kids) !== undefined ? await entryFrom(this.fs, folder, kids) : null;
         if (this.version(key) === before) this.entries.set(key, entry);
         return entry;
       }),

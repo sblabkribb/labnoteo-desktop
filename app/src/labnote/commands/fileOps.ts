@@ -29,7 +29,7 @@ import {
 import { hasUnlinkableChars, linkKey } from '../../links/resolve';
 import { movesFor, type Move } from '../../links/rewrite';
 import { openNote, processNote } from '../openNotes';
-import { README } from '../paths';
+import { README, resolveReadmePath } from '../paths';
 import { warnIfWindowsPathTooLong } from '../port/experiments';
 import { moveTableCsvs, offerTableCsvCleanupOnDelete } from '../port/tableCsvFiles';
 import type { CommandContext, LinkDeps } from './context';
@@ -513,7 +513,7 @@ async function moveTableCsvsAfterRename(host: CommandContext['host'], path: stri
 /** README 체크리스트에서 지운 워크플로 노트의 항목을 뺀다(물어본 뒤). 열린 README 는 버퍼에 들어간다. */
 async function offerReadmeCleanup(ctx: CommandContext, workflowPath: string): Promise<void> {
   const { host } = ctx;
-  const readmePath = joinPath(parentOf(workflowPath), README);
+  const readmePath = await resolveReadmePath(host.fs, parentOf(workflowPath));
   if (!(await host.fs.exists(readmePath))) return;
   const fileName = baseName(workflowPath);
   if (!removeWorkflowFromReadme(await host.fs.read(readmePath), fileName).changed) return;

@@ -8,8 +8,8 @@ import { TOGGLE_MODE_KEY, toggleMode } from '../live/mode';
 import { addPropertyCommand, editYamlCommand, PROPS_ADD_KEY } from '../live/properties';
 import { FORMAT_KEYS, runFormatCommand } from './formatCommands';
 import { convertLegacyNotesCommand } from '../../labnote/commands/legacyConvert';
+import { isWorkflowNote } from '../../labnote/paths';
 import { toggleWorkflowDone } from '../../labnote/commands/workflow';
-import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import { openSettings } from '../../ui/SettingsModal';
 import { runOpenLabnoteoLink } from '../../partbank/linkCommand';
 import { bfwReady } from '../../bfworkflow/bfwApp';
@@ -181,11 +181,11 @@ const toggleWorkflowDoneCommand: AppCommand = {
   nameKey: 'cmd.toggleWorkflowDone',
   available: (ctx) => {
     const path = ctx.activePath();
-    return path !== undefined && isValidWorkflowPath(path);
+    return path !== undefined && isWorkflowNote(path);
   },
   run: (ctx) => {
     const path = ctx.activePath();
-    return path && isValidWorkflowPath(path) ? toggleWorkflowDone(ctx, path) : undefined;
+    return path && isWorkflowNote(path) ? toggleWorkflowDone(ctx, path) : undefined;
   },
 };
 
