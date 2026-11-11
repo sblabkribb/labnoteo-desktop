@@ -17,7 +17,6 @@ import { loadWorkflows } from '@labnoteo/core/lib/workflowDataLoader';
 import {
   createWorkflowContent,
   createWorkflowFileName,
-  getNextWorkflowNumber,
   hasWorkflowChecklistSection,
   insertWorkflowChecklistEntries,
   parseExperimenterFromReadme,
@@ -46,6 +45,7 @@ import type { CommandContext } from './context';
 import type { Command } from './registry';
 import { readmeStamp } from './stamp';
 import { checklistCounts, offerStatusNudge, type ChecklistCounts } from './statusNudge';
+import { insertLegacyChecklistLine, nextWorkflowSeq, pad3 } from './workflowOrderPlan';
 
 /**
  * registerWorkflowInReadme 가 한 일. 'notRegistered': README 가 편집기에 열려 있는데 바쁘거나(NoteBusyError)
@@ -94,7 +94,7 @@ export type PickStep = { query: string; onQuery: (query: string) => void };
 export const ALIAS_COUNTER_NEAR = 10;
 
 /** "만들었다" 알림, 그리고 README 체크리스트에 넣지 못했으면 그 경고. */
-function notifyWorkflowCreated(ctx: CommandContext, created: CreatedWorkflow): void {
+export function notifyWorkflowCreated(ctx: CommandContext, created: CreatedWorkflow): void {
   const { host } = ctx;
   host.notify('info', host.t('Workflow created: {0}', created.fileName));
   if (created.registered === 'noReadme') {
@@ -158,16 +158,35 @@ export async function createWorkflowFile(
  */
 async function pickAndCreateWorkflow(ctx: CommandContext, labnoteDir: string, chosen?: WorkflowItem): Promise<CreatedWorkflow | undefined> {
   if (chosen) return createWorkflowFile(ctx, labnoteDir, chosen);
+  const done = await pickWorkflowAndAlias(ctx, labnoteDir);
+  if (!done) return undefined;
+  return writeWorkflowFile(ctx, labnoteDir, done.chosen, done.alias);
+}
+
+/** 카탈로그에서 고르고 별칭을 묻는다(아무것도 쓰지 않는다). 닫으면 undefined. "여기 뒤에 Workflow 추가"가 먼저 묻는다. */
+export async function pickWorkflowAndAlias(ctx: CommandContext, labnoteDir: string): Promise<{ chosen: WorkflowItem; alias: string } | undefined> {
   const done = await pickThen(
     (step) => pickWorkflow(ctx, step),
     (item) => askWorkflowAlias(ctx, labnoteDir, item, true),
   );
   if (!done || done.result === undefined) return undefined;
-  return writeWorkflowFile(ctx, labnoteDir, done.value, done.result);
+  return { chosen: done.value, alias: done.result };
+}
+
+/** writeWorkflowFile 의 덧붙임: 정한 번호, 그리고 체크리스트 등록을 대신하는 함수("여기 뒤에" 넣기). */
+export interface WriteWorkflowOpts {
+  seq?: number;
+  register?: (readmePath: string, entry: { title: string; fileName: string }) => Promise<WorkflowRegistration>;
 }
 
 /** 워크플로 노트를 쓰고 README 체크리스트에 등록한다. */
-async function writeWorkflowFile(ctx: CommandContext, labnoteDir: string, chosen: WorkflowItem, alias: string): Promise<CreatedWorkflow> {
+export async function writeWorkflowFile(
+  ctx: CommandContext,
+  labnoteDir: string,
+  chosen: WorkflowItem,
+  alias: string,
+  opts: WriteWorkflowOpts = {},
+): Promise<CreatedWorkflow> {
   const { host } = ctx;
   const locale = coreLocale();
   const cleanAlias = alias.trim();
@@ -177,7 +196,8 @@ async function writeWorkflowFile(ctx: CommandContext, labnoteDir: string, chosen
   let experimenter = '';
   if (await host.fs.exists(readmePath)) experimenter = parseExperimenterFromReadme(await host.fs.read(readmePath));
 
-  const sequence = getNextWorkflowNumber(await host.fs.list(labnoteDir));
+  // 예전 이름(`001_WD090_x.md`)도 센다: 코어 getNextWorkflowNumber 는 `.labnote.md` 만 세어 001 을 다시 준다
+  const sequence = pad3(opts.seq ?? nextWorkflowSeq(await host.fs.list(labnoteDir)));
   const info = { id: chosen.id, name: chosen.name, description: chosen.description };
   const fileName = createWorkflowFileName(sequence, info, cleanAlias || undefined);
   const workflowPath = posix.join(labnoteDir, fileName);
@@ -189,7 +209,9 @@ async function writeWorkflowFile(ctx: CommandContext, labnoteDir: string, chosen
   // 사람은 다시 실행해 002_ 쌍둥이를 만든다. 그러니 그 두 오류는 여기서 받아 경고로 바꾸고, 새로고침·열기·알림은 그대로 한다.
   let registered: WorkflowRegistration;
   try {
-    registered = await registerWorkflowInReadme(ctx, readmePath, { title: displayTitle, fileName });
+    registered = opts.register
+      ? await opts.register(readmePath, { title: displayTitle, fileName })
+      : await registerWorkflowInReadme(ctx, readmePath, { title: displayTitle, fileName });
   } catch (err) {
     if (!(err instanceof NoteBusyError || err instanceof NoteSaveError)) {
       ctx.refresh();
@@ -218,7 +240,11 @@ export async function registerWorkflowInReadme(
   await processNote(host.fs, readmePath, (text) => {
     hasSection = hasWorkflowChecklistSection(text);
     return hasSection
-      ? stamp(insertWorkflowChecklistEntries(text, [{ done: false, title: entry.title, fileName: entry.fileName }]), readmePath)
+      ? stamp(
+          // 예전 줄뿐인 README 는 코어가 맨 위에 넣는다: 번호 차례의 자리에, 그 줄들의 꼴로 넣는다
+          insertLegacyChecklistLine(text, entry) ?? insertWorkflowChecklistEntries(text, [{ done: false, title: entry.title, fileName: entry.fileName }]),
+          readmePath,
+        )
       : text;
   });
   return hasSection ? 'registered' : 'noSection';

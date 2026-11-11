@@ -41,10 +41,13 @@ async function readWorkflowFolder(ctx: CommandContext, labnoteDir: string): Prom
   return { names, titles };
 }
 
-/** 'sync-workflow-checklist': 열린 노트의 실험 README 체크리스트에 빠진 워크플로 노트를 더한다. */
-export async function syncWorkflowChecklist(ctx: CommandContext): Promise<void> {
+/**
+ * 'sync-workflow-checklist': 열린 노트의 실험 README 체크리스트에 빠진 워크플로 노트를 더한다.
+ * `experimentDir` 를 주면(Workflow 순서 바꾸기의 거절 알림 단추) 열린 노트가 아니라 그 실험이다.
+ */
+export async function syncWorkflowChecklist(ctx: CommandContext, experimentDir?: string): Promise<void> {
   const { host } = ctx;
-  const labnoteDir = resolveLabnoteDir(host, ctx.activePath());
+  const labnoteDir = experimentDir ?? resolveLabnoteDir(host, ctx.activePath());
   if (!labnoteDir) return;
   // 예전 보관함의 실험은 README.md 다
   const readmePath = await resolveReadmePath(host.fs, labnoteDir);
