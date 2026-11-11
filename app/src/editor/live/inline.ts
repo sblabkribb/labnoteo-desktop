@@ -3,7 +3,7 @@ import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { isFenceMark, revealInline, revealLine, skipRanges, touchedLines } from './reveal';
-import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
+import { isRealLink, linkHref, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
 import type { Lang } from '../../i18n/lang';
 import { editorLang, langChanged } from './editorLang';
@@ -198,6 +198,8 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
       }
     if (!open || open.name !== 'LinkMark' || !close) return;
     const url = node.getChild('URL');
+    // `[글][참조]`·`[글][]` 는 같은 문서에 `[참조]: 주소` 정의가 있을 때만 링크다(CommonMark, Obsidian): 없으면 원문 그대로 둔다
+    if (!url && linkHref(state, node) === null) return;
     const missing = !!url && linkStateOf(resolution, 'md', state.sliceDoc(url.from, url.to), notePath) === 'unresolved';
     if (open.to < close.from) decos.push((missing ? unresolvedLinkMark : linkMark).range(open.to, close.from));
     // 숨김은 줄바꿈을 넘지 않는다: 여러 줄에 걸친 링크는 원문 그대로 둔다

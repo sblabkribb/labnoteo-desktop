@@ -394,6 +394,22 @@ describe('라이브 미리보기: 링크와 유닛 오퍼레이션 제목', () =
     expect(opened).toEqual([{ kind: 'external', url: 'https://doi.org/10.1/x' }]);
   });
 
+  it.each([
+    ['Anneal at [Tm-5][] for 30 s', 'Anneal at [Tm-5][] for 30 s'],
+    ['Anneal at [Tm-5][ref] for 30 s', 'Anneal at [Tm-5][ref] for 30 s'],
+    ['Anneal at [Tm-5] for 30 s', 'Anneal at [Tm-5] for 30 s'],
+  ])('a reference link without a definition stays plain text, as in Obsidian (%s)', (line, shown) => {
+    const v = view(`${line}\nx`, line.length + 2, exp);
+    expect(visibleText(v, 1)).toBe(shown);
+    expect(v.contentDOM.querySelector('.lno-link')).toBeNull();
+  });
+
+  it('a collapsed reference link with its definition still renders', () => {
+    const v = view('[Tm-5][]\n\n[tm-5]: https://example.test/tm\nz', 40, exp);
+    expect(visibleText(v, 1)).toBe('Tm-5');
+    expect(v.contentDOM.querySelector('.lno-link')).not.toBeNull();
+  });
+
   it('a reference link renders and opens its definition target', () => {
     const v = view('[x][ref]\n\n[ref]: ./c.labnote.md\nz', 31, exp);
     expect(visibleText(v, 1)).toBe('x');
