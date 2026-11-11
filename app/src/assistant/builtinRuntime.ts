@@ -102,6 +102,14 @@ export function statusLabel(name: string): string {
       return appT('assistant.status.createSample');
     case 'create_workflow':
       return appT('assistant.status.createWorkflow');
+    case 'search_parts':
+      return appT('assistant.status.searchParts');
+    case 'lookup_part':
+      return appT('assistant.status.lookupPart');
+    case 'create_order':
+      return appT('assistant.status.createOrder');
+    case 'write_note':
+      return appT('assistant.status.writeNote');
     default:
       return appT('assistant.status.working');
   }

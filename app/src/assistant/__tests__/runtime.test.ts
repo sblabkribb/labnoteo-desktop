@@ -227,9 +227,15 @@ describe('builtinRuntime', () => {
       'get_sample',
       'create_sample',
       'create_workflow',
+      'search_parts',
+      'lookup_part',
+      'create_order',
+      'write_note',
       'mystery_tool',
     ])
       expect(statusLabel(name)).not.toMatch(/[a-z]+_[a-z]+/);
+    // each named tool has its own line, not the generic fallback
+    for (const name of ['search_parts', 'lookup_part', 'create_order', 'write_note']) expect(statusLabel(name), name).not.toBe(t('assistant.status.working'));
     expect(statusLabel('mystery_tool')).toBe(t('assistant.status.working'));
   });
 
