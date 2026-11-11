@@ -22,9 +22,12 @@ import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../la
 import {
   builtinRuntime,
   EARLIER_REPLIES_RULES,
+  FRESH_LOOKUP_NOTE,
   EARLIER_UNTRUSTED_RULES,
   noticeTranslator,
   PARTBANK_RULES,
+  RECHECK_NOTE,
+  ungroundedIds,
   STATUS_TITLE_MAX,
   statusLabel,
   toolLabel,
@@ -777,6 +780,79 @@ describe('builtinRuntime', () => {
       expect(q.seen[0][0].content).not.toContain('partbank_');
       expect(q.seen[0][0].content).not.toContain('workflow_list_designs');
       expect(q.seen[0][0].content).toContain(PARTBANK_RULES.unknown);
+    });
+
+    it('after a reply that used outside data, the new question carries a fresh-lookup note when lab tools are offered', async () => {
+      // real-server check (2026-11-11): after a design list, "두 번째 디자인 자세히" was answered with no tool call and made-up
+      // Unit Operations, although the system prompt said to call the tools again. The note sits next to the question.
+      const history = [msg('user', '내 Workflow 디자인 목록 보여줘'), msg('assistant', '1. A\n2. B', { tainted: true })];
+      const p = new Script([answer('끝')]);
+      const a = await setup(p, { routes: { secret_status: () => secretStatusOf({ bfwServer: true }) } });
+      await a.rt.run(turnOf('두 번째 디자인 자세히 알려줘', { history }), recordSink().sink, go());
+      const last = p.seen[0][p.seen[0].length - 1];
+      expect(last.role).toBe('user');
+      expect(last.content).toBe(`두 번째 디자인 자세히 알려줘\n\n${FRESH_LOOKUP_NOTE}`);
+      expect(p.seen[0][2]).toEqual({ role: 'assistant', content: '1. A\n2. B' });
+
+      // A clean history, or no lab tools: the question goes as typed.
+      const q = new Script([answer('끝')]);
+      const b = await setup(q, { routes: { secret_status: () => secretStatusOf({ bfwServer: true }) } });
+      await b.rt.run(turnOf('두 번째', { history: [msg('assistant', '안녕하세요', { tainted: false })] }), recordSink().sink, go());
+      expect(q.seen[0][q.seen[0].length - 1]).toEqual({ role: 'user', content: '두 번째' });
+      const r = new Script([answer('끝')]);
+      const c = await setup(r);
+      await c.rt.run(turnOf('두 번째', { history }), recordSink().sink, go());
+      expect(r.seen[0][r.seen[0].length - 1]).toEqual({ role: 'user', content: '두 번째' });
+    });
+
+    it('an answer without lookups that names lab ids nowhere in the chat is dropped and asked once more', async () => {
+      // real-server check (2026-11-11): even with the note, "첫 번째 디자인 자세히" got made-up WD003/UHW040 rows, no tool call.
+      const history = [msg('user', '내 Workflow 디자인 목록 보여줘'), msg('assistant', '1. Plasmid Mutagenesis (S001)', { tainted: true })];
+      const p = new Script([answer('WD003 Golden Gate: UHW040, USW050'), answer('다시 조회했어요')]);
+      const a = await setup(p, { routes: { secret_status: () => secretStatusOf({ bfwServer: true }) } });
+      const { rec, sink } = recordSink();
+      let resets = 0;
+      const r = await a.rt.run(turnOf('첫 번째 디자인 자세히 알려줘', { history }), { ...sink, reset: () => void resets++ }, go());
+      expect(p.seen).toHaveLength(2);
+      expect(resets).toBe(1);
+      expect(rec.deltas.join('')).toContain('다시 조회했어요');
+      expect(r.content).toBe('다시 조회했어요');
+      const last = p.seen[1][p.seen[1].length - 1];
+      expect(last).toEqual({ role: 'user', content: `첫 번째 디자인 자세히 알려줘\n\n${RECHECK_NOTE}` });
+      // The dropped draft is not sent back.
+      expect(JSON.stringify(p.seen[1])).not.toContain('WD003 Golden Gate');
+    });
+
+    it('no second ask when the ids are in the chat or the history is clean', async () => {
+      const ok = async (history: StoredMessage[], script: Script, text = '자세히') => {
+        const a = await setup(script, { routes: { secret_status: () => secretStatusOf({ bfwServer: true }) } });
+        return a.rt.run(turnOf(text, { history }), recordSink().sink, go());
+      };
+      const tainted = [msg('assistant', 'WB005 has UHW010 and KBp_aa0406', { tainted: true })];
+      const p1 = new Script([answer('WB005 의 UHW010 은 KBp_aa0406 를 써요')]);
+      expect((await ok(tainted, p1)).content).toBe('WB005 의 UHW010 은 KBp_aa0406 를 써요');
+      expect(p1.seen).toHaveLength(1);
+      // The id is in the question itself.
+      const p2 = new Script([answer('WD010 은 논문 자료가 없어요')]);
+      await ok(tainted, p2, 'WD010 은?');
+      expect(p2.seen).toHaveLength(1);
+      const p3 = new Script([answer('WD003 이에요')]);
+      await ok([msg('assistant', '안녕하세요', { tainted: false })], p3);
+      expect(p3.seen).toHaveLength(1);
+    });
+
+    it('ungroundedIds lists lab ids of the answer that the chat never named', () => {
+      const ground = 'S001 https://workflow.example/services/b85f9733-c580-409d-96be-949415247038 KBp_aa0406 wb005';
+      expect(ungroundedIds('KBp_aa0406 and WB005', ground)).toEqual([]);
+      expect(ungroundedIds('b85f9733-c580-409d-96be-949415247038', ground)).toEqual([]);
+      expect(ungroundedIds('WD003 / UHW040 / USW050 / KBp_zz0001 / 1f1dbb66-9281-4f84-8f7f-5332734ad9d2 / UHW040', ground)).toEqual([
+        'WD003',
+        'UHW040',
+        'USW050',
+        'KBp_zz0001',
+        '1f1dbb66-9281-4f84-8f7f-5332734ad9d2',
+      ]);
+      expect(ungroundedIds('PCR 은 95 °C 에서 30초', ground)).toEqual([]);
     });
 
     it('a making chip gets no lab-service tools', async () => {

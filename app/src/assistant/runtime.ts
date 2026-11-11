@@ -59,6 +59,8 @@ export interface AssistantSink {
   status(line: string): void;
   /** 런타임의 출처 장부에 새 출처가 번호 `n` 으로 들어갔다. */
   source(n: number, s: Source): void;
+  /** 지금까지 흘러온 답 글을 버린다(런타임이 그 답을 버리고 다시 물을 때). */
+  reset?(): void;
 }
 
 export interface AssistantResult {

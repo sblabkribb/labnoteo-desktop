@@ -81,6 +81,41 @@ export const EARLIER_REPLIES_RULES =
   'Workflow server, the web or papers, call the tools again. Never invent or repeat items, ids or links from memory, and ' +
   'never write <untrusted-data> tags in your answer.';
 
+/**
+ * 바깥 내용이 닿은 앞선 답이 있고 바깥 도구가 있을 때, 새 질문 뒤에 붙는 짧은 알림(모델에게만 간다). real-server check
+ * (2026-11-11): 디자인 목록 뒤 "두 번째 디자인 자세히"에 시스템 프롬프트의 규칙(`EARLIER_REPLIES_RULES`)이 있는데도 도구 없이
+ * Unit Operation 을 지어냈다. 질문 바로 옆에 두어야 지킨다.
+ */
+export const FRESH_LOOKUP_NOTE =
+  '(Note from labnoteO, not from the user: your earlier replies are not a lookup. If the answer needs facts from partbank, ' +
+  'the Workflow server, the web or papers, including details of an item listed earlier, call the tools now; to find an ' +
+  'earlier item\'s id, list again. Never answer such facts from memory.)';
+
+/**
+ * 바깥 내용이 닿은 기록 뒤, 도구 없이 쓴 답이 기록에 없는 연구실 id 를 댔을 때 다시 물으며 질문 뒤에 붙는 알림(`ungroundedIds`).
+ * real-server check (2026-11-11): `FRESH_LOOKUP_NOTE` 가 있어도 "첫 번째 디자인 자세히"에 WD003·UHW040 행을 지어냈다.
+ */
+export const RECHECK_NOTE =
+  '(Note from labnoteO, not from the user: your draft answer named ids or codes that no lookup in this chat returned, so it ' +
+  'was dropped. Call the tools now to look the facts up (list again to find an earlier item\'s id) and answer only with ' +
+  'what they return. If the tools cannot find it, say so.)';
+
+/** partbank KID, 카탈로그 Workflow·Unit Operation 코드, 디자인 같은 서버 항목의 uuid. */
+const LAB_ID = /\bKBp_[A-Za-z0-9]+\b|\b(?:W[DBTL]|U[HS]W)\d{3}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
+/** 답이 대는 연구실 id 가운데 `ground`(앞선 대화·요약·질문)에 없는 것, 처음 나온 차례로 한 번씩. 대소문자는 가리지 않는다. */
+export function ungroundedIds(answer: string, ground: string): string[] {
+  const known = new Set((ground.match(LAB_ID) ?? []).map((x) => x.toLowerCase()));
+  const out: string[] = [];
+  for (const id of answer.match(LAB_ID) ?? []) {
+    const key = id.toLowerCase();
+    if (known.has(key)) continue;
+    known.add(key);
+    out.push(id);
+  }
+  return out;
+}
+
 const PARTBANK_LOCAL_RULES =
   "list_samples, search_samples and get_sample read only this vault's local sample registry, not partbank. " +
   'Never claim that partbank has or lacks a part. If you look in the local sample registry instead, say that it is the local registry.';
@@ -592,6 +627,7 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
           );
     const activePath = env.ctx.host.editTarget()?.path;
     const partbank = hasPartbankTool(tools) ? undefined : setup.partbank;
+    const outsideTools = external.tools.length > 0 || lab.tools.length > 0 || !!web;
     const messages: ChatMessage[] = [
       {
         role: 'system',
@@ -599,7 +635,7 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
           tools,
           scope,
           activePath,
-          external: external.tools.length > 0 || lab.tools.length > 0 || !!web,
+          external: outsideTools,
           web: !!web,
           fencedHistory: earlier.fenced,
           taintedReplies: earlier.taintedReplies,
@@ -609,10 +645,11 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
         }),
       },
       ...earlier.messages,
-      { role: 'user', content: turn.userText },
+      // The note goes to the model only: the shown and saved question stays as typed.
+      { role: 'user', content: earlier.taintedReplies && outsideTools ? `${turn.userText}\n\n${FRESH_LOOKUP_NOTE}` : turn.userText },
     ];
 
-    const run = await runAgent(messages, {
+    const agentDeps: AgentDeps = {
       provider: turns,
       tools,
       ctx,
@@ -630,7 +667,20 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
         sink.delta(text);
       },
       ...(earlier.initialTaint.length ? { initialTaint: earlier.initialTaint } : {}),
-    });
+    };
+    let run = await runAgent(messages, agentDeps);
+
+    // real-server check (2026-11-11): after a reply that used outside data, the model sometimes answered a follow-up from
+    // memory with made-up ids. An answer with no lookup that names lab ids the chat never named is dropped (also from the
+    // bubble) and asked once more with a stronger note; the second answer stands either way.
+    if (earlier.taintedReplies && outsideTools && run.executed.length === 0 && !run.stoppedAtLimit) {
+      const ground = [turn.summary ?? '', ...earlier.messages.map((m) => m.content), turn.userText].join('\n');
+      if (ungroundedIds(stripFenceTags(run.content), ground).length > 0) {
+        sink.reset?.();
+        state('think');
+        run = await runAgent([...messages.slice(0, -1), { role: 'user', content: `${turn.userText}\n\n${RECHECK_NOTE}` }], agentDeps);
+      }
+    }
 
     // real-server check (2026-11-11): the model sometimes echoed fence tags; they are never shown or saved.
     const answerText = stripFenceTags(run.content);

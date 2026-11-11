@@ -263,6 +263,9 @@ export function createAssistantSession(initial: SessionDeps = {}): AssistantSess
           source: (_n, s) => {
             if (live()) patchItem(reply.id, (it) => ({ sources: [...it.sources, s] }));
           },
+          reset: () => {
+            if (live()) patchItem(reply.id, { text: '', status: undefined });
+          },
         },
         ac.signal
       );
