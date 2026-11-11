@@ -86,11 +86,71 @@ describe('ExperimentsPanel', () => {
     expect(groups.map((g) => g.querySelector('.tree-meta')?.textContent)).toEqual(['1', '1', '1']);
   });
 
-  it('experiment rows carry a status shape icon with a text label', async () => {
+  it('experiment rows carry a status shape button whose label names the status and says it changes it', async () => {
     mount();
     const states = [await findRow(/003 · /), row(/004 · /), row(/005 · /)].map((li) => li.querySelector('.tree-state')!);
     expect(states.map((s) => s.getAttribute('data-icon'))).toEqual(['circle-half', 'circle-dashed', 'circle-check']);
-    expect(states.map((s) => s.getAttribute('aria-label'))).toEqual(['진행 중', '계획', '완료']);
+    expect(states.map((s) => s.tagName)).toEqual(['BUTTON', 'BUTTON', 'BUTTON']);
+    expect(states.map((s) => s.getAttribute('aria-haspopup'))).toEqual(['menu', 'menu', 'menu']);
+    expect(states.map((s) => s.getAttribute('aria-label'))).toEqual([
+      '실험 상태: 진행 중 (눌러서 바꾸기)',
+      '실험 상태: 계획 (눌러서 바꾸기)',
+      '실험 상태: 완료 (눌러서 바꾸기)',
+    ]);
+    expect(states[1].getAttribute('title')).toBe(states[1].getAttribute('aria-label'));
+  });
+
+  it('failed, discontinued and no status each have their own shape, not the planned one', async () => {
+    const files = {
+      ...experimentVault(),
+      [`${PLAN}/README.labnote.md`]: expReadme('계획만', 'failed', []),
+      [`${DONE}/README.labnote.md`]: expReadme('끝난 실험', 'discontinued', []),
+      'labnote/006_None/README.labnote.md': expReadme('상태 없는 실험', '', []),
+    };
+    mount({ files });
+    const states = [await findRow(/004 · /), row(/005 · /), row(/006 · /)].map((li) => li.querySelector('.tree-state')!);
+    expect(states.map((s) => s.getAttribute('data-icon'))).toEqual(['circle-x', 'circle-stop', 'circle-dashed']);
+    expect(states.map((s) => s.getAttribute('aria-label'))).toEqual([
+      '실험 상태: 실패 (눌러서 바꾸기)',
+      '실험 상태: 중단 (눌러서 바꾸기)',
+      '실험 상태: 상태 없음 (눌러서 바꾸기)',
+    ]);
+  });
+
+  it('clicking the status shape opens a menu of the plugin statuses; picking one writes the README status like the status chip', async () => {
+    const user = userEvent.setup();
+    mount();
+    const plan = await findRow(/004 · /);
+    await user.click(plan.querySelector('.tree-state')!);
+    const names = screen.getAllByRole('menuitem').map((m) => m.textContent);
+    expect(names).toHaveLength(7);
+    expect(names[0]).toBe('계획 (현재)');
+    expect(names.slice(1)).toEqual(['진행 중', '검토 필요', '완료', '실패', '중단', '재실험 필요']);
+    await user.click(screen.getByRole('menuitem', { name: '진행 중' }));
+    await waitFor(async () => expect(await h.vault.mem.read(`${PLAN}/README.labnote.md`)).toMatch(/^status: in-progress$/m));
+    // 줄을 열지 않는다
+    expect(h.opened).toEqual([]);
+    expect(h.asked.pick).toEqual([]);
+    await waitFor(() => expect(row(/004 · /).querySelector('.tree-state')?.getAttribute('data-icon')).toBe('circle-half'));
+  });
+
+  it('Space on a focused experiment row opens the status menu; Enter still opens the README', async () => {
+    mount();
+    const plan = await findRow(/004 · /);
+    plan.focus();
+    fireEvent.keyDown(plan, { key: ' ' });
+    expect(await screen.findByRole('menuitem', { name: '계획 (현재)' })).toBeTruthy();
+    expect(h.opened).toEqual([]);
+    act(() => closeMenu());
+    fireEvent.keyDown(row(/004 · /), { key: 'Enter' });
+    await waitFor(() => expect(h.opened).toEqual([`${PLAN}/README.labnote.md`]));
+  });
+
+  it('an experiment row shows a small Workflow n/m progress badge', async () => {
+    mount();
+    const exp = await findRow(/003 · /);
+    expect(exp.querySelector('.tree-meta')?.textContent).toBe('Workflow 1/3');
+    expect(row(/004 · /).querySelector('.tree-meta')).toBeNull();
   });
 
   it('an expanded experiment lists workflows by prefix, README, images and resources with counts, and an add row', async () => {
@@ -102,7 +162,7 @@ describe('ExperimentsPanel', () => {
     expect(level3).toEqual(['Gibson run', 'GFP', 'Design', 'README', 'images', 'resources', 'Workflow 추가']);
     expect(row(/^images/).querySelector('.tree-meta')?.textContent).toBe('2');
     expect(row(/^resources/).querySelector('.tree-meta')?.textContent).toBe('1');
-    expect(row(/003 · /).querySelector('.tree-meta')?.textContent).toBe('1/3');
+    expect(row(/003 · /).querySelector('.tree-meta')?.textContent).toBe('Workflow 1/3');
   });
 
   it('a workflow row shows the alias first and the code as a right-aligned .meta.code, with a UO meta', async () => {
@@ -325,7 +385,7 @@ describe('ExperimentsPanel', () => {
       .map((li) => li.querySelector('.wf-tree-label')?.textContent);
     expect(level3).toEqual(['test', 'DNA Oligomer Assembly', 'General Design of Experiment', 'README', 'Workflow 추가']);
     // 실험 줄의 진행도 예전 꼴의 줄을 센다
-    expect(exp.querySelector('.tree-meta')?.textContent).toBe('1/3');
+    expect(exp.querySelector('.tree-meta')?.textContent).toBe('Workflow 1/3');
     const rows = [row(/test/), row(/DNA Oligomer Assembly/), row(/General Design of Experiment/)];
     expect(rows.map((li) => li.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
     await user.click(within(row(/test/)).getByRole('checkbox', { name: /Workflow 완료/ }));

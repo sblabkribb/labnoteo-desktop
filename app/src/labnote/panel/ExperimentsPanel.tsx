@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { TreeNode, UnitOperationItem, WorkflowItem } from '@labnoteo/core';
-import { buildWorkflowTree } from '@labnoteo/core';
+import { buildWorkflowTree, EXPERIMENT_STATUSES } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import { loadUnitOperations, loadWorkflows } from '@labnoteo/core/lib/workflowDataLoader';
 import { t } from '../../i18n/t';
@@ -23,7 +23,7 @@ import { catalogDescriptionShown } from '../port/aliasHints';
 import { CATALOG_DIR, ensureVaultCatalogs } from '../port/catalogUpdate';
 import { statusNames } from '../port/status';
 import { discussWords, showMarkers, treeLabels } from '../port/workflowView';
-import { statusLabel, statusShape } from '../statusLabels';
+import { STATUS_SHAPE_ICON as SHAPE_ICON, statusLabel, statusShape } from '../statusLabels';
 import { MENU_SEPARATOR, openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
 import { ExperimentEntryCache, type PanelEntry } from './experimentEntries';
 import { publishExperimentTree } from './experimentTreeSnapshot';
@@ -77,7 +77,6 @@ type Item =
 
 const GROUPS: readonly GroupBy[] = ['status', 'experimenter', 'project', 'updated', 'discuss'];
 
-const SHAPE_ICON = { dashed: 'circle-dashed', half: 'circle-half', check: 'circle-check' } as const;
 /** Workflow 줄의 완료 체크박스(README 체크리스트의 [ ] / [x]). UO 진행은 옆의 `n/m` 이 보인다. */
 const WF_ICON = { ticked: 'square-check', tickedOpen: 'square-check', partial: 'square', none: 'square' } as const;
 
@@ -328,6 +327,7 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
       experimentLabel(exp),
       exp.dir,
       `${coreT('Status')}: ${exp.status ? statusLabel(exp.status) : t('experiments.noStatus')}`,
+      ...(exp.entry.progress && exp.entry.progress.total > 0 ? [t('experiments.wfProgress.tip', exp.entry.progress.done, exp.entry.progress.total)] : []),
       ...(exp.project ? [`${t('experiments.project')}: ${exp.project}`] : []),
       ...(exp.experimenter ? [`${t('experiments.experimenter')}: ${exp.experimenter}`] : []),
       ...(exp.entry.lastUpdated ? [`${coreT('Last updated')}: ${exp.entry.lastUpdated}`] : []),
@@ -421,6 +421,24 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
       forget([folder]);
       reload();
     }
+  };
+
+  /**
+   * 실험 상태 메뉴(상태 아이콘, 그 줄의 Space): 플러그인의 상태들, 지금 것에 "(현재)". 고르면 머리줄의 상태 칩·명령과 같은
+   * changeExperimentStatus 가 쓴다(완료면 같은 확인, last_updated_date, 알림). 같은 값은 아무것도 쓰지 않는다.
+   */
+  const openStatusMenu = (exp: ExpNode, el: HTMLElement) => {
+    const folded = exp.status.trim().toLowerCase().replace(/_/g, '-');
+    const current = folded === 'done' ? 'completed' : folded;
+    openMenu(
+      ctx,
+      { element: el },
+      EXPERIMENT_STATUSES.map((s) => ({
+        label: s === current ? t('experiments.status.current', statusLabel(s)) : statusLabel(s),
+        icon: SHAPE_ICON[statusShape(s)],
+        run: changed(exp.dir, () => changeExperimentStatus(ctx, exp.dir, s)),
+      })),
+    );
   };
 
   /** README 체크리스트에서 그 워크플로를 체크하거나 푼다(상태 아이콘과 맥락 메뉴). */
@@ -578,8 +596,14 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
   const state = (node: TreeNode): TreeState | undefined => {
     const item = items.get(node.id);
     if (item?.kind === 'experiment') {
-      const label = item.exp.status ? statusLabel(item.exp.status) : t('experiments.noStatus');
-      return { icon: SHAPE_ICON[statusShape(item.exp.status)], label };
+      const { exp } = item;
+      const name = exp.status ? statusLabel(exp.status) : t('experiments.noStatus');
+      return {
+        icon: SHAPE_ICON[statusShape(exp.status)],
+        label: t('experiments.status.tip', name),
+        popup: 'menu',
+        onClick: (el) => openStatusMenu(exp, el),
+      };
     }
     if (item?.kind === 'workflow') {
       const full = fullWorkflows.get(item.wf.id) ?? item.wf;
@@ -609,7 +633,7 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
     if (item.kind === 'group') return String(groupCount.get(node.id) ?? '');
     if (item.kind === 'experiment') {
       const p = item.exp.entry.progress;
-      return p && p.total > 0 ? `${p.done}/${p.total}` : undefined;
+      return p && p.total > 0 ? t('experiments.wfProgress', p.done, p.total) : undefined;
     }
     if (item.kind === 'workflow') {
       // 찾기로 UO 일부만 남아도 진행은 워크플로 전체로 센다

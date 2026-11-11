@@ -123,6 +123,10 @@ describe('statusNudge', () => {
     expect(statusNudge({ done: 0, total: 3, status: 'in-progress' }, { done: 1, total: 3, status: 'in-progress' })).toBeNull();
     expect(statusNudge({ done: 0, total: 0, status: 'planned' }, { done: 0, total: 0, status: 'planned' })).toBeNull();
   });
+  it('an experiment with no status (legacy README) is treated like planned', () => {
+    expect(statusNudge({ done: 0, total: 3, status: '' }, { done: 1, total: 3, status: '' })).toBe('inProgress');
+    expect(statusNudge({ done: 2, total: 3, status: '' }, { done: 3, total: 3, status: '' })).toBe('done');
+  });
   it('checklistCounts reads the Related Workflows checklist and the status', () => {
     expect(checklistCounts(readme('planned', ['x', ' ', ' ']))).toEqual({ done: 1, total: 3, status: 'planned' });
   });
@@ -150,7 +154,10 @@ describe('status nudge on a tick', () => {
     h = createTestHost(files('in-progress', ['x', 'x', ' ']));
     await toggleWorkflowTick(h.ctx, DIR, '003_WB030_DNA_Assembly.labnote.md');
     const i = h.noteOpts.findIndex((o) => o.action);
-    expect(h.notes[i].message).toContain('완료');
+    expect(h.notes[i].message).toBe('모든 Workflow 를 완료로 표시했습니다. 실험도 완료로 표시할까요?');
+    expect(h.noteOpts[i].action?.label).toBe('실험 완료로 표시');
+    // 단추를 누르기 전에는 바꾸지 않는다
+    expect(h.vault.files()[README_PATH]).toMatch(/^status: in-progress$/m);
   });
 
   it('without the click nothing changes', async () => {

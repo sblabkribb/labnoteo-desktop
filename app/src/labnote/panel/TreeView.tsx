@@ -67,9 +67,12 @@ export interface TreeViewProps {
 export interface TreeState {
   icon: IconName;
   label: string;
-  onClick?: () => void;
+  /** 단추를 눌렀다. `el` 은 그 단추(메뉴를 그 아래에 띄울 때). */
+  onClick?: (el: HTMLElement) => void;
   /** 있으면 단추는 체크박스다(role=checkbox, aria-checked): Workflow 완료 표시. */
   checked?: boolean;
+  /** 'menu': 단추가 메뉴를 연다(aria-haspopup): 실험 상태. */
+  popup?: 'menu';
   /** 'warning': 주의 색(완료로 표시했지만 끝나지 않은 Unit Operation 이 있다). 모양과 글이 따로 뜻을 전한다. */
   tone?: 'warning';
 }
@@ -193,15 +196,15 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     // Alt/Ctrl/Meta+arrow belongs to the app (Alt+←/→ is back and forward): never take it as tree movement.
     if ((e.altKey || e.ctrlKey || e.metaKey) && /^(Arrow|Home$|End$)/.test(e.key)) return;
     const row = rows[index];
-    // 체크박스가 있는 줄(Workflow 완료): Space 는 체크박스를 누른다. 체크박스는 탭 정지가 아니라서(줄 하나만 탭 정지) 키보드로는 이 길이다.
-    // Enter 는 그대로 연다. 초점은 줄에 남는다.
+    // 체크박스가 있는 줄(Workflow 완료): Space 는 체크박스를 누른다. 메뉴 단추가 있는 줄(실험 상태): Space 는 그 메뉴를 연다.
+    // 그 단추들은 탭 정지가 아니라서(줄 하나만 탭 정지) 키보드로는 이 길이다. Enter 는 그대로 연다. 초점은 줄에 남는다.
     if (e.key === ' ' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       const shape = state?.(row.node);
-      if (shape?.onClick && shape.checked !== undefined) {
+      if (shape?.onClick && (shape.checked !== undefined || shape.popup)) {
         e.preventDefault();
         e.stopPropagation();
         setFocusKey(row.key);
-        shape.onClick();
+        shape.onClick(e.currentTarget.querySelector<HTMLElement>(':scope > .tree-state') ?? e.currentTarget);
         return;
       }
     }
@@ -331,12 +334,13 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
                   data-icon={shape.icon}
                   data-tone={shape.tone}
                   {...(shape.checked === undefined ? {} : { role: 'checkbox', 'aria-checked': shape.checked })}
+                  aria-haspopup={shape.popup}
                   tabIndex={-1}
                   aria-label={shape.label}
                   title={shape.label}
                   onClick={(e) => {
                     e.stopPropagation();
-                    shape.onClick!();
+                    shape.onClick!(e.currentTarget);
                   }}
                 >
                   <Icon name={shape.icon} size={14} />

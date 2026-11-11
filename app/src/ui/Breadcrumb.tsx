@@ -9,15 +9,9 @@ import { noteWrites } from '../labnote/openNotes';
 import { notePosition, type NotePosition } from '../labnote/notePosition';
 import { isReadmeName, samePath } from '../labnote/paths';
 import { subscribeVaultChanges, type ListenFn } from '../vault/useVaultEvents';
-import { statusLabel, statusShape } from '../labnote/statusLabels';
+import { STATUS_SHAPE_ICON as SHAPE_ICON, statusLabel, statusShape } from '../labnote/statusLabels';
 import type { MenuItem } from '../labnote/ui/menuStore';
-import { Icon, type IconName } from './Icon';
-
-const SHAPE_ICON: Record<ReturnType<typeof statusShape>, IconName> = {
-  dashed: 'circle-dashed',
-  half: 'circle-half',
-  check: 'circle-check',
-};
+import { Icon } from './Icon';
 
 /** 열린 노트의 구조 위치(편집기가 낸 본문에서 읽는다; 본문이 바뀔 때만 다시 계산한다). */
 export function useNotePosition(path: string): NotePosition {

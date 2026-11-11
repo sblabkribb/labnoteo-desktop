@@ -37,4 +37,12 @@ describe('statusLabel / statusShape', () => {
     expect(statusKind('in_progress')).toBe('inProgress');
     expect(statusKind('odd')).toBeUndefined();
   });
+
+  it('failed and discontinued never look like planned', () => {
+    expect(statusShape('failed')).toBe('failed');
+    expect(statusShape('discontinued')).toBe('stopped');
+    expect(statusShape('needs-review')).toBe('half');
+    expect(statusShape('needs-repeat')).toBe('half');
+    expect(statusShape('')).toBe('dashed');
+  });
 });

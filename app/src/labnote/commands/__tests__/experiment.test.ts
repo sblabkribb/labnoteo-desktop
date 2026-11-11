@@ -206,6 +206,30 @@ describe('change-experiment-status', () => {
     expect(h.vault.files()['labnote/002_b/README.labnote.md']).toContain('status: planned');
   });
 
+  it('a status already chosen (the Experiments tree status menu) skips the picker and writes the same lines', async () => {
+    const before = readme('planned', '# 손으로 적은 주석\n');
+    h = createTestHost({ [README_PATH]: before, 'labnote/002_b/README.labnote.md': readme('planned') });
+    h.setActive('labnote/002_b/README.labnote.md');
+    await changeExperimentStatus(h.ctx, DIR, 'failed');
+    expect(h.asked.pick).toEqual([]);
+    expect(h.vault.files()[README_PATH]).toBe(
+      before.replace('status: planned', 'status: failed').replace('last_updated_date: 2026-01-01', `last_updated_date: ${TODAY}`),
+    );
+    expect(h.notes).toHaveLength(1);
+  });
+
+  it('a chosen completed still asks the completed questions; the same status writes nothing', async () => {
+    const before = readme('in-progress', '', '- [ ] [[001_PCR]]\n');
+    h = createTestHost({ [README_PATH]: before });
+    h.answer.confirm(false);
+    await changeExperimentStatus(h.ctx, DIR, 'completed');
+    expect(h.asked.confirm).toHaveLength(1);
+    expect(h.vault.files()[README_PATH]).toBe(before);
+    await changeExperimentStatus(h.ctx, DIR, 'in-progress');
+    expect(h.vault.files()[README_PATH]).toBe(before);
+    expect(h.notes).toEqual([]);
+  });
+
   it("with automation 'none' the message has no 'Setup research automation'", async () => {
     h = createTestHost({ [README_PATH]: readme('in-progress') });
     h.setActive(README_PATH);

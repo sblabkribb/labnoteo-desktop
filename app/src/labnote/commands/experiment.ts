@@ -13,6 +13,7 @@
  *   설정 defaultExperimenter 로 기억한다. 앱이 새로 쓰는 README 에서는 Ctrl+P/Cmd+P 안내 인용을 지운다
  *   (stripInstructionCallouts, 플러그인과 일부러 다른 점). 이미 있는 파일은 건드리지 않는다.
  */
+import type { ExperimentStatus } from '@labnoteo/core';
 import { DISCUSS_FLAG_KEY, EXPERIMENT_STATUSES, copyFrontMatterKeys, isDiscussFlagged, isValidStatus, parseFrontMatterYaml, setFrontMatterKeys } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import {
@@ -188,8 +189,11 @@ export async function retryFromActive(ctx: CommandContext): Promise<void> {
   await retryExperiment(ctx, folder);
 }
 
-/** 실험 README 의 status 를 고른 값으로 바꾼다. `experimentDir` 는 Workflows 패널이 실험을 직접 가리킬 때. */
-export async function changeExperimentStatus(ctx: CommandContext, experimentDir?: string): Promise<void> {
+/**
+ * 실험 README 의 status 를 고른 값으로 바꾼다. `experimentDir` 는 Workflows 패널이 실험을 직접 가리킬 때.
+ * `preset` 이 있으면(실험 탭의 상태 메뉴에서 이미 골랐다) 고르기 창을 건너뛰고 나머지(완료 확인, 쓰기, 알림)는 같다.
+ */
+export async function changeExperimentStatus(ctx: CommandContext, experimentDir?: string, preset?: ExperimentStatus): Promise<void> {
   const { host } = ctx;
   const stamp = readmeStamp(ctx.settings);
   const labnoteDir = experimentDir ?? resolveLabnoteDir(host, ctx.activePath());
@@ -212,7 +216,7 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
       ? host.t('The current status "{0}" is not an allowed value. Select a status', current)
       : host.t('Select a status');
   const meanings = statusMeanings(host);
-  const chosen = await host.pick(
+  const chosen = preset ?? await host.pick(
     EXPERIMENT_STATUSES.map((status) => ({
       label: status,
       description: status === current ? host.t('current') : undefined,

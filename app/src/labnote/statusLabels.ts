@@ -9,7 +9,16 @@ import { coreT } from './i18n';
 import { statusNames } from './port/status';
 
 export type StatusKind = 'planned' | 'inProgress' | 'done';
-export type StatusShape = 'dashed' | 'half' | 'check';
+export type StatusShape = 'dashed' | 'half' | 'check' | 'failed' | 'stopped';
+
+/** 상태 모양의 아이콘(실험 탭, 머리줄 칩). */
+export const STATUS_SHAPE_ICON = {
+  dashed: 'circle-dashed',
+  half: 'circle-half',
+  check: 'circle-check',
+  failed: 'circle-x',
+  stopped: 'circle-stop',
+} as const satisfies Record<StatusShape, string>;
 
 const fold = (raw: string) => raw.trim().toLowerCase().replace(/_/g, '-');
 
@@ -37,11 +46,16 @@ export function statusLabel(raw: string): string {
   return raw;
 }
 
-/** 상태 칩의 아이콘 모양: 계획은 점선 원, 진행 중은 반쪽 원, 완료는 체크. 그 밖은 점선 원. */
+/**
+ * 상태 칩의 아이콘 모양: 계획은 점선 원, 진행 중(과 검토·재실험 필요)은 반쪽 원, 완료는 체크, 실패는 X, 중단은 멈춤.
+ * 실패·중단이 계획처럼 보이지 않게 한다. 없음과 모르는 값은 점선 원.
+ */
 export function statusShape(raw: string): StatusShape {
   const kind = statusKind(raw);
   const v = fold(raw);
   if (kind === 'done') return 'check';
+  if (v === 'failed') return 'failed';
+  if (v === 'discontinued') return 'stopped';
   if (kind === 'inProgress' || v === 'needs-review' || v === 'needs-repeat') return 'half';
   return 'dashed';
 }

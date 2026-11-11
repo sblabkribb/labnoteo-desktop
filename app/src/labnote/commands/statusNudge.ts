@@ -42,7 +42,8 @@ export function checklistCounts(readme: string): ChecklistCounts {
  */
 export function statusNudge(prev: ChecklistCounts, next: ChecklistCounts): StatusNudge | null {
   if (next.total === 0 || next.done <= prev.done) return null;
-  const kind = statusKind(next.status);
+  // 상태가 없는 README(예전 실험)는 계획으로 본다
+  const kind = next.status === '' ? 'planned' : statusKind(next.status);
   if (next.done === next.total && (kind === 'planned' || kind === 'inProgress')) return 'done';
   if (kind === 'planned' && prev.done === 0) return 'inProgress';
   return null;
@@ -76,7 +77,7 @@ export function offerStatusNudge(ctx: CommandContext, readmePath: string, prev: 
   const message = nudge === 'done' ? t('nudge.done') : t('nudge.inProgress');
   ctx.host.notify('info', message, {
     ms: 10000,
-    action: { label: t('nudge.change'), run: () => void applyStatusNudge(ctx, readmePath, nudge).catch(() => {}) },
+    action: { label: nudge === 'done' ? t('nudge.done.mark') : t('nudge.change'), run: () => void applyStatusNudge(ctx, readmePath, nudge).catch(() => {}) },
   });
   return true;
 }
