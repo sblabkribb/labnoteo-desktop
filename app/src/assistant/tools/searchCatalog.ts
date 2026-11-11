@@ -69,8 +69,8 @@ const missing = (kind: Kind): ToolResult => ({
  */
 export const NO_UO_LIST_NOTE =
   "The catalog does not list these Workflows' Unit Operations. Do not search for them one by one: answer from the " +
-  'description, and say that the catalog has no Unit Operation list (workflow_get_method, if you have it, gives the ' +
-  'ones named in papers).';
+  'description and say that the catalog has no Unit Operation list. If workflow_get_method is in your tool list, call ' +
+  "it once for the ones named in papers and give them under '논문 요약' ('Paper summary' in English replies).";
 
 /** 카탈로그 코드 꼴(UHW010, USW020, WB030, WD010 …). */
 const CODE = /^(?:U[HS]W|W[A-Z])\d{3}$/i;
