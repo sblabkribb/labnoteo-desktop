@@ -3,11 +3,11 @@ import { listen as tauriListen } from '@tauri-apps/api/event';
 import * as posix from '@labnoteo/core/posix';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
-import { useEditorLoaded, useEditorText } from '../editor/editorStatus';
+import { editorStatus, subscribeEditorStatus, useEditorLoaded, useEditorText } from '../editor/editorStatus';
 import { coreT } from '../labnote/i18n';
 import { noteWrites } from '../labnote/openNotes';
 import { notePosition, type NotePosition } from '../labnote/notePosition';
-import { README } from '../labnote/paths';
+import { isReadmeName, samePath } from '../labnote/paths';
 import { subscribeVaultChanges, type ListenFn } from '../vault/useVaultEvents';
 import { statusLabel, statusShape } from '../labnote/statusLabels';
 import type { MenuItem } from '../labnote/ui/menuStore';
@@ -87,8 +87,12 @@ export function WorkflowDoneChip(p: { ticked: boolean | undefined; onToggle?: ()
   );
 }
 
-/** README 를 다시 읽을 때(앱의 쓰기, 보관함 감시자): 그 README 경로이거나 무엇이 바뀌었는지 모를 때(''). */
-const touchesReadme = (changed: string, readme: string) => changed === '' || changed.toLowerCase() === readme.toLowerCase();
+/**
+ * README 를 다시 읽을 때(앱의 쓰기, 보관함 감시자, 열린 편집기): 그 실험 폴더의 README(README.labnote.md, 예전 보관함의 README.md)
+ * 이거나 무엇이 바뀌었는지 모를 때('').
+ */
+const touchesReadme = (changed: string, dir: string) =>
+  changed === '' || (samePath(posix.dirname(changed), dir) && isReadmeName(posix.basename(changed)));
 
 /** Workflow 노트 머리가 README 체크를 읽고 바꾸는 길(App 이 CommandContext 로 채운다). */
 export interface WorkflowTickIo {
@@ -98,7 +102,8 @@ export interface WorkflowTickIo {
 
 /**
  * 열린 Workflow 노트의 README 체크 상태. 읽기 전이면 'loading', 체크리스트에 없으면 undefined.
- * README 가 바뀌면(앱이 닫힌 README 에 쓴 것: noteWrites, 밖의 변경: 보관함 감시자) 다시 읽고, 누른 뒤에는 돌려받은 값을 쓴다.
+ * README 가 바뀌면(앱이 닫힌 README 에 쓴 것: noteWrites, 밖의 변경: 보관함 감시자, 편집기에 열린 README 의 저장하지 않은 글:
+ * editorStatus) 다시 읽고, 누른 뒤에는 돌려받은 값을 쓴다. README 는 README.labnote.md 와 예전 이름 README.md 를 다 본다.
  */
 export function useWorkflowTick(
   path: string,
@@ -120,13 +125,22 @@ export function useWorkflowTick(
     };
     setTicked('loading');
     load();
-    const readme = posix.join(posix.dirname(path), README);
-    const offWrites = noteWrites.subscribe((p) => touchesReadme(p, readme) && load());
-    const offWatch = subscribeVaultChanges(listen, (c) => touchesReadme(c.path, readme) && load());
+    const dir = posix.dirname(path);
+    const offWrites = noteWrites.subscribe((p) => touchesReadme(p, dir) && load());
+    const offWatch = subscribeVaultChanges(listen, (c) => touchesReadme(c.path, dir) && load());
+    // 편집기에 열린 README 의 저장하지 않은 글: 본문이 바뀌어 나올 때마다 다시 읽는다(읽기는 그 버퍼를 본다, readReadmeText)
+    let seenText: string | undefined;
+    const offEdits = subscribeEditorStatus(() => {
+      const s = editorStatus();
+      if (!s || s.text === seenText || !touchesReadme(s.path, dir) || s.path === '') return;
+      seenText = s.text;
+      load();
+    });
     return () => {
       live = false;
       offWrites();
       offWatch();
+      offEdits();
     };
     // io 는 App 이 그릴 때마다 새로 만든다: 경로와 켜짐만 본다
     // eslint-disable-next-line react-hooks/exhaustive-deps

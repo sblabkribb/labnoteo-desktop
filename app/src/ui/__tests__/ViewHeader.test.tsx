@@ -34,6 +34,7 @@ afterEach(() => {
   setLang('ko');
   clearEditorStatus(WF);
   clearEditorStatus(`${EXP}/README.labnote.md`);
+  clearEditorStatus(`${EXP}/README.md`);
   clearEditorStatus('a/b.md');
 });
 
@@ -109,6 +110,29 @@ describe('Breadcrumb', () => {
     const reads = vi.mocked(io.read).mock.calls.length;
     act(() => noteWrites.emit('labnote/004_Plan/README.labnote.md'));
     expect(vi.mocked(io.read).mock.calls.length).toBe(reads);
+  });
+
+  it('NoteLead re-reads for a legacy README.md and when an open README editor changes its unsaved text', async () => {
+    publishEditorStatus(WF, { text: WF_TEXT, save: 'saved' });
+    let ticked: boolean | undefined = false;
+    const io: WorkflowTickIo = { read: vi.fn(async () => ticked), toggle: vi.fn(async () => undefined) };
+    render(<NoteLead path={WF} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} workflowTick={io} />);
+    await screen.findByRole('checkbox', { name: 'Workflow 완료' });
+    // 예전 보관함의 README.md 에 쓴 것
+    ticked = true;
+    act(() => noteWrites.emit(`${EXP}/README.md`));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('true'));
+    // 편집기에 열린 README 의 저장하지 않은 글이 바뀌면 다시 읽는다(읽기는 그 버퍼를 본다)
+    ticked = false;
+    act(() => publishEditorStatus(`${EXP}/README.md`, { text: '## Related Workflows\n\n[ ] [GFP](./002_WT020_Protein_Expression_Measurement_GFP.labnote.md)\n', save: 'dirty' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('false'));
+    const reads = vi.mocked(io.read).mock.calls.length;
+    // 커서만 움직인 것(같은 글), 다른 실험의 README 는 다시 읽지 않는다
+    act(() => publishEditorStatus(`${EXP}/README.md`, { line: 3, col: 2 }));
+    act(() => publishEditorStatus('labnote/004_Plan/README.md', { text: 'x', save: 'dirty' }));
+    act(() => noteWrites.emit('labnote/004_Plan/README.md'));
+    expect(vi.mocked(io.read).mock.calls.length).toBe(reads);
+    clearEditorStatus('labnote/004_Plan/README.md');
   });
 
   it('a workflow with no UO offers a disabled hint in the menu', async () => {
