@@ -121,6 +121,7 @@ export function arrange(
   groupOf: ((item: PickItem<unknown>) => string | undefined) | undefined,
   keyOf: (item: PickItem<unknown>) => string = itemKey,
   restHead: string = t('picker.rest'),
+  recentHead: string = t('picker.recent'),
 ): { items: PickItem<unknown>[]; heads: Map<number, string> } {
   const heads = new Map<number, string>();
   if (query.trim() ? !groupOf : !groupOf && recent.length === 0) return { items: ranked, heads };
@@ -137,7 +138,7 @@ export function arrange(
     byGroup.get(g)!.push(item);
   }
   const items = [...recentItems];
-  if (recentItems.length > 0) heads.set(0, t('picker.recent'));
+  if (recentItems.length > 0) heads.set(0, recentHead);
   for (const g of order) {
     if (g) heads.set(items.length, g);
     else if (heads.size > 0) heads.set(items.length, restHead);
@@ -190,8 +191,8 @@ export function Picker(props: {
   const optionEls = useRef<(HTMLLIElement | null)[]>([]);
   const id = useId();
   const { items: ranked, heads } = useMemo(
-    () => arrange(withSelectedFirst(rankPickItems(items, query), query, spec.selected), query, recent, spec.groupOf, spec.recentId, spec.restHead),
-    [items, spec.selected, spec.groupOf, spec.recentId, spec.restHead, query, recent],
+    () => arrange(withSelectedFirst(rankPickItems(items, query), query, spec.selected), query, recent, spec.groupOf, spec.recentId, spec.restHead, spec.recentHead),
+    [items, spec.selected, spec.groupOf, spec.recentId, spec.restHead, spec.recentHead, query, recent],
   );
   const shown = ranked.slice(0, PICKER_MAX_ROWS);
   const current = Math.min(active, shown.length - 1);
