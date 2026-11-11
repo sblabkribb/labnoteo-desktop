@@ -136,6 +136,37 @@ describe('tool-run notice', () => {
     );
   });
 
+  it('failureReasons words a web tool failure in the UI language, names the tool in words and never doubles the period', () => {
+    const th = host({});
+    const { env } = aiEnv(th, () => reply('x'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const offline: AgentRun['executed'][number] = {
+      call: call('web_search', { query: 'q' }),
+      outcome: 'failed',
+      mutates: false,
+      error: 'Could not reach the web search service.',
+      code: 'web_failed',
+      params: ['search', 'offline'],
+    };
+    try {
+      setLang('ko');
+      const ko = failureReasons(env, [offline]);
+      expect(ko).toBe(`실패: ${t('tool.name.webSearch')} — ${t('tool.fail.web.offline.search')}.`);
+      expect(ko).not.toMatch(/web_search|Could not|\.\.$/);
+      expect(failureReasons(env, [{ ...offline, call: call('fetch_page'), params: ['page', 'status', '503'] }])).toBe(
+        `실패: ${t('tool.name.fetchPage')} — ${t('tool.fail.web.status.page', '503')}.`,
+      );
+      setLang('en');
+      expect(failureReasons(env, [offline])).toBe('Failed: web search — Could not reach the web search service.');
+      // A reason without a code keeps its text, without a second period
+      expect(failureReasons(env, [{ call: call('mcp_x_tool'), outcome: 'failed', mutates: false, error: 'Server said no. ' }])).toBe(
+        'Failed: mcp_x_tool — Server said no.',
+      );
+    } finally {
+      setLang('en');
+    }
+  });
+
   it('failureReasons names at most 3, each cut to 80 chars', () => {
     const th = host({});
     const { env } = aiEnv(th, () => reply('x'));

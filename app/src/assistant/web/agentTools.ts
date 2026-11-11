@@ -166,6 +166,19 @@ function errorForModel(err: NetError, what: 'search' | 'page'): string {
   }
 }
 
+/**
+ * A network failure as a tool result: the English sentence for the model, and `web_failed` with
+ * [what, kind, status] so the end notice can word it in the UI language (aiCommon failureReasonText).
+ */
+function failed(err: NetError, what: 'search' | 'page'): ToolResult {
+  return {
+    ok: false,
+    error: errorForModel(err, what),
+    code: 'web_failed',
+    params: err.status != null ? [what, err.kind, String(err.status)] : [what, err.kind],
+  };
+}
+
 type Args = Record<string, unknown>;
 
 const TIME_RANGES = ['day', 'week', 'month', 'year'] as const;
@@ -240,7 +253,7 @@ export function webAgentTools(ipc: WebIpc, opts: WebAgentToolOpts): { tools: Too
           keyNoticeShown = true;
           opts.notify?.(t('web.unauthorized'));
         }
-        return { ok: false, error: errorForModel(err, 'search') };
+        return failed(err, 'search');
       }
       allowedUrls.addFromHits(result.hits);
       const lines = result.hits.map((h) => {
@@ -280,7 +293,7 @@ export function webAgentTools(ipc: WebIpc, opts: WebAgentToolOpts): { tools: Too
       } catch (e) {
         const err = toNetError(e);
         if (err.kind === 'cancelled') throw err;
-        return { ok: false, error: errorForModel(err, 'page') };
+        return failed(err, 'page');
       }
       const host = hostOf(page.url);
       if (page.kind !== 'ok') {

@@ -234,6 +234,25 @@ describe('webAgentTools', () => {
     await expect(c.run('web_search', { query: 'q' })).rejects.toMatchObject({ kind: 'cancelled' });
   });
 
+  it('a network failure carries a code the end notice words in the UI language (search and page)', async () => {
+    const s = setup({
+      userText: 'https://user.test/x',
+      ipc: fakeIpc({
+        search: async () => {
+          throw new NetError('offline', 'raw-rust-text');
+        },
+        fetchPage: async () => {
+          throw new NetError('status', 'raw-rust-text', 503);
+        },
+      }),
+    });
+    const a = await s.run('web_search', { query: 'q' });
+    expect(a).toMatchObject({ ok: false, error: 'Could not reach the web search service.', code: 'web_failed', params: ['search', 'offline'] });
+    const b = await s.run('fetch_page', { url: 'https://user.test/x' });
+    expect(b).toMatchObject({ ok: false, code: 'web_failed' });
+    expect(b.params).toEqual(['page', 'status', '503']);
+  });
+
   it('a refused search key (unauthorized) tells the model to ask for the key and the person once per run', async () => {
     const f = fakeIpc({
       search: async () => {

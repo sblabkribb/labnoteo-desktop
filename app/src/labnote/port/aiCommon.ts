@@ -195,9 +195,49 @@ export function failureReasonText(env: AiEnv, code: string, params: readonly str
       );
     case 'section_not_found':
       return env.host.t('The note has no "{0}" section.', a);
+    case 'web_failed':
+      return webFailureText(a === 'page' ? 'page' : 'search', b, params[2] ?? '');
     default:
       // The experiment-scope codes of the context tools, worded from the app catalog (not the vendor one).
       return scopeErrorText(code, params);
+  }
+}
+
+/**
+ * A failed web search or page read (`web_failed`: what, NetError kind, status), in the app catalog
+ * (real-server check, 2026-11-11: the notice showed the model's English sentence). Each key is written out
+ * so the catalog test sees it.
+ */
+function webFailureText(what: 'search' | 'page', kind: string, status: string): string {
+  const search = what === 'search';
+  switch (kind) {
+    case 'offline':
+    case 'tls':
+      return search ? appT('tool.fail.web.offline.search') : appT('tool.fail.web.offline.page');
+    case 'timeout':
+      return search ? appT('tool.fail.web.timeout.search') : appT('tool.fail.web.timeout.page');
+    case 'status':
+      return search ? appT('tool.fail.web.status.search', status || '?') : appT('tool.fail.web.status.page', status || '?');
+    case 'unauthorized':
+      return appT('tool.fail.web.unauthorized');
+    case 'rateLimited':
+      return appT('tool.fail.web.rateLimited');
+    case 'blocked':
+      return appT('tool.fail.web.blocked');
+    default:
+      return search ? appT('tool.fail.web.other.search') : appT('tool.fail.web.other.page');
+  }
+}
+
+/** A tool's name as the end notice shows it: the web tools in words, the rest as the model called them. */
+function toolNameShown(name: string): string {
+  switch (name) {
+    case 'web_search':
+      return appT('tool.name.webSearch');
+    case 'fetch_page':
+      return appT('tool.name.fetchPage');
+    default:
+      return name;
   }
 }
 
@@ -216,9 +256,10 @@ export function failureReasons(env: AiEnv, executed: AgentRun['executed']): stri
     const pick = [args.alias, args.id, args.heading, args.documentPath].find(v => typeof v === 'string' && v.trim());
     const target = typeof pick === 'string' ? pick.split('/').pop() : undefined;
     const known = e.code ? failureReasonText(env, e.code, e.params ?? []) : undefined;
-    const reason = (known ?? e.error ?? '').replace(/\s+/g, ' ').trim();
+    // The template ends with its own period: a reason's closing period would read '..' (real-server check).
+    const reason = (known ?? e.error ?? '').replace(/\s+/g, ' ').trim().replace(/[.。]+$/, '');
     const short = reason.length > FAILURE_REASON_MAX ? `${reason.slice(0, FAILURE_REASON_MAX - 1)}…` : reason;
-    return `${e.call.name}${target ? ` (${target})` : ''}${short ? ` — ${short}` : ''}`;
+    return `${toolNameShown(e.call.name)}${target ? ` (${target})` : ''}${short ? ` — ${short}` : ''}`;
   });
   const more = failed.length - named.length;
   const list = more > 0 ? `${named.join('; ')}; ${env.host.t('+{0} more', String(more))}` : named.join('; ');

@@ -428,9 +428,9 @@ describe('askAgentCommand (#77)', () => {
     await askAgentCommand(env);
     const notice = messages(th).find((n) => n.startsWith('AI 도구 호출'))!;
     expect(notice).toContain(
-      'create_sample (pET;28a) — 별칭에는 ";"나 ":"를 쓸 수 없습니다. 노트에서 ID·별칭·설명을 가르는 글자입니다. 대신 "-"나 "/"를 쓰세요(예: 1-10).'
+      'create_sample (pET;28a) — 별칭에는 ";"나 ":"를 쓸 수 없습니다. 노트에서 ID·별칭·설명을 가르는 글자입니다. 대신 "-"나 "/"를 쓰세요(예: 1-10); '
     );
-    expect(notice).toContain('create_sample — "XNA"은(는) 시료 타입이 아닙니다(DNA, RNA). Labnote 설정에서 먼저 추가하세요.');
+    expect(notice).toContain('create_sample — "XNA"은(는) 시료 타입이 아닙니다(DNA, RNA). Labnote 설정에서 먼저 추가하세요; ');
     expect(notice).toContain('create_sample — type and documentPath are required.');
   });
 
