@@ -419,6 +419,8 @@ describe('Settings modal', () => {
     act(() => void openSettings('integrations', { focus: 'githubToken' }));
     const d = within(screen.getByRole('dialog', { name: '설정' }));
     await waitFor(() => expect(document.activeElement).toBe(d.getByLabelText(t('github.settings.token'))));
+    // the token field is inside the GitHub group, wherever that group sits on the page
+    expect(d.getByRole('region', { name: t('integrations.group.github') }).contains(document.activeElement)).toBe(true);
   });
 
   it('with no source (settings not read yet) openSettings does nothing', async () => {

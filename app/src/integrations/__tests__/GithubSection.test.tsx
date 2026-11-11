@@ -333,7 +333,7 @@ describe('IntegrationSettingsPage with GitHub', () => {
     };
   })();
 
-  it('renders the GitHub section last, after the MCP and skill sections', async () => {
+  it('renders the GitHub section in its own group, after the scan settings and before the MCP and skill sections', async () => {
     const { invoke } = fakeInvoke({});
     const deps: IntegrationDeps = {
       value: () => BASE,
@@ -346,13 +346,15 @@ describe('IntegrationSettingsPage with GitHub', () => {
     };
     render(<IntegrationSettingsPage deps={deps} onLeave={async () => {}} />);
     await screen.findByRole('button', { name: t('github.settings.connect') });
-    const sections = [...document.querySelectorAll('section.integration-section')];
-    const last = sections[sections.length - 1];
-    expect(last.classList.contains('github-section')).toBe(true);
+    const gh = document.querySelector('section.github-section')!;
+    const group = screen.getByRole('region', { name: t('integrations.group.github') });
+    expect(group.contains(gh)).toBe(true);
+    const scan = [...document.querySelectorAll('section.scan-settings')].pop()!;
     const mcp = document.querySelector('section.mcp-section')!;
     const skill = document.querySelector('section.skill-section')!;
-    expect(mcp.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(skill.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scan.compareDocumentPosition(gh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(gh.compareDocumentPosition(mcp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(gh.compareDocumentPosition(skill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('without deps.github there is no GitHub section', async () => {

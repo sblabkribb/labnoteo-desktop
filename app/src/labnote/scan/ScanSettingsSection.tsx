@@ -292,7 +292,7 @@ export function ScanSettingsSection(props: {
   return (
     <>
       <section className="integration-section scan-settings">
-        <h3>{coreT('Barcode & scans')}</h3>
+        <h5>{coreT('Barcode & scans')}</h5>
         <div className="integration-field">
           <label className="prompt-question" htmlFor={`${id}-paper`}>
             {coreT('Worksheet paper size')}
@@ -457,7 +457,7 @@ export function ScanSettingsSection(props: {
       </section>
 
       <section className="integration-section scan-settings">
-        <h3>{coreT('Slack scans (optional)')}</h3>
+        <h5>{coreT('Slack scans (optional)')}</h5>
         {linked && link ? (
           <div className="integration-field">
             <span className="prompt-question">{coreT('Slack connection')}</span>

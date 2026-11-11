@@ -155,8 +155,12 @@ describe('McpClientSection', () => {
     const headings = screen.getAllByRole('heading').map((h) => h.textContent);
     expect(headings).toContain('외부 MCP 서버');
     expect(headings).toContain(coreT('MCP server'));
-    // after bfworkflow, before the app's own MCP server section
-    expect(headings.indexOf('외부 MCP 서버')).toBeGreaterThan(headings.indexOf(t('integrations.bfw.heading')));
+    // the AI group: after AI 제공자 and 문헌 검색, before bfworkflow and the app's own MCP server section
+    expect(headings.indexOf('외부 MCP 서버')).toBeGreaterThan(headings.indexOf(t('integrations.aiProvider')));
+    expect(headings.indexOf('외부 MCP 서버')).toBeGreaterThan(headings.indexOf(t('scholar.title')));
+    expect(headings.indexOf('외부 MCP 서버')).toBeLessThan(headings.indexOf(t('integrations.bfw.heading')));
+    const aiGroup = screen.getByRole('region', { name: t('integrations.group.ai') });
+    expect(within(aiGroup).getByRole('heading', { name: '외부 MCP 서버' })).toBeTruthy();
     expect(headings.indexOf('외부 MCP 서버')).toBeLessThan(headings.indexOf(coreT('MCP server')));
     await act(async () => {});
   });

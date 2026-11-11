@@ -113,6 +113,8 @@ describe('styles/*.css', () => {
       // 맥락 메뉴(Task 16)가 일부러 없앤 것: 꺼진 항목은 이제 aria-disabled(까닭 툴팁이 보이도록 disabled 를 쓰지 않는다)
       '.context-menu-item:hover:not(:disabled)',
       '.context-menu-item:disabled',
+      // 연동 묶음(설정 순서 정리)이 일부러 바꾼 것: 섹션 제목은 이제 묶음 제목(h4) 아래의 h5(.integration-section h5)
+      '.integration-section h3',
     ];
     expect(OLD_APP_CSS_SELECTORS.filter((s) => !now.has(s) && !RETIRED.includes(s))).toEqual([]);
     for (const s of RETIRED) expect(now.has(s), s).toBe(false);

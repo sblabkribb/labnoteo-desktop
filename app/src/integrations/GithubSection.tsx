@@ -337,7 +337,7 @@ export function GithubSection(props: { deps: GithubDeps; onLeave(): Promise<void
 
   return (
     <section className="integration-section github-section" aria-labelledby={`${id}-head`}>
-      <h3 id={`${id}-head`}>{t('github.settings.title')}</h3>
+      <h5 id={`${id}-head`}>{t('github.settings.title')}</h5>
 
       {signing ? (
         <SignInPanel
