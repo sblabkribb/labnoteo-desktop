@@ -163,6 +163,16 @@ describe('change-experiment-status', () => {
     expect(h.notes).toHaveLength(1);
   });
 
+  it('a README with blank lines before its --- keeps one front-matter block when the status changes or is cleared', async () => {
+    const before = `\n\n${readme('in-progress')}`;
+    h = createTestHost({ [README_PATH]: before }, { autoUpdateLastUpdated: false });
+    await changeExperimentStatus(h.ctx, DIR, 'failed');
+    expect(h.vault.files()[README_PATH]).toBe(readme('failed'));
+    h = createTestHost({ [README_PATH]: `\r\n${readme('failed').replace(/\n/g, '\r\n')}` }, { autoUpdateLastUpdated: false });
+    await clearExperimentStatus(h.ctx, DIR);
+    expect(h.vault.files()[README_PATH]).toBe(readme('failed').replace('status: failed\n', '').replace(/\n/g, '\r\n'));
+  });
+
   it('without autoUpdateLastUpdated only the status line changes', async () => {
     const before = readme('in-progress');
     h = createTestHost({ [README_PATH]: before }, { autoUpdateLastUpdated: false });

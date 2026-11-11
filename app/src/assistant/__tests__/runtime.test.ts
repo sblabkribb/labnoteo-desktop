@@ -551,17 +551,45 @@ describe('builtinRuntime', () => {
     );
     const r = await rt.run(turnOf('UHW010 이 뭐야?'), recordSink().sink, go());
     expect(r.sources).toEqual([
-      { kind: 'note', label: t('assistant.source.catalog', 'UHW010 Liquid Handling'), target: 'resources/workflows/unitoperations_hw_en.json' },
+      { kind: 'note', label: t('assistant.source.catalog', 'UHW010 Liquid Handling'), target: 'resources/workflows/unitoperations_hw_en.json#UHW010' },
     ]);
     const toolMsg = p.seen[1].find((m) => m.role === 'tool')!.content;
     expect(JSON.parse(toolMsg).results[0]).toMatchObject({ id: 'UHW010', cite: 1 });
     expect(r.content).toBe('UHW010 은 Liquid Handling 이에요 [1]. 장비는 Multiple dispenser system 이에요.');
   });
 
+  it('two catalog hits from the same file get their own numbers and their own names', async () => {
+    const p = new Script([toolTurn('search_catalog', { query: 'liquid' }), answer('UHW020 은 분주예요 [2].')]);
+    const { rt, th } = await setup(p);
+    await th.host.fs.write(
+      'resources/workflows/unitoperations_hw_en.json',
+      JSON.stringify({
+        version: '1',
+        language: 'English',
+        lastUpdated: '2026-11-11',
+        unitOperations: [
+          { id: 'UHW010', name: 'Liquid Handling', description: 'Basic liquid operations', equipment: 'Dispenser' },
+          { id: 'UHW020', name: 'Liquid Dispensing', description: 'Liquid dispensing into plates', equipment: 'Dispenser' },
+        ],
+      })
+    );
+    const r = await rt.run(turnOf('liquid 관련 Unit Operation?'), recordSink().sink, go());
+    const results = JSON.parse(p.seen[1].find((m) => m.role === 'tool')!.content).results as Array<{ id: string; cite: number }>;
+    const byId = Object.fromEntries(results.map((x) => [x.id, x.cite]));
+    expect(byId.UHW010).toBeGreaterThan(0);
+    expect(byId.UHW020).toBeGreaterThan(0);
+    expect(byId.UHW010).not.toBe(byId.UHW020);
+    const src = r.sources!.find((s) => s.target.endsWith('#UHW020'))!;
+    expect(src.label).toBe(t('assistant.source.catalog', 'UHW020 Liquid Dispensing'));
+    expect(r.sources!.indexOf(src) + 1).toBe(byId.UHW020);
+  });
+
   it('dropUnknownCites keeps known numbers, code indexes and links', () => {
     expect(dropUnknownCites('A [1] B [2][3].', 1)).toBe('A [1] B.');
     expect(dropUnknownCites('arr[2] and [x](y) and [2](http://a)', 0)).toBe('arr[2] and [x](y) and [2](http://a)');
     expect(dropUnknownCites('no cites', 0)).toBe('no cites');
+    expect(dropUnknownCites('see [the guide][2] and \x60a [3] b\x60 [1].', 1)).toBe('see [the guide][2] and \x60a [3] b\x60 [1].');
+    expect(dropUnknownCites('\x60\x60\x60\nx = y [4]\n\x60\x60\x60\nok [6]', 0)).toBe('\x60\x60\x60\nx = y [4]\n\x60\x60\x60\nok');
   });
 
   it('tidyAnswer keeps ordinary text, uuids and real [n] as they are', () => {
@@ -570,6 +598,8 @@ describe('builtinRuntime', () => {
     expect(tidyAnswer('see [cite: 2, 3] and (cite:4)')).toBe('see [2][3] and [4]');
     expect(tidyAnswer('From the result (fence id="0123456789ab"): GFP.')).toBe('From the result: GFP.');
     expect(tidyAnswer('The untrusted-data block says nothing. GFP is KBp_1.')).toBe('GFP is KBp_1.');
+    const code = 'Config -\n\x60\x60\x60\nsource="x"\nid: 0123456789ab\n\x60\x60\x60';
+    expect(tidyAnswer(code)).toBe(code);
   });
 
   it('a clean history does not taint the run', async () => {

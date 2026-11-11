@@ -28,6 +28,7 @@ import {
   chipTools,
   chipUserLine,
   isWorkflowNotePath,
+  EXISTING_SECTION_NOTE,
   NEW_SECTION_NOTE,
 } from '../chips';
 import { emptyHistory, type HistoryDoc } from '../history';
@@ -270,6 +271,28 @@ describe('builtinRuntime in chip mode', () => {
     const read = q.seen[1].find((m) => m.role === 'tool')!.content;
     expect(read).toContain('memo');
     expect(read).not.toContain(NEW_SECTION_NOTE);
+  });
+
+  it('a typed title the note already has is read for real and both tools say to use update_section', async () => {
+    const p = new Script([
+      toolTurn('read_section', { documentPath: NOTE, heading: 'Notes' }),
+      toolTurn('add_section', { documentPath: NOTE, heading: 'Notes', body: '- 새 메모' }),
+      answer('이미 있어요'),
+    ]);
+    const { rt, th } = await setupRt(p);
+    th.answer.confirm(true);
+    const r = await rt.run(chipTurn('section', { documentPath: NOTE, heading: 'Notes', existing: 'no' }, ''), sink(), go());
+    const toolMsgs = p.seen.flatMap((m) => m.filter((x) => x.role === 'tool').map((x) => x.content));
+    expect(toolMsgs[0]).toContain('memo');
+    expect(toolMsgs[0]).toContain('"exists":true');
+    expect(toolMsgs[0]).toContain(EXISTING_SECTION_NOTE);
+    expect(toolMsgs[0]).not.toContain(NEW_SECTION_NOTE);
+    expect(toolMsgs[1]).toContain(EXISTING_SECTION_NOTE);
+    expect(r.executed.map((e) => [e.call.name, e.outcome])).toEqual([
+      ['read_section', 'done'],
+      ['add_section', 'rejected'],
+    ]);
+    expect(docOf(NOTE)).toBe(BODY);
   });
 
   it('a section write shows the preview confirm; denied, the note is unchanged', async () => {

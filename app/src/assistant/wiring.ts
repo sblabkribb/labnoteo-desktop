@@ -20,7 +20,7 @@ import { readAssistantConfig } from './config';
 import { prepareHistory } from './compact';
 import type { BubbleActions } from './MessageView';
 import { registerRuntime, type AssistantRuntime } from './runtime';
-import { safeTarget, type Source } from './sources';
+import { noteFileOf, safeTarget, type Source } from './sources';
 import { assistantSession, type AssistantSession } from './useAssistantSession';
 
 /** 출처 하나를 연다. 장부가 받지 않을 대상(다른 스킴, `..`)은 열지 않는다. */
@@ -30,7 +30,7 @@ export async function openSourceWith(
 ): Promise<void> {
   const target = safeTarget(src.kind, src.target);
   if (!target) return;
-  if (src.kind === 'note') await deps.openFile(target);
+  if (src.kind === 'note') await deps.openFile(noteFileOf(target));
   else await deps.openUrl(target);
 }
 

@@ -61,6 +61,15 @@ export function safeTarget(kind: SourceKind, target: string): string | undefined
   return kind === 'note' ? noteTarget(target) : webTarget(target);
 }
 
+/**
+ * 카탈로그 항목 출처(`resources/workflows/<file>.json#<id>`)는 항목마다 다른 번호를 받도록 `#<id>` 가 붙는다. 열 때는 그
+ * 파일만 연다. 다른 노트 경로(`#` 이 든 파일 이름 포함)는 그대로 둔다.
+ */
+export function noteFileOf(target: string): string {
+  const m = /^(resources\/workflows\/[^#/]+\.json)#[\w.-]+$/.exec(target);
+  return m ? m[1] : target;
+}
+
 export class SourceLedger {
   private readonly entries: Source[] = [];
 

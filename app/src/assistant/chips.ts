@@ -93,32 +93,50 @@ export const NEW_SECTION_NOTE =
   'This section does not exist yet: it is the new section you are drafting. Do not read it again and do not ask the ' +
   'researcher; write the draft now with add_section.';
 
+/** 사람이 새 제목으로 적었지만 노트에 이미 있는 섹션일 때 도구 결과에 덧붙는 안내. */
+export const EXISTING_SECTION_NOTE =
+  'This section already exists in the note: change it with update_section, not add_section. Do not ask the researcher.';
+
 /**
  * 섹션 만들기 칩이 새 제목일 때(`existing !== 'yes'`) `read_section` 을 감싼다(real-app check, 2026-11-11: 새 제목을
- * read_section 으로 읽다 "없음"을 받고 사람에게 되물었다). 그 제목을 읽으면 노트를 읽지 않고 "아직 없으니 add_section 으로
- * 쓰라"는 결과를 돌려주고, 다른 제목이 "찾을 수 없음"으로 끝나면 같은 안내를 덧붙인다. 다른 도구와 다른 칩은 그대로다.
+ * read_section 으로 읽다 "없음"을 받고 사람에게 되물었다). 그 제목을 읽으면 먼저 노트를 실제로 읽는다. 섹션이 없으면
+ * "아직 없으니 add_section 으로 쓰라"는 결과를, 있으면(제목을 직접 적어 picker 가 새 제목으로 본 경우) 읽은 결과에
+ * "이미 있으니 update_section 으로" 안내를 붙인다. 다른 제목이 "찾을 수 없음"으로 끝나면 새 섹션 안내를 덧붙인다.
+ * `add_section` 이 같은 제목(duplicateHeading)으로 거절하면 같은 "이미 있음" 안내를 붙인다. 다른 도구와 다른 칩은 그대로다.
  */
 export function guardNewSection(tools: readonly ToolDef[], chip: ChipId, params: ChipParams): ToolDef[] {
   if (chip !== 'section' || params.existing === 'yes' || !params.heading) return [...tools];
   const want = headingKey(params.heading);
-  return tools.map((tool) =>
-    tool.name !== 'read_section'
-      ? tool
-      : {
-          ...tool,
-          async handler(ctx, args) {
-            const heading = typeof args.heading === 'string' ? args.heading : '';
-            if (heading && headingKey(heading) === want) {
-              return { ok: true, data: { heading: params.heading, exists: false, note: NEW_SECTION_NOTE } };
-            }
-            const res = await tool.handler(ctx, args);
-            if (!res.ok && heading && res.code === 'section_not_found') {
-              return { ...res, error: `${res.error ?? ''} ${NEW_SECTION_NOTE}`.trim() };
-            }
-            return res;
-          },
+  return tools.map((tool): ToolDef => {
+    if (tool.name === 'add_section') {
+      return {
+        ...tool,
+        async handler(ctx, args) {
+          const res = await tool.handler(ctx, args);
+          return !res.ok && res.code === 'duplicateHeading' ? { ...res, error: `${res.error ?? ''} ${EXISTING_SECTION_NOTE}`.trim() } : res;
+        },
+      };
+    }
+    if (tool.name !== 'read_section') return tool;
+    return {
+      ...tool,
+      async handler(ctx, args) {
+        const heading = typeof args.heading === 'string' ? args.heading : '';
+        const res = await tool.handler(ctx, args);
+        if (heading && headingKey(heading) === want) {
+          if (res.ok) return { ...res, data: { exists: true, note: EXISTING_SECTION_NOTE, data: res.data ?? null } };
+          if (res.code === 'section_not_found') {
+            return { ok: true, data: { heading: params.heading, exists: false, note: NEW_SECTION_NOTE } };
+          }
+          return res;
         }
-  );
+        if (!res.ok && heading && res.code === 'section_not_found') {
+          return { ...res, error: `${res.error ?? ''} ${NEW_SECTION_NOTE}`.trim() };
+        }
+        return res;
+      },
+    };
+  });
 }
 
 /** 폴더 기록과 대화 칸에 남는 칩 실행의 짧은 줄: "[섹션 만들기] 결과 섹션". */

@@ -47,6 +47,14 @@ describe('openSourceWith', () => {
     expect(openUrl.mock.calls).toEqual([['https://example.test/x?y=1'], ['https://doi.org/10.1/abc']]);
   });
 
+  it('a catalog entry source opens its catalog file; other paths with # are opened as they are', async () => {
+    const openFile = vi.fn();
+    const openUrl = vi.fn();
+    await openSourceWith({ kind: 'note', label: 'C', target: 'resources/workflows/unitoperations_hw_en.json#UHW020' }, { openFile, openUrl });
+    await openSourceWith({ kind: 'note', label: 'N', target: 'labnote/001_A/C#1.md' }, { openFile, openUrl });
+    expect(openFile.mock.calls).toEqual([['resources/workflows/unitoperations_hw_en.json'], ['labnote/001_A/C#1.md']]);
+  });
+
   it('refuses targets the ledger would refuse', async () => {
     const openFile = vi.fn();
     const openUrl = vi.fn();

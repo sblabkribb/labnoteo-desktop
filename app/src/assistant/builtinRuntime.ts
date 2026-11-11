@@ -140,6 +140,16 @@ const FENCE_TALK = /untrusted[-_ ]?data|fence\s*id|울타리/i;
 const ECHOED_TAG = /<\s*\/\s*untrusted[-_]data\b[^>\n]*>|<\s*untrusted[-_]data\b[^>\n]*\b(?:source|id)\s*=[^>\n]*>/gi;
 const talksAboutFences = (s: string): boolean => FENCE_TALK.test(s.replace(ECHOED_TAG, ''));
 
+/** 코드 블록(```…```)과, `spans` 가 거짓이 아니면 코드 조각(`…`) 밖의 글에만 `fn` 을 쓴다. */
+function outsideCode(text: string, fn: (s: string) => string, opts: { spans?: boolean } = {}): string {
+  // Backticks are written \x60: the escapes guard reads a backtick as the start of a template literal.
+  const re = opts.spans === false ? /(\x60{3}[\s\S]*?(?:\x60{3}|$))/ : /(\x60{3}[\s\S]*?(?:\x60{3}|$)|\x60[^\x60\n]*\x60)/;
+  return text
+    .split(re)
+    .map((part, i) => (i % 2 === 1 ? part : fn(part)))
+    .join('');
+}
+
 /**
  * 보이고 저장되는 답을 다듬는다(real-app check, 2026-11-11): 베낀 울타리 태그를 지우고(`stripFenceTags`), `[cite:n]`·
  * `(cite: n)` 꼴은 출처 칩이 되는 `[n]` 으로 바꾸고, 울타리 id(`id="0123456789ab"`, `(id: …)`)와 울타리를 말하는
@@ -148,10 +158,17 @@ const talksAboutFences = (s: string): boolean => FENCE_TALK.test(s.replace(ECHOE
 export function tidyAnswer(text: string): string {
   // 1. Echoed fence tags (with attributes, or closing) go first, as stripFenceTags would take them.
   let out = text.replace(new RegExp(`${ECHOED_TAG.source}[ \t]*\r?\n?`, 'gi'), '');
-  // 2. Fence ids and source attributes mentioned in prose.
-  out = out.replace(/\s*\bsource\s*=\s*"[^"\n]*"/gi, '');
-  out = out.replace(/\s*[([]\s*(?:fence\s+|block\s+)?id\s*[:=]?\s*[\x22\x27\x60]?[0-9a-f]{12}[\x22\x27\x60]?\s*[)\]]/gi, '');
-  out = out.replace(/\s*(?:fence\s+|block\s+)?\bid\s*[:=]\s*[\x22\x27\x60]?[0-9a-f]{12}\b[\x22\x27\x60]?/gi, '');
+  // 2. Fence ids and source attributes mentioned in prose. Code blocks (```…```) keep them: there they are code.
+  //    Inline code spans are not spared, as the model writes an echoed id as `0123456789ab`.
+  out = outsideCode(
+    out,
+    (seg) =>
+      seg
+        .replace(/\s*\bsource\s*=\s*"[^"\n]*"/gi, '')
+        .replace(/\s*[([]\s*(?:fence\s+|block\s+)?id\s*[:=]?\s*[\x22\x27\x60]?[0-9a-f]{12}[\x22\x27\x60]?\s*[)\]]/gi, '')
+        .replace(/\s*(?:fence\s+|block\s+)?\bid\s*[:=]\s*[\x22\x27\x60]?[0-9a-f]{12}\b[\x22\x27\x60]?/gi, ''),
+    { spans: false }
+  );
   // 3. Sentences that talk about the fences.
   out = out
     .split('\n')
@@ -369,7 +386,7 @@ function notePathOf(tool: ToolDef, args: Record<string, unknown>): string | unde
   return undefined;
 }
 
-/** 카탈로그 결과 하나의 파일(보관함 상대 경로): 출처 칩이 연다. */
+/** 카탈로그 결과 하나의 파일(보관함 상대 경로): 출처 칩이 연다(`noteFileOf`). */
 function catalogFileOf(hit: { kind?: unknown; category?: unknown }): string {
   if (hit.kind === 'workflow') return 'resources/workflows/workflows_en.json';
   return hit.category === 'SW' ? 'resources/workflows/unitoperations_sw_en.json' : 'resources/workflows/unitoperations_hw_en.json';
@@ -377,7 +394,8 @@ function catalogFileOf(hit: { kind?: unknown; category?: unknown }): string {
 
 /**
  * `search_catalog` 결과마다 출처 번호를 단다(real-app check, 2026-11-11: 카탈로그로 답하고도 출처가 없어 모델이 없는
- * [1] 을 달았다). 이름표는 "카탈로그 · UHW010 Liquid Handling", 대상은 그 카탈로그 파일이다.
+ * [1] 을 달았다). 이름표는 "카탈로그 · UHW010 Liquid Handling", 대상은 그 카탈로그 파일에 `#<id>` 를 붙인 것이다.
+ * 장부는 같은 대상을 한 번호로 합치므로, 파일만 대상으로 하면 같은 파일의 항목이 모두 첫 항목의 이름표를 단 한 번호가 된다.
  */
 function citeCatalog(res: ToolResult, cite: (src: Source) => number): ToolResult {
   const data = res.data as { results?: unknown } | undefined;
@@ -387,18 +405,26 @@ function citeCatalog(res: ToolResult, cite: (src: Source) => number): ToolResult
     const hit = r as { id?: unknown; name?: unknown; kind?: unknown; category?: unknown };
     const label = [hit.id, hit.name].filter((x) => typeof x === 'string' && x).join(' ');
     if (!label) return r;
-    const n = cite({ kind: 'note', label: appT('assistant.source.catalog', label), target: catalogFileOf(hit) });
+    const id = typeof hit.id === 'string' && /^[\w.-]+$/.test(hit.id) ? hit.id : '';
+    const target = id ? `${catalogFileOf(hit)}#${id}` : catalogFileOf(hit);
+    const n = cite({ kind: 'note', label: appT('assistant.source.catalog', id ? label : hit.kind === 'workflow' ? 'Workflow' : 'Unit Operation'), target });
     return n ? { ...(r as object), cite: n } : r;
   });
   return { ...res, data: { ...data, results } };
 }
 
 /**
- * 답의 `[n]` 가운데 출처 장부에 없는 번호(모델이 지어낸 인용)를 뺀다. 이름 바로 뒤의 `[n]`(코드의 `a[1]`)과 링크
- * `[1](…)` 는 인용이 아니라 그대로 둔다.
+ * 답의 `[n]` 가운데 출처 장부에 없는 번호(모델이 지어낸 인용)를 뺀다. 이름 바로 뒤의 `[n]`(코드의 `a[1]`), 링크
+ * `[1](…)`, 참조 링크 `[글][1]`·`[1]: …`, 코드 조각·블록 안의 `[n]` 은 인용이 아니라 그대로 둔다. 알려진 대가: 글 속의
+ * 맨 `[2]`(번호 목록의 `[2] 참고문헌`, `step [3]`)는 장부 번호보다 크면 빠진다.
  */
 export function dropUnknownCites(text: string, known: number): string {
-  const out = text.replace(/ ?(?<!\w)\[([1-9]\d{0,2})\](?![(:])/g, (m, n: string) => (Number(n) <= known ? m : ''));
+  const out = outsideCode(text, (seg) =>
+    // Not after a word, nor after a bracket that is not itself a cite (`[the guide][2]`); `[2][3]` are both cites.
+    seg.replace(/ ?(?<!\w)(?<!\[(?![1-9]\d{0,2}\])[^[\]\n]*\])\[([1-9]\d{0,2})\](?![(:])/g, (m, n: string) =>
+      Number(n) <= known ? m : ''
+    )
+  );
   return out === text ? text : out.trim();
 }
 

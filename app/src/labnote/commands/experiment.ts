@@ -30,7 +30,7 @@ import {
 import { experimentMarkerSpots, formatMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerIndex';
 import { coreLocale, overrideOr } from '../i18n';
 import { processNote } from '../openNotes';
-import { frontMatterText } from '../frontMatterText';
+import { frontMatterText, liftFrontMatter } from '../frontMatterText';
 import { README, resolveReadmePath, VAULT_ROOT, samePath } from '../paths';
 import {
   experimentFolderNames,
@@ -245,7 +245,7 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
   }
 
   // 플러그인: writeNoteThroughVault(app, host, readmePath, stamp(setFrontMatterKeys(parsed.text, changes)))
-  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(text, changes)));
+  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(liftFrontMatter(text), changes)));
   let message = host.t('Experiment status changed ({0}): {1} → {2}.', folderName, current ?? host.t('(none)'), chosen);
   if (cleared) {
     message += ` ${host.t('Discussion flag cleared.')}`;
@@ -306,7 +306,7 @@ export async function clearExperimentStatus(ctx: CommandContext, experimentDir: 
   const raw = parsed.frontMatter.status;
   if (raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '')) return;
   const current = String(raw);
-  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(text, { status: undefined })));
+  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(liftFrontMatter(text), { status: undefined })));
   host.notify(
     'info',
     host.t('Experiment status changed ({0}): {1} → {2}.', posix.basename(experimentDir), current, host.t('(none)')),
@@ -332,7 +332,7 @@ export async function toggleDiscussionFlag(ctx: CommandContext, experimentDir?: 
   const next = !isDiscussFlagged(parsed.frontMatter);
   // 플러그인: writeNoteThroughVault(app, host, readmePath, stamp(setFrontMatterKeys(parsed.text, {...})))
   await processNote(host.fs, readmePath, (text) =>
-    stamp(setFrontMatterKeys(text, { [DISCUSS_FLAG_KEY]: next ? true : undefined })),
+    stamp(setFrontMatterKeys(liftFrontMatter(text), { [DISCUSS_FLAG_KEY]: next ? true : undefined })),
   );
 
   const state = await issueAutomationState(host);

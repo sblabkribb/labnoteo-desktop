@@ -9,7 +9,7 @@
 import type { ExperimentStatus, LabnoteHost } from '@labnoteo/core';
 import { EXPERIMENT_STATUSES, parseFrontMatterYaml } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
-import { frontMatterText } from '../frontMatterText';
+import { frontMatterText, liftFrontMatter } from '../frontMatterText';
 import {
   normalizeChecklistLink,
   parseWorkflowChecklistFromReadme,
@@ -165,7 +165,8 @@ export async function readNoteForFrontMatterEdit(
 ): Promise<{ frontMatter: Record<string, unknown>; body: string; text: string } | undefined> {
   // `parseFrontMatterYaml` requires LF-normalised text with no BOM (a bare `\n`
   // right after the opening `---`); Windows-authored notes have CRLF and often a BOM.
-  const original = frontMatterText(await host.fs.read(readmePath));
+  // A blank line before the opening `---` is read past, as the write (liftFrontMatter) takes it out.
+  const original = frontMatterText(liftFrontMatter(await host.fs.read(readmePath)));
   const { frontMatter, body, parseError } = parseFrontMatterYaml(original);
   if (parseError) {
     host.notify(
