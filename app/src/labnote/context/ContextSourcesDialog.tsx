@@ -47,6 +47,12 @@ const ISSUE_LABEL: Record<ChainIssueCode, () => string> = {
 const issueText = (i: ChainIssue): string =>
   [ISSUE_LABEL[i.code](), i.path, i.detail ? `(${i.detail})` : ''].filter(Boolean).join(' ');
 
+/**
+ * The row label. The Input prefill is labelled by the unit op whose Output it carries, which also has its own row,
+ * so it says what it is (real-server check, 2026-11-11: two rows read the same).
+ */
+const rowLabel = (s: ContextSource): string => (s.kind === 'prefill' ? `${s.label} › ${t('aiCtx.sources.previousOutput')}` : s.label);
+
 function SourceRow(props: { source: ContextSource; onToggle: (on: boolean) => void }) {
   const s = props.source;
   const id = useId();
@@ -63,7 +69,7 @@ function SourceRow(props: { source: ContextSource; onToggle: (on: boolean) => vo
           onChange={e => props.onToggle(e.currentTarget.checked)}
         />
         <span>
-          <span>{s.label}</span>
+          <span>{rowLabel(s)}</span>
           {where ? <span className="picker-desc"> {where}</span> : null}
         </span>
       </label>

@@ -54,6 +54,21 @@ afterEach(() => {
 });
 
 describe('ContextSourcesDialog', () => {
+  it('names the previous-Output row apart from that unit op’s own row (real-server check)', async () => {
+    const built = await mainContext();
+    const prefill = built.sources.find(s => s.kind === 'prefill')!;
+    expect(prefill).toBeTruthy();
+    const own = built.sources.find(s => s.kind === 'unitOp' && s.label === prefill.label)!;
+    expect(own).toBeTruthy();
+    renderLayer();
+    openIn(() => contextSourcesDialog(built, 200_000, 'Ollama', 'qwen2.5'));
+    const labelOf = (id: string) => rowOf(id).querySelector('label > span > span')!.textContent;
+    expect(labelOf(prefill.id)).toBe(`${prefill.label} › ${t('aiCtx.sources.previousOutput')}`);
+    expect(labelOf(own.id)).toBe(own.label);
+    const labels = built.sources.map(s => labelOf(s.id));
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
   it('shows scope, sources, badges, tokens, required and default-excluded rows, issues, provider and total', async () => {
     const built = await mainContext();
     renderLayer();
