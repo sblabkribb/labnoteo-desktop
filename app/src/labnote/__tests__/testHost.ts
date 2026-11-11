@@ -35,7 +35,7 @@ type Answer<A extends unknown[], R> = R | ((...args: A) => R);
 export interface Asked {
   pick: Array<{ items: PickItem<unknown>[]; opts?: { title?: string; placeholder?: string; selected?: unknown } & PickExtras }>;
   prompt: PromptOpts[];
-  confirm: Array<{ message: string; opts?: { confirmLabel?: string } }>;
+  confirm: Array<{ message: string; opts?: { title?: string; confirmLabel?: string } }>;
   alias: AliasOpts[];
   choose: Array<{ message: string; choices: Array<{ label: string; value: unknown }>; opts?: { title?: string } }>;
   newExperiment: NewExperimentOpts[];
