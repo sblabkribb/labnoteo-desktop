@@ -26,6 +26,9 @@
  * - 웹 도구(Task 14): 대화 칩에서, 이 PC 의 `assistant.json` 에 검색 주소가 있을 때만 `web_search`/`fetch_page` 를 준다.
  *   `fetch_page` 의 허용 목록은 이번 차례의 사용자 글과 이 폴더 기록의 사용자 글, 검색 결과, 문헌 검색 결과의 링크다.
  *   검색 중 상태 줄은 보낼 검색어를 그대로 보인다(`web.queryShown`). 한도(검색 3번, 페이지 5개)는 실행마다 새로 센다.
+ * - 실험실 도구(labservices/, lab-service tools design §7): 대화 칩에서, partbank 기본 연결이 설정되어 있으면 `partbank_*`,
+ *   Workflow 서버가 설정되어 있으면 `workflow_*` 를 준다. 읽기만 하고, 결과는 `kind:'lab'` 울타리에 싸여 실행을 오염시킨다.
+ *   partbank 도구가 있으면 "partbank 를 찾을 수 없다" 문단(`PARTBANK_RULES`)은 빠지고 `labToolRules` 문단이 들어간다.
  */
 import type { ToolDef, ToolResult, Translator } from '@labnoteo/core';
 import type { AiEnv } from '../ai/aiEnv';
@@ -33,12 +36,11 @@ import { externalAgentTools, externalApprovalMessage, type ExternalToolMeta } fr
 import { loopDetail } from '../ai/loopDetail';
 import { UNTRUSTED_RULES } from '../ai/untrusted';
 import { t as appT } from '../i18n/t';
-import { secretStatus, vaultGuard } from '../integrations/netIpc';
+import { vaultGuard } from '../integrations/netIpc';
 import { searchNotesIn } from '../search/indexApi';
 import type { ScopedToolContext } from '../labnote/context/contextTools';
 import { experimentFolderOf, resolveScope, scopeGate, type ExperimentRef, type Scope } from '../labnote/context/scope';
 import { overrideOr } from '../labnote/i18n';
-import { isOriginUrl } from '../labnote/settings';
 import { noAnswerMessage, replyLanguageInstruction, toolContext, toolRunNotice } from '../labnote/port/aiCommon';
 import { buildApprovalMessage, erasesRecordedLines } from '../labnote/port/approvalMessage';
 import { experimentReadmes } from '../labnote/port/experiments';
@@ -53,6 +55,7 @@ import { cleanLabel, SourceLedger, type Source } from './sources';
 import { readAssistantConfig } from './config';
 import { UrlAllowlist, webAgentTools } from './web/agentTools';
 import { MAX_WEB_QUERY, webIpcFor } from './web/ipc';
+import { labAgentTools, labIpcFor, labSetup, labToolRules } from '../labservices';
 
 export { HISTORY_TAINT } from './compact';
 
@@ -100,19 +103,13 @@ export type PartbankSetup = keyof typeof PARTBANK_RULES;
 
 /** partbank 연동 상태: 주소가 있고 그 연결의 키가 저장되어 있으면 configured. 키 상태를 읽지 못하면 unknown. */
 export async function partbankSetup(env: Pick<AiEnv, 'settings' | 'invoke'>): Promise<PartbankSetup> {
-  try {
-    const status = await secretStatus(env.invoke);
-    const s = env.settings();
-    const set =
-      (isOriginUrl(s.partbankWebUrl) && status.set.partbankWeb === true) ||
-      (isOriginUrl(s.partbankDesktopUrl) && status.set.partbankDesktop === true);
-    return set ? 'configured' : 'notSetUp';
-  } catch {
-    return 'unknown';
-  }
+  return (await labSetup(env)).partbank;
 }
 
-/** 이번 실행의 도구 중 partbank 를 찾는 것(MCP 도구는 `mcp_<서버>_search_parts` 꼴이다). */
+/**
+ * 이번 실행의 도구 중 partbank 를 찾는 것(MCP 도구는 `mcp_<서버>_search_parts` 꼴, 앱의 실험실 도구는
+ * `partbank_search_parts`·`partbank_lookup_part` 다).
+ */
 export function hasPartbankTool(tools: readonly ToolDef[]): boolean {
   return tools.some((x) => /(?:^|_)(?:search_parts|lookup_part)$/.test(x.name));
 }
@@ -354,6 +351,7 @@ function systemPrompt(o: {
         'fetch_page opens only links from web_search or literature results or links the user typed, exactly as given. ' +
         'Cite what you use from the web with its cite number.'
       : '',
+    labToolRules(o.tools.map((x) => x.name)),
     hasPartbankTool(o.tools) ? '' : PARTBANK_RULES[o.partbank ?? 'unknown'],
     o.chip ?? '',
     replyLanguageInstruction(o.lang),
@@ -464,7 +462,20 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     // Web tools (Task 14): chat only, and only when this PC has a search address (assistant.json, R9).
     const web =
       chip && chip !== 'chat' ? undefined : await webToolsFor(env, turn, run$.signal, cite);
-    const meta = new Map<string, ExternalToolMeta>([...external.meta, ...(web?.meta ?? [])]);
+    // Lab-service tools (partbank, Workflow server): chat only, and only for the services that are set up (design §7).
+    const setup = await labSetup(env);
+    const lab =
+      chip && chip !== 'chat'
+        ? { tools: [] as ToolDef[], meta: new Map<string, ExternalToolMeta>() }
+        : labAgentTools({
+            ipc: labIpcFor(env.invoke, run$.signal),
+            setup,
+            settings: env.settings(),
+            cite,
+            notify: (message) => env.host.notify('warn', message),
+            vaultKey: guard.root ?? '',
+          });
+    const meta = new Map<string, ExternalToolMeta>([...external.meta, ...lab.meta, ...(web?.meta ?? [])]);
     let readOutside = false;
     const hooks = {
       outside: () => {
@@ -477,7 +488,9 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
       cite,
       ...(web ? { scholarLinks: (text: string) => web.allowedUrls.addFromResultLines(text) } : {}),
     };
-    const tools = [...coreTools, ...external.tools, ...(web?.tools ?? [])].map((x) => instrument(x, meta.get(x.name), hooks));
+    const tools = [...coreTools, ...external.tools, ...lab.tools, ...(web?.tools ?? [])].map((x) =>
+      instrument(x, meta.get(x.name), hooks)
+    );
 
     const check = async (): Promise<void> => {
       try {
@@ -564,7 +577,7 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
             { budgetTokens: historyBudget(env.settings().llmContextWindow) }
           );
     const activePath = env.ctx.host.editTarget()?.path;
-    const partbank = hasPartbankTool(tools) ? undefined : await partbankSetup(env);
+    const partbank = hasPartbankTool(tools) ? undefined : setup.partbank;
     const messages: ChatMessage[] = [
       {
         role: 'system',
@@ -572,7 +585,7 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
           tools,
           scope,
           activePath,
-          external: external.tools.length > 0 || !!web,
+          external: external.tools.length > 0 || lab.tools.length > 0 || !!web,
           web: !!web,
           fencedHistory: earlier.fenced,
           lang: env.lang(),

@@ -39,6 +39,7 @@ import {
   type StoredMessage,
 } from '../runtime';
 import type { Source } from '../sources';
+import { labToolRules } from '../../labservices';
 
 vi.mock('../../ai/externalTools', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../ai/externalTools')>();
@@ -699,9 +700,14 @@ describe('builtinRuntime', () => {
   it('partbank set up but no search tool: the rule says it cannot be searched in chat yet, never that it is not connected', async () => {
     // real-server check: with partbank configured the assistant said partbank was not connected to this system.
     const p = new Script([answer('끝')]);
-    const { rt } = await setup(p, { routes: { secret_status: () => secretStatusOf({ partbankWeb: true }) } });
+    // The web key is saved but the default connection is the desktop one, which has none: no partbank tool is offered.
+    const { rt } = await setup(p, {
+      settings: { partbankDefaultConnection: 'desktop' },
+      routes: { secret_status: () => secretStatusOf({ partbankWeb: true }) },
+    });
     await rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
     const sys = p.seen[0][0].content;
+    expect(sys).not.toContain('partbank_search_parts');
     expect(sys).toContain(PARTBANK_RULES.configured);
     expect(sys).not.toContain(PARTBANK_RULES.notSetUp);
     expect(PARTBANK_RULES.configured).toContain('cannot search partbank in this chat yet');
@@ -715,6 +721,114 @@ describe('builtinRuntime', () => {
     await rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
     expect(p.seen[0][0].content).toContain(PARTBANK_RULES.notSetUp);
     expect(PARTBANK_RULES.notSetUp).toContain('not connected yet');
+  });
+
+  describe('lab-service tools (partbank, Workflow server)', () => {
+    const PB_TOOLS = 'partbank_search_parts, partbank_lookup_part, partbank_list_groups';
+    const WF_TOOLS = 'workflow_list_designs, workflow_get_design, workflow_get_protocol_notes, workflow_get_method';
+    const GLOBAL = {
+      results: [{ id: '665f00000000000000000001', kid: 'KBp_aa0406', name: 'sfGFP', type: 'part', owner_is_me: true }],
+      total: 1,
+    };
+
+    it('the default partbank connection with a key offers the partbank tools; the "cannot search" rule is gone', async () => {
+      const p = new Script([answer('끝')]);
+      const { rt } = await setup(p, { routes: { secret_status: () => secretStatusOf({ partbankWeb: true }) } });
+      await rt.run(turnOf('partbank에서 GFP 찾아 줘'), recordSink().sink, go());
+      const sys = p.seen[0][0].content;
+      expect(sys).toContain(PB_TOOLS);
+      expect(sys).not.toContain('workflow_list_designs');
+      for (const rule of Object.values(PARTBANK_RULES)) expect(sys).not.toContain(rule);
+      expect(sys).toContain(labToolRules(['partbank_search_parts']));
+      expect(sys).toContain('you cannot create or change anything in partbank.');
+      expect(sys).toContain(UNTRUSTED_RULES);
+    });
+
+    it('a Workflow server key offers the workflow tools; partbank keeps its not-set-up rule', async () => {
+      const p = new Script([answer('끝')]);
+      const { rt } = await setup(p, { routes: { secret_status: () => secretStatusOf({ bfwServer: true }) } });
+      await rt.run(turnOf('내 디자인 목록'), recordSink().sink, go());
+      const sys = p.seen[0][0].content;
+      expect(sys).toContain(WF_TOOLS);
+      expect(sys).not.toContain('partbank_search_parts');
+      expect(sys).toContain(PARTBANK_RULES.notSetUp);
+      expect(sys).toContain('not the lab\'s own protocol');
+    });
+
+    it('the desktop Workflow connection needs only its key; an unreadable key status offers nothing', async () => {
+      const p = new Script([answer('끝')]);
+      const a = await setup(p, { settings: { bfwConnection: 'desktop' }, routes: { secret_status: () => secretStatusOf({ bfwDesktop: true }) } });
+      await a.rt.run(turnOf('hi'), recordSink().sink, go());
+      expect(p.seen[0][0].content).toContain(WF_TOOLS);
+
+      const q = new Script([answer('끝')]);
+      const b = await setup(q); // secret_status is not routed: the status cannot be read
+      await b.rt.run(turnOf('hi'), recordSink().sink, go());
+      expect(q.seen[0][0].content).not.toContain('partbank_');
+      expect(q.seen[0][0].content).not.toContain('workflow_list_designs');
+      expect(q.seen[0][0].content).toContain(PARTBANK_RULES.unknown);
+    });
+
+    it('a making chip gets no lab-service tools', async () => {
+      const q = new Script([answer('끝')]);
+      const b = await setup(q, { routes: { secret_status: () => secretStatusOf({ partbankWeb: true, bfwServer: true }) } });
+      await b.rt.run(
+        turnOf('워크플로', { mode: { kind: 'chip', chip: 'workflow', params: { documentPath: DIR } } }),
+        recordSink().sink,
+        go()
+      );
+      expect(q.seen[0][0].content).not.toContain('partbank_search_parts');
+      expect(q.seen[0][0].content).not.toContain('workflow_list_designs');
+    });
+
+    it('a partbank search runs without a confirm, cites the row link, taints the run and fences the result', async () => {
+      const p = new Script([toolTurn('partbank_search_parts', { query: 'GFP' }), answer('찾았어요 [1]')]);
+      const sent: Array<Record<string, unknown>> = [];
+      const { rt, th } = await setup(p, {
+        routes: {
+          secret_status: () => secretStatusOf({ partbankWeb: true }),
+          partbank_read: (a) => {
+            sent.push(a);
+            return { status: 200, json: GLOBAL };
+          },
+        },
+      });
+      const { rec, sink } = recordSink();
+      const res = await rt.run(turnOf('partbank에서 GFP 찾아 줘'), sink, go());
+      expect(sent).toEqual([{ method: 'POST', path: '/search/global', query: null, body: { query: 'GFP', limit: 10 } }]);
+      expect(p.dialogs.every((d) => d === undefined)).toBe(true);
+      expect(rec.status[0]).toBe(t('assistant.status.tool', t('tool.name.partbankSearchParts')));
+      const link = 'https://partbank.kbiofoundry.kr/workspace/parts/665f00000000000000000001';
+      expect(res.sources).toEqual([{ kind: 'web', label: 'partbank: KBp_aa0406 sfGFP', target: link }]);
+      expect(res.tainted).toBe(true);
+      const toolMsg = p.seen[1].find((m) => m.role === 'tool');
+      expect(toolMsg?.content).toContain('<untrusted-data source=\\"partbank:search_parts\\"');
+      expect(toolMsg?.content).toContain(link);
+      expect(th.notes).toEqual([]);
+    });
+
+    it('a missing key is told to the person once per run, in the UI language, and named in the end notice', async () => {
+      setLang('ko');
+      const p = new Script([
+        toolTurn('partbank_search_parts', { query: 'GFP' }),
+        toolTurn('partbank_list_groups', {}),
+        answer('키가 없어요'),
+      ]);
+      const { rt, th } = await setup(p, {
+        routes: {
+          secret_status: () => secretStatusOf({ partbankWeb: true }),
+          partbank_read: () => {
+            throw { kind: 'keyMissing', message: 'raw-rust-text' };
+          },
+        },
+      });
+      const res = await rt.run(turnOf('GFP'), recordSink().sink, go());
+      const notice = t('pet.labTools.notice.keyMissing', 'partbank');
+      expect(th.notes.filter((n) => n.message === notice)).toHaveLength(1);
+      expect(notice).toBe('partbank API 키가 저장되어 있지 않습니다. 통합 설정에서 키를 넣어 주세요.');
+      expect(res.notice?.()).toContain(t('tool.name.partbankSearchParts'));
+      expect(JSON.stringify(p.seen)).not.toContain('raw-rust-text');
+    });
   });
 
   it('an external write is asked with the external text, and the untrusted rules are sent', async () => {
