@@ -24,6 +24,7 @@ import {
   workflowLabelFor,
 } from '@labnoteo/core/lib/workflowStructure';
 import type { AiEnv } from '../../ai/aiEnv';
+import { vendorKo } from '../i18n';
 import { openNote } from '../openNotes';
 import { complete, deliverToNote, insertBlock, noteRef, replyLanguageInstruction, SUMMARY_REFERENCE_INSTRUCTION } from './aiCommon';
 import { toNoteCallout } from './aiDraftMethod';
@@ -37,10 +38,15 @@ const README_SUMMARY_HEADING = 'Summary and Discussion';
 /** Characters of results sent for a whole experiment, shared among its notes (#306). */
 const EXPERIMENT_RESULTS_BUDGET = 10000;
 
-/** The callout titles an earlier run of a summary wrote, in English (`key`) and in the UI language (`translated`). */
+/**
+ * The callout titles an earlier run of a summary wrote, in English (`key`) and in the UI language (`translated`).
+ * The plugin's own Korean title (`vendorKo`) is matched too: the app writes "Workflow" in English where the plugin and
+ * earlier app versions wrote 워크플로, and their callouts must still be replaced, not doubled.
+ */
 function summaryTitles(key: string, translated: string): string[] {
   const before = (title: string) => title.split(' (')[0].trim();
-  return [...new Set([before(key), before(translated)])];
+  const plugin = vendorKo(key);
+  return [...new Set([before(key), before(translated), ...(plugin ? [before(plugin)] : [])])];
 }
 
 /**

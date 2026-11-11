@@ -53,15 +53,15 @@ beforeEach(() => setLang('ko'));
 describe('chip ids, labels and lines', () => {
   it('has the five chips in order with ko and en labels', () => {
     expect(CHIP_IDS).toEqual(['howTo', 'section', 'unitOp', 'workflow', 'chat']);
-    expect(CHIP_IDS.map(chipLabel)).toEqual(['사용법', '섹션 만들기', '단위 공정 만들기', '워크플로 만들기', '대화']);
+    expect(CHIP_IDS.map(chipLabel)).toEqual(['사용법', '섹션 만들기', 'Unit Operation 만들기', 'Workflow 만들기', '대화']);
     setLang('en');
     expect(CHIP_IDS.map(chipLabel)).toEqual(['How to use', 'Create section', 'Create unit operation', 'Create workflow', 'Chat']);
   });
 
   it('a chip run is stored as one short line "[chip] …"', () => {
     expect(chipUserLine('section', '결과 섹션')).toBe('[섹션 만들기] 결과 섹션');
-    expect(chipUserLine('unitOp', '  PCR 산물 정제 추가 ')).toBe('[단위 공정 만들기] PCR 산물 정제 추가');
-    expect(chipUserLine('workflow', '')).toBe('[워크플로 만들기]');
+    expect(chipUserLine('unitOp', '  PCR 산물 정제 추가 ')).toBe('[Unit Operation 만들기] PCR 산물 정제 추가');
+    expect(chipUserLine('workflow', '')).toBe('[Workflow 만들기]');
   });
 
   it('knows a workflow note (###_….md, not the README)', () => {

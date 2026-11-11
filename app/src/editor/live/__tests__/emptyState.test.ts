@@ -58,9 +58,9 @@ describe('README empty-state card', () => {
     const v = view(README([]), readmeEmptyState.of({ onAddWorkflow }));
     const c = card(v);
     expect(c).not.toBeNull();
-    expect(c!.textContent).toContain('아직 워크플로가 없습니다');
+    expect(c!.textContent).toContain('아직 Workflow가 없습니다');
     const button = c!.querySelector('button')!;
-    expect(button.textContent).toBe('첫 워크플로 추가');
+    expect(button.textContent).toBe('첫 Workflow 추가');
     expect(button.getAttribute('style')).toBeNull();
     button.click();
     expect(onAddWorkflow).toHaveBeenCalledTimes(1);

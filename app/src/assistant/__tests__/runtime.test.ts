@@ -711,8 +711,8 @@ describe('end notice wording', () => {
 
   it('write tools are named in words; an unknown tool keeps its name', () => {
     setLang('ko');
-    expect(toolLabel('insert_unit_operation')).toBe('단위 공정 넣기');
-    expect(toolLabel('create_workflow')).toBe('워크플로 만들기');
+    expect(toolLabel('insert_unit_operation')).toBe('Unit Operation 넣기');
+    expect(toolLabel('create_workflow')).toBe('Workflow 만들기');
     expect(toolLabel('mystery_tool')).toBe('mystery_tool');
   });
 });

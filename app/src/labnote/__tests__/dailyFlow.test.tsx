@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
  * 하루의 실험 노트 흐름을 앱 전체(App)로 끝까지 돌린다. 파일은 fakeVault, 대화상자의 답은 대화상자 저장소로 준다.
- * 실험 만들기(Ctrl+P) → README 에 입력(자동 저장 전) → Workflows 패널에서 카탈로그 워크플로 만들기 → 머리 단추로
- * 단위 공정 넣기(되돌리기 한 번) → Meta End_date 에 날짜와 시간 → 상태를 failed 로 → 다시 하기.
+ * 실험 만들기(Ctrl+P) → README 에 입력(자동 저장 전) → Workflows 패널에서 카탈로그 Workflow 만들기 → 머리 단추로
+ * Unit Operation 넣기(되돌리기 한 번) → Meta End_date 에 날짜와 시간 → 상태를 failed 로 → 다시 하기.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -190,11 +190,11 @@ describe('하루의 흐름(앱 전체)', () => {
       });
       expect(vault.files()[README_PATH]).not.toContain(TYPED);
 
-      // 4. Workflows 패널 → 카탈로그 워크플로 → 워크플로 생성, 별칭 "pET"
+      // 4. Workflows 패널 → 카탈로그 Workflow → Workflow 생성, 별칭 "pET"
       await user.click(screen.getByRole('tab', { name: '실험' }));
       await user.click(await screen.findByRole('button', { name: /^카탈로그/ }));
       const catalog = await screen.findByRole('tree', { name: '카탈로그' });
-      const root = await within(catalog).findByRole('treeitem', { name: /^워크플로/ });
+      const root = await within(catalog).findByRole('treeitem', { name: /^Workflow/ });
       await user.click(root);
       let wfRow: HTMLElement | undefined;
       await waitFor(async () => {
@@ -213,7 +213,7 @@ describe('하루의 흐름(앱 전체)', () => {
       await user.click(within(pop).getByRole('button', { name: /^현재 실험에 추가 \(/ }));
       await answer('alias', () => 'pET');
 
-      // 5. 워크플로 노트가 열린다. README 는 친 줄을 지키고 체크리스트 항목을 얻었다(바꿀 때 저장됐다)
+      // 5. Workflow 노트가 열린다. README 는 친 줄을 지키고 체크리스트 항목을 얻었다(바꿀 때 저장됐다)
       await editorReady(WF_PATH, `${WF.id} ${WF.name}`);
       await waitFor(() => expect(vault.files()[README_PATH]).toContain(TYPED));
       const readmeAfterWorkflow = vault.files()[README_PATH];
@@ -250,7 +250,7 @@ describe('하루의 흐름(앱 전체)', () => {
       await palette('Insert date and time');
       await waitFor(() => expect(currentView().state.doc.toString()).toMatch(FILLED_END_DATE));
 
-      // 8. 상태를 failed 로(워크플로 노트에서: 그 실험의 README 를 바꾼다)
+      // 8. 상태를 failed 로(Workflow 노트에서: 그 실험의 README 를 바꾼다)
       await palette('Change experiment status');
       await answer('pick', () => 'failed');
       await waitFor(() => expect(vault.files()[README_PATH]).toMatch(/^status: failed$/m));
@@ -280,7 +280,7 @@ describe('하루의 흐름(앱 전체)', () => {
       expect(maskDates(files[RETRY_README])).toBe(maskDates(expectedRetry));
       expect(files[RETRY_README]).toContain('retry_of');
 
-      // 워크플로 노트: 템플릿의 줄은 그대로, 더한 것은 블록과 목차 한 줄, End_date 는 채워졌다
+      // Workflow 노트: 템플릿의 줄은 그대로, 더한 것은 블록과 목차 한 줄, End_date 는 채워졌다
       const wfSaved = files[WF_PATH];
       expect(wfSaved).toContain(heading);
       expect(wfSaved.split('\n').filter((l) => /^\s*- \[UHW010 /.test(l))).toHaveLength(1);

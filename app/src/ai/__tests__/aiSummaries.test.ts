@@ -514,6 +514,22 @@ describe('reply language', () => {
     expect(th.asked.confirm).toHaveLength(1);
     expect(docOf(NOTE)).not.toContain('옛 요약');
   });
+
+  it('writes the Korean header with Workflow in English and still replaces a plugin-written 워크플로 summary', async () => {
+    setLang('ko');
+    const body =
+      '## [WD010 A]\n\n### [UHW010 Spin]\n\n#### Results & Discussions\n수율 82%\n\n## Conclusions and Discussion\n\n> [!note] AI 워크플로 결과 요약 (old, 2026-01-01)\n> - 옛 요약\n';
+    const th = host({ [NOTE]: body });
+    await mountAt(th, NOTE, 0);
+    th.answer.confirm(true);
+    const { env } = aiEnv(th, () => reply('- 새 요약'));
+    await summarizeResultsCommand(env);
+    expect(th.asked.confirm).toHaveLength(1);
+    const doc = docOf(NOTE);
+    expect(doc).not.toContain('옛 요약');
+    expect(doc).not.toContain('워크플로');
+    expect(doc).toContain('> [!note] AI Workflow 결과 요약 (llama3.1');
+  });
 });
 
 describe('helpers', () => {

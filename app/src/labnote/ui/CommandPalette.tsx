@@ -7,7 +7,7 @@ import type { CommandContext } from '../commands/context';
 import { commands, type Command } from '../commands/registry';
 import { runCommand } from '../commands/runCommand';
 import { currentDialog } from '../host/dialogStore';
-import { paletteName } from '../i18n';
+import { koTerms, paletteName, vendorKo } from '../i18n';
 import { closeMenu } from './menuStore';
 
 function available(c: Command | AppCommand, ctx: CommandContext): boolean {
@@ -25,6 +25,12 @@ interface Entry {
   kbd?: string;
 }
 
+/** 지금 이름과 다른 플러그인 한국어 이름(용어 규칙으로 바뀐 것). 없거나 같으면 빈 목록. */
+function pluginKoName(key: string): string[] {
+  const ko = vendorKo(key);
+  return ko !== undefined && ko !== koTerms(ko) ? [ko] : [];
+}
+
 /** 최근 고른 명령을 적는 이름(이 사람의 편의, localStorage). */
 export const PALETTE_RECENT_KEY = 'command';
 
@@ -39,7 +45,8 @@ export async function openPalette(ctx: CommandContext): Promise<void> {
     .filter((c) => available(c, ctx))
     .map((c) => ({
       label: paletteName(c.nameKey),
-      keywords: [c.id, c.nameKey],
+      // 플러그인 한국어 이름(예: '워크플로 생성')으로도 찾는다: 노트 템플릿의 명령 안내는 그 이름을 적는다(이름은 'Workflow 생성').
+      keywords: [c.id, c.nameKey, ...pluginKoName(c.nameKey)],
       value: { command: c, icon: c.icon, kbd: c.shortcut ? displayKey(c.shortcut) : undefined },
     }));
   const app: PickItem<Entry>[] = appCommands()

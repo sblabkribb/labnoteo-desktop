@@ -6,6 +6,8 @@
 import { describe, it, expect } from 'vitest';
 import { createTranslator } from '@labnoteo/core';
 import obsidianKo from '../../../vendor/labnoteo/src/l10n.ko';
+import { setLang } from '../../i18n/lang';
+import { coreT } from '../../labnote/i18n';
 import { buildApprovalMessage, erasesRecordedLines } from '../../labnote/port/approvalMessage';
 
 const createObsidianTranslator = (lang: 'ko' | 'en') => (lang === 'ko' ? createTranslator(obsidianKo) : createTranslator());
@@ -187,6 +189,13 @@ describe('buildApprovalMessage', () => {
     it('reads in Korean too', () => {
       expect(buildApprovalMessage(createObsidianTranslator('ko'), '허용?', null, insert)).toBe(
         '허용?\n\n유닛 오퍼레이션 [UHW010 Liquid Handling]을(를) 001_WD010_Design.labnote.md (마지막 유닛 오퍼레이션 다음)에 넣습니다.'
+      );
+    });
+
+    it("the app's translator (coreT, host.t) writes Unit Operation in English (term rule)", () => {
+      setLang('ko');
+      expect(buildApprovalMessage(coreT, '허용?', null, insert)).toBe(
+        '허용?\n\nUnit Operation [UHW010 Liquid Handling]을(를) 001_WD010_Design.labnote.md (마지막 Unit Operation 다음)에 넣습니다.'
       );
     });
   });

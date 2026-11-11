@@ -57,7 +57,7 @@ describe('Breadcrumb', () => {
     ]);
     await items[1].run();
     expect(onJump).toHaveBeenCalledWith(5);
-    // 상태 칩: 진행 중(반쪽 원), 워크플로에서는 단추가 아니다
+    // 상태 칩: 진행 중(반쪽 원), Workflow에서는 단추가 아니다
     const chip = document.querySelector('.chip.status') as HTMLElement;
     expect(chip.tagName).toBe('SPAN');
     expect(chip.textContent).toBe('진행 중');
@@ -67,14 +67,14 @@ describe('Breadcrumb', () => {
     const onMenu = vi.fn();
     render(<Breadcrumb position={notePosition(WF, '')} onOpen={vi.fn()} onJump={vi.fn()} onMenu={onMenu} />);
     await userEvent.click(screen.getByRole('button', { name: /WT020/ }));
-    expect(onMenu.mock.calls[0][1]).toEqual([expect.objectContaining({ label: '아직 유닛 오퍼레이션이 없습니다', disabled: true })]);
+    expect(onMenu.mock.calls[0][1]).toEqual([expect.objectContaining({ label: '아직 Unit Operation이 없습니다', disabled: true })]);
   });
 
-  it('a README shows the experiment, a "워크플로 1/3" chip and a status chip that runs the status command', async () => {
+  it('a README shows the experiment, a "Workflow 1/3" chip and a status chip that runs the status command', async () => {
     const onStatus = vi.fn();
     const text = '---\nstatus: planned\n---\n## 🗂️ Related Workflows\n\n- [x] [A](./001_WA010_A.labnote.md)\n- [ ] [B](./002_WB010_B.labnote.md)\n- [ ] [C](./003_WC010_C.labnote.md)\n';
     render(<Breadcrumb position={notePosition(`${EXP}/README.labnote.md`, text)} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} onStatus={onStatus} />);
-    expect(screen.getByText('워크플로 1/3')).toBeTruthy();
+    expect(screen.getByText('Workflow 1/3')).toBeTruthy();
     const chip = screen.getByRole('button', { name: '계획' });
     expect(chip.getAttribute('data-shape')).toBe('dashed');
     await userEvent.click(chip);
@@ -139,11 +139,11 @@ describe('StatusBar', () => {
     expect(bar.getByText('Not saved')).toBeTruthy();
   });
 
-  it('a README shows "003 · 워크플로 1/3"; another note no position; another path is ignored', () => {
+  it('a README shows "003 · Workflow 1/3"; another note no position; another path is ignored', () => {
     const readme = `${EXP}/README.labnote.md`;
     const { rerender } = render(<StatusBar path={readme} onReveal={vi.fn()} />);
     act(() => publishEditorStatus(readme, { text: '## Related Workflows\n\n- [x] [A](./001_WA010_A.labnote.md)\n- [ ] [B](./002_WB010_B.labnote.md)\n- [ ] [C](./003_WC010_C.labnote.md)\n', save: 'saved' }));
-    expect(screen.getByRole('button', { name: /003 · 워크플로 1\/3/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /003 · Workflow 1\/3/ })).toBeTruthy();
     rerender(<StatusBar path="a/b.md" onReveal={vi.fn()} />);
     act(() => publishEditorStatus('a/b.md', { text: 'x y', words: 2, save: 'saved' }));
     expect(document.querySelector('.statusbar-position')).toBeNull();

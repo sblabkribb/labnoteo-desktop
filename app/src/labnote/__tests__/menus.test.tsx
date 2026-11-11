@@ -544,7 +544,7 @@ describe('editorMenu', () => {
   it('the Lab note section of a workflow note, a labnote note and a README', () => {
     h = createTestHost();
     expect(labels(head(editorMenu(h.ctx, WF_PATH)))).toEqual(['samples.menu.addSample', coreT('Insert unit operation')]);
-    expect(coreT('Insert unit operation')).toBe('유닛 오퍼레이션 삽입');
+    expect(coreT('Insert unit operation')).toBe('Unit Operation 삽입');
     expect(labels(head(editorMenu(h.ctx, 'notes/a.labnote.md')))).toEqual(['samples.menu.addSample']);
     expect(labels(head(editorMenu(h.ctx, README_PATH)))).toEqual([
       'samples.menu.addSample',

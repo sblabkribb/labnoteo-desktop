@@ -103,7 +103,7 @@ describe('명령 팔레트', () => {
     const e = ctrlPInShadow();
     expect(e.defaultPrevented).toBe(true);
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(optionLabels()).toEqual(['실험 생성', '워크플로 생성']);
+    expect(optionLabels()).toEqual(['실험 생성', 'Workflow 생성']);
     // 열려 있는 동안 다시 눌러도 둘째 팔레트를 열지 않는다. 인쇄 대화상자는 여전히 막는다
     const again = ctrlPInShadow();
     expect(again.defaultPrevented).toBe(true);
@@ -122,21 +122,27 @@ describe('명령 팔레트', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy();
   });
 
-  it("the palette lists Korean names in ko and finds create-workflow by '워크플로 생성' and by 'Create workflow'", async () => {
+  it("the palette lists Korean names in ko and finds create-workflow by its name 'Workflow 생성', by the plugin name '워크플로 생성' (README hints) and by 'Create workflow'", async () => {
     const user = userEvent.setup();
     const ctx = makeCtx();
     render(<Harness ctx={ctx} />);
     ctrlPInShadow();
     await user.type(await screen.findByRole('combobox'), '워크플로 생성');
-    expect(optionLabels()[0]).toBe('워크플로 생성');
+    expect(optionLabels()[0]).toBe('Workflow 생성');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(run).toHaveBeenCalledWith(ctx));
 
     ctrlPInShadow();
     await user.type(await screen.findByRole('combobox'), 'Create workflow');
-    expect(optionLabels()[0]).toBe('워크플로 생성');
+    expect(optionLabels()[0]).toBe('Workflow 생성');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+
+    ctrlPInShadow();
+    await user.type(await screen.findByRole('combobox'), 'Workflow 생성');
+    expect(optionLabels()[0]).toBe('Workflow 생성');
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
 
     // 영어 화면: 영어 이름만. 이름은 열 때 만든다. 방금 돌린 명령이 "최근" 묶음으로 맨 위에 온다(id 로 기억한다)
     act(() => setLang('en'));
@@ -153,7 +159,7 @@ describe('명령 팔레트', () => {
     await screen.findByRole('dialog');
     // app commands (with their shortcut chips) come before the lab-note commands
     const labels = optionLabels();
-    expect(labels).toEqual(expect.arrayContaining(['실험 생성', '워크플로 생성', '소스 보기 전환']));
+    expect(labels).toEqual(expect.arrayContaining(['실험 생성', 'Workflow 생성', '소스 보기 전환']));
     expect(labels.indexOf('소스 보기 전환')).toBeLessThan(labels.indexOf('실험 생성'));
     // 단축키는 이름 뒤가 아니라 줄 오른쪽 끝의 kbd 칩이다(UI 재설계 Task 12)
     const kbdOf = (label: string) => screen.queryAllByRole('option').find((o) => o.querySelector('.picker-label')?.textContent === label)?.querySelector('kbd')?.textContent;

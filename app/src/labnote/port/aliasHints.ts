@@ -4,6 +4,7 @@
 // Changes: catalogDescription(id, description) -> catalogDescription(id, description, locale); `getObsidianLanguage()` -> the `locale` parameter.
 // Changes: catalogKoFields is exported and takes a `locale` parameter instead of reading `getObsidianLanguage()`.
 // Changes: catalogKoFields adds the Korean name and search words as keywords in every locale, not only in Korean (UI redesign spec §5.3).
+// Changes: catalogKoFields shows the Korean name and description through koTerms in Korean (Workflow / Unit Operation in English) and keeps the plugin's Korean name as a keyword.
 // Changes: readChecklistLabels takes `LabnoteFs`; README is imported from ../paths; the imports below replace the top of commands.ts.
 
 import type { LabnoteFs, LabnoteHost, PromptHint, UnitOpBlock } from '@labnoteo/core';
@@ -16,6 +17,7 @@ import {
   workflowAliasProblem,
   workflowChecklistLabels,
 } from '@labnoteo/core/lib/workflowStructure';
+import { koTerms } from '../i18n';
 import { README } from '../paths';
 
 /**
@@ -143,14 +145,17 @@ export function catalogKoFields(
   // The Korean name and search words stay searchable in either UI language (UI redesign spec §5.3);
   // only the Korean UI shows the name.
   const ko = catalogKoEntry(id);
-  const detail = catalogDescription(id, description, locale);
+  // The app's term rule: the Korean UI shows "Workflow" / "Unit Operation" in English (koTerms); the plugin's
+  // Korean words stay searchable below.
+  const shown = (text: string) => (korean ? koTerms(text) : text);
+  const detail = shown(catalogDescription(id, description, locale));
   // The Korean name ranks as a name; its search words (`PCR` for UHW100 열 순환) and the English description rank below
   // every name match (spec §5.3: exact code > name > word-prefix name > search words and description), so `PCR` puts
   // UHW110 Real-time PCR above UHW100 Thermocycling.
-  const keywords = ko ? [ko.name] : [];
+  const keywords = ko ? [...new Set([ko.name, koTerms(ko.name)])] : [];
   const searchWords = [...(ko?.keywords ?? []), ...(detail !== description ? [description] : [])];
   return {
-    description: ko && korean ? `${ko.name} · ${category}` : category,
+    description: ko && korean ? `${shown(ko.name)} · ${category}` : category,
     detail,
     ...(keywords.length > 0 ? { keywords } : {}),
     ...(searchWords.length > 0 ? { searchWords } : {}),

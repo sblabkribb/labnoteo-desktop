@@ -57,7 +57,7 @@ describe('create-workflow', () => {
     );
     expect(h.asked.pick).toHaveLength(1);
     expect(h.asked.pick[0].items.length).toBeGreaterThan(10);
-    expect(h.asked.pick[0].opts?.title).toBe('워크플로 추가') // the header button's name (one vocabulary);
+    expect(h.asked.pick[0].opts?.title).toBe('Workflow 추가') // the header button's name (one vocabulary);
     // 처음 채우는 것은 조용하다
     expect(h.notes).toEqual([]);
   });
@@ -90,7 +90,7 @@ describe('create-workflow', () => {
     expect(text).toContain(`last_updated_date: ${TODAY}`);
     expect(h.opened).toEqual([path]);
     expect(h.refreshes()).toBe(1);
-    expect(h.notes).toEqual([{ kind: 'info', message: `워크플로가 생성되었습니다: ${fileName}` }]);
+    expect(h.notes).toEqual([{ kind: 'info', message: `Workflow가 생성되었습니다: ${fileName}` }]);
     // 별칭 대화상자: 카탈로그 머리와 한국어 안내
     expect(h.asked.alias[0]).toMatchObject({ id: 'WD030', catalogName: 'Growth Media Design', back: true });
     // 제목은 대화상자의 "별칭 (선택)"(UI 재설계 Task 11)
@@ -124,7 +124,7 @@ describe('create-workflow', () => {
     expect(h.vault.log.filter((c) => c.cmd === 'vault_modify' && c.args.path === README_PATH)).toEqual([]);
     expect(h.notes.map((n) => n.kind)).toEqual(['info', 'warn']);
     expect(h.notes[1].message).toContain('Related Workflows');
-    expect(h.notes[1].message).toContain('폴더와 워크플로 체크리스트 맞추기');
+    expect(h.notes[1].message).toContain('폴더와 Workflow 체크리스트 맞추기');
   });
 
   it('README open and busy: the note is still created, refreshed, opened and announced, with a warning that the README checklist was not updated', async () => {
@@ -146,7 +146,7 @@ describe('create-workflow', () => {
     expect(h.opened).toEqual([path]);
     expect(h.notes.map((n) => n.kind)).toEqual(['info', 'warn']);
     expect(h.notes[0].message).toContain('001_WD010_General_Design_of_Experiment.labnote.md');
-    expect(h.notes[1].message).toContain('폴더와 워크플로 체크리스트 맞추기');
+    expect(h.notes[1].message).toContain('폴더와 Workflow 체크리스트 맞추기');
     expect(h.notes[1].message).not.toContain('바꾸지 않았습니다');
   });
 
@@ -168,7 +168,7 @@ describe('create-workflow', () => {
     expect(h.refreshes()).toBe(1);
     expect(h.opened).toEqual([path]);
     expect(h.notes.map((n) => n.kind)).toEqual(['info', 'warn']);
-    expect(h.notes[1].message).toContain('폴더와 워크플로 체크리스트 맞추기');
+    expect(h.notes[1].message).toContain('폴더와 Workflow 체크리스트 맞추기');
   });
 
   it('the alias hint flags a same-alias twin', async () => {
@@ -283,7 +283,7 @@ describe('Insert workflow (README editor menu)', () => {
     expect(h.vault.files()[README_PATH]).toBe(buffer);
     expect(h.vault.files()[`${DIR}/001_WD010_General_Design_of_Experiment.labnote.md`]).toBeDefined();
     expect(h.opened).toEqual([]); // README 에 머문다
-    expect(h.notes[0]).toEqual({ kind: 'info', message: '워크플로가 생성되었습니다: 001_WD010_General_Design_of_Experiment.labnote.md' });
+    expect(h.notes[0]).toEqual({ kind: 'info', message: 'Workflow가 생성되었습니다: 001_WD010_General_Design_of_Experiment.labnote.md' });
   });
 
   it('isExperimentReadme is true only for an experiment folder README', () => {

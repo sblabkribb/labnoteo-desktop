@@ -1,6 +1,6 @@
 import { KO_COMMAND_NAMES } from '@labnoteo/core/lib/labnoteStructure';
 import { setLang } from '../../i18n/lang';
-import { coreLocale, coreT, overrideOr, paletteName } from '../i18n';
+import { coreLocale, coreT, koTerms, overrideOr, paletteName, vendorKo } from '../i18n';
 
 describe('코어 번역 다리', () => {
   it('coreT follows a language switch without re-creation', () => {
@@ -16,11 +16,21 @@ describe('코어 번역 다리', () => {
     expect(coreT('No such key {0}', 3)).toBe('No such key 3');
   });
 
-  // README 템플릿의 Ctrl+P 안내가 참이려면 팔레트 이름(coreT)이 코어 상수와 같아야 한다. Task 9 가 셋 모두 등록한다.
-  it('KO_COMMAND_NAMES match coreT in Korean', () => {
-    expect(coreT('Create workflow')).toBe(KO_COMMAND_NAMES.createWorkflow);
-    expect(coreT('Insert unit operation')).toBe(KO_COMMAND_NAMES.insertUnitOperation);
-    expect(coreT('Sync workflow checklist with folder')).toBe(KO_COMMAND_NAMES.syncWorkflowChecklist);
+  // README 템플릿의 Ctrl+P 안내(파일 내용, 코어 상수)는 플러그인 한국어 이름을 적는다. 앱 팔레트는 용어 규칙으로
+  // 'Workflow 생성' 이라 보이지만 플러그인 이름(vendorKo)도 찾기 낱말로 받으므로(CommandPalette.test) 안내는 참이다.
+  it('KO_COMMAND_NAMES are the plugin names; coreT shows them with the term rule', () => {
+    const cases: Array<[string, string]> = [
+      ['Create workflow', KO_COMMAND_NAMES.createWorkflow],
+      ['Insert unit operation', KO_COMMAND_NAMES.insertUnitOperation],
+      ['Sync workflow checklist with folder', KO_COMMAND_NAMES.syncWorkflowChecklist],
+    ];
+    for (const [key, ko] of cases) {
+      expect(vendorKo(key)).toBe(ko);
+      expect(coreT(key)).toBe(koTerms(ko));
+    }
+    expect(coreT('Create workflow')).toBe('Workflow 생성');
+    expect(coreT('Insert unit operation')).toBe('Unit Operation 삽입');
+    expect(coreT('Sync workflow checklist with folder')).toBe('폴더와 Workflow 체크리스트 맞추기');
   });
 
   it('paletteName 은 지금 언어의 이름 하나만 보인다(영어를 괄호로 붙이지 않는다), 시료는 샘플로', () => {

@@ -68,7 +68,7 @@ async function expandExperiment() {
   const exp = await findRow(/003 · 대장균 숙주 비교/);
   fireEvent.keyDown(exp, { key: 'ArrowRight' });
   await waitFor(() => expect(exp.getAttribute('aria-expanded')).toBe('true'));
-  // UO 는 워크플로 본문을 뒤에서 읽은 뒤에 생긴다
+  // UO 는 Workflow 본문을 뒤에서 읽은 뒤에 생긴다
   await waitFor(() => expect(row(/^.*Gibson run/).getAttribute('aria-expanded')).toBe('false'));
   return exp;
 }
@@ -99,7 +99,7 @@ describe('ExperimentsPanel', () => {
     const level3 = items()
       .filter((li) => li.getAttribute('aria-level') === '3')
       .map((li) => li.querySelector('.wf-tree-label')?.textContent);
-    expect(level3).toEqual(['Gibson run', 'GFP', 'Design', 'README', 'images', 'resources', '워크플로 추가']);
+    expect(level3).toEqual(['Gibson run', 'GFP', 'Design', 'README', 'images', 'resources', 'Workflow 추가']);
     expect(row(/^images/).querySelector('.tree-meta')?.textContent).toBe('2');
     expect(row(/^resources/).querySelector('.tree-meta')?.textContent).toBe('1');
     expect(row(/003 · /).querySelector('.tree-meta')?.textContent).toBe('1/3');
@@ -124,11 +124,11 @@ describe('ExperimentsPanel', () => {
     const user = userEvent.setup();
     mount({ active: `${PLAN}/README.labnote.md` });
     await expandExperiment();
-    await user.click(within(tree()).getAllByRole('treeitem', { name: '워크플로 추가' })[0]);
+    await user.click(within(tree()).getAllByRole('treeitem', { name: 'Workflow 추가' })[0]);
     await waitFor(() => expect(createWorkflow).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createWorkflow).mock.calls[0]).toEqual([h.ctx, undefined, { experimentDir: EXP }]);
     // 줄에 올리면 보이는 + 도 같다
-    await user.click(within(row(/003 · /)).getByRole('button', { name: '워크플로 추가' }));
+    await user.click(within(row(/003 · /)).getByRole('button', { name: 'Workflow 추가' }));
     await waitFor(() => expect(createWorkflow).toHaveBeenCalledTimes(2));
     expect(vi.mocked(createWorkflow).mock.calls[1]).toEqual([h.ctx, undefined, { experimentDir: EXP }]);
   });
@@ -138,12 +138,12 @@ describe('ExperimentsPanel', () => {
     mount({ active: `${PLAN}/README.labnote.md` });
     await expandExperiment();
     const wf = row(/GFP/);
-    await user.click(within(wf).getByRole('button', { name: '유닛 오퍼레이션 추가' }));
+    await user.click(within(wf).getByRole('button', { name: 'Unit Operation 추가' }));
     await waitFor(() => expect(insertUnitOp).toHaveBeenCalledTimes(1));
     expect(vi.mocked(insertUnitOp).mock.calls[0]).toEqual([h.ctx, undefined, { workflowPath: WF2 }]);
     fireEvent.keyDown(wf, { key: 'ArrowRight' });
     await waitFor(() => expect(wf.getAttribute('aria-expanded')).toBe('true'));
-    await user.click(row('유닛 오퍼레이션 추가'));
+    await user.click(row('Unit Operation 추가'));
     await waitFor(() => expect(insertUnitOp).toHaveBeenCalledTimes(2));
     expect(vi.mocked(insertUnitOp).mock.calls[1]).toEqual([h.ctx, undefined, { workflowPath: WF2 }]);
   });
@@ -187,7 +187,7 @@ describe('ExperimentsPanel', () => {
     mount();
     await expandExperiment();
     fireEvent.keyDown(row(/GFP/), { key: 'F10', shiftKey: true });
-    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['유닛 오퍼레이션 추가', 'README 에서 완료로 체크']);
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Unit Operation 추가', 'README 에서 완료로 체크']);
     await user.click(screen.getByRole('menuitem', { name: 'README 에서 완료로 체크' }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
     await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^README 에서 완료로 체크했지만 UO/));
@@ -212,7 +212,7 @@ describe('ExperimentsPanel', () => {
     await user.type(screen.getByRole('searchbox', { name: '실험 찾기' }), '2026-02');
     expect(await findRow(/005 · /)).toBeTruthy();
     expect(row(/003 · /)).toBeTruthy();
-    expect(screen.queryByText('일치하는 실험·워크플로·UO 없음')).toBeNull();
+    expect(screen.queryByText('일치하는 실험·Workflow·UO 없음')).toBeNull();
   });
 
   it('the filter reaches UOs, marks the match and hides the rest; no match shows the empty state', async () => {
@@ -223,7 +223,7 @@ describe('ExperimentsPanel', () => {
     await user.type(box, 'plate');
     const uo = await findRow(/plate 1/);
     expect(uo.querySelector('mark')?.textContent).toBe('plate');
-    // 남은 UO 가 하나여도 워크플로의 진행은 전체로 센다
+    // 남은 UO 가 하나여도 Workflow의 진행은 전체로 센다
     expect(row(/GFP/).querySelector('.tree-meta')?.textContent).toBe('1/2');
     expect(screen.queryByRole('treeitem', { name: /004 · / })).toBeNull();
     expect(screen.queryByRole('treeitem', { name: /Gibson run/ })).toBeNull();
@@ -231,7 +231,7 @@ describe('ExperimentsPanel', () => {
 
     await user.clear(box);
     await user.type(box, '없는말');
-    expect(await screen.findByText('일치하는 실험·워크플로·UO 없음')).toBeTruthy();
+    expect(await screen.findByText('일치하는 실험·Workflow·UO 없음')).toBeTruthy();
   });
 
   it('the filter matches a localised status name', async () => {
@@ -248,7 +248,7 @@ describe('ExperimentsPanel', () => {
     mount({ files });
     fireEvent.contextMenu(await findRow(/005 · /));
     expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual([
-      '워크플로 추가',
+      'Workflow 추가',
       coreT('Change experiment status'),
       coreT('Toggle discussion flag'),
       coreT('Retry this experiment'),
@@ -326,7 +326,7 @@ describe('ExperimentsPanel', () => {
     mount();
     const head = await screen.findByRole('button', { name: /^카탈로그/ });
     expect(head.getAttribute('aria-expanded')).toBe('false');
-    expect(head.textContent).toContain(`워크플로 ${WORKFLOWS} · UO ${UNIT_OPS}`);
+    expect(head.textContent).toContain(`Workflow ${WORKFLOWS} · UO ${UNIT_OPS}`);
     expect(screen.queryByRole('tree', { name: '카탈로그' })).toBeNull();
     await user.click(head);
     const catalog = await screen.findByRole('tree', { name: '카탈로그' });
@@ -334,7 +334,7 @@ describe('ExperimentsPanel', () => {
       .getAllByRole('treeitem')
       .filter((li) => li.getAttribute('aria-level') === '1')
       .map((li) => li.querySelector('.wf-tree-label')?.textContent);
-    expect(roots).toEqual(['워크플로', 'HW UO', 'SW UO']);
+    expect(roots).toEqual(['Workflow', 'HW UO', 'SW UO']);
   });
 
   it('the catalog tree still offers Insert unit operation from its menu', async () => {
@@ -369,7 +369,7 @@ describe('ExperimentsPanel', () => {
   it('a catalog workflow with an experiment open: the popover adds it to that experiment', async () => {
     const user = userEvent.setup();
     mount({ active: `${EXP}/README.labnote.md` });
-    const pop = await openCatalogEntry(user, /^워크플로/, [/^Build/], 'WB030');
+    const pop = await openCatalogEntry(user, /^Workflow/, [/^Build/], 'WB030');
     expect(pop.textContent).toContain('DNA Assembly');
     const add = within(pop).getByRole('button', { name: '현재 실험에 추가 (003 · 대장균 숙주 비교)' });
     await user.click(add);
@@ -382,7 +382,7 @@ describe('ExperimentsPanel', () => {
   it('with no experiment open, the add button is disabled and says why', async () => {
     const user = userEvent.setup();
     mount();
-    const pop = await openCatalogEntry(user, /^워크플로/, [/^Build/], 'WB030');
+    const pop = await openCatalogEntry(user, /^Workflow/, [/^Build/], 'WB030');
     const add = within(pop).getByRole('button', { name: '현재 실험에 추가' }) as HTMLButtonElement;
     // aria-disabled, not disabled: the button keeps focus so Esc works and a screen reader reads the reason
     expect(add.disabled).toBe(false);
@@ -400,7 +400,7 @@ describe('ExperimentsPanel', () => {
     mount();
     await user.click(await screen.findByRole('button', { name: /^카탈로그/ }));
     const catalog = await screen.findByRole('tree', { name: '카탈로그' });
-    await user.click(within(catalog).getByRole('treeitem', { name: /^워크플로/ }));
+    await user.click(within(catalog).getByRole('treeitem', { name: /^Workflow/ }));
     await user.click(within(catalog).getByRole('treeitem', { name: /^Build/ }));
     const row = within(catalog)
       .getAllByRole('treeitem')
@@ -419,7 +419,7 @@ describe('ExperimentsPanel', () => {
     const user = userEvent.setup();
     mount({ active: WF1 });
     let pop = await openCatalogEntry(user, /^HW UO/, [], 'UHW380');
-    await user.click(within(pop).getByRole('button', { name: '현재 워크플로에 삽입 (WB030 Gibson run)' }));
+    await user.click(within(pop).getByRole('button', { name: '현재 Workflow에 삽입 (WB030 Gibson run)' }));
     await waitFor(() => expect(insertUnitOp).toHaveBeenCalledTimes(1));
     expect(vi.mocked(insertUnitOp).mock.calls[0][1]).toEqual({ op: expect.objectContaining({ id: 'UHW380' }), kind: 'hw' });
     const catalog = screen.getByRole('tree', { name: '카탈로그' });
@@ -433,7 +433,7 @@ describe('ExperimentsPanel', () => {
     const user = userEvent.setup();
     mount({ active: `${EXP}/README.labnote.md` });
     const pop = await openCatalogEntry(user, /^HW UO/, [], 'UHW380');
-    expect(within(pop).getByRole('button', { name: '현재 워크플로에 삽입' }).getAttribute('aria-disabled')).toBe('true');
-    expect(pop.textContent).toContain('먼저 워크플로 노트를 여세요.');
+    expect(within(pop).getByRole('button', { name: '현재 Workflow에 삽입' }).getAttribute('aria-disabled')).toBe('true');
+    expect(pop.textContent).toContain('먼저 Workflow 노트를 여세요.');
   });
 });

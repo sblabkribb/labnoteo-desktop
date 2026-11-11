@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe('EditorActions (the view header primary action)', () => {
-  it("is 'UO 추가' on a workflow note, '워크플로 추가' on a README, and absent elsewhere", async () => {
+  it("is 'UO 추가' on a workflow note, 'Workflow 추가' on a README, and absent elsewhere", async () => {
     const user = userEvent.setup();
     h = createTestHost();
     const { rerender, container } = render(<EditorActions ctx={h.ctx} path={WF_PATH} disabled={false} />);
@@ -50,7 +50,7 @@ describe('EditorActions (the view header primary action)', () => {
 
     rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled={false} />);
     expect(screen.queryByRole('button', { name: 'UO 추가' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: '워크플로 추가' }));
+    await user.click(screen.getByRole('button', { name: 'Workflow 추가' }));
     expect(createWorkflow).toHaveBeenCalledWith(h.ctx);
 
     rerender(<EditorActions ctx={h.ctx} path="notes/a.labnote.md" disabled={false} />);
@@ -72,7 +72,7 @@ describe('EditorActions (the view header primary action)', () => {
     const { rerender } = render(<EditorActions ctx={h.ctx} path={WF_PATH} disabled />);
     expect((screen.getByRole('button', { name: 'UO 추가' }) as HTMLButtonElement).disabled).toBe(true);
     rerender(<EditorActions ctx={h.ctx} path={README_PATH} disabled />);
-    expect((screen.getByRole('button', { name: '워크플로 추가' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Workflow 추가' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
@@ -92,7 +92,7 @@ describe('NoteQrButton', () => {
     expect(container.innerHTML).toBe('');
     rerender(<NoteQrButton ctx={h.ctx} path="e/01_x.labnote.md" disabled />);
     expect((screen.getByRole('button', { name: coreT('Show note barcode') }) as HTMLButtonElement).disabled).toBe(true);
-    // 워크플로 노트와 README 에도 있다
+    // Workflow 노트와 README 에도 있다
     rerender(<NoteQrButton ctx={h.ctx} path={WF_PATH} disabled={false} />);
     expect(screen.getByRole('button', { name: coreT('Show note barcode') })).toBeTruthy();
     rerender(<NoteQrButton ctx={h.ctx} path={README_PATH} disabled={false} />);

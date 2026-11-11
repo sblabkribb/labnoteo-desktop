@@ -98,7 +98,7 @@ const WIDGETS: { name: string; read: (r: ShadowRoot) => string | null | undefine
   { name: 'properties "Edit as YAML" button', read: (r) => r.querySelector('.lno-props-head button')?.textContent, ko: 'YAML로 편집', en: 'Edit as YAML' },
   { name: 'properties "Add property"', read: (r) => (r.querySelector('.lno-props')?.textContent?.includes('속성 추가') ? '속성 추가' : r.querySelector('.lno-props')?.textContent?.includes('Add property') ? 'Add property' : null), ko: '속성 추가', en: 'Add property' },
   { name: 'properties key label (author)', read: (r) => r.querySelector('.lno-props-row[data-key="author"] .lno-props-key')?.textContent, ko: '실험자', en: 'Experimenter' },
-  { name: 'README empty-state card button', read: (r) => r.querySelector('.lno-empty-state-add')?.textContent, ko: '첫 워크플로 추가', en: 'Add the first workflow' },
+  { name: 'README empty-state card button', read: (r) => r.querySelector('.lno-empty-state-add')?.textContent, ko: '첫 Workflow 추가', en: 'Add the first workflow' },
   { name: 'task checkbox aria-label', read: (r) => r.querySelector('input.lno-task')?.getAttribute('aria-label'), ko: '할 일 완료 전환', en: 'Toggle task' },
   { name: 'UO status chip text', read: (r) => r.querySelector('.lno-uo-status')?.textContent, ko: '완료', en: 'Done' },
   { name: 'UO status chip title', read: (r) => r.querySelector<HTMLElement>('.lno-uo-status')?.title, ko: 'UO 상태: 완료', en: 'UO status: Done' },
@@ -178,7 +178,7 @@ describe('real Editor: README with properties, ko → en → ko', () => {
     await tick();
     expect(m.view()).toBe(v);
     report.push(...checkAll(m.root(), 'en'));
-    expect(m.root().textContent).not.toMatch(/YAML로 편집|속성 추가|첫 워크플로 추가|날짜 고르기|이미지를 찾을 수 없습니다/);
+    expect(m.root().textContent).not.toMatch(/YAML로 편집|속성 추가|첫 Workflow 추가|날짜 고르기|이미지를 찾을 수 없습니다/);
     expect(snap()).toEqual(before);
 
     await switchTo('ko');

@@ -151,7 +151,7 @@ describe('live preview widgets follow the editor language', () => {
   it('the README empty-state card relabels', () => {
     const doc = ['---', 'title: x', '---', '', '## 🗂️ Related Workflows', '', '', '## Summary', ''].join('\n');
     const v = view(doc, readmeEmptyState.of({ onAddWorkflow: () => {} }));
-    expect(q(v, '.lno-empty-state-add')?.textContent).toBe('첫 워크플로 추가');
+    expect(q(v, '.lno-empty-state-add')?.textContent).toBe('첫 Workflow 추가');
     switchTo(v, 'en');
     expect(q(v, '.lno-empty-state-add')?.textContent).toBe('Add the first workflow');
   });

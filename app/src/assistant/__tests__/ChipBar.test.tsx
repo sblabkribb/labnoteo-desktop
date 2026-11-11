@@ -2,7 +2,7 @@
 /**
  * 말풍선의 칩 줄과 칩 흐름(assistant spec §4.4, plan Task 11B): 칩 줄은 roving tabindex 도구 막대, 제공자가 없으면
  * ai.configureFirst 와 연동 설정 단추(사용법은 빼고), 실험 밖이면 "실험 노트를 먼저 열어 주세요" 와 실험 목록 단추,
- * 사용법은 모델을 부르지 않는 도움말, 섹션·단위 공정·워크플로는 고른 대상과 글로 칩 실행을 보낸다.
+ * 사용법은 모델을 부르지 않는 도움말, 섹션·Unit Operation·Workflow는 고른 대상과 글로 칩 실행을 보낸다.
  */
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useRef } from 'react';
@@ -106,7 +106,7 @@ describe('chip toolbar', () => {
     const { store } = setup();
     await open(store);
     const buttons = within(toolbar()).getAllByRole('button');
-    expect(buttons.map((b) => b.textContent)).toEqual(['사용법', '섹션 만들기', '단위 공정 만들기', '워크플로 만들기', '대화']);
+    expect(buttons.map((b) => b.textContent)).toEqual(['사용법', '섹션 만들기', 'Unit Operation 만들기', 'Workflow 만들기', '대화']);
     expect(buttons.map((b) => b.tabIndex)).toEqual([-1, -1, -1, -1, 0]);
     expect(chip('대화').getAttribute('aria-pressed')).toBe('true');
     expect(chip('사용법').getAttribute('aria-pressed')).toBe('false');
@@ -135,10 +135,10 @@ describe('chip toolbar', () => {
   it('clicking a chip chooses it (session state) and moves the tab stop to it', async () => {
     const { store, session } = setup();
     await open(store);
-    await pick('워크플로 만들기');
+    await pick('Workflow 만들기');
     expect(session.get().chip).toBe('workflow');
-    expect(chip('워크플로 만들기').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('워크플로 만들기').tabIndex).toBe(0);
+    expect(chip('Workflow 만들기').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('Workflow 만들기').tabIndex).toBe(0);
   });
 });
 
@@ -146,7 +146,7 @@ describe('chip gates', () => {
   it('without a provider every chip but 사용법 shows ai.configureFirst with a button to the Integrations settings', async () => {
     const { store, actions, turns } = setup({ provider: false });
     await open(store);
-    for (const name of ['섹션 만들기', '단위 공정 만들기', '워크플로 만들기', '대화']) {
+    for (const name of ['섹션 만들기', 'Unit Operation 만들기', 'Workflow 만들기', '대화']) {
       await pick(name);
       expect(screen.getByText(t('ai.configureFirst')), name).toBeTruthy();
       expect(screen.queryByRole('textbox', { name: '어시스턴트에게 보낼 글' }), name).toBeNull();
@@ -162,7 +162,7 @@ describe('chip gates', () => {
   it('outside an experiment the section, unit op and workflow chips ask to open an experiment note first', async () => {
     const { store, actions, turns } = setup({ activePath: 'notes/free.md' });
     await open(store);
-    for (const name of ['섹션 만들기', '단위 공정 만들기', '워크플로 만들기']) {
+    for (const name of ['섹션 만들기', 'Unit Operation 만들기', 'Workflow 만들기']) {
       await pick(name);
       expect(screen.getByText('실험 노트를 먼저 열어 주세요.'), name).toBeTruthy();
     }
@@ -220,25 +220,25 @@ describe('chip flows', () => {
     expect(turns).toHaveLength(0);
   });
 
-  it('단위 공정 만들기 targets the open workflow note', async () => {
+  it('Unit Operation 만들기 targets the open workflow note', async () => {
     const { store, turns } = setup();
     await open(store);
-    await pick('단위 공정 만들기');
+    await pick('Unit Operation 만들기');
     expect(screen.getByText(t('chip.target', '001_WD010_Design.labnote.md'))).toBeTruthy();
     const box = screen.getByRole('textbox', { name: '어시스턴트에게 보낼 글' });
     fireEvent.change(box, { target: { value: 'PCR 산물 정제 추가' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     await settle();
     expect(turns[0].mode).toEqual({ kind: 'chip', chip: 'unitOp', params: { documentPath: WF_A } });
-    expect(screen.getByRole('log').textContent).toContain('[단위 공정 만들기] PCR 산물 정제 추가');
+    expect(screen.getByRole('log').textContent).toContain('[Unit Operation 만들기] PCR 산물 정제 추가');
   });
 
-  it('단위 공정 만들기 from the README picks one of the experiment workflow notes', async () => {
+  it('Unit Operation 만들기 from the README picks one of the experiment workflow notes', async () => {
     const { store, turns, actions } = setup({ activePath: README_A });
     await open(store);
-    await pick('단위 공정 만들기');
+    await pick('Unit Operation 만들기');
     expect(actions.workflowNotes).toHaveBeenCalledWith(A);
-    const select = screen.getByRole('combobox', { name: '어느 워크플로 노트에?' }) as HTMLSelectElement;
+    const select = screen.getByRole('combobox', { name: '어느 Workflow 노트에?' }) as HTMLSelectElement;
     expect([...select.options].map((o) => o.textContent)).toEqual(['001_WD010_Design.labnote.md', '002_WD020_Clone.labnote.md']);
     fireEvent.change(select, { target: { value: WF_A2 } });
     const box = screen.getByRole('textbox', { name: '어시스턴트에게 보낼 글' });
@@ -252,8 +252,8 @@ describe('chip flows', () => {
     const long = `${A}/001_WD090_Genome_Editing_Design_test.labnote.md`;
     const { store } = setup({ activePath: README_A, actions: { workflowNotes: vi.fn(async () => [long]) } });
     await open(store);
-    await pick('단위 공정 만들기');
-    const select = (await screen.findByRole('combobox', { name: '어느 워크플로 노트에?' })) as HTMLSelectElement;
+    await pick('Unit Operation 만들기');
+    const select = (await screen.findByRole('combobox', { name: '어느 Workflow 노트에?' })) as HTMLSelectElement;
     const option = select.options[0];
     expect(option.title).toBe('001_WD090_Genome_Editing_Design_test.labnote.md');
     expect([...option.textContent!].length).toBe(36);
@@ -263,10 +263,10 @@ describe('chip flows', () => {
     expect(select.title).toBe('001_WD090_Genome_Editing_Design_test.labnote.md');
   });
 
-  it('워크플로 만들기 sends the goal in the current experiment', async () => {
+  it('Workflow 만들기 sends the goal in the current experiment', async () => {
     const { store, turns } = setup({ activePath: README_A });
     await open(store);
-    await pick('워크플로 만들기');
+    await pick('Workflow 만들기');
     const box = screen.getByRole('textbox', { name: '어시스턴트에게 보낼 글' });
     fireEvent.change(box, { target: { value: '플라스미드 클로닝' } });
     fireEvent.keyDown(box, { key: 'Enter' });

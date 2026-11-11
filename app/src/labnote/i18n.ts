@@ -10,10 +10,29 @@ import { t } from '../i18n/t';
  * 부를 때마다 getLang() 을 읽는다. 언어를 바꿔도 이 번역기를 다시 만들 필요가 없다.
  * src/labnote 에서 coreT / host.t / paletteName 에 글자로 넘기는 키는 obsidianKo 에 있어야 한다(__tests__/koCoverage.test.ts).
  */
-const koTranslator = createTranslator(obsidianKo);
+/**
+ * 앱의 용어 규칙(2026-11-11): 한국어 화면에서도 'Workflow' 와 'Unit Operation' 은 영어로 쓴다. 플러그인 한국어 목록은
+ * 워크플로 / 유닛 오퍼레이션(한 곳은 붙여 쓴 유닛오퍼레이션, 한 곳은 단위 공정)이라 쓰므로 템플릿을 미리 바꿔 둔다.
+ * 조사는 그대로 맞는다: 워크플로·Workflow 는 모음으로, 유닛 오퍼레이션·단위 공정·Unit Operation 은 받침으로 끝난다.
+ * 템플릿만 바꾸고 {0} 에 들어가는 값(노트 제목 등 사용자 글)은 건드리지 않는다. 파일에 쓰는 글이 옛 낱말을 알아봐야
+ * 하면 vendorKo(key) 로 플러그인 원문을 함께 본다.
+ */
+export function koTerms(text: string): string {
+  return text.replace(/워크플로/g, 'Workflow').replace(/유닛 ?오퍼레이션|단위 ?공정/g, 'Unit Operation');
+}
+
+const appKo: Record<string, string> = Object.fromEntries(
+  Object.entries(obsidianKo).map(([key, value]) => [key, koTerms(value)])
+);
+const koTranslator = createTranslator(appKo);
 const enTranslator = createTranslator();
 
 export const coreT: Translator = (key, ...args) => (getLang() === 'ko' ? koTranslator : enTranslator)(key, ...args);
+
+/** 플러그인 한국어 목록의 원문 템플릿(용어를 바꾸기 전). 플러그인이나 예전 앱이 노트에 쓴 글을 알아볼 때만 쓴다. */
+export function vendorKo(key: string): string | undefined {
+  return Object.hasOwn(obsidianKo, key) ? obsidianKo[key] : undefined;
+}
 
 /** createLabnoteStructure / createWorkflowContent / catalogDescriptionFor 에 `{locale}` 로 넘기는 언어. */
 export function coreLocale(): 'ko' | 'en' {

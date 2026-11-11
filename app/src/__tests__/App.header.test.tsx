@@ -133,7 +133,7 @@ describe('view header and status bar', () => {
     expect(chip.getAttribute('data-shape')).toBe('half');
     expect(header().getByRole('button', { name: 'UO 추가' })).toBeTruthy();
     expect(header().getByRole('button', { name: '표 넣기' })).toBeTruthy();
-    expect(header().queryByRole('button', { name: '워크플로 추가' })).toBeNull();
+    expect(header().queryByRole('button', { name: 'Workflow 추가' })).toBeNull();
     // 상태 줄
     await waitFor(() => expect(statusbar().getByRole('button', { name: /WT020 · UO 1\/2 완료/ })).toBeTruthy());
     expect(statusbar().getByText('저장됨')).toBeTruthy();
@@ -149,14 +149,14 @@ describe('view header and status bar', () => {
     expect(items.map((i) => i.textContent)).toEqual(['IncubationUHW180', 'Microplate ReadingUHW380']);
     await user.click(items[1]);
     await waitFor(() => expect(v.state.doc.lineAt(v.state.selection.main.head).text).toBe('### [UHW380 Microplate Reading]'));
-    // 실험 칸은 README 를 연다: 주 동작이 "워크플로 추가" 가 되고 체크리스트 칩과 상태 칩(눌러서 바꾸기)이 보인다
+    // 실험 칸은 README 를 연다: 주 동작이 "Workflow 추가" 가 되고 체크리스트 칩과 상태 칩(눌러서 바꾸기)이 보인다
     await user.click(exp);
     await openPath(README);
-    await waitFor(() => expect(header().getByText('워크플로 1/3')).toBeTruthy());
-    expect(header().getByRole('button', { name: '워크플로 추가' })).toBeTruthy();
+    await waitFor(() => expect(header().getByText('Workflow 1/3')).toBeTruthy());
+    expect(header().getByRole('button', { name: 'Workflow 추가' })).toBeTruthy();
     expect(header().queryByRole('button', { name: 'UO 추가' })).toBeNull();
     expect(header().getByRole('button', { name: '진행 중' }).title).toBe('상태: 진행 중 (눌러서 바꾸기)');
-    await waitFor(() => expect(statusbar().getByRole('button', { name: /003 · 워크플로 1\/3/ })).toBeTruthy());
+    await waitFor(() => expect(statusbar().getByRole('button', { name: /003 · Workflow 1\/3/ })).toBeTruthy());
     // 뒤로 단추와 Alt+→
     const back = header().getByRole('button', { name: '뒤로' }) as HTMLButtonElement;
     expect(back.disabled).toBe(false);
@@ -172,7 +172,7 @@ describe('view header and status bar', () => {
     await openPath('Plain note.md');
     expect(header().getByRole('button', { name: '표 넣기' })).toBeTruthy();
     expect(header().queryByRole('button', { name: 'UO 추가' })).toBeNull();
-    expect(header().queryByRole('button', { name: '워크플로 추가' })).toBeNull();
+    expect(header().queryByRole('button', { name: 'Workflow 추가' })).toBeNull();
     expect(screen.getByRole('navigation', { name: '노트 위치' }).textContent).toBe('Plain note');
     await waitFor(() => expect(statusbar().getByText('단어 3')).toBeTruthy());
     expect(document.querySelector('.statusbar-position')).toBeNull();

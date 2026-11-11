@@ -116,7 +116,7 @@ describe('Settings modal', () => {
   it('opens on the General page by default, with theme, language, density and system files', async () => {
     install();
     act(() => void openSettings());
-    expect(nav().getAllByRole('tab').map((x) => x.textContent)).toEqual(['일반', '편집기', '실험·워크플로', '샘플', '연동', '어시스턴트', '단축키', '정보']);
+    expect(nav().getAllByRole('tab').map((x) => x.textContent)).toEqual(['일반', '편집기', '실험·Workflow', '샘플', '연동', '어시스턴트', '단축키', '정보']);
     expect(nav().getByRole('tab', { name: '일반' }).getAttribute('aria-selected')).toBe('true');
     const panel = within(dialog().getByRole('tabpanel', { name: '일반' }));
     expect(within(panel.getByRole('radiogroup', { name: '테마' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['시스템', '밝게', '어둡게']);

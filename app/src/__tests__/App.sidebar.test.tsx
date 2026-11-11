@@ -110,7 +110,7 @@ describe('사이드바 탭', () => {
     await vaultShown();
     await user.click(within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '왼쪽 사이드바 보이기/숨기기' }));
     expect(document.documentElement.getAttribute('data-left-hidden')).toBe('true');
-    await runFromPalette(user, '워크플로 뷰 열기');
+    await runFromPalette(user, 'Workflow 뷰 열기');
     await waitFor(() => expect(tabs().getByRole('tab', { name: '실험' }).getAttribute('aria-selected')).toBe('true'));
     expect(document.documentElement.getAttribute('data-left-hidden')).toBe('false');
   });
