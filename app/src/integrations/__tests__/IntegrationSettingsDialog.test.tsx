@@ -330,6 +330,47 @@ describe('IntegrationSettingsPage', () => {
     expect(screen.queryByLabelText(coreT('API key'))).toBeNull();
   });
 
+  it('with provider Disabled, "Enter manually" switches to OpenAI-compatible and puts focus in the endpoint field', async () => {
+    const deps = fakeDeps({ llmProvider: 'none' });
+    show(deps);
+    expect(await screen.findByText(t('integrations.ai.manualHint'))).toBeTruthy();
+    const manual = screen.getByRole('button', { name: t('integrations.ai.manual') });
+    expect(manual.tagName).toBe('BUTTON');
+    manual.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(deps.commit).toHaveBeenCalledWith({ llmProvider: 'openai' });
+    const ep = (await screen.findByLabelText(coreT('OpenAI endpoint'))) as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(ep));
+    // The URL, model and API key fields are all there at once; the hint and button are gone.
+    expect(screen.getByLabelText(coreT('Model'))).toBeTruthy();
+    expect(screen.getByLabelText(coreT('API key'))).toBeTruthy();
+    expect((screen.getByLabelText(coreT('Provider')) as HTMLSelectElement).value).toBe('openai');
+    expect(screen.queryByRole('button', { name: t('integrations.ai.manual') })).toBeNull();
+    expect(screen.queryByText(t('integrations.ai.manualHint'))).toBeNull();
+    expect(styleAttributes()).toEqual([]);
+  });
+
+  it('the "Enter manually" button and hint read in Korean', async () => {
+    setLang('ko');
+    show(fakeDeps({ llmProvider: 'none' }));
+    expect(await screen.findByRole('button', { name: '직접 입력' })).toBeTruthy();
+    expect(screen.getByText(t('integrations.ai.manualHint'))).toBeTruthy();
+    expect(t('integrations.ai.manualHint')).toMatch(/[가-힣]/);
+  });
+
+  it('an OpenAI-compatible base URL ending in /v1 is accepted and saved as typed, with no warning', async () => {
+    const deps = fakeDeps({ llmProvider: 'openai' });
+    show(deps);
+    const ep = (await screen.findByLabelText(coreT('OpenAI endpoint'))) as HTMLInputElement;
+    await userEvent.clear(ep);
+    await userEvent.type(ep, 'https://llm.lab.example/v1');
+    fireEvent.blur(ep);
+    expect(deps.commit).toHaveBeenCalledWith({ llmEndpointOpenai: 'https://llm.lab.example/v1' });
+    expect(ep.value).toBe('https://llm.lab.example/v1');
+    const field = ep.closest('.integration-field') as HTMLElement;
+    expect(field.querySelector('.warn')).toBeNull();
+  });
+
   it('the bfworkflow key slot follows the connection', async () => {
     const deps = fakeDeps();
     show(deps);

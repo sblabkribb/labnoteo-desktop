@@ -138,6 +138,10 @@ const ko: Record<string, string> = {
   'integrations.keyRemoveFailed': '키를 Windows 자격 증명 관리자에서 지우지 못했습니다.',
   'integrations.testFailed': '연결을 확인하지 못했습니다.',
   'integrations.import.button': '파일에서 가져오기…',
+  'integrations.import.heading': '파일로 한 번에 가져오기(선택)',
+  'integrations.import.intro': '연결 정보 파일이 있으면 위의 주소와 키를 한 번에 채웁니다. 없으면 위 칸에 직접 넣으면 됩니다.',
+  'integrations.ai.manualHint': 'AI가 꺼져 있습니다. 주소, 모델, API 키를 직접 넣으려면 "직접 입력"을 누르세요(OpenAI 호환).',
+  'integrations.ai.manual': '직접 입력',
   'integrations.import.hint':
     'AI 제공자, partbank, bfworkflow 연결 설정과 API 키, 외부 MCP 서버를 JSON 또는 .env 파일 하나에서 가져옵니다. 키는 Windows 자격 증명 관리자에만 저장됩니다.',
   'integrations.import.pickTitle': '연결 설정 파일 고르기',
@@ -1280,6 +1284,10 @@ const en: Record<string, string> = {
   'integrations.keyRemoveFailed': "Couldn't remove the key from Windows Credential Manager.",
   'integrations.testFailed': "Couldn't check the connection.",
   'integrations.import.button': 'Import from file…',
+  'integrations.import.heading': 'Import from a file (optional)',
+  'integrations.import.intro': 'If you have a connection file, this fills the addresses and keys above in one go. Otherwise, type them in the fields above.',
+  'integrations.ai.manualHint': 'AI is off. To type the address, model and API key yourself, choose "Enter manually" (OpenAI-compatible).',
+  'integrations.ai.manual': 'Enter manually',
   'integrations.import.hint':
     'Load the AI provider, partbank and bfworkflow connection settings, API keys and external MCP servers from one JSON or .env file. Keys are stored only in Windows Credential Manager.',
   'integrations.import.pickTitle': 'Choose a connections file',

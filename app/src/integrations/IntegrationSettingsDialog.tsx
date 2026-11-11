@@ -688,6 +688,18 @@ export function IntegrationSettingsPage(props: {
 
   // ── AI ──
   const provider = val.llmProvider;
+  // "직접 입력": 공급자를 OpenAI 호환으로 바꾸고 나타난 주소 칸에 초점을 준다(단추는 사라지므로 초점이 본문으로 떨어지지 않게).
+  const aiGroup = useRef<HTMLDivElement>(null);
+  const [focusEndpoint, setFocusEndpoint] = useState(false);
+  useEffect(() => {
+    if (!focusEndpoint || provider === 'none') return;
+    aiGroup.current?.querySelector('input')?.focus();
+    setFocusEndpoint(false);
+  }, [focusEndpoint, provider]);
+  const enterManually = () => {
+    setFocusEndpoint(true);
+    void save({ llmProvider: 'openai' });
+  };
   const endpointKey: EndpointKey = provider === 'ollama' ? 'llmEndpointOllama' : 'llmEndpointOpenai';
   const endpointWarn = provider === 'openai' ? cleartext(resolveEndpoint(draft.llmEndpointOpenai)) : { warnings: [], box: null };
 
@@ -697,72 +709,6 @@ export function IntegrationSettingsPage(props: {
 
   return (
       <div className="integration-body" ref={first}>
-        {deps.importFile ? (
-          <section className="integration-section">
-            <div className="integration-test">
-              <button type="button" disabled={importBusy} onClick={() => void runImport()}>
-                {t('integrations.import.button')}
-              </button>
-            </div>
-            <p className="prompt-hint">{t('integrations.import.hint')}</p>
-            <div
-              className={dropOver ? 'integration-drop over' : 'integration-drop'}
-              onDragOver={onDropOver}
-              onDragEnter={onDropOver}
-              onDragLeave={() => setDropOver(false)}
-              onDrop={(e) => void onDrop(e)}
-            >
-              {t('integrations.import.dropHere')}
-            </div>
-            <div className="integration-test">
-              <button type="button" aria-expanded={pasteOpen} onClick={() => setPasteOpen((o) => !o)}>
-                {t('mcpClient.import.paste')}
-              </button>
-            </div>
-            {pasteOpen ? (
-              <div className="integration-field">
-                <p className="prompt-hint">{t('mcpClient.import.pasteHint')}</p>
-                <textarea
-                  ref={pasteRef}
-                  className="integration-paste"
-                  aria-label={t('mcpClient.import.paste')}
-                  autoComplete="off"
-                  spellCheck={false}
-                  rows={6}
-                />
-                <div className="integration-test">
-                  <button type="button" disabled={importBusy} onClick={() => void runPaste()}>
-                    {t('mcpClient.import.run')}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {importLines.length > 0 ? (
-              <div role="status" className="integration-field">
-                {importLines.map((line, i) => (
-                  <p key={i} className={line.warn ? 'prompt-hint warn' : 'prompt-hint'}>
-                    {line.text}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-            {deleteAsk ? (
-              <div className="integration-field">
-                <p className="prompt-hint warn">
-                  {t(asksTrash ? 'integrations.import.deleteAsk' : 'integrations.import.permanentAsk')}
-                </p>
-                <div className="integration-test">
-                  <button type="button" onClick={() => void removeImported(!asksTrash)}>
-                    {t(asksTrash ? 'integrations.import.deleteYes' : 'integrations.import.permanentYes')}
-                  </button>
-                  <button type="button" onClick={keepImported}>
-                    {t('integrations.import.keep')}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
-        ) : null}
         <section className="integration-section">
           <h3>{coreT('partbank')}</h3>
           <p className="prompt-hint">{overrideOr('integrations.partbankIntro')}</p>
@@ -821,8 +767,17 @@ export function IntegrationSettingsPage(props: {
               <option value="ollama">Ollama</option>
             </SelectField>
           </div>
-          {provider !== 'none' ? (
-            <div className="integration-group">
+          {provider === 'none' ? (
+            <div className="integration-field">
+              <p className="prompt-hint">{t('integrations.ai.manualHint')}</p>
+              <div className="integration-test">
+                <button type="button" onClick={enterManually}>
+                  {t('integrations.ai.manual')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="integration-group" ref={aiGroup}>
               <UrlField
                 key={endpointKey}
                 label={provider === 'ollama' ? coreT('Ollama endpoint') : coreT('OpenAI endpoint')}
@@ -875,7 +830,7 @@ export function IntegrationSettingsPage(props: {
                 })}
               />
             </div>
-          ) : null}
+          )}
         </section>
 
         <section className="integration-section">
@@ -958,6 +913,75 @@ export function IntegrationSettingsPage(props: {
           />
         ) : null}
         {deps.mcp ? <SkillSection notify={deps.mcp.notify} invoke={deps.mcp.invoke} /> : null}
+        {/* 파일로 한 번에 가져오기: 위의 칸을 채우는 지름길(선택). 직접 넣는 칸이 먼저 보이게 맨 끝에 둔다. */}
+        {deps.importFile ? (
+          <section className="integration-section">
+            <h3>{t('integrations.import.heading')}</h3>
+            <p className="prompt-hint">{t('integrations.import.intro')}</p>
+            <div className="integration-test">
+              <button type="button" disabled={importBusy} onClick={() => void runImport()}>
+                {t('integrations.import.button')}
+              </button>
+            </div>
+            <p className="prompt-hint">{t('integrations.import.hint')}</p>
+            <div
+              className={dropOver ? 'integration-drop over' : 'integration-drop'}
+              onDragOver={onDropOver}
+              onDragEnter={onDropOver}
+              onDragLeave={() => setDropOver(false)}
+              onDrop={(e) => void onDrop(e)}
+            >
+              {t('integrations.import.dropHere')}
+            </div>
+            <div className="integration-test">
+              <button type="button" aria-expanded={pasteOpen} onClick={() => setPasteOpen((o) => !o)}>
+                {t('mcpClient.import.paste')}
+              </button>
+            </div>
+            {pasteOpen ? (
+              <div className="integration-field">
+                <p className="prompt-hint">{t('mcpClient.import.pasteHint')}</p>
+                <textarea
+                  ref={pasteRef}
+                  className="integration-paste"
+                  aria-label={t('mcpClient.import.paste')}
+                  autoComplete="off"
+                  spellCheck={false}
+                  rows={6}
+                />
+                <div className="integration-test">
+                  <button type="button" disabled={importBusy} onClick={() => void runPaste()}>
+                    {t('mcpClient.import.run')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {importLines.length > 0 ? (
+              <div role="status" className="integration-field">
+                {importLines.map((line, i) => (
+                  <p key={i} className={line.warn ? 'prompt-hint warn' : 'prompt-hint'}>
+                    {line.text}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {deleteAsk ? (
+              <div className="integration-field">
+                <p className="prompt-hint warn">
+                  {t(asksTrash ? 'integrations.import.deleteAsk' : 'integrations.import.permanentAsk')}
+                </p>
+                <div className="integration-test">
+                  <button type="button" onClick={() => void removeImported(!asksTrash)}>
+                    {t(asksTrash ? 'integrations.import.deleteYes' : 'integrations.import.permanentYes')}
+                  </button>
+                  <button type="button" onClick={keepImported}>
+                    {t('integrations.import.keep')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
       </div>
   );
 }

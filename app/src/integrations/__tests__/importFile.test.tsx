@@ -95,6 +95,24 @@ function show(deps: IntegrationDeps) {
 const importButton = () => screen.findByRole('button', { name: t('integrations.import.button') });
 
 describe('Integration settings: Import from file…', () => {
+  it('reads as an optional shortcut: its own heading and description, after the manual sections', async () => {
+    setLang('en');
+    const f = importDeps();
+    show(f.deps);
+    const heading = await screen.findByRole('heading', { name: t('integrations.import.heading') });
+    const section = heading.closest('section') as HTMLElement;
+    expect(section.textContent).toContain(t('integrations.import.intro'));
+    expect(section.contains(await importButton())).toBe(true);
+    expect(section.contains(screen.getByText(t('integrations.import.dropHere')))).toBe(true);
+    // The manual AI fields come first in the pane.
+    const ai = screen.getByRole('heading', { name: t('integrations.aiProvider') });
+    expect(ai.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(t('integrations.import.heading')).toBe('Import from a file (optional)');
+    setLang('ko');
+    expect(t('integrations.import.heading')).toBe('파일로 한 번에 가져오기(선택)');
+    setLang('en');
+  });
+
   it('imports through Rust, saves the settings, shows the summary, refreshes statuses and offers to delete', async () => {
     const seen: SecretStatus[] = [];
     const off = onSecretsChange((s) => seen.push(s));
