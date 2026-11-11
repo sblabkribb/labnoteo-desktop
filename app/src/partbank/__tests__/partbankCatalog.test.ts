@@ -312,8 +312,18 @@ describe('downloadPartbankCatalog', () => {
     expect(Object.keys(catalog('Strain_partbank-web.json'))).toHaveLength(2);
   });
 
-  it('says partbank returned nothing when there is nothing to write', async () => {
+  it('an empty own workspace is said as such, not as a failure (shared and public items are not downloaded)', async () => {
+    // real-server check: an account with an empty own workspace saw only "partbank returned nothing".
     setup({});
+    await run();
+    expect(store.writes).toEqual([]);
+    expect(messages()).toEqual([t('partbank.catalogEmptyWorkspace')]);
+    expect(messages()[0]).toMatch(/own workspace is empty/);
+  });
+
+  it('says partbank returned nothing when items were listed but none went into a catalog', async () => {
+    setup({ strains: [row(2, 'KBs_aa0001', 'E. coli')] });
+    env().th.answer.confirm(false);
     await run();
     expect(store.writes).toEqual([]);
     expect(messages()).toEqual(['partbank returned nothing to put in a catalog.']);

@@ -423,6 +423,8 @@ const ko: Record<string, string> = {
   'integrations.badRequest': '앱이 잘못된 요청을 만들었습니다. 다시 해 보고, 계속되면 알려 주세요.',
   'integrations.cancelled': '취소했습니다.',
   'partbank.setupFirst': '연동 설정에서 partbank 연결을 먼저 설정하세요.',
+  'partbank.catalogEmptyWorkspace':
+    '받을 항목이 없어요: 이 API 키 계정의 내 작업 공간이 비어 있어요. 카탈로그는 내 작업 공간의 항목만 받고, 공유·공개 라이브러리의 항목은 받지 않아요.',
   'partbank.globalFolderFirst': '샘플 설정에서 전역 샘플 폴더를 먼저 정한 뒤 카탈로그를 내려받으세요.',
   'cmd.integrationSettings': '연동 설정',
   'cmd.openLabnoteoLink': 'labnoteO 링크 열기',
@@ -1987,6 +1989,8 @@ const en: Record<string, string> = {
   'integrations.badRequest': 'The app built an invalid request. Try again, and report it if it keeps happening.',
   'integrations.cancelled': 'Cancelled.',
   'partbank.setupFirst': 'Set up a partbank connection in Integration settings first.',
+  'partbank.catalogEmptyWorkspace':
+    "Nothing to download: this API key's own workspace is empty. The catalog takes only items in your own workspace, not items in the shared or public library.",
   'partbank.globalFolderFirst': 'Set the Global sample folder in Sample settings before downloading a catalog.',
   'cmd.integrationSettings': 'Integration settings',
   'cmd.openLabnoteoLink': 'Open labnoteO link',

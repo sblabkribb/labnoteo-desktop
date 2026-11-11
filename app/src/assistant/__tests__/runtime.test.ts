@@ -10,7 +10,7 @@ import { externalAgentTools, type ExternalToolMeta } from '../../ai/externalTool
 import { UNTRUSTED_RULES } from '../../ai/untrusted';
 import { getLang, setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
-import { fakeInvoke } from '../../integrations/__tests__/fakeNet';
+import { fakeInvoke, secretStatusOf } from '../../integrations/__tests__/fakeNet';
 import { cancelAllRequests } from '../../integrations/netIpc';
 import { closeAllDialogs, currentDialog } from '../../labnote/host/dialogStore';
 import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
@@ -23,7 +23,7 @@ import {
   builtinRuntime,
   EARLIER_UNTRUSTED_RULES,
   noticeTranslator,
-  PARTBANK_UNAVAILABLE_RULES,
+  PARTBANK_RULES,
   STATUS_TITLE_MAX,
   statusLabel,
   toolLabel,
@@ -654,7 +654,8 @@ describe('builtinRuntime', () => {
     const p1 = new Script([answer('끝')]);
     const a = await setup(p1);
     await a.rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
-    expect(p1.seen[0][0].content).toContain(PARTBANK_UNAVAILABLE_RULES);
+    // The key status could not be read here: the rule names no connection state.
+    expect(p1.seen[0][0].content).toContain(PARTBANK_RULES.unknown);
 
     const meta = new Map<string, ExternalToolMeta>([
       ['mcp_rapid_search_parts', { kind: 'mcp', serverId: 'rapid', serverName: 'RAPID', toolTitle: 'search_parts', readOnly: true }],
@@ -670,7 +671,28 @@ describe('builtinRuntime', () => {
     const p2 = new Script([answer('끝')]);
     const b = await setup(p2);
     await b.rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
-    expect(p2.seen[0][0].content).not.toContain(PARTBANK_UNAVAILABLE_RULES);
+    for (const rule of Object.values(PARTBANK_RULES)) expect(p2.seen[0][0].content).not.toContain(rule);
+  });
+
+  it('partbank set up but no search tool: the rule says it cannot be searched in chat yet, never that it is not connected', async () => {
+    // real-server check: with partbank configured the assistant said partbank was not connected to this system.
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p, { routes: { secret_status: () => secretStatusOf({ partbankWeb: true }) } });
+    await rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
+    const sys = p.seen[0][0].content;
+    expect(sys).toContain(PARTBANK_RULES.configured);
+    expect(sys).not.toContain(PARTBANK_RULES.notSetUp);
+    expect(PARTBANK_RULES.configured).toContain('cannot search partbank in this chat yet');
+    expect(PARTBANK_RULES.configured).toContain('Download partbank catalog');
+    expect(PARTBANK_RULES.configured).toContain('do not say that partbank is not connected');
+  });
+
+  it('partbank not set up: the rule says it is not connected and where to set it up', async () => {
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p, { routes: { secret_status: () => secretStatusOf({ llmOpenai: true }) } });
+    await rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
+    expect(p.seen[0][0].content).toContain(PARTBANK_RULES.notSetUp);
+    expect(PARTBANK_RULES.notSetUp).toContain('not connected yet');
   });
 
   it('an external write is asked with the external text, and the untrusted rules are sent', async () => {
