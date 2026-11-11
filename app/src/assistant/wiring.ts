@@ -20,18 +20,27 @@ import { readAssistantConfig } from './config';
 import { prepareHistory } from './compact';
 import type { BubbleActions } from './MessageView';
 import { registerRuntime, type AssistantRuntime } from './runtime';
-import { noteFileOf, safeTarget, type Source } from './sources';
+import { catalogIdOf, noteFileOf, safeTarget, type Source } from './sources';
+import { revealCatalogEntry } from '../labnote/panel/catalogReveal';
 import { assistantSession, type AssistantSession } from './useAssistantSession';
 
-/** 출처 하나를 연다. 장부가 받지 않을 대상(다른 스킴, `..`)은 열지 않는다. */
+/**
+ * 출처 하나를 연다. 장부가 받지 않을 대상(다른 스킴, `..`)은 열지 않는다. 카탈로그 항목(`…json#WB150`)은 `revealCatalog` 가
+ * 있으면 실험 탭 카탈로그에서 그 항목을 보인다(JSON 파일을 열면 "노트가 아닌 파일" 카드뿐이고 항목은 보이지 않는다).
+ */
 export async function openSourceWith(
   src: Source,
-  deps: { openFile(path: string): unknown; openUrl(url: string): unknown }
+  deps: { openFile(path: string): unknown; openUrl(url: string): unknown; revealCatalog?(id: string): unknown }
 ): Promise<void> {
   const target = safeTarget(src.kind, src.target);
   if (!target) return;
-  if (src.kind === 'note') await deps.openFile(noteFileOf(target));
-  else await deps.openUrl(target);
+  if (src.kind !== 'note') {
+    await deps.openUrl(target);
+    return;
+  }
+  const catalogId = catalogIdOf(target);
+  if (catalogId !== undefined && deps.revealCatalog) await deps.revealCatalog(catalogId);
+  else await deps.openFile(noteFileOf(target));
 }
 
 /** 글자 위치(offset)의 줄 번호(0부터). */
@@ -80,6 +89,10 @@ export function bubbleActions(getCtx: () => CommandContext | undefined): BubbleA
       void openSourceWith(src, {
         openFile: (path) => ctx.openFile(path),
         openUrl: (url) => openExternal(url, tauriExternalDeps(notify)),
+        revealCatalog: (id) => {
+          ctx.showPanel('workflows');
+          revealCatalogEntry(id);
+        },
       }).catch((err: unknown) => {
         console.warn('[labnoteo] assistant source did not open:', err);
         notify('warn', t('pet.openFailed'));

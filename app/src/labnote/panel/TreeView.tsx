@@ -53,6 +53,8 @@ export interface TreeViewProps {
   actions?(node: TreeNode): TreeAction[] | undefined;
   /** 이 id 의 줄로 초점을 옮기고 보이게 스크롤한다. seq 마다 한 번, 그 줄이 그려진 뒤에(조상이 펼쳐지길 기다린다). */
   focusRequest?: { id: string; seq: number };
+  /** focusRequest 의 줄에 초점을 옮긴 뒤 한 번(그 줄과 요소). 실험 탭 카탈로그가 그 줄에 작은 창을 띄운다. */
+  onFocusRequest?(node: TreeNode, row: HTMLElement): void;
   /** Alt+Shift+↑/↓: 그 줄을 한 칸 옮긴다(실험 탭의 Workflow·Unit Operation 차례). 옮길 수 없는 줄이면 아무것도 하지 않는다. */
   onMove?(node: TreeNode, dir: 'up' | 'down'): void;
   /**
@@ -140,7 +142,7 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
  *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
  * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, badge, actions, focusRequest, onMove, dragGroup, onDrop }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, badge, actions, focusRequest, onFocusRequest, onMove, dragGroup, onDrop }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   /** 끌고 있는 줄과, 놓을 자리(그 줄의 앞이나 뒤). */
@@ -176,6 +178,8 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     const el = refs.current.get(row.key);
     el?.scrollIntoView?.({ block: 'nearest' });
     el?.focus();
+    if (el) onFocusRequest?.(row.node, el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onFocusRequest 는 요청(seq)마다 한 번만 부른다
   }, [focusRequest, rows]);
 
   const activate = (row: Row, el?: HTMLElement) => {

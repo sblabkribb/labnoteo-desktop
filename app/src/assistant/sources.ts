@@ -62,12 +62,19 @@ export function safeTarget(kind: SourceKind, target: string): string | undefined
 }
 
 /**
- * 카탈로그 항목 출처(`resources/workflows/<file>.json#<id>`)는 항목마다 다른 번호를 받도록 `#<id>` 가 붙는다. 열 때는 그
- * 파일만 연다. 다른 노트 경로(`#` 이 든 파일 이름 포함)는 그대로 둔다.
+ * 카탈로그 항목 출처(`resources/workflows/<file>.json#<id>`)는 항목마다 다른 번호를 받도록 `#<id>` 가 붙는다. 카탈로그에서 그
+ * 항목을 보일 수 없을 때(openSourceWith 의 revealCatalog 가 없다)는 그 파일만 연다. 다른 노트 경로(`#` 이 든 파일 이름 포함)는 그대로 둔다.
  */
 export function noteFileOf(target: string): string {
-  const m = /^(resources\/workflows\/[^#/]+\.json)#[\w.-]+$/.exec(target);
+  const m = CATALOG_ENTRY.exec(target);
   return m ? m[1] : target;
+}
+
+const CATALOG_ENTRY = /^(resources\/workflows\/[^#/]+\.json)#([\w.-]+)$/;
+
+/** 카탈로그 항목 출처의 코드(`…/workflows_en.json#WB150` → `WB150`). 카탈로그 항목이 아니면 undefined. */
+export function catalogIdOf(target: string): string | undefined {
+  return CATALOG_ENTRY.exec(target)?.[2];
 }
 
 /**

@@ -55,6 +55,28 @@ describe('openSourceWith', () => {
     expect(openFile.mock.calls).toEqual([['resources/workflows/unitoperations_hw_en.json'], ['labnote/001_A/C#1.md']]);
   });
 
+  it('a catalog entry source reveals that entry in the catalog when the app can, instead of opening the JSON file', async () => {
+    const openFile = vi.fn();
+    const openUrl = vi.fn();
+    const revealCatalog = vi.fn();
+    await openSourceWith({ kind: 'note', label: 'C', target: 'resources/workflows/workflows_en.json#WB150' }, { openFile, openUrl, revealCatalog });
+    await openSourceWith({ kind: 'note', label: 'U', target: 'resources/workflows/unitoperations_hw_en.json#UHW100' }, { openFile, openUrl, revealCatalog });
+    await openSourceWith({ kind: 'note', label: 'N', target: 'labnote/001_A/C#1.md' }, { openFile, openUrl, revealCatalog });
+    expect(revealCatalog.mock.calls).toEqual([['WB150'], ['UHW100']]);
+    expect(openFile.mock.calls).toEqual([['labnote/001_A/C#1.md']]);
+  });
+
+  it('bubbleActions.openSource on a catalog chip shows the Experiments tab and asks it to reveal the entry', async () => {
+    const { takeCatalogReveal } = await import('../../labnote/panel/catalogReveal');
+    const showPanel = vi.fn();
+    const { c } = ctx();
+    (c as unknown as { showPanel: typeof showPanel }).showPanel = showPanel;
+    bubbleActions(() => c).openSource!({ kind: 'note', label: '카탈로그 · WB150', target: 'resources/workflows/workflows_en.json#WB150' });
+    await vi.waitFor(() => expect(showPanel).toHaveBeenCalledWith('workflows'));
+    expect(takeCatalogReveal()).toBe('WB150');
+    expect(c.openFile).not.toHaveBeenCalled();
+  });
+
   it('refuses targets the ledger would refuse', async () => {
     const openFile = vi.fn();
     const openUrl = vi.fn();

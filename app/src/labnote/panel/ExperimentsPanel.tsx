@@ -48,6 +48,7 @@ import { TreeView, type TreeAction, type TreeBadge, type TreeState } from './Tre
 import { githubMenuItems } from '../../github/commands';
 import { statusBadge, useGithubStatuses } from '../../github/statusStore';
 import { CatalogPopover, type CatalogEntry, type CatalogTarget } from './CatalogPopover';
+import { onCatalogReveal, takeCatalogReveal } from './catalogReveal';
 import { touchesDir, useVaultChanges } from './useVaultChanges';
 
 export interface ExperimentsPanelProps {
@@ -179,6 +180,9 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
   /** 카탈로그 구역: 처음엔 접혀 있다. */
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [popover, setPopover] = useState<{ entry: CatalogEntry; anchor: HTMLElement }>();
+  /** 어시스턴트 카탈로그 칩이 보여 달라고 한 항목(코드)과 그 카탈로그 줄 초점 요청. */
+  const [catalogReveal, setCatalogReveal] = useState<{ id: string; seq: number }>();
+  const [catalogFocus, setCatalogFocus] = useState<{ id: string; seq: number }>();
   const [groupBy, setGroupBy] = useState<GroupBy>(groupByFromSetting(ctx.settings.workflowViewGroupBy));
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   /** 옮긴 Workflow·UO 의 줄로 초점을 돌린다(경로와 줄이 바뀌어 id 가 바뀐다). */
@@ -720,6 +724,45 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
     if (entry && el) setPopover({ entry, anchor: el });
   };
 
+  // 어시스턴트의 카탈로그 출처 칩(catalogReveal.ts): 패널이 뜰 때 남은 요청과, 뜬 뒤의 요청을 받는다.
+  useEffect(() => {
+    const take = () => {
+      const id = takeCatalogReveal();
+      if (id) setCatalogReveal({ id, seq: ++focusSeq.current });
+    };
+    take();
+    return onCatalogReveal(take);
+  }, []);
+
+  // 카탈로그를 읽은 뒤: 구역을 펴고 그 항목의 조상을 펼친 다음 그 줄로 초점을 옮긴다(작은 창은 onFocusRequest 에서).
+  // 카탈로그에 없는 코드면 구역만 편다.
+  useEffect(() => {
+    if (!catalogReveal || !catalog) return;
+    const find = (list: readonly TreeNode[], trail: TreeNode[]): TreeNode[] | undefined => {
+      for (const node of list) {
+        const id = node.kind === 'workflow' || node.kind === 'unitOperation' ? (node.payload as { id: string }).id : undefined;
+        if (id === catalogReveal.id) return [...trail, node];
+        const below = node.children ? find(node.children, [...trail, node]) : undefined;
+        if (below) return below;
+      }
+      return undefined;
+    };
+    const path = find(catalogTree, []);
+    setCatalogOpen(true);
+    if (!path) {
+      setCatalogReveal(undefined);
+      return;
+    }
+    setExpanded((prev) => new Set([...prev, ...path.slice(0, -1).map((n) => n.id)]));
+    setCatalogFocus({ id: path[path.length - 1].id, seq: catalogReveal.seq });
+  }, [catalogReveal, catalog, catalogTree]);
+
+  const onCatalogFocused = (node: TreeNode, el: HTMLElement) => {
+    if (!catalogReveal) return;
+    setCatalogReveal(undefined);
+    activateCatalog(node, el);
+  };
+
   return (
     <div className="workflows-panel experiments-panel">
       <div className="nav-header">
@@ -816,6 +859,8 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
               onContext={context}
               code={catalogCode}
               meta={catalogMeta}
+              focusRequest={catalogFocus}
+              onFocusRequest={onCatalogFocused}
             />
           )}
         </section>

@@ -10,6 +10,7 @@ import { createWorkflow } from '../../commands/workflow';
 import { ContextMenu } from '../../ui/ContextMenu';
 import { closeMenu } from '../../ui/menuStore';
 import { ExperimentsPanel } from '../ExperimentsPanel';
+import { revealCatalogEntry, takeCatalogReveal } from '../catalogReveal';
 import { resetGithubStatusesForTest, setGithubStatuses } from '../../../github/statusStore';
 import type { FolderStatus } from '../../../integrations/githubIpc';
 import { WorkflowsPanel } from '../WorkflowsPanel';
@@ -42,6 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => closeMenu());
   cleanup();
+  takeCatalogReveal();
   resetGithubStatusesForTest();
   h?.cleanup();
   setLang('ko');
@@ -598,6 +600,28 @@ describe('ExperimentsPanel', () => {
     expect(vi.mocked(createWorkflow).mock.calls[0][1]).toEqual(expect.objectContaining({ id: 'WB030' }));
     expect(vi.mocked(createWorkflow).mock.calls[0][2]).toEqual({ experimentDir: EXP });
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('an assistant catalog chip (revealCatalogEntry) opens the catalog, expands to the entry and shows its popover', async () => {
+    mount({ active: `${EXP}/README.labnote.md` });
+    await findRow(/003 · 대장균 숙주 비교/);
+    act(() => revealCatalogEntry('WB030'));
+    const pop = await screen.findByRole('dialog', { name: /^WB030 / });
+    expect(pop.textContent).toContain('DNA Assembly');
+    const catalog = screen.getByRole('tree', { name: '카탈로그' });
+    const entry = within(catalog)
+      .getAllByRole('treeitem')
+      .find((li) => li.querySelector('.meta.code')?.textContent === 'WB030');
+    expect(entry).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^카탈로그/ }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('a reveal asked before the panel mounts (the tab was hidden) is shown once it mounts; a UO code works too', async () => {
+    const op = hwJson.unitOperations[0].id;
+    revealCatalogEntry(op);
+    mount();
+    const pop = await screen.findByRole('dialog', { name: new RegExp(`^${op} `) });
+    expect(pop).toBeTruthy();
   });
 
   it('with no experiment open, the add button is disabled and says why', async () => {
