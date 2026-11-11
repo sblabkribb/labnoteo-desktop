@@ -116,7 +116,8 @@ function bumpSkinRevision(id: string): void {
 /** 임시 보관한 팩을 설치한다. 같은 id 의 다른 스킨이 있으면 `replace` 없이는 `exists`. */
 export async function installSkin(stagingId: string, replace: boolean, invoke: InvokeFn = tauriInvoke): Promise<SkinManifest> {
   const m = await call<SkinManifest>(invoke, 'skin_install', { stagingId, replace });
-  bumpSkinRevision(m.id);
+  // Rust always returns the manifest; a test double may not
+  if (m?.id) bumpSkinRevision(m.id);
   return m;
 }
 

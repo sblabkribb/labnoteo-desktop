@@ -348,7 +348,7 @@ export function PreviewDialog(props: {
                     <span className="github-file-size">{size(f.size)}</span>
                     {fix ? (
                       <span className="github-badge fix">
-                        <Icon name="circle-x" size={12} /> <span>{t('github.preview.badgeFix')}</span>
+                        <Icon name="circle-x" size={14} /> <span>{t('github.preview.badgeFix')}</span>
                       </span>
                     ) : null}
                     {b ? <span className={`github-badge ${f.change}`}>{b}</span> : null}
