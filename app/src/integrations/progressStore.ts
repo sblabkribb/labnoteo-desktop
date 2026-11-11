@@ -12,6 +12,8 @@ import { vaultSignal } from './netIpc';
 export interface ProgressHandle {
   readonly signal: AbortSignal;
   line(text: string): void;
+  /** 줄 목록 아래의 상태 한 줄(부를 때마다 바꾼다). undefined 면 지운다. AI 초안의 '생각하는 중… / 쓰는 중… N자'. */
+  status(text: string | undefined): void;
   done(): void;
   /**
    * 취소할 수 있는지 바꾼다(GitHub 올리기, spec §5.5). false 면 취소 단추가 사라지고, 취소 단추·닫기 단추·Escape 가 더는
@@ -23,6 +25,8 @@ export interface ProgressHandle {
 export interface ProgressState {
   readonly title: string;
   readonly lines: readonly string[];
+  /** `status()` 로 단 상태 한 줄. */
+  readonly status?: string;
   readonly cancellable: boolean;
   /** `setCancellable(false)` 뒤: 닫기 단추와 Escape 도 아무것도 하지 않는다. */
   readonly locked?: boolean;
@@ -88,6 +92,12 @@ export function openProgress(title: string, opts: { cancellable?: boolean } = {}
       if (!current) return;
       const lines = [...current.state.lines, text];
       current.state = { ...current.state, lines: lines.length > MAX_LINES ? lines.slice(lines.length - MAX_LINES) : lines };
+      emit();
+    },
+    status(text: string | undefined) {
+      const current = entries.get(id);
+      if (!current || current.state.status === text) return;
+      current.state = { ...current.state, status: text };
       emit();
     },
     done() {

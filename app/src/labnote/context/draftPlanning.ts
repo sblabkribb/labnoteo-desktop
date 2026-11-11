@@ -203,7 +203,9 @@ export async function draftPlanningCommand(deps: DraftDeps): Promise<void> {
   const picked = await deps.pickSources(model, window);
   if (!picked) return;
   const chosen: BuiltContext = { ...model, sources: picked.sources };
-  const out = await complete(env, buildPlanningMessages(chosen, sections, env.lang()), { contextWindow: picked.window });
+  // Streamed so the progress dialog shows the model thinking and writing (real-server check, 2026-11-11);
+  // the draft is still parsed and shown once the whole answer is in.
+  const out = await complete(env, buildPlanningMessages(chosen, sections, env.lang()), { contextWindow: picked.window, stream: true });
   if (!out) return;
 
   const draft = parsePlanningReply(out.content, sections);

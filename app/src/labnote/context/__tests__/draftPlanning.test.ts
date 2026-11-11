@@ -256,6 +256,23 @@ describe('draftPlanningCommand', () => {
     expect(p.calls[0].opts?.contextWindow).toBe(4096);
   });
 
+  it('streams the request when the provider can (progress while the model writes)', async () => {
+    const { th } = await setup(vault(), WF2, IN_TARGET);
+    const p = fakeProvider(PLANNING_REPLY);
+    const streamed: ChatOptions[] = [];
+    p.chatStream = async (_messages, opts, onDelta) => {
+      streamed.push(opts!);
+      onDelta(PLANNING_REPLY);
+      return { content: PLANNING_REPLY, toolCalls: [] };
+    };
+    const d = deps(envWith(th, p), m => ({ sources: m.sources, window: 4096 }));
+    await draftPlanningCommand(d);
+    expect(p.calls).toHaveLength(0);
+    expect(streamed).toHaveLength(1);
+    expect(streamed[0].contextWindow).toBe(4096);
+    expect(d.shown).toHaveLength(1);
+  });
+
   it('drops Results text from the reply and leaves the Results bytes alone on Insert', async () => {
     const { th } = await setup(vault(), WF2, IN_TARGET);
     const p = fakeProvider(PLANNING_REPLY);

@@ -130,6 +130,7 @@ function harness(o: {
     progress: () => ({
       signal: new AbortController().signal,
       line: (s) => void h.progressLines.push(s),
+      status: () => undefined,
       done: () => undefined,
       setCancellable: (v) => void h.cancellable.push(v),
     }),

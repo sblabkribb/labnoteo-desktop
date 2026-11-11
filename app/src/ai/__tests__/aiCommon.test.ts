@@ -206,6 +206,58 @@ describe('complete', () => {
     expect(Object.keys(chat.mock.calls[2][1]!).sort()).toEqual(['signal', 'temperature']);
   });
 
+  it('complete with stream: true streams the answer and shows thinking, then writing with a character count', async () => {
+    renderLayer();
+    const th = host({});
+    const base = createAiEnv(th.ctx);
+    let push!: (text: string) => void;
+    let finish!: () => void;
+    const statuses: (string | null | undefined)[] = [];
+    const chatStream = vi.fn(
+      (_m: unknown, _o: unknown, onDelta: (text: string) => void) =>
+        new Promise<{ content: string; toolCalls: [] }>((resolve) => {
+          let text = '';
+          push = (piece) => {
+            text += piece;
+            onDelta(piece);
+          };
+          finish = () => resolve({ content: text, toolCalls: [] });
+        })
+    );
+    const chat = vi.fn();
+    const env: AiEnv = { ...base, provider: { ...base.provider!, label: 'OpenAI-compatible', chat, chatStream } };
+    const status = () => document.querySelector('.progress-status')?.textContent;
+    let run!: Promise<unknown>;
+    await act(async () => {
+      run = complete(env, [{ role: 'user', content: 'hi' }], { stream: true, contextWindow: 4096 });
+      await tick();
+    });
+    statuses.push(status());
+    await act(async () => push('#### Method\n'));
+    statuses.push(status());
+    await act(async () => push('- mix'));
+    statuses.push(status());
+    expect(screen.getByRole('button', { name: t('integrations.cancel') })).toBeTruthy();
+    await act(async () => {
+      finish();
+      await run;
+    });
+    await expect(run).resolves.toMatchObject({ content: '#### Method\n- mix' });
+    expect(statuses).toEqual([t('ai.progress.thinking'), t('ai.progress.writing', '12'), t('ai.progress.writing', '17')]);
+    expect(chat).not.toHaveBeenCalled();
+    expect(chatStream.mock.calls[0][1]).toMatchObject({ temperature: 0.2, contextWindow: 4096 });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('complete with stream: true falls back to chat when the provider cannot stream', async () => {
+    const th = host({});
+    const { env } = aiEnv(th, () => reply('whole'));
+    const provider = Object.assign(Object.create(env.provider!), { chatStream: undefined });
+    await expect(complete({ ...env, provider }, [{ role: 'user', content: 'hi' }], { stream: true })).resolves.toMatchObject({
+      content: 'whole',
+    });
+  });
+
   it('complete maps errors with describeLlmError and returns undefined', async () => {
     const th = host({});
     vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -15,6 +15,7 @@ import { caretIn } from '@labnoteo/core/lib/caret';
 import type { EditorView } from '@codemirror/view';
 import type { AiEnv } from '../../ai/aiEnv';
 import { getLang } from '../../i18n/lang';
+import { t as appT } from '../../i18n/t';
 import { withProgress } from '../../integrations/progressStore';
 import { entryEvents } from '../commands/entryEvents';
 import { readmeStamp } from '../commands/stamp';
@@ -231,7 +232,7 @@ export function failureReasons(env: AiEnv, executed: AgentRun['executed']): stri
 export async function complete(
   env: AiEnv,
   messages: ChatMessage[],
-  opts: { contextWindow?: number } = {}
+  opts: { contextWindow?: number; stream?: boolean } = {}
 ): Promise<ChatResult | undefined> {
   const provider = env.provider;
   if (!provider) {
@@ -242,12 +243,22 @@ export async function complete(
   try {
     const result = await withProgress(
       env.host.t('Contacting {0}…', provider.label),
-      p =>
-        provider.chat(messages, {
+      p => {
+        const chatOpts = {
           temperature: 0.2,
           signal: p.signal,
           ...(opts.contextWindow != null ? { contextWindow: opts.contextWindow } : {}),
-        }),
+        };
+        if (!opts.stream || !provider.chatStream) return provider.chat(messages, chatOpts);
+        // Streamed (the planning draft, real-server check 2026-11-11): the dialog says the model is thinking until
+        // the first piece of answer arrives, then how much it has written, so a long answer does not look stuck.
+        p.status(appT('ai.progress.thinking'));
+        let written = 0;
+        return provider.chatStream(messages, chatOpts, piece => {
+          written += piece.length;
+          p.status(appT('ai.progress.writing', String(written)));
+        });
+      },
       { cancellable: true }
     );
     const content = result.content.trim();

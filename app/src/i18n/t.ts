@@ -126,6 +126,8 @@ const ko: Record<string, string> = {
   'ai.reasoningLoop':
     '{0} 모델이 같은 생각을 되풀이해서 멈췄습니다. 다시 하거나 요청을 더 짧고 분명하게 바꿔 보세요.',
   'ai.configureFirst': '연동 설정에서 AI 제공자를 먼저 설정하세요.',
+  'ai.progress.thinking': '생각하는 중…',
+  'ai.progress.writing': '쓰는 중… {0}자',
   'integrations.allowHttp': '이 주소로 암호화 없이 키 보내기 허용',
   'integrations.bfw.heading': 'bfworkflow',
   'integrations.bfw.connection': '연결',
@@ -1492,6 +1494,8 @@ const en: Record<string, string> = {
   'ai.reasoningLoop':
     'The {0} model kept repeating the same reasoning, so it was stopped. Try again, or make the request shorter and clearer.',
   'ai.configureFirst': 'Configure an AI provider in Integration settings first.',
+  'ai.progress.thinking': 'Thinking…',
+  'ai.progress.writing': 'Writing… {0} characters',
   'integrations.allowHttp': 'Allow sending the key to this address without encryption',
   'integrations.bfw.heading': 'bfworkflow',
   'integrations.bfw.connection': 'Connection',

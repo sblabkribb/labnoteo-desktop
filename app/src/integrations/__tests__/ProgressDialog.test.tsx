@@ -34,6 +34,22 @@ describe('progress dialog', () => {
     act(() => p.done());
   });
 
+  it('status() shows one line that each call replaces, and undefined clears it (planning draft progress)', () => {
+    renderLayer();
+    const p = open('Contacting OpenAI-compatible…', { cancellable: true });
+    act(() => p.status('Thinking…'));
+    expect(document.querySelector('.progress-status')?.textContent).toBe('Thinking…');
+    act(() => p.status('Writing… 12 chars'));
+    expect(document.querySelectorAll('.progress-status')).toHaveLength(1);
+    expect(document.querySelector('.progress-status')?.textContent).toBe('Writing… 12 chars');
+    expect(document.querySelector('.progress-status')?.getAttribute('aria-live')).toBe('polite');
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    act(() => p.status(undefined));
+    expect(document.querySelector('.progress-status')).toBeNull();
+    expect(styleAttributes()).toEqual([]);
+    act(() => p.done());
+  });
+
   it('Cancel aborts the signal and closes', async () => {
     renderLayer();
     const p = open('Working', { cancellable: true });

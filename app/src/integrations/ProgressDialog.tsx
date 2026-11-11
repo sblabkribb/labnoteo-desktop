@@ -37,6 +37,11 @@ export function ProgressDialog(props: { spec: Extract<DialogSpec, { kind: 'progr
           </li>
         ))}
       </ul>
+      {state.status ? (
+        <p className="progress-status" aria-live="polite">
+          {state.status}
+        </p>
+      ) : null}
       {state.cancellable && (
         <div className="dialog-actions">
           <button ref={cancelButton} type="button" onClick={cancel}>

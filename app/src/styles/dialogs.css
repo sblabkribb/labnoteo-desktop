@@ -83,6 +83,7 @@
 /* 진행 창(SP6 Task 12): 줄 목록만 스크롤한다. 긴 줄은 감싼다 */
 .progress-lines { margin: 0; padding: 0; list-style: none; min-height: 0; max-height: 40vh; overflow-y: auto; color: var(--text-muted); font-size: 0.93em; }
 .progress-line { padding: 1px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.progress-status { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 0.93em; font-variant-numeric: tabular-nums; }
 .ai-answer { margin: 0 0 var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; font: inherit; }
 
 /* 연동 설정(SP6 Task 13, D17): 본문만 스크롤하고 닫기 줄은 남는다. 주소·키 칸은 너비를 다 쓴다(플러그인의 width: 100%) */
