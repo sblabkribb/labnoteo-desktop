@@ -38,6 +38,9 @@ describe('Assistant pane: chat history row', () => {
     const row = screen.getByRole('group', { name: '대화 기록' });
     expect(row.textContent).toContain('기록이 있는 실험: 3개');
     expect(row.textContent).toContain('보관함에는 저장하지 않아요');
+    // the count is its own line, not glued in front of the description (Visual QA: "…0개 실험마다 …")
+    const lines = [...row.querySelectorAll('.setting-desc-line')].map((el) => el.textContent);
+    expect(lines).toEqual(['실험마다 이 PC의 앱 폴더에 따로 저장해요. 보관함에는 저장하지 않아요.', '기록이 있는 실험: 3개']);
   });
 
   it('delete all asks first; refused leaves everything', async () => {

@@ -190,6 +190,27 @@ describe('SkinGalleryDialog', () => {
     expect(calls.map((c) => c[0])).not.toContain('skin_install');
   });
 
+  it('marks the previewed entry in the list; the status line spans the dialog and takes no room when empty (Visual QA)', async () => {
+    const bad = entry({ id: 'bad-sha', name: 'bad-sha' });
+    const { invoke } = galleryInvoke(() => preview(), [entry(), bad]);
+    const failing = (async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'skin_gallery_fetch' && args?.entryId === 'bad-sha') throw { kind: 'galleryMismatch', detail: 'sha256' };
+      return invoke(cmd, args);
+    }) as InvokeFn;
+    renderDialog(failing);
+    const items = await screen.findAllByRole('listitem');
+    expect(items.map((li) => li.getAttribute('aria-current'))).toEqual([null, null]);
+    const status = screen.getByRole('status');
+    expect(status.className).toBe('pet-gallery-status');
+    fireEvent.click(screen.getByRole('button', { name: 'Teal <b>Flask</b> 미리 보기' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '설치' })).toBeTruthy());
+    expect(items[0].getAttribute('aria-current')).toBe('true');
+    expect(items[0].classList.contains('is-current')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'bad-sha 미리 보기' }));
+    await waitFor(() => expect(status.textContent).toContain(catalogs.ko['skin.error.galleryMismatch']));
+    expect(items.map((li) => li.getAttribute('aria-current'))).toEqual([null, 'true']);
+  });
+
   it('a licence that differs from the index disables install with the reason', async () => {
     const { invoke } = galleryInvoke(() => preview({ stagingId: null, licenceMatches: false, indexLicence: 'CC0-1.0' }));
     renderDialog(invoke);

@@ -94,8 +94,13 @@ const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g;
 
 /** 확인 글에 넣을 검색어: 한 줄, 제어·양방향 글자 없이, 200자까지(Rust `web_search::MAX_QUERY`). */
 function queryLine(args: Record<string, unknown>): string {
-  const q = typeof args.query === 'string' ? args.query : '';
-  return [...q.replace(/[\r\n\t]+/g, ' ').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim()].slice(0, 200).join('');
+  return oneLine(args.query, 200);
+}
+
+/** 확인 글에 넣을 한 줄: 제어·양방향 글자 없이, `max` 자까지. 글이 아니면 빈 글. */
+function oneLine(v: unknown, max = 2000): string {
+  const s = typeof v === 'string' ? v : '';
+  return [...s.replace(/[\r\n\t]+/g, ' ').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim()].slice(0, max).join('');
 }
 
 /**
@@ -104,16 +109,31 @@ function queryLine(args: Record<string, unknown>): string {
  * 닿은 실행이면 웹 줄(`web.tainted`)을 덧붙인다(assistant spec §7.3).
  */
 export function externalApprovalMessage(call: ToolCall, meta: ExternalToolMeta, mutates: boolean, note?: ConfirmNote): string {
-  // 웹 도구에는 서버가 없다: 종류 id('web') 대신 말로 부른다(Task 22).
-  const server = meta.kind === 'web' ? t('web.serverName') : (meta.serverName ?? meta.serverId ?? meta.kind);
+  if (meta.kind === 'web') return webApprovalMessage(call, mutates, note);
+  const server = meta.serverName ?? meta.serverId ?? meta.kind;
   const tool = meta.toolTitle ?? call.name;
   const parts = [t('mcpClient.confirm.title', server, tool)];
   if (mutates) parts.push(t('mcpClient.confirm.writes'));
   if (note?.reason === 'crossServer') parts.push(t('ai.confirm.crossServer'));
   if (note?.reason === 'bigArgs') parts.push(t('mcpClient.confirm.bigArgs'));
-  if (note?.reason === 'webAfterTaint') parts.push(t('web.confirm.afterTaint', queryLine(call.arguments)));
   if (note?.tainted && mutates) parts.push(t('ai.confirm.tainted'));
   if (note?.web && (mutates || note.reason)) parts.push(t('web.tainted'));
   parts.push(`${t('mcpClient.confirm.args')}\n${argsPreview(call.arguments)}`);
+  return parts.join('\n\n');
+}
+
+/**
+ * 웹 도구의 확인 글(Visual QA): 도구 id('web_search') 와 JSON 대신 말로 — 무엇을 하려는지, 왜 묻는지, 보낼 검색어(또는 열
+ * 주소) 한 줄. 검색어·주소는 한 줄로, 제어·방향 글자 없이 보인다.
+ */
+function webApprovalMessage(call: ToolCall, mutates: boolean, note?: ConfirmNote): string {
+  const page = call.name === 'fetch_page';
+  const parts = [page ? t('web.confirm.fetch') : t('web.confirm.search')];
+  if (note?.reason === 'webAfterTaint') parts.push(t('web.confirm.why'));
+  if (note?.reason === 'crossServer') parts.push(t('ai.confirm.crossServer'));
+  if (note?.reason === 'bigArgs') parts.push(t('mcpClient.confirm.bigArgs'));
+  if (note?.tainted && mutates) parts.push(t('ai.confirm.tainted'));
+  if (note?.web && (mutates || note.reason)) parts.push(t('web.tainted'));
+  parts.push(page ? t('web.confirm.url', oneLine(call.arguments.url)) : t('web.confirm.query', queryLine(call.arguments)));
   return parts.join('\n\n');
 }

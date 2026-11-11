@@ -54,19 +54,31 @@
 }
 html[data-reduced-motion] .pet-sprite { animation: none; }
 
-/* 말풍선: 그림 위에, 오른쪽 끝을 맞춰 뜬다(전환 없이). 대화가 길어지면 대화 칸만 스크롤한다 */
+/* 말풍선: 그림 위에, 오른쪽 끝을 맞춰 뜬다(전환 없이). 위에 자리가 모자라면 아래로 뒤집고, 가로는 창 안으로 민다:
+   PetLayer 가 --bubble-left, --bubble-bottom(위로 열 때), --bubble-top(아래로 열 때), --bubble-max-h 를 건다.
+   대화가 길어지면 대화 칸만 스크롤한다. 한국어는 낱말 중간에서 끊지 않는다(keep-all) */
 .pet-bubble {
+  position: fixed;
+  left: var(--bubble-left, auto);
+  bottom: var(--bubble-bottom, auto);
+  box-sizing: border-box;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   width: min(22rem, calc(100vw - 2 * var(--space-6)));
-  max-height: min(32rem, calc(100vh - 8rem));
+  max-height: min(32rem, var(--bubble-max-h, calc(100vh - 8rem)));
   padding: var(--space-5) var(--space-6);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-container);
   box-shadow: var(--shadow-high);
   color: var(--text);
+}
+.pet-bubble[data-side="below"] {
+  top: var(--bubble-top, auto);
+  bottom: auto;
 }
 .pet-bubble-head {
   display: flex;
@@ -297,6 +309,12 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   box-sizing: border-box;
   width: 100%;
 }
+/* 긴 워크플로 노트 이름은 줄임표로(고르기 칸은 줄을 바꾸지 않는다). 전체 이름은 title 에 있다 */
+.pet-select {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pet-chip-target {
   margin: 0;
   color: var(--text-muted);
@@ -391,7 +409,20 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
 }
-.pet-gallery-item.is-current { border-color: var(--border-strong); }
+/* 미리 보는 항목: 강조색 테두리와 옅은 바탕(아래의 미리 보기·오류가 어느 것의 것인지) */
+.pet-gallery-item.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* 받는 중·오류 한 줄: 창 너비만큼 쓰고(좁은 칸에 접히지 않게), 비어 있으면 자리를 차지하지 않는다 */
+.pet-gallery-status {
+  margin: 0 0 var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.pet-gallery-status:empty { margin: 0; }
 .pet-gallery-text {
   display: flex;
   flex-direction: column;

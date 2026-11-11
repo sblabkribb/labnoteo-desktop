@@ -38,6 +38,19 @@ describe('styles/assistant.css', () => {
     expect(decl(top, '.pet-wrap', 'bottom')).toEqual(['var(--pet-y)']);
   });
 
+  it('the bubble is placed by the CSSOM variables (flipped below when there is no room above) and capped to the room left', () => {
+    expect(decl(top, '.pet-bubble', 'position')).toEqual(['fixed']);
+    expect(decl(top, '.pet-bubble', 'left')).toEqual(['var(--bubble-left, auto)']);
+    expect(decl(top, '.pet-bubble', 'bottom')).toEqual(['var(--bubble-bottom, auto)']);
+    expect(decl(top, '.pet-bubble[data-side="below"]', 'top')).toEqual(['var(--bubble-top, auto)']);
+    expect(decl(top, '.pet-bubble[data-side="below"]', 'bottom')).toEqual(['auto']);
+    expect(decl(top, '.pet-bubble', 'max-height')).toEqual(['min(32rem, var(--bubble-max-h, calc(100vh - 8rem)))']);
+  });
+
+  it('Korean text in the bubble does not break inside words', () => {
+    expect(decl(top, '.pet-bubble', 'word-break')).toEqual(['keep-all']);
+  });
+
   it('reduced motion (media query and html[data-reduced-motion]) stops the sprite: frame 0 of the state stays', () => {
     expect(decl((r) => r.atRule === '@media (prefers-reduced-motion: reduce)', '.pet-sprite', 'animation')).toEqual(['none']);
     expect(decl(top, 'html[data-reduced-motion] .pet-sprite', 'animation')).toEqual(['none']);

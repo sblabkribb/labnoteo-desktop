@@ -94,6 +94,9 @@ describe('skin pack IPC (Task 17)', () => {
     expect(skinErrorText({ kind: 'fileNotAllowed', detail: 'x.svg' })).toBe('허용되지 않는 파일이 들어 있어요: x.svg');
     expect(skinErrorText({ kind: 'tooLarge' })).toBe('파일이 너무 커요.');
     expect(skinErrorText({ kind: 'licenceMissing' })).toBe('라이선스가 필요해요.');
+    // zip-slip and links say what was found, not just "damaged" (Visual QA)
+    expect(skinErrorText({ kind: 'badPath', detail: '../evil.png' })).toBe('위험한 경로나 링크가 들어 있어서 열지 않았어요.');
+    expect(skinErrorText({ kind: 'symlink' })).toBe('위험한 경로나 링크가 들어 있어서 열지 않았어요.');
     expect(skinErrorText('boom')).toBe(catalogs.ko['skin.error.io']);
   });
 });

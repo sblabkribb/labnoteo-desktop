@@ -10,11 +10,13 @@ export type { BubbleActions } from './MessageView';
 import { useAssistantSession, type AssistantSession } from './useAssistantSession';
 import {
   applySkinVars,
+  bubblePlace,
   DRAG_THRESHOLD,
   MOVE_STEP,
   MOVE_STEP_BIG,
   petArea,
   petStore as defaultStore,
+  snapScale,
   type PetPos,
   type PetStore,
 } from './petStore';
@@ -62,12 +64,17 @@ export function PetLayer(props: {
   const button = useRef<HTMLButtonElement>(null);
   const bubbleId = useId();
   const [hint, setHint] = useState('');
+  // 창 크기와 화면 배율(다른 모니터로 옮기면 바뀐다): 바뀌면 그림 배율과 말풍선 자리를 다시 잡는다
+  const [frame, setFrame] = useState(0);
   const drag = useRef<{ id: number; x0: number; y0: number; pos: PetPos; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
 
   // 창 크기에 맞춰 자른다: 처음 그릴 때와 창 크기가 바뀔 때
   useEffect(() => {
-    const fit = () => store.clampTo(window.innerWidth, window.innerHeight);
+    const fit = () => {
+      store.clampTo(window.innerWidth, window.innerHeight);
+      setFrame((n) => n + 1);
+    };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
@@ -78,8 +85,23 @@ export function PetLayer(props: {
     if (!el) return;
     el.style.setProperty('--pet-x', `${snap.pos.x}px`);
     el.style.setProperty('--pet-y', `${snap.pos.y}px`);
-    el.style.setProperty('--pet-scale', String(snap.scale));
-  }, [snap.pos.x, snap.pos.y, snap.scale, snap.hidden]);
+    el.style.setProperty('--pet-scale', String(snapScale(snap.scale, window.devicePixelRatio || 1)));
+  }, [snap.pos.x, snap.pos.y, snap.scale, snap.hidden, frame]);
+
+  // 말풍선을 창 안에: 그림 위(자리가 모자라면 아래)로, 가로는 창 틀 안으로 민다. 높이는 고른 쪽에 남은 만큼(CSSOM 변수)
+  useLayoutEffect(() => {
+    const bubble = wrap.current?.querySelector<HTMLElement>('.pet-bubble');
+    const pet = button.current;
+    if (!snap.open || !bubble || !pet) return;
+    bubble.style.removeProperty('--bubble-max-h');
+    const r = pet.getBoundingClientRect();
+    const place = bubblePlace(r, { w: bubble.offsetWidth, h: bubble.offsetHeight }, { ...store.viewport(), w: window.innerWidth, h: window.innerHeight });
+    bubble.dataset.side = place.side;
+    bubble.style.setProperty('--bubble-left', `${place.left}px`);
+    bubble.style.setProperty('--bubble-top', `${place.top}px`);
+    bubble.style.setProperty('--bubble-bottom', `${place.bottom}px`);
+    bubble.style.setProperty('--bubble-max-h', `${place.maxH}px`);
+  }, [snap.open, snap.pos.x, snap.pos.y, snap.scale, skin, frame, store]);
 
   useLayoutEffect(() => {
     if (sprite.current) applySkinVars(sprite.current, skin.manifest, snap.state, skin.sheetUrl);

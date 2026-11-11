@@ -36,6 +36,8 @@ export function SkinGalleryDialog(props: {
   const [list, setList] = useState<ListState>({ kind: 'loading' });
   const [preview, setPreview] = useState<GalleryPreview | undefined>(undefined);
   const [busy, setBusy] = useState<string | undefined>(undefined);
+  /** 마지막으로 "미리 보기"를 누른 항목(목록에서 칠한다: 아래 미리 보기·오류가 어느 것의 것인지 보인다). */
+  const [shown, setShown] = useState<string | undefined>(undefined);
   const [status, setStatus] = useState('');
   /** 지금 임시 보관한 팩(닫거나 다른 것을 미리 볼 때 버린다). 설치로 넘기면 비운다. */
   const staged = useRef<string | null>(null);
@@ -60,6 +62,7 @@ export function SkinGalleryDialog(props: {
 
   const show = async (entry: GalleryEntry) => {
     setBusy(entry.id);
+    setShown(entry.id);
     setStatus(t('gallery.downloading', cleanGalleryText(entry.name)));
     // 앞의 미리 보기는 먼저 치운다: 새 것을 받지 못해도 앞 팩의 "설치" 가 새 오류 밑에 남지 않는다(Task 22).
     setPreview(undefined);
@@ -103,7 +106,7 @@ export function SkinGalleryDialog(props: {
           {list.skins.map((s) => {
             const name = cleanGalleryText(s.name);
             return (
-              <li key={s.id} className={preview?.manifest.id === s.id ? 'pet-gallery-item is-current' : 'pet-gallery-item'}>
+              <li key={s.id} className={shown === s.id ? 'pet-gallery-item is-current' : 'pet-gallery-item'} aria-current={shown === s.id || undefined}>
                 <div className="pet-gallery-text">
                   <strong>{name}</strong>
                   <span className="pet-gallery-meta">
@@ -119,7 +122,7 @@ export function SkinGalleryDialog(props: {
           })}
         </ul>
       )}
-      <p role="status" className="setting-status">
+      <p role="status" className="pet-gallery-status">
         {status}
       </p>
       {preview && <PreviewPane preview={preview} urls={deps.urls} />}

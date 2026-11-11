@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { useRef } from 'react';
 import { setLang } from '../../i18n/lang';
+import { t } from '../../i18n/t';
 import { DialogLayer } from '../../labnote/host/DialogLayer';
 import { confirmDialog } from '../../labnote/host/dialogStore';
 import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
@@ -171,6 +172,37 @@ describe('assistant bubble chat', () => {
     gate.resolve();
     await settle();
     expect(log().textContent).toContain('첫 조각 끝');
+  });
+
+  it('scrolls to the real end when a web answer finishes: the sources and Insert come after the last text (Visual QA)', async () => {
+    const gate = deferred();
+    const { store } = setup({
+      plan: async (_t, sink) => {
+        sink.delta('웹 답 [1]');
+        await gate.promise;
+        return { content: '웹 답 [1]', sources: [URL_SRC] };
+      },
+    });
+    const scrolled: Element[] = [];
+    const proto = Element.prototype as unknown as { scrollIntoView?: (arg?: unknown) => void };
+    const had = proto.scrollIntoView;
+    proto.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      await open(store);
+      await type('q');
+      fireEvent.keyDown(composer(), { key: 'Enter' });
+      await settle();
+      const before = scrolled.length;
+      gate.resolve();
+      await settle();
+      expect(screen.getByRole('list', { name: '출처' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '노트에 넣기' })).toBeTruthy();
+      expect(scrolled.length).toBeGreaterThan(before);
+    } finally {
+      proto.scrollIntoView = had;
+    }
   });
 
   it('shows markup in replies as literal text (no HTML, no Markdown)', async () => {
@@ -352,6 +384,18 @@ describe('assistant bubble chat', () => {
     expect(document.getElementById('pet-layer')!.hasAttribute('inert')).toBe(false);
     expect(document.activeElement).toBe(composer());
     expect(log().textContent).toContain('했어요');
+  });
+
+  it('the end notice of an earlier answer follows a language switch (Visual QA)', async () => {
+    const { store } = setup({ plan: async () => ({ content: '답', notice: () => t('pet.tools.unchanged') }) });
+    await open(store);
+    await type('q');
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    await settle();
+    expect(log().textContent).toContain('보관함은 그대로예요.');
+    act(() => setLang('en'));
+    expect(log().textContent).toContain('Nothing in the vault changed.');
+    expect(log().textContent).not.toContain('보관함은 그대로예요.');
   });
 
   it('follows the language', async () => {

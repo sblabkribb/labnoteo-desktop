@@ -47,6 +47,8 @@ export type DialogSpec =
   | {
       kind: 'confirm';
       message: string;
+      /** 창 머리의 제목. 없으면 머리에는 닫기 단추만 있다. */
+      title?: string;
       confirmLabel?: string;
       signal?: AbortSignal;
       destructive?: boolean;
@@ -296,7 +298,7 @@ export function aliasDialog(opts: AliasOpts): Promise<string | undefined | Alias
 
 export function confirmDialog(
   message: string,
-  opts: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean } = {},
+  opts: { title?: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean } = {},
 ): Promise<boolean> {
   return openDialog<boolean>({ kind: 'confirm', message, ...opts }, false);
 }

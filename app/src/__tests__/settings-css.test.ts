@@ -21,7 +21,14 @@ describe('settings rows', () => {
   });
 
   it('the name and description keep a readable minimum width', () => {
-    expect(decl('.setting-info', 'flex')).toEqual(['1 1 12rem']);
-    expect(decl('.setting-info', 'min-width')).toEqual(['12rem']);
+    // 16rem: the skin row's buttons wrap instead of squeezing the description to ~190 px (Visual QA)
+    expect(decl('.setting-info', 'flex')).toEqual(['1 1 16rem']);
+    expect(decl('.setting-info', 'min-width')).toEqual(['min(16rem, 100%)']);
+  });
+
+  it('Korean descriptions do not break inside words; a count can sit on its own line', () => {
+    expect(decl('.setting-desc', 'word-break')).toEqual(['keep-all']);
+    expect(decl('.setting-desc', 'overflow-wrap')).toEqual(['anywhere']);
+    expect(decl('.setting-desc-line', 'display')).toEqual(['block']);
   });
 });

@@ -167,9 +167,11 @@ export function skinErrorText(e: unknown): string {
     case 'tooManyEntries':
     case 'compressionRatio':
       return t('skin.error.tooLarge');
-    case 'badArchive':
     case 'badPath':
     case 'symlink':
+      // zip-slip(../, 절대 경로)과 링크: 위험한 것을 찾았다고 말한다(Visual QA)
+      return t('skin.error.unsafePath');
+    case 'badArchive':
     case 'encrypted':
     case 'unsupportedMethod':
     case 'duplicate':

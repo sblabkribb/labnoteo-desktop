@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createLayoutStore, PET_DEFAULT, type UiPrefs } from '../../ui/layoutStore';
 import { BUILTIN_SKIN } from '../skins/builtin';
-import { applySkinVars, createPetStore, DONE_MS, MOVE_STEP, MOVE_STEP_BIG, petArea } from '../petStore';
+import { applySkinVars, BUBBLE_GAP, bubblePlace, createPetStore, DONE_MS, MOVE_STEP, MOVE_STEP_BIG, petArea, petSize, snapScale, type Viewport } from '../petStore';
 
 function memoryStorage(): Storage {
   const m = new Map<string, string>();
@@ -17,7 +17,7 @@ function memoryStorage(): Storage {
   };
 }
 
-function setup(viewport = { w: 1200, h: 800 }) {
+function setup(viewport: Viewport = { w: 1200, h: 800 }) {
   const invoke = vi.fn(async (_c: string, a?: Record<string, unknown>) => (a?.prefs as UiPrefs | undefined) ?? null);
   const layout = createLayoutStore({ storage: () => memoryStorage(), invoke });
   const store = createPetStore({ layout, viewport: () => viewport });
@@ -131,5 +131,77 @@ describe('applySkinVars', () => {
     applySkinVars(el, BUILTIN_SKIN, 'done');
     expect(el.style.getPropertyValue('--pet-frames')).toBe('6');
     expect(el.style.getPropertyValue('--pet-dur')).toBe('600ms');
+  });
+});
+
+describe('pet stays out of the window frame (Visual QA)', () => {
+  const frame: Viewport = { w: 1200, h: 800, top: 36, left: 44, bottom: 26, right: 0 };
+
+  it('moveBy and dragTo keep the pet off the status bar, the ribbon and the view header', () => {
+    const { store } = setup({ ...frame });
+    store.moveBy(5000, 5000); // right/down past the edge: stops above the status bar
+    expect(store.get().pos).toEqual({ x: 0, y: 26 });
+    store.moveBy(-5000, -5000); // left/up: stops right of the ribbon and below the view header
+    expect(store.get().pos).toEqual({ x: 1200 - 44 - 64, y: 800 - 36 - 64 });
+    store.dragTo(-10, 0);
+    expect(store.get().pos).toEqual({ x: 0, y: 26 });
+  });
+
+  it('clampTo uses the frame too; a window too small for the pet pins it to the bottom-right frame', () => {
+    const { store } = setup({ ...frame });
+    store.moveBy(-5000, -5000);
+    store.clampTo(600, 400);
+    expect(store.get().pos).toEqual({ x: 600 - 44 - 64, y: 400 - 36 - 64 });
+    store.clampTo(100, 100);
+    expect(store.get().pos).toEqual({ x: 0, y: 26 });
+  });
+});
+
+describe('snapScale (150% screens)', () => {
+  it('keeps whole device pixels per art pixel', () => {
+    expect(snapScale(2, 1)).toBe(2);
+    expect(snapScale(3, 1)).toBe(3);
+    expect(snapScale(2, 1.5)).toBe(2);
+    expect(snapScale(3, 1.5) * 1.5).toBe(5);
+    expect(snapScale(3, 2)).toBe(3);
+    expect(snapScale(2, 0)).toBe(2);
+    expect(petSize(3, undefined, 1.5)).toEqual({ w: 107, h: 107 });
+    expect(petSize(2, undefined, 1)).toEqual({ w: 64, h: 64 });
+  });
+});
+
+describe('bubblePlace', () => {
+  const vp: Viewport = { w: 1200, h: 800, top: 36, left: 44, bottom: 26, right: 0 };
+  const bubble = { w: 352, h: 400 };
+  const petAt = (left: number, top: number) => ({ left, top, right: left + 64, bottom: top + 64 });
+
+  it('opens above the pet, right edges aligned, at the default corner', () => {
+    const p = bubblePlace(petAt(1112, 696), bubble, vp);
+    expect(p.side).toBe('above');
+    expect(p.left).toBe(1176 - 352);
+    expect(p.bottom).toBe(800 - (696 - BUBBLE_GAP));
+    expect(p.maxH).toBe(696 - BUBBLE_GAP - (36 + BUBBLE_GAP));
+  });
+
+  it('flips below the pet at the top edge, so it is never above the window', () => {
+    const p = bubblePlace(petAt(1112, 36), bubble, vp);
+    expect(p.side).toBe('below');
+    expect(p.top).toBe(36 + 64 + BUBBLE_GAP);
+    expect(p.maxH).toBe(800 - 26 - BUBBLE_GAP - (36 + 64 + BUBBLE_GAP));
+  });
+
+  it('is pushed right of the ribbon at the left edge', () => {
+    const p = bubblePlace(petAt(44, 710), bubble, vp);
+    expect(p.side).toBe('above');
+    expect(p.left).toBe(44 + BUBBLE_GAP);
+  });
+
+  it('a tall bubble with more room below than above goes below and is capped to the room there', () => {
+    const p = bubblePlace(petAt(600, 200), { w: 352, h: 600 }, vp);
+    expect(p.side).toBe('below');
+    expect(p.maxH).toBe(800 - 26 - BUBBLE_GAP - (264 + BUBBLE_GAP));
+    const q = bubblePlace(petAt(600, 500), { w: 352, h: 600 }, vp);
+    expect(q.side).toBe('above');
+    expect(q.maxH).toBe(500 - BUBBLE_GAP - (36 + BUBBLE_GAP));
   });
 });

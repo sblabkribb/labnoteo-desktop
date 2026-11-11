@@ -46,8 +46,8 @@ export interface ChatItem {
   status?: string;
   /** 사람에게 보일 오류(번역됨). */
   error?: string;
-  /** 도구 사용 요약 같은 끝 알림(번역됨). */
-  notice?: string;
+  /** 도구 사용 요약 같은 끝 알림: 그릴 때 지금 언어로 만든다. */
+  notice?: () => string;
   /** 멈췄다. */
   stopped?: boolean;
 }
@@ -275,7 +275,7 @@ export function createAssistantSession(initial: SessionDeps = {}): AssistantSess
         pet('idle');
         return;
       }
-      const content = res.content || res.notice || '';
+      const content = res.content || res.notice?.() || '';
       patchItem(reply.id, {
         text: res.content,
         sources: res.sources,

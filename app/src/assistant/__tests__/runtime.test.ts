@@ -8,7 +8,7 @@ import type { ToolDef } from '@labnoteo/core';
 import { createAiEnv, type AiEnv } from '../../ai/aiEnv';
 import { externalAgentTools, type ExternalToolMeta } from '../../ai/externalTools';
 import { UNTRUSTED_RULES } from '../../ai/untrusted';
-import { setLang } from '../../i18n/lang';
+import { getLang, setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import { fakeInvoke } from '../../integrations/__tests__/fakeNet';
 import { cancelAllRequests } from '../../integrations/netIpc';
@@ -18,7 +18,7 @@ import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost'
 import { openNote } from '../../labnote/openNotes';
 import { askAgentCommand } from '../../labnote/port/aiAskAgent';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
-import { builtinRuntime, EARLIER_UNTRUSTED_RULES, STATUS_TITLE_MAX } from '../builtinRuntime';
+import { builtinRuntime, EARLIER_UNTRUSTED_RULES, noticeTranslator, STATUS_TITLE_MAX, toolLabel } from '../builtinRuntime';
 import { fakeRuntime } from '../fakeRuntime';
 import {
   getRuntime,
@@ -220,13 +220,15 @@ describe('builtinRuntime', () => {
     const r = await rt.run(turnOf('결과를 바꿔 줘'), recordSink().sink, go());
     expect(th.asked.confirm).toHaveLength(1);
     const { message, opts } = th.asked.confirm[0];
-    expect(message.startsWith('Allow AI tool "update_section" to modify the vault?')).toBe(true);
+    // plain words, not the tool id with "이(가)" (Visual QA)
+    expect(message.startsWith(t('pet.confirm.write', t('pet.tool.updateSection')))).toBe(true);
+    expect(message).not.toContain('update_section');
     expect(message).toContain(`Target: ${NOTE}`);
     expect(message).not.toContain(t('ai.confirm.tainted'));
-    expect(opts).toEqual({ confirmLabel: 'Allow', destructive: true });
+    expect(opts).toEqual({ title: t('pet.confirm.title'), confirmLabel: 'Allow', destructive: true });
     expect(docOf(NOTE)).toBe(BODY);
     expect(r.executed.map((e) => e.outcome)).toEqual(['denied']);
-    expect(r.notice).toContain('1 denied by you');
+    expect(r.notice?.()).toContain('1 denied by you');
   });
 
   it('an allowed write changes the note and shows a status line', async () => {
@@ -239,7 +241,7 @@ describe('builtinRuntime', () => {
     expect(rec.status).toContain(t('assistant.status.write', '001_WD010_A.labnote.md'));
   });
 
-  it('the approval text is the same as askAgentCommand builds for the same call (parity)', async () => {
+  it('the approval text matches what askAgentCommand builds for the same call, apart from the plain first line and the title (parity)', async () => {
     const args = { documentPath: NOTE, heading: '결과', content: '새 결과', mode: 'append' };
     const toolCall = { id: 'c', type: 'function', function: { name: 'update_section', arguments: JSON.stringify(args) } };
     const p = new Script([toolTurn('update_section', args), answer('')]);
@@ -253,7 +255,10 @@ describe('builtinRuntime', () => {
     th.answer.prompt('결과에 덧붙여 줘');
     await askAgentCommand(createAiEnv(th.ctx, f.invoke));
     expect(th.asked.confirm.length).toBeGreaterThanOrEqual(2);
-    expect(th.asked.confirm[1]).toEqual(th.asked.confirm[0]);
+    const [mine, cmd] = th.asked.confirm;
+    const rest = (m: string) => m.split('\n\n').slice(1);
+    expect(rest(mine.message)).toEqual(rest(cmd.message));
+    expect(mine.opts).toEqual({ ...cmd.opts, title: t('pet.confirm.title') });
   });
 
   it('cancel during a model turn ends the run without an error message', async () => {
@@ -360,12 +365,12 @@ describe('builtinRuntime', () => {
     await rt.run(turnOf('메모 섹션을 만들어 줘'), sink, go());
     expect(th.asked.confirm).toHaveLength(1);
     const { message, opts } = th.asked.confirm[0];
-    expect(message.startsWith('Allow AI tool "add_section" to modify the vault?')).toBe(true);
+    expect(message.startsWith(t('pet.confirm.write', t('pet.tool.addSection')))).toBe(true);
     expect(message).toContain(`Target: ${NOTE}`);
     expect(message).toContain(t('assistant.addSection.atEnd', 'Notes'));
     expect(message).toContain('새 메모');
     expect(message).not.toContain('This replaces section');
-    expect(opts).toEqual({ confirmLabel: 'Allow', destructive: false });
+    expect(opts).toEqual({ title: t('pet.confirm.title'), confirmLabel: 'Allow', destructive: false });
     expect(docOf(NOTE)).toContain('## Notes\n\n새 메모');
     expect(rec.status).toContain(t('assistant.status.write', '001_WD010_A.labnote.md'));
   });
@@ -640,5 +645,46 @@ describe('builtinRuntime web tools', () => {
     await rt.run(turnOf('그 페이지 읽어 줘', { history: [msg('user', '참고: https://user.test/protocol')] }), recordSink().sink, go());
     expect(fetched).toEqual(['https://user.test/protocol']);
     expect(JSON.stringify(p.seen[2])).toContain('not from search results or the user');
+  });
+});
+
+// Visual QA: the end notice counts in plain words ("3 lookups", not "3 lookup(s)") and is rebuilt in the current language.
+describe('end notice wording', () => {
+  let was: ReturnType<typeof getLang>;
+  beforeEach(() => (was = getLang()));
+  afterEach(() => setLang(was));
+
+  it('noticeTranslator words the counts in the app catalog and passes other keys through', () => {
+    const base = vi.fn((key: string) => `base:${key}`);
+    const tr = noticeTranslator(base);
+    setLang('en');
+    expect(tr('{0} lookup(s)', '3')).toBe('3 lookups');
+    expect(tr('{0} lookup(s)', '1')).toBe('1 lookup');
+    expect(tr('{0} change(s) made', '1')).toBe('1 change');
+    expect(tr('{0} change(s) made', '2')).toBe('2 changes');
+    expect(tr('AI tool calls: {0}.', '3 lookups')).toBe('AI tools used: 3 lookups.');
+    expect(tr('Failed: {0}.', 'x')).toBe('base:Failed: {0}.');
+    setLang('ko');
+    expect(tr('{0} lookup(s)', '3')).toBe('조회 3건');
+    expect(tr('Nothing in the vault changed.')).toBe('보관함은 그대로예요.');
+  });
+
+  it('the notice of a finished run follows a later language switch', async () => {
+    const p = new Script([toolTurn('update_section', { documentPath: NOTE, heading: '결과', content: '새 결과' }), answer('')]);
+    const { rt, th } = await setup(p);
+    th.answer.confirm(false);
+    const r = await rt.run(turnOf('결과를 바꿔 줘'), recordSink().sink, go());
+    setLang('ko');
+    expect(r.notice?.()).toContain('거절 1건');
+    setLang('en');
+    expect(r.notice?.()).toContain('1 denied by you');
+    expect(r.notice?.()).toContain('AI tools used:');
+  });
+
+  it('write tools are named in words; an unknown tool keeps its name', () => {
+    setLang('ko');
+    expect(toolLabel('insert_unit_operation')).toBe('단위 공정 넣기');
+    expect(toolLabel('create_workflow')).toBe('워크플로 만들기');
+    expect(toolLabel('mystery_tool')).toBe('mystery_tool');
   });
 });

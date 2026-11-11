@@ -65,8 +65,8 @@ export interface AssistantResult {
   cancelled?: boolean;
   /** 사람에게 보일 오류 글(번역됨). */
   error?: string;
-  /** 도구 사용 요약 같은 끝 알림(번역됨). */
-  notice?: string;
+  /** 도구 사용 요약 같은 끝 알림. 부를 때의 언어로 만든다(언어를 바꾸면 지난 답의 알림도 따라 바뀐다). */
+  notice?: () => string;
 }
 
 export interface AssistantRuntime {

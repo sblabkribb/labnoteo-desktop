@@ -14,14 +14,20 @@ const search = (query: string): ToolCall => ({ id: 'c', name: 'web_search', argu
 beforeEach(() => setLang('ko'));
 
 describe('externalApprovalMessage', () => {
-  it('webAfterTaint shows why and the exact query', () => {
+  it('webAfterTaint says what, why and the exact query once, in words: no tool id, no JSON (Visual QA)', () => {
     const msg = externalApprovalMessage(search('PCR 정제 실험 노트 내용'), WEB, false, { tainted: true, reason: 'webAfterTaint' });
-    expect(msg).toContain(t('web.confirm.afterTaint', 'PCR 정제 실험 노트 내용'));
-    // Task 22: the web is named in words ("웹의 'web_search'"), not by its kind id ("web의").
-    expect(msg).toContain("AI가 웹의 'web_search' 도구를 쓰려고 해요.");
+    expect(msg).toBe(
+      ['AI가 웹을 검색하려고 해요.', '바깥에서 가져온 내용을 읽은 뒤라서 먼저 물어봐요.', '보낼 검색어: PCR 정제 실험 노트 내용'].join('\n\n'),
+    );
+    expect(msg).not.toContain('web_search');
+    expect(msg).not.toContain('{');
     setLang('en');
-    expect(externalApprovalMessage(search('q'), WEB, false, { tainted: true, reason: 'webAfterTaint' })).toContain(
-      'The AI wants to use the tool "web_search" on the web.',
+    expect(externalApprovalMessage(search('q'), WEB, false, { tainted: true, reason: 'webAfterTaint' })).toBe(
+      ['The AI wants to search the web.', 'It has read outside content, so it asks you first.', 'Search words to send: q'].join('\n\n'),
+    );
+    const page: ToolCall = { id: 'c', name: 'fetch_page', arguments: { url: 'https://example.test/a' } };
+    expect(externalApprovalMessage(page, { ...WEB, toolTitle: 'fetch_page' }, false, { tainted: true, reason: 'crossServer' })).toContain(
+      'Address to open: https://example.test/a',
     );
     setLang('ko');
     expect(msg).not.toContain(t('ai.confirm.tainted'));
@@ -30,7 +36,7 @@ describe('externalApprovalMessage', () => {
 
   it('the query line is one line without control or bidi characters', () => {
     const msg = externalApprovalMessage(search('a\nb‮c\u0007'), WEB, false, { tainted: true, reason: 'webAfterTaint' });
-    expect(msg).toContain(t('web.confirm.afterTaint', 'a bc'));
+    expect(msg).toContain(t('web.confirm.query', 'a bc'));
   });
 
   it('after a web result the web line is added to a write and to a webAfterTaint search', () => {

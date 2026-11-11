@@ -248,6 +248,21 @@ describe('chip flows', () => {
     expect(turns[0].mode).toEqual({ kind: 'chip', chip: 'unitOp', params: { documentPath: WF_A2 } });
   });
 
+  it('a long workflow note name is shortened in the middle in the select; the full name is its title (Visual QA)', async () => {
+    const long = `${A}/001_WD090_Genome_Editing_Design_test.labnote.md`;
+    const { store } = setup({ activePath: README_A, actions: { workflowNotes: vi.fn(async () => [long]) } });
+    await open(store);
+    await pick('단위 공정 만들기');
+    const select = (await screen.findByRole('combobox', { name: '어느 워크플로 노트에?' })) as HTMLSelectElement;
+    const option = select.options[0];
+    expect(option.title).toBe('001_WD090_Genome_Editing_Design_test.labnote.md');
+    expect([...option.textContent!].length).toBe(36);
+    expect(option.textContent!.startsWith('001_WD090_Genome_')).toBe(true);
+    expect(option.textContent!.endsWith('test.labnote.md')).toBe(true);
+    expect(option.textContent).toContain('…');
+    expect(select.title).toBe('001_WD090_Genome_Editing_Design_test.labnote.md');
+  });
+
   it('워크플로 만들기 sends the goal in the current experiment', async () => {
     const { store, turns } = setup({ activePath: README_A });
     await open(store);

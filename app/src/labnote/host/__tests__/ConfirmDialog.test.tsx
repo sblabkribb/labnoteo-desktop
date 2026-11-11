@@ -32,6 +32,13 @@ describe('확인 대화상자', () => {
     await expect(p).resolves.toBe(false);
   });
 
+  it('a title, when given, heads the dialog and names it (no empty header row, Visual QA)', () => {
+    renderLayer();
+    void openIn(() => confirmDialog('AI가 보관함을 바꾸려고 해요(섹션 추가). 허용할까요?', { title: 'AI 작업 확인' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'AI 작업 확인' });
+    expect(dialog.querySelector('h2, h1, [role="heading"]')?.textContent).toBe('AI 작업 확인');
+  });
+
   it('has an accessible name (and the message as its description)', () => {
     renderLayer();
     void openIn(() => confirmDialog('지울까요?', { destructive: true }));
