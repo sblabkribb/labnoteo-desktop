@@ -49,6 +49,16 @@ describe('SignInPanel', () => {
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith({ login: 'octo', id: 7, avatarUrl: '' }));
   });
 
+  it('announces phase changes but keeps the ticking countdown out of the live region (review)', async () => {
+    const d = { ...deps([]), signInWait: () => new Promise<SignInOutcome>(() => undefined) };
+    const { container } = render(<SignInPanel deps={d} onSignedIn={() => undefined} onCancel={() => undefined} />);
+    const code = await screen.findByText('CODE-1');
+    expect(code.closest('[aria-live]')?.getAttribute('aria-live')).toBe('polite');
+    const timer = screen.getByText((text) => text.startsWith(t('github.signin.waiting', '').split('(')[0].trim()));
+    expect(timer.closest('[aria-live]')).toBeNull();
+    expect(container.querySelector('.github-signin')?.hasAttribute('aria-live')).toBe(false);
+  });
+
   it('sign up opens GitHub’s sign-up page; no token button without onUseToken', async () => {
     const d = deps([]);
     render(<SignInPanel deps={d} onSignedIn={() => undefined} onCancel={() => undefined} />);

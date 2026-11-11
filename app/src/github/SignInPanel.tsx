@@ -140,21 +140,30 @@ export function SignInPanel(props: {
   };
 
   return (
-    <div className="github-signin" aria-live="polite">
+    <div className="github-signin">
       {props.hideTitle ? null : <p className="github-signin-title">{t('github.signin.title')}</p>}
-      <p className="prompt-hint">{t('github.signin.what')}</p>
-      {phase.kind === 'starting' ? <p className="prompt-hint">{t('github.progress.checking')}</p> : null}
+      {/* 단계가 바뀔 때(코드·연결됨)만 읽어 준다. 1초마다 바뀌는 남은 시간은 이 영역 밖에 둔다(화면 읽기 프로그램이 매초 읽지 않게).
+          문제는 role="alert" 로 따로 알린다. 늘 보이는 안내 글이 있어 영역은 비지 않는다. */}
+      <div className="github-signin-status" aria-live="polite">
+        <p className="prompt-hint">{t('github.signin.what')}</p>
+        {phase.kind === 'starting' ? <p className="prompt-hint">{t('github.progress.checking')}</p> : null}
+        {phase.kind === 'code' ? (
+          <>
+            <p>{t('github.signin.enterCode')}</p>
+            <div className="github-code-row">
+              <code className="github-code">{phase.userCode}</code>
+              {phase.copied ? <span className="github-copied">{t('github.signin.copied')}</span> : null}
+              <button type="button" onClick={() => void props.deps.copy(phase.userCode).catch(() => undefined)}>
+                <Icon name="copy" size={14} />
+                <span>{t('github.signin.copy')}</span>
+              </button>
+            </div>
+          </>
+        ) : null}
+        {phase.kind === 'done' ? <p className="github-signin-done">{t('github.signin.done', phase.login)}</p> : null}
+      </div>
       {phase.kind === 'code' ? (
         <>
-          <p>{t('github.signin.enterCode')}</p>
-          <div className="github-code-row">
-            <code className="github-code">{phase.userCode}</code>
-            {phase.copied ? <span className="github-copied">{t('github.signin.copied')}</span> : null}
-            <button type="button" onClick={() => void props.deps.copy(phase.userCode).catch(() => undefined)}>
-              <Icon name="copy" size={14} />
-              <span>{t('github.signin.copy')}</span>
-            </button>
-          </div>
           <div className="github-actions">
             <button type="button" onClick={() => void Promise.resolve(props.deps.openExternal(phase.verificationUri)).catch(() => undefined)}>
               <Icon name="external-link" size={14} />
@@ -169,7 +178,6 @@ export function SignInPanel(props: {
           </div>
         </>
       ) : null}
-      {phase.kind === 'done' ? <p className="github-signin-done">{t('github.signin.done', phase.login)}</p> : null}
       {phase.kind === 'problem' ? (
         <>
           {phase.text ? (

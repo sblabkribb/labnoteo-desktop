@@ -293,6 +293,24 @@ describe('preview dialog', () => {
     expect(choices.untick).toEqual(['raw/gel_raw.czi']);
   });
 
+  it('resolving a finding keeps focus on its button (aria-disabled) and says it is resolved (review)', async () => {
+    renderLayer();
+    const hit = { kind: 'suspect' as const, path: 'notes.md', line: 14, masked: 'sk-…a9f1', lineHash: 'abc', overridable: true };
+    openIn(() => githubPreviewDialog(plan({ red: [{ kind: 'secret', hit }] }), HEAD, { openFile: () => undefined }));
+    const leave = screen.getByRole('button', { name: t('github.preview.leaveOut') }) as HTMLButtonElement;
+    leave.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(leave.disabled).toBe(false);
+    expect(leave.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(leave);
+    const notKey = screen.getByRole('button', { name: t('github.preview.notAKey') }) as HTMLButtonElement;
+    expect(notKey.disabled).toBe(false);
+    expect(screen.getByText(t('github.preview.resolved'))).toBeTruthy();
+    // pressing it again does nothing (still left out, not toggled back)
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByText(t('github.preview.resolved'))).toBeTruthy();
+  });
+
   it('a secret hit can be opened, or marked "not a key" when overridable', async () => {
     renderLayer();
     const opened: string[] = [];

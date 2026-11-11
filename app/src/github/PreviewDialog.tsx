@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { DialogFrame } from '../labnote/host/DialogFrame';
@@ -112,6 +112,29 @@ function yellowLines(yellow: readonly Yellow[]): Array<{ text: string; names: st
  * spec §5.4 화면 C: Rust 가 세운 계획을 보인다. 웹뷰는 파일을 빼거나(체크 해제) 키가 아니라고 확인할 수만 있다:
  * 파일을 더하는 요소는 없다. 빨간 항목이 남아 있는 동안 [올리기] 는 꺼져 있다. 공용 시료는 기본으로 올리지 않는다.
  */
+/**
+ * 지금 누를 수 없는 단추: `disabled` 대신 `aria-disabled` 로 끈다. 누르자마자 `disabled` 가 되면 키보드 초점이 본문으로 떨어져
+ * 긴 목록에서 자리를 잃는다(설정 창의 softOff 와 같은 까닭). 꺼진 동안 누르면 아무 일도 하지 않는다.
+ */
+function softOff(off: boolean, run: () => void) {
+  return {
+    'aria-disabled': off || undefined,
+    onClick: () => {
+      if (!off) run();
+    },
+  };
+}
+
+/** 고쳐야 할 항목 한 줄. 풀리면 흐리게 긋고, 화면 읽기 프로그램도 알 수 있게 "해결됨" 을 글자로 단다. */
+function RedRow(props: { done: boolean; children: ReactNode }) {
+  return (
+    <li className={props.done ? 'github-finding done' : 'github-finding'}>
+      {props.children}
+      {props.done ? <p className="github-finding-state">{t('github.preview.resolved')}</p> : null}
+    </li>
+  );
+}
+
 export function PreviewDialog(props: {
   spec: Extract<DialogSpec, { kind: 'githubPreview' }>;
   onDone: (value: UploadChoices) => void;
@@ -177,13 +200,17 @@ export function PreviewDialog(props: {
     props.onDone(choices);
   };
 
-  const redRow = (r: Red, i: number) => {
-    const done = resolved(r);
-    const cls = done ? 'github-finding done' : 'github-finding';
+  const redRow = (r: Red, i: number) => (
+    <RedRow key={i} done={resolved(r)}>
+      {redBody(r)}
+    </RedRow>
+  );
+
+  const redBody = (r: Red) => {
     switch (r.kind) {
       case 'secret':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>{t('github.preview.secret', base(r.hit.path), r.hit.line, hitKind(r.hit), r.hit.masked)}</p>
             {r.fromSample ? null : (
               <div className="github-actions">
@@ -197,74 +224,73 @@ export function PreviewDialog(props: {
                 >
                   {t('github.preview.openFile')}
                 </button>
-                <button type="button" disabled={untick.has(r.hit.path)} onClick={() => toggle(r.hit.path, false)}>
+                <button type="button" {...softOff(untick.has(r.hit.path), () => toggle(r.hit.path, false))}>
                   {t('github.preview.leaveOut')}
                 </button>
                 {r.hit.overridable ? (
                   <button
                     type="button"
                     className="github-link"
-                    disabled={isAllowed(r.hit)}
-                    onClick={() => setAllowed((a) => [...a, { path: r.hit.path, lineHash: r.hit.lineHash }])}
+                    {...softOff(isAllowed(r.hit), () => setAllowed((a) => [...a, { path: r.hit.path, lineHash: r.hit.lineHash }]))}
                   >
                     {t('github.preview.notAKey')}
                   </button>
                 ) : null}
               </div>
             )}
-          </li>
+          </>
         );
       case 'tooLarge':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>
               <code>{base(r.path)}</code> ({size(r.size)}): {t('github.preview.tooBig')}
             </p>
             <div className="github-actions">
-              <button type="button" disabled={untick.has(r.path)} onClick={() => toggle(r.path, false)}>
+              <button type="button" {...softOff(untick.has(r.path), () => toggle(r.path, false))}>
                 {t('github.preview.leaveOut')}
               </button>
             </div>
-          </li>
+          </>
         );
       case 'uploadTooLarge':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>{t('github.preview.uploadTooBig')}</p>
-          </li>
+          </>
         );
       case 'nfdCollision':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>{t('github.preview.dropOne')}</p>
             <p className="github-names">{r.paths.join(', ')}</p>
-          </li>
+          </>
         );
       case 'unreadable':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>
               {t('github.preview.unreadable')}: <code>{r.path}</code>
             </p>
             <div className="github-actions">
-              <button type="button" disabled={untick.has(r.path)} onClick={() => toggle(r.path, false)}>
+              <button type="button" {...softOff(untick.has(r.path), () => toggle(r.path, false))}>
                 {t('github.preview.leaveOut')}
               </button>
             </div>
-          </li>
+          </>
         );
       case 'publicNotConfirmed':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>{t('github.public.nowPublic')}</p>
-          </li>
+          </>
         );
       case 'divergedNotAcknowledged':
         return (
-          <li key={i} className={cls}>
+          <>
             <p>{t('github.diverged.title')}</p>
             <p className="github-names">{r.paths.join(', ')}</p>
-          </li>
+          </>
         );
     }
   };

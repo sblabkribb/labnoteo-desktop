@@ -328,7 +328,7 @@ fieldset.mcp-client-auth legend { padding: 0; }
 
 /* A native <select> in a dialog form (spec §3.8): no browser arrow, the app's chevron drawn over it */
 .select-field { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
-.select-field > select { appearance: none; min-width: 10rem; max-width: 100%; padding-right: 28px; cursor: pointer; }
+.select-field > select { appearance: none; flex: 1 1 auto; min-width: 10rem; max-width: 100%; padding-right: 28px; cursor: pointer; }
 .select-field > .icon { position: absolute; right: var(--space-4); color: var(--text-muted); pointer-events: none; }
 
 /* A checkbox drawn as the settings switch (same track and knob as .toggle); still a native checkbox with role=switch */
@@ -408,6 +408,7 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-section button > .icon + span, .github-section button > span + .icon { margin-left: var(--space-2); }
 .github-signin { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5) 0; border-top: 1px solid var(--border); }
 .github-signin p { margin: 0; }
+.github-signin-status { display: flex; flex-direction: column; gap: var(--space-4); }
 .github-signin-title { font-weight: 600; }
 .github-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 .github-code { padding: var(--space-2) var(--space-4); font-family: var(--font-mono); font-size: var(--font-size-lg); letter-spacing: 0.08em; background: var(--bg-hover); border-radius: var(--radius-s); user-select: all; }
@@ -439,6 +440,8 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 /* 본문이 창(76vh)보다 길면 본문만 스크롤한다. 파일 확인 창은 단추 줄이 본문 밖이라 늘 보인다(.integration-body 와 같은 방식) */
 .dialog.github-dialog .github-form { min-height: 0; overflow-y: auto; }
 .github-form p { margin: 0; }
+/* 세로 flex 안에서 고르기 틀이 줄 끝까지 늘면 chevron 이 상자에서 떨어진다: 고르기 크기로 둔다(시각 QA) */
+.github-form > .select-field { align-self: flex-start; }
 .github-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 .github-check { display: flex; align-items: center; gap: var(--space-2); min-height: 1.4em; color: var(--text-muted); font-size: var(--font-size-sm); }
 .github-check.free { color: var(--success); }
@@ -467,7 +470,9 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-yellow h3 { color: var(--warning); }
 .github-finding { margin: 0 0 var(--space-3); }
 .github-finding p { margin: 0; }
-.github-finding.done { color: var(--text-muted); text-decoration: line-through; }
+.github-finding.done { color: var(--text-muted); }
+.github-finding.done > p:not(.github-finding-state) { text-decoration: line-through; }
+.github-finding .github-finding-state { margin-top: var(--space-2); color: var(--success); font-size: var(--font-size-sm); }
 .github-finding .github-actions { margin-top: var(--space-2); }
 .github-names { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
 .github-ack { display: flex; align-items: flex-start; gap: var(--space-2); overflow-wrap: anywhere; }
