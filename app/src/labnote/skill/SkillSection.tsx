@@ -92,7 +92,7 @@ export function SkillSection(props: SkillSectionProps) {
 
   return (
     <section className="integration-section skill-section">
-      <h3>{t('skill.heading')}</h3>
+      <h5>{t('skill.heading')}</h5>
       <div className="integration-field">
         <p className="prompt-hint">{t('skill.hint')}</p>
         {status ? (

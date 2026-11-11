@@ -106,7 +106,7 @@ export function ScholarSection(props: {
 
   return (
     <section className="integration-section">
-      <h3>{t('scholar.title')}</h3>
+      <h5>{t('scholar.title')}</h5>
       <p className="prompt-hint">{t('scholar.help')}</p>
       <p className="prompt-hint">{t('scholar.queryNote')}</p>
       {SOURCES.map((key) => (

@@ -637,7 +637,7 @@ export function McpClientSection(p: {
 
   return (
     <section className="integration-section mcp-client">
-      <h3>{t('mcpClient.title')}</h3>
+      <h5>{t('mcpClient.title')}</h5>
       <p className="prompt-hint">{t('mcpClient.help')}</p>
       {rows.map(renderRow)}
       {adding ? (

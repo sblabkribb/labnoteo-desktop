@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type DragEvent, type MutableRefObject } from 'react';
+import { useEffect, useId, useRef, useState, type DragEvent, type MutableRefObject, type ReactNode } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/t';
 import { coreT, overrideOr } from '../labnote/i18n';
@@ -356,8 +356,48 @@ function ProbeButton(props: { id: ProbeId; target: string; fields: () => Paramet
   );
 }
 
+/** 연동 쪽의 묶음. 이 차례로 그린다(자주 쓰는 AI 가 맨 위, 파일 가져오기는 지름길이라 맨 끝). */
+type GroupId = 'ai' | 'research' | 'scan' | 'github' | 'agents' | 'import';
+
+const GROUP_LABEL: Record<GroupId, () => string> = {
+  ai: () => t('integrations.group.ai'),
+  research: () => t('integrations.group.research'),
+  scan: () => t('integrations.group.scan'),
+  github: () => t('integrations.group.github'),
+  agents: () => t('integrations.group.agents'),
+  import: () => t('integrations.import.heading'),
+};
+
 /**
- * 연동 설정 쪽(D17, UI 재설계 Task 8): 설정 창의 "연동" 쪽에 들어간다. partbank, AI 제공자, bfworkflow, 바코드와 스캔, MCP.
+ * 묶음 하나: 이름 붙은 영역(section + aria-labelledby), h4 제목, 한 줄 설명. 제목은 차례 단추가 초점을 줄 수 있게
+ * tabIndex=-1 이다(Tab 순서에는 들지 않는다). 그 안의 섹션 제목은 h5.
+ */
+function Group(props: {
+  gid: GroupId;
+  baseId: string;
+  label: string;
+  lead: string;
+  headRef: (el: HTMLHeadingElement | null) => void;
+  extraClass?: string;
+  children: ReactNode;
+}) {
+  const hid = `${props.baseId}-group-${props.gid}`;
+  const cls = `integration-category integration-category-${props.gid}${props.extraClass ? ` ${props.extraClass}` : ''}`;
+  return (
+    <section className={cls} aria-labelledby={hid}>
+      <h4 id={hid} ref={props.headRef} tabIndex={-1} className="integration-category-title">
+        {props.label}
+      </h4>
+      <p className="prompt-hint integration-category-lead">{props.lead}</p>
+      {props.children}
+    </section>
+  );
+}
+
+/**
+ * 연동 설정 쪽(D17, UI 재설계 Task 8): 설정 창의 "연동" 쪽에 들어간다. 맨 위 차례 다음에 묶음 여섯 개를 이 차례로 그린다:
+ * AI(AI 제공자, 문헌 검색, 외부 MCP 서버), 연구 서비스(bfworkflow, partbank), 기록지 스캔(바코드와 스캔, Slack),
+ * GitHub, 다른 AI 도구(MCP 서버, SKILL.md), 파일로 가져오기.
  * 플러그인 설정 탭의 줄을 그 이름(coreT)으로 보인다. 주소 칸은 칸을 떠날 때 검사해 저장하고, 고르기와 스위치는 바로 저장한다.
  * 키 칸은 쓰기만 한다.
  *
@@ -411,6 +451,23 @@ export function IntegrationSettingsPage(props: {
   const [mcpFocus, setMcpFocus] = useState<string | undefined>(undefined);
   /** 섹션이 맡긴, 아직 떠나지 않은 칸의 저장(플러그인 ctx.onHide). 닫기 전에 부른다. */
   const hideCommits = useRef<Array<() => Promise<void>>>([]);
+  /** 묶음 제목(차례 단추가 초점을 줄 곳). */
+  const groupHeads = useRef<Partial<Record<GroupId, HTMLHeadingElement | null>>>({});
+  const headSetters = useRef<Partial<Record<GroupId, (el: HTMLHeadingElement | null) => void>>>({});
+  const headRef = (g: GroupId) =>
+    (headSetters.current[g] ??= (el) => {
+      groupHeads.current[g] = el;
+    });
+  const visibleGroups = (['ai', 'research', 'scan', 'github', 'agents', 'import'] as const).filter(
+    (g) => (g !== 'github' || !!deps.github) && (g !== 'agents' || !!deps.mcp) && (g !== 'import' || !!deps.importFile),
+  );
+  /** 차례 단추: 그 묶음 제목을 설정 창 위로 올리고(부드럽게 움직이지 않는다) 초점을 준다. Tab 은 그 묶음 안에서 이어진다. */
+  const jumpTo = (g: GroupId) => {
+    const head = groupHeads.current[g];
+    if (!head) return;
+    head.scrollIntoView?.({ block: 'start' });
+    head.focus({ preventScroll: true });
+  };
 
   useEffect(() => {
     let live = true;
@@ -775,221 +832,257 @@ export function IntegrationSettingsPage(props: {
 
   return (
       <div className="integration-body" ref={first}>
-        <section className="integration-section">
-          <h3>{coreT('partbank')}</h3>
-          <p className="prompt-hint">{overrideOr('integrations.partbankIntro')}</p>
-          {partbankRows('desktop')}
-          {partbankRows('web')}
-          <div className="integration-field">
-            <label className="prompt-question" htmlFor={`${id}-pbconn`}>
-              {coreT('Connection to search')}
-            </label>
-            <p className="prompt-hint">
-              {coreT(
-                'Which partbank the autocomplete search and the catalog download use. A link made through the desktop app points at this PC only, so a vault shared with the lab should use the server.',
-              )}
-            </p>
-            <SelectField
-              id={`${id}-pbconn`}
-              value={val.partbankDefaultConnection}
-              onChange={(e) => void save({ partbankDefaultConnection: e.target.value as IntegrationSettingsValue['partbankDefaultConnection'] })}
-            >
-              <option value="web">{coreT('partbank server')}</option>
-              <option value="desktop">{coreT('partbank desktop app')}</option>
-            </SelectField>
-          </div>
-          <div className="integration-field">
-            <label className="prompt-question switch-label">
-              <input
-                type="checkbox"
-                role="switch"
-                className="switch"
-                checked={val.partbankSendUsages}
-                onChange={(e) => void save({ partbankSendUsages: e.target.checked })}
-              />{' '}
-              {coreT('Send note usages to partbank')}
-            </label>
-            <p className="prompt-hint">
-              {coreT(
-                'Lists the lab notes that use a sample from partbank on its partbank page. Note paths, experiment folder names and section titles are stored on the partbank server and shown to you only. Turning this off deletes what this PC sent.',
-              )}
-            </p>
-          </div>
-        </section>
-
-        <section className="integration-section">
-          <h3>{overrideOr('integrations.aiProvider') /* coreT('AI provider') */}</h3>
-          <div className="integration-field">
-            <label className="prompt-question" htmlFor={`${id}-provider`}>
-              {overrideOr('integrations.provider') /* coreT('Provider') */}
-            </label>
-            <SelectField
-              id={`${id}-provider`}
-              value={provider}
-              onChange={(e) => void save({ llmProvider: e.target.value as IntegrationSettingsValue['llmProvider'] })}
-            >
-              <option value="none">{coreT('Disabled')}</option>
-              <option value="openai">OpenAI-compatible</option>
-              <option value="ollama">Ollama</option>
-            </SelectField>
-          </div>
-          {provider === 'none' ? (
-            <div className="integration-field">
-              <p className="prompt-hint">{t('integrations.ai.manualHint')}</p>
-              <div className="integration-test">
-                <button type="button" onClick={enterManually}>
-                  {t('integrations.ai.manual')}
+        {/* 한눈에 보는 차례: 단추를 누르면 그 묶음 제목으로 초점과 화면이 간다(주소 #은 바꾸지 않는다). */}
+        <nav className="integration-toc" aria-label={t('integrations.toc.label')}>
+          <ul>
+            {visibleGroups.map((g) => (
+              <li key={g}>
+                <button type="button" onClick={() => jumpTo(g)}>
+                  {GROUP_LABEL[g]()}
                 </button>
-              </div>
-            </div>
-          ) : (
-            <div className="integration-group" ref={aiGroup}>
-              <UrlField
-                key={endpointKey}
-                label={provider === 'ollama' ? coreT('Ollama endpoint') : coreT('OpenAI endpoint')}
-                hints={provider === 'openai' ? [overrideOr('ai.schemeHint'), t('ai.openaiEndpointHint')] : [overrideOr('ai.schemeHint')]}
-                value={draft[endpointKey]}
-                onChange={(v) => {
-                  setDraft(endpointKey, v);
-                  setNotice((n) => ({ ...n, [endpointKey]: undefined }));
-                }}
-                onCommit={() => void commitEndpoint(endpointKey)}
-                warnings={[...(notice[endpointKey] ? [notice[endpointKey]!] : []), ...endpointWarn.warnings]}
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <Group gid="ai" baseId={id} label={t('integrations.group.ai')} lead={t('integrations.group.aiLead')} headRef={headRef('ai')}>
+          <section className="integration-section">
+            <h5>{overrideOr('integrations.aiProvider') /* coreT('AI provider') */}</h5>
+            <div className="integration-field">
+              <label className="prompt-question" htmlFor={`${id}-provider`}>
+                {overrideOr('integrations.provider') /* coreT('Provider') */}
+              </label>
+              <SelectField
+                id={`${id}-provider`}
+                value={provider}
+                onChange={(e) => void save({ llmProvider: e.target.value as IntegrationSettingsValue['llmProvider'] })}
               >
-                {endpointWarn.box}
-              </UrlField>
+                <option value="none">{coreT('Disabled')}</option>
+                <option value="openai">OpenAI-compatible</option>
+                <option value="ollama">Ollama</option>
+              </SelectField>
+            </div>
+            {provider === 'none' ? (
               <div className="integration-field">
-                <label className="prompt-question" htmlFor={`${id}-model`}>
-                  {coreT('Model')}
-                </label>
-                <input
-                  id={`${id}-model`}
-                  type="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={draft.llmModel}
-                  onChange={(e) => setDraft('llmModel', e.target.value)}
-                  onBlur={() => void commitModel()}
+                <p className="prompt-hint">{t('integrations.ai.manualHint')}</p>
+                <div className="integration-test">
+                  <button type="button" onClick={enterManually}>
+                    {t('integrations.ai.manual')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="integration-group" ref={aiGroup}>
+                <UrlField
+                  key={endpointKey}
+                  label={provider === 'ollama' ? coreT('Ollama endpoint') : coreT('OpenAI endpoint')}
+                  hints={provider === 'openai' ? [overrideOr('ai.schemeHint'), t('ai.openaiEndpointHint')] : [overrideOr('ai.schemeHint')]}
+                  value={draft[endpointKey]}
+                  onChange={(v) => {
+                    setDraft(endpointKey, v);
+                    setNotice((n) => ({ ...n, [endpointKey]: undefined }));
+                  }}
+                  onCommit={() => void commitEndpoint(endpointKey)}
+                  warnings={[...(notice[endpointKey] ? [notice[endpointKey]!] : []), ...endpointWarn.warnings]}
+                >
+                  {endpointWarn.box}
+                </UrlField>
+                <div className="integration-field">
+                  <label className="prompt-question" htmlFor={`${id}-model`}>
+                    {coreT('Model')}
+                  </label>
+                  <input
+                    id={`${id}-model`}
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft.llmModel}
+                    onChange={(e) => setDraft('llmModel', e.target.value)}
+                    onBlur={() => void commitModel()}
+                  />
+                </div>
+                <ContextWindowField value={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT} commit={async (patch) => { await save(patch); }} />
+                {/* 고급: 비워 두면 지금처럼 요청마다 정한 temperature. 저장된 값이 있으면 펼쳐 둔다(숨은 설정이 되지 않게). */}
+                <details className="integration-advanced" open={val.llmTemperature != null || undefined}>
+                  <summary>{t('integrations.ai.advanced')}</summary>
+                  <TemperatureField value={val.llmTemperature} model={val.llmModel} commit={async (patch) => { await save(patch); }} />
+                </details>
+                {provider === 'openai' ? (
+                  <KeyField
+                    deps={deps}
+                    slot="llmOpenai"
+                    label={coreT('API key')}
+                    hints={[overrideOr('integrations.openaiOnlyHint'), overrideOr('integrations.keyKeptHere')]}
+                    isSet={status.set.llmOpenai}
+                    inputRef={keyRefs.llmOpenai}
+                    beforeSave={() => commitEndpoint('llmEndpointOpenai')}
+                    onSaved={onSaved}
+                  />
+                ) : null}
+                <ProbeButton
+                  id="llm"
+                  target={`${provider}|${draft[endpointKey].trim()}|${draft.llmModel.trim()}`}
+                  fields={() => ({
+                    url: draftRef.current[endpointKey].trim(),
+                    provider,
+                    model: draftRef.current.llmModel.trim(),
+                    apiKey: provider === 'openai' ? keyValue(keyRefs.llmOpenai) : undefined,
+                  })}
                 />
               </div>
-              <ContextWindowField value={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT} commit={async (patch) => { await save(patch); }} />
-              {/* 고급: 비워 두면 지금처럼 요청마다 정한 temperature. 저장된 값이 있으면 펼쳐 둔다(숨은 설정이 되지 않게). */}
-              <details className="integration-advanced" open={val.llmTemperature != null || undefined}>
-                <summary>{t('integrations.ai.advanced')}</summary>
-                <TemperatureField value={val.llmTemperature} model={val.llmModel} commit={async (patch) => { await save(patch); }} />
-              </details>
-              {provider === 'openai' ? (
-                <KeyField
-                  deps={deps}
-                  slot="llmOpenai"
-                  label={coreT('API key')}
-                  hints={[overrideOr('integrations.openaiOnlyHint'), overrideOr('integrations.keyKeptHere')]}
-                  isSet={status.set.llmOpenai}
-                  inputRef={keyRefs.llmOpenai}
-                  beforeSave={() => commitEndpoint('llmEndpointOpenai')}
-                  onSaved={onSaved}
-                />
-              ) : null}
-              <ProbeButton
-                id="llm"
-                target={`${provider}|${draft[endpointKey].trim()}|${draft.llmModel.trim()}`}
-                fields={() => ({
-                  url: draftRef.current[endpointKey].trim(),
-                  provider,
-                  model: draftRef.current.llmModel.trim(),
-                  apiKey: provider === 'openai' ? keyValue(keyRefs.llmOpenai) : undefined,
-                })}
-              />
-            </div>
-          )}
-        </section>
+            )}
+          </section>
 
-        <section className="integration-section">
-          <h3>{t('integrations.bfw.heading')}</h3>
-          <div className="integration-field">
-            <label className="prompt-question" htmlFor={`${id}-bfwconn`}>
-              {t('integrations.bfw.connection')}
-            </label>
-            <SelectField
-              id={`${id}-bfwconn`}
-              value={val.bfwConnection}
-              onChange={(e) => void save({ bfwConnection: e.target.value as IntegrationSettingsValue['bfwConnection'] })}
-            >
-              <option value="server">{t('integrations.bfw.server')}</option>
-              <option value="desktop">{t('integrations.bfw.desktop')}</option>
-            </SelectField>
-          </div>
-          {val.bfwConnection === 'server' ? (
-            <UrlField
-              label={t('integrations.bfw.url')}
-              placeholder={BFW_DEFAULT_URL}
-              value={draft.bfwUrl}
-              onChange={(v) => setDraft('bfwUrl', v)}
-              onCommit={() => void commitOrigin('bfwUrl')}
-              warnings={bfwField.warnings}
-            >
-              {bfwField.box}
-            </UrlField>
-          ) : null}
-          <KeyField
-            key={bfwSlot}
+
+          <ScholarSection
+            value={{ scholarSources: val.scholarSources, ncbiEmail: val.ncbiEmail, crossrefMailto: val.crossrefMailto }}
+            save={save}
             deps={deps}
-            slot={bfwSlot}
-            label={t('integrations.bfw.key')}
-            hints={[t('integrations.bfw.keyHint'), overrideOr('integrations.keyKeptHere')]}
-            isSet={status.set[bfwSlot]}
-            inputRef={keyRefs.bfw}
-            beforeSave={bfwSlot === 'bfwServer' ? () => commitOrigin('bfwUrl') : undefined}
+            ncbiKeySet={status.set.ncbiEutils}
             onSaved={onSaved}
+            onHide={registerHide}
           />
-          <ProbeButton
-            id="bfw"
-            target={`${val.bfwConnection}|${val.bfwConnection === 'server' ? draft.bfwUrl.trim() : ''}`}
-            fields={() => ({
-              url: val.bfwConnection === 'server' ? draftRef.current.bfwUrl.trim() : '',
-              connection: val.bfwConnection,
-              apiKey: keyValue(keyRefs.bfw),
-            })}
+
+          <McpClientSection key={mcpGen} deps={deps} onHide={registerHide} focusServer={mcpFocus} />
+
+        </Group>
+
+        <Group gid="research" baseId={id} label={t('integrations.group.research')} lead={t('integrations.group.researchLead')} headRef={headRef('research')}>
+          <section className="integration-section">
+            <h5>{t('integrations.bfw.heading')}</h5>
+            <div className="integration-field">
+              <label className="prompt-question" htmlFor={`${id}-bfwconn`}>
+                {t('integrations.bfw.connection')}
+              </label>
+              <SelectField
+                id={`${id}-bfwconn`}
+                value={val.bfwConnection}
+                onChange={(e) => void save({ bfwConnection: e.target.value as IntegrationSettingsValue['bfwConnection'] })}
+              >
+                <option value="server">{t('integrations.bfw.server')}</option>
+                <option value="desktop">{t('integrations.bfw.desktop')}</option>
+              </SelectField>
+            </div>
+            {val.bfwConnection === 'server' ? (
+              <UrlField
+                label={t('integrations.bfw.url')}
+                placeholder={BFW_DEFAULT_URL}
+                value={draft.bfwUrl}
+                onChange={(v) => setDraft('bfwUrl', v)}
+                onCommit={() => void commitOrigin('bfwUrl')}
+                warnings={bfwField.warnings}
+              >
+                {bfwField.box}
+              </UrlField>
+            ) : null}
+            <KeyField
+              key={bfwSlot}
+              deps={deps}
+              slot={bfwSlot}
+              label={t('integrations.bfw.key')}
+              hints={[t('integrations.bfw.keyHint'), overrideOr('integrations.keyKeptHere')]}
+              isSet={status.set[bfwSlot]}
+              inputRef={keyRefs.bfw}
+              beforeSave={bfwSlot === 'bfwServer' ? () => commitOrigin('bfwUrl') : undefined}
+              onSaved={onSaved}
+            />
+            <ProbeButton
+              id="bfw"
+              target={`${val.bfwConnection}|${val.bfwConnection === 'server' ? draft.bfwUrl.trim() : ''}`}
+              fields={() => ({
+                url: val.bfwConnection === 'server' ? draftRef.current.bfwUrl.trim() : '',
+                connection: val.bfwConnection,
+                apiKey: keyValue(keyRefs.bfw),
+              })}
+            />
+          </section>
+
+
+          <section className="integration-section">
+            <h5>{coreT('partbank')}</h5>
+            <p className="prompt-hint">{overrideOr('integrations.partbankIntro')}</p>
+            {partbankRows('desktop')}
+            {partbankRows('web')}
+            <div className="integration-field">
+              <label className="prompt-question" htmlFor={`${id}-pbconn`}>
+                {coreT('Connection to search')}
+              </label>
+              <p className="prompt-hint">
+                {coreT(
+                  'Which partbank the autocomplete search and the catalog download use. A link made through the desktop app points at this PC only, so a vault shared with the lab should use the server.',
+                )}
+              </p>
+              <SelectField
+                id={`${id}-pbconn`}
+                value={val.partbankDefaultConnection}
+                onChange={(e) => void save({ partbankDefaultConnection: e.target.value as IntegrationSettingsValue['partbankDefaultConnection'] })}
+              >
+                <option value="web">{coreT('partbank server')}</option>
+                <option value="desktop">{coreT('partbank desktop app')}</option>
+              </SelectField>
+            </div>
+            <div className="integration-field">
+              <label className="prompt-question switch-label">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="switch"
+                  checked={val.partbankSendUsages}
+                  onChange={(e) => void save({ partbankSendUsages: e.target.checked })}
+                />{' '}
+                {coreT('Send note usages to partbank')}
+              </label>
+              <p className="prompt-hint">
+                {coreT(
+                  'Lists the lab notes that use a sample from partbank on its partbank page. Note paths, experiment folder names and section titles are stored on the partbank server and shown to you only. Turning this off deletes what this PC sent.',
+                )}
+              </p>
+            </div>
+          </section>
+        </Group>
+
+        <Group gid="scan" baseId={id} label={t('integrations.group.scan')} lead={t('integrations.group.scanLead')} headRef={headRef('scan')}>
+          {/* SP7 Part B: 바코드와 스캔, Slack(Task 29) */}
+          <ScanSettingsSection
+            deps={deps}
+            secrets={status}
+            onSecrets={setStatus}
+            onLeave={leave}
+            onHide={registerHide}
           />
-        </section>
+        </Group>
 
-        <McpClientSection key={mcpGen} deps={deps} onHide={registerHide} focusServer={mcpFocus} />
-
-        <ScholarSection
-          value={{ scholarSources: val.scholarSources, ncbiEmail: val.ncbiEmail, crossrefMailto: val.crossrefMailto }}
-          save={save}
-          deps={deps}
-          ncbiKeySet={status.set.ncbiEutils}
-          onSaved={onSaved}
-          onHide={registerHide}
-        />
-
-        {/* SP7 Part B: 바코드와 스캔, Slack(Task 29) */}
-        <ScanSettingsSection
-          deps={deps}
-          secrets={status}
-          onSecrets={setStatus}
-          onLeave={leave}
-          onHide={registerHide}
-        />
-        {deps.mcp ? (
-          <McpSection
-            enabled={val.mcpEnabled}
-            port={val.mcpPort}
-            commit={async (patch) => {
-              await save(patch);
-            }}
-            notify={deps.mcp.notify}
-            invoke={deps.mcp.invoke}
-          />
+        {deps.github ? (
+          <Group gid="github" baseId={id} label={t('integrations.group.github')} lead={t('integrations.group.githubLead')} headRef={headRef('github')}>
+            <GithubSection deps={deps.github} onLeave={leave} focus={props.focus} />
+          </Group>
         ) : null}
-        {deps.mcp ? <SkillSection notify={deps.mcp.notify} invoke={deps.mcp.invoke} /> : null}
-        {deps.github ? <GithubSection deps={deps.github} onLeave={leave} focus={props.focus} /> : null}
+
+        {deps.mcp ? (
+          <Group gid="agents" baseId={id} label={t('integrations.group.agents')} lead={t('integrations.group.agentsLead')} headRef={headRef('agents')}>
+            <McpSection
+              enabled={val.mcpEnabled}
+              port={val.mcpPort}
+              commit={async (patch) => {
+                await save(patch);
+              }}
+              notify={deps.mcp.notify}
+              invoke={deps.mcp.invoke}
+            />
+            <SkillSection notify={deps.mcp.notify} invoke={deps.mcp.invoke} />
+          </Group>
+        ) : null}
+
         {/* 파일로 한 번에 가져오기: 위의 칸을 채우는 지름길(선택). 직접 넣는 칸이 먼저 보이게 맨 끝에 둔다. */}
         {deps.importFile ? (
-          <section className="integration-section">
-            <h3>{t('integrations.import.heading')}</h3>
-            <p className="prompt-hint">{t('integrations.import.intro')}</p>
+          <Group
+            gid="import"
+            baseId={id}
+            label={t('integrations.import.heading')}
+            lead={t('integrations.import.intro')}
+            headRef={headRef('import')}
+            extraClass="integration-section"
+          >
             <div className="integration-test">
               <button type="button" disabled={importBusy} onClick={() => void runImport()}>
                 {t('integrations.import.button')}
@@ -1052,7 +1145,7 @@ export function IntegrationSettingsPage(props: {
                 </div>
               </div>
             ) : null}
-          </section>
+          </Group>
         ) : null}
       </div>
   );

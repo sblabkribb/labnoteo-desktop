@@ -102,6 +102,10 @@ describe('Integration settings: Import from file…', () => {
     const heading = await screen.findByRole('heading', { name: t('integrations.import.heading') });
     const section = heading.closest('section') as HTMLElement;
     expect(section.textContent).toContain(t('integrations.import.intro'));
+    // its own group, the last one, with a level-4 group heading
+    expect(heading.tagName).toBe('H4');
+    const groups = [...document.querySelectorAll('.integration-category')];
+    expect(groups[groups.length - 1]).toBe(section);
     expect(section.contains(await importButton())).toBe(true);
     expect(section.contains(screen.getByText(t('integrations.import.dropHere')))).toBe(true);
     // The manual AI fields come first in the pane.
