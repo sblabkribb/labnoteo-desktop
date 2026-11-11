@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { LabnoteFs } from '@labnoteo/core';
 import type { ScopedToolContext } from '../../context/contextTools';
 import { PLANNING_RULES } from '../../context/planningPrompt';
+import { KOREAN_TERMS_INSTRUCTION } from '../../port/aiCommon';
 import {
   buildFixtureVault,
   EXP_OTHER,
@@ -60,6 +61,7 @@ describe('fillPrompt: draft-unit-operation', () => {
     const reply = await fillPrompt('draft-unit-operation', { notePath: MAIN_FILES.expression, unitOp: 'UHW030' }, { toolCtx: await ctxOf() });
     const { description, text } = textOf(reply);
     expect(text.startsWith(PLANNING_RULES)).toBe(true);
+    expect(text.startsWith(`${PLANNING_RULES}\n\n${KOREAN_TERMS_INSTRUCTION}`)).toBe(true);
     expect(text).toContain('<<source id="target"');
     expect(text).toContain('Target unit operation: ### [UHW030 Induction]');
     expect(requestedLine(text)).toBe(HW_LINE);
@@ -128,6 +130,7 @@ describe('fillPrompt: continue-workflow', () => {
       await fillPrompt('continue-workflow', { notePath: MAIN_FILES.cloning, goal: 'express GFP in BL21' }, { toolCtx: await ctxOf() })
     );
     expect(text.startsWith(PLANNING_RULES)).toBe(true);
+    expect(text.startsWith(`${PLANNING_RULES}\n\n${KOREAN_TERMS_INSTRUCTION}`)).toBe(true);
     expect(text).toContain('Last unit operation so far: ### [UHW020 Gel Purification]');
     expect(text).toContain(`Next workflow in the README checklist: WB020 Protein Expression (${MAIN_FILES.expression})`);
     // The cloning workflow is checked as done, so the first unit op of the next workflow is asked for.

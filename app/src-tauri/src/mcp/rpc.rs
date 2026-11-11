@@ -54,14 +54,21 @@ pub enum Reply {
     NoReply,
 }
 
+/// The app's term rule (2026-11-11), the same sentence as the webview's
+/// `KOREAN_TERMS_INSTRUCTION` (labnote/port/aiCommon.ts): an agent that answers
+/// in Korean keeps "Workflow" and "Unit Operation" in English, as the Korean UI does.
+pub const KOREAN_TERMS_INSTRUCTION: &str = "When you write Korean, keep the terms \"Workflow\" and \"Unit Operation\" in English (never 워크플로, 단위 공정 or 유닛 오퍼레이션; \"UO\" is fine where space is tight), with the Korean particle that fits the English word (Workflow를, Workflow가, Workflow로, Unit Operation을, Unit Operation이, Unit Operation으로); other words stay Korean.";
+
 /// The `InitializeResult` (vendor `buildInitializeResult`). `capabilities`
 /// advertises only what is served: a fixed tool list and a fixed prompt list
-/// (both `listChanged: false`), no resources, no sampling.
+/// (both `listChanged: false`), no resources, no sampling. `instructions`
+/// carries the Korean term rule to every client, also one that never fills a prompt.
 pub fn initialize_result(version: &str) -> Value {
     json!({
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": { "tools": { "listChanged": false }, "prompts": { "listChanged": false } },
         "serverInfo": { "name": "labnoteo", "version": version },
+        "instructions": KOREAN_TERMS_INSTRUCTION,
     })
 }
 
@@ -73,7 +80,8 @@ const PROMPT_NAMES: [&str; 2] = ["draft-unit-operation", "continue-workflow"];
 const PROMPT_PREFIX: &str = "prompt:";
 
 /// The static `prompts/list` result (ai-context spec §10.2). The webview fills
-/// the prompts; the planning-only rule is stated in the filled text.
+/// the prompts; the planning-only rule and the Korean term rule
+/// (`KOREAN_TERMS_INSTRUCTION`) are stated in the filled text.
 pub fn prompt_list() -> Value {
     json!({ "prompts": [
         {
@@ -283,6 +291,15 @@ mod tests {
         let r = initialize_result("0.77.0");
         assert_eq!(r["protocolVersion"], MCP_PROTOCOL_VERSION);
         assert_eq!(r["serverInfo"], json!({"name": "labnoteo", "version": "0.77.0"}));
+    }
+
+    #[test]
+    fn initialize_result_tells_clients_to_keep_workflow_and_unit_operation_in_english() {
+        let r = initialize_result("0.0.0");
+        let text = r["instructions"].as_str().unwrap();
+        assert_eq!(text, KOREAN_TERMS_INSTRUCTION);
+        assert!(text.contains("\"Workflow\"") && text.contains("\"Unit Operation\""));
+        assert!(text.contains("Korean"));
     }
 
     #[test]

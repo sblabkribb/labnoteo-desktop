@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { estimateTokens } from '../../labnote/context/tokens';
+import { KOREAN_TERMS_INSTRUCTION } from '../../labnote/port/aiCommon';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
 import {
   COMPACT_KEEP,
@@ -141,6 +142,7 @@ describe('compact', () => {
     await compact(docOf(messages), p, go());
     const prompt = p.seen[0]!;
     expect(prompt.every((m) => m.role === 'system' || m.role === 'user')).toBe(true);
+    expect(prompt[0]!.content).toContain(KOREAN_TERMS_INSTRUCTION); // a Korean summary keeps Workflow / Unit Operation in English
     expect(prompt.some((m) => m.role === 'tool')).toBe(false);
     expect(prompt.some((m) => m.toolCalls?.length)).toBe(false);
     const text = allText(prompt.slice(1));

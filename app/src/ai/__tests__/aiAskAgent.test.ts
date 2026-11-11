@@ -17,6 +17,7 @@ import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { openNote } from '../../labnote/openNotes';
 import { askAgentCommand } from '../../labnote/port/aiAskAgent';
+import { KOREAN_TERMS_INSTRUCTION } from '../../labnote/port/aiCommon';
 import { runAgent, type AgentRun } from '../../labnote/port/llmAgent';
 import { createAiEnv } from '../aiEnv';
 import { externalAgentTools, type ExternalToolMeta } from '../externalTools';
@@ -186,6 +187,7 @@ describe('askAgentCommand (#77)', () => {
     const system = sent(f)[0][0].content;
     expect(system).toContain('update_section');
     expect(system).toContain('experiment status');
+    expect(system).toContain(KOREAN_TERMS_INSTRUCTION); // a Korean answer keeps Workflow / Unit Operation in English
   });
 
   it('reads caret and text before the prompt', async () => {

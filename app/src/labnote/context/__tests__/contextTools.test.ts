@@ -6,6 +6,7 @@ import { appTools, scopeErrorText } from '../appTools';
 import { contextTools, type ScopedToolContext } from '../contextTools';
 import { scopeGate, type Scope } from '../scope';
 import { PLANNING_RULES } from '../planningPrompt';
+import { KOREAN_TERMS_INSTRUCTION } from '../../port/aiCommon';
 import { PLANNING_SECTIONS_HW } from '../chain';
 import {
   buildFixtureVault,
@@ -410,7 +411,7 @@ describe('get_experiment_context and get_unit_operation_context (MCP, spec §10.
     const ctx = await mcpCtx();
     const data = dataOf(await run(ctx, 'get_experiment_context', { experiment: TITLE_MAIN }));
     expect(data.scope).toEqual({ folder: EXP_MAIN, named: [] });
-    expect(data.rules).toBe(PLANNING_RULES);
+    expect(data.rules).toBe(`${PLANNING_RULES} ${KOREAN_TERMS_INSTRUCTION}`);
     expect(ids(data)).toContain('readme:goal');
     expect(ids(data)).toContain(`wf:${MAIN_FILES.cloning}`);
     for (const s of data.sources) {
@@ -474,7 +475,7 @@ describe('get_experiment_context and get_unit_operation_context (MCP, spec §10.
   it('the unit op defaults to the last one of the note', async () => {
     const ctx = await mcpCtx();
     const data = dataOf(await run(ctx, 'get_unit_operation_context', { notePath: MAIN_FILES.expression }));
-    expect(data.rules).toBe(PLANNING_RULES);
+    expect(data.rules).toBe(`${PLANNING_RULES} ${KOREAN_TERMS_INSTRUCTION}`);
     expect(data.target).toMatchObject({
       path: MAIN_FILES.expression,
       unitOpIndex: 1,

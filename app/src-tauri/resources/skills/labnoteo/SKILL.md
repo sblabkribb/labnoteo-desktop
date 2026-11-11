@@ -67,6 +67,12 @@ Korean section names (same sections):
 | 논의 | Discussion |
 | 메타 | Meta |
 
+## Terms in Korean
+
+When you answer in Korean, write **Workflow** and **Unit Operation** in English, as the labnoteO Korean UI does: never 워크플로, 단위 공정 or 유닛 오퍼레이션. `UO` is fine where space is tight. Use the Korean particle that fits the English word (Workflow를, Workflow가, Workflow로, Unit Operation을, Unit Operation이, Unit Operation으로). Every other word stays Korean (섹션, 실험, 샘플, 시약 …).
+
+Notes written by older versions may still say 워크플로 or 유닛 오퍼레이션 (for example the `관련 유닛 오퍼레이션` heading or a `워크플로 생성` command hint). Read those as they are and leave them unchanged in the note; the rule is about your own words.
+
 ## The planning-only rule
 
 You help **plan** experiments. The researcher records what happened.

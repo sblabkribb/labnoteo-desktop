@@ -4,7 +4,8 @@
 // fills the text from the shared context builder. Scope comes from `notePath`
 // only: one experiment folder, never another. The text always carries
 // PLANNING_RULES, so the planning-only rule reaches a client that never loaded
-// the skill. Nothing here writes.
+// the skill, and KOREAN_TERMS_INSTRUCTION (Workflow / Unit Operation stay in
+// English in a Korean answer): the client picks its own reply language. Nothing here writes.
 import {
   buildChain,
   canonicalSection,
@@ -24,6 +25,7 @@ import {
 } from '../context/contextTools';
 import { draftableSections, draftableSectionsFor, PLANNING_RULES, planningRequestText } from '../context/planningPrompt';
 import { assertInScope, experimentFolderOf, ScopeError, type Scope } from '../context/scope';
+import { KOREAN_TERMS_INSTRUCTION } from '../port/aiCommon';
 
 export type PromptReply =
   | { kind: 'result'; result: { description: string; messages: Array<{ role: 'user'; content: { type: 'text'; text: string } }> } }
@@ -112,7 +114,7 @@ async function draftUnitOperation(ctx: ScopedToolContext, args: Record<string, s
   const { requested, refused } = splitSections(uo, args.sections);
 
   const built = await buildContext({ ...buildInput(ctx, scope), target: { workflowPath: uo.workflowPath, unitOpIndex: uo.index } });
-  const parts = [PLANNING_RULES];
+  const parts = [PLANNING_RULES, KOREAN_TERMS_INSTRUCTION];
   if (refused.length > 0) {
     parts.push(
       `Not drafted: ${refused.join(', ')}. Only the planning sections of this unit operation are drafted; ` +
@@ -158,7 +160,7 @@ async function continueWorkflow(ctx: ScopedToolContext, args: Record<string, str
     exclude: ['target:input-prefill'],
   });
 
-  const parts = [PLANNING_RULES];
+  const parts = [PLANNING_RULES, KOREAN_TERMS_INSTRUCTION];
   const rendered = renderContext(built);
   if (rendered) parts.push('Context sources:', rendered);
   parts.push(`Workflow: ${wf.label} (${wf.path})`);

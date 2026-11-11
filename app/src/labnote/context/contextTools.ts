@@ -9,6 +9,7 @@ import type { LabnoteFs, ToolContext, ToolDef, ToolResult } from '@labnoteo/core
 import { listUnitOpBlocks } from '@labnoteo/core';
 import { listHeadings, normalizeHeadingText } from '../../../vendor/labnoteo/packages/labnoteo-core/src/sections/sectionEdit';
 import type { SearchResults } from '../../search/indexApi';
+import { KOREAN_TERMS_INSTRUCTION } from '../port/aiCommon';
 import { experimentReadmes } from '../port/experiments';
 import { buildChain, canonicalSection, MAX_FILE_BYTES, MAX_WORKFLOW_FILES, previousUnitOp, type UnitOpNode } from './chain';
 import { buildContext, catalogFromTools, registryAliases, renderContext, type BuildInput, type BuiltContext } from './contextBuilder';
@@ -454,7 +455,8 @@ function contextData(built: BuiltContext): Record<string, unknown> {
     overBudget: built.overBudget,
     trimmed: built.trimmed,
     issues: built.issues,
-    rules: PLANNING_RULES,
+    // The client picks its own reply language: in Korean it keeps Workflow / Unit Operation in English.
+    rules: `${PLANNING_RULES} ${KOREAN_TERMS_INSTRUCTION}`,
   };
 }
 

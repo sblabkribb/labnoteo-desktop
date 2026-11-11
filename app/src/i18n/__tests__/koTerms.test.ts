@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import obsidianKo from '../../../vendor/labnoteo/src/l10n.ko';
 import workflows from '../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/workflows_en.json';
 import hw from '../../../vendor/labnoteo/packages/labnoteo-core/src/catalog/unitoperations_hw_en.json';
 import { coreT, koTerms, vendorKo } from '../../labnote/i18n';
 import { catalogKoFields } from '../../labnote/port/aliasHints';
+import { KOREAN_TERMS_INSTRUCTION, replyLanguageInstruction } from '../../labnote/port/aiCommon';
 import { setLang } from '../lang';
 import { catalogs } from '../t';
 
@@ -11,6 +14,8 @@ import { catalogs } from '../t';
  * 워크플로 / 단위 공정 / 유닛 오퍼레이션(띄어 쓰든 붙여 쓰든)은 보이는 글에 다시 들어오면 안 된다.
  */
 const OLD_TERMS = /워크플로|단위\s*공정|유닛\s*오퍼레이션/;
+
+const root = join(__dirname, '..', '..', '..');
 
 describe('용어 규칙: Workflow / Unit Operation 은 한국어 화면에서도 영어', () => {
   afterEach(() => setLang('ko'));
@@ -68,5 +73,25 @@ describe('용어 규칙: Workflow / Unit Operation 은 한국어 화면에서도
     expect(koTerms('워크플로를 단위 공정으로, 유닛오퍼레이션이')).toBe('Workflow를 Unit Operation으로, Unit Operation이');
     expect(vendorKo('Create workflow')).toBe('워크플로 생성');
     expect(vendorKo('no such key')).toBeUndefined();
+  });
+
+  it('AI 의 한국어 답 지시에 용어 규칙이 붙는다(다른 언어에는 붙지 않는다)', () => {
+    expect(replyLanguageInstruction('ko')).toContain(KOREAN_TERMS_INSTRUCTION);
+    expect(replyLanguageInstruction('en')).not.toContain(KOREAN_TERMS_INSTRUCTION);
+    expect(KOREAN_TERMS_INSTRUCTION).toContain('"Workflow"');
+    expect(KOREAN_TERMS_INSTRUCTION).toContain('"Unit Operation"');
+  });
+
+  it('MCP 서버(Rust)의 instructions 는 웹뷰와 같은 문장이다', () => {
+    const rs = readFileSync(join(root, 'src-tauri', 'src', 'mcp', 'rpc.rs'), 'utf8');
+    const m = rs.match(/pub const KOREAN_TERMS_INSTRUCTION: &str = "((?:\\.|[^"\\])*)";/);
+    expect(m).not.toBeNull();
+    expect(m![1].replace(/\\"/g, '"')).toBe(KOREAN_TERMS_INSTRUCTION);
+  });
+
+  it('SKILL.md 가 외부 에이전트에게 같은 규칙을 알려 준다', () => {
+    const skill = readFileSync(join(root, 'src-tauri', 'resources', 'skills', 'labnoteo', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('## Terms in Korean');
+    expect(skill).toMatch(/write \*\*Workflow\*\* and \*\*Unit Operation\*\* in English/);
   });
 });
