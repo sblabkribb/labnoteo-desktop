@@ -40,10 +40,10 @@ export interface AppHost extends LabnoteHost {
   ): Promise<T | undefined>;
   /** 새 실험 대화상자(제목과 실험자, UI 재설계 Task 19). 닫으면 undefined. */
   newExperiment(opts: NewExperimentOpts): Promise<NewExperimentResult | undefined>;
-  /** 코어의 확인에 `unsolicited`(A9)를 더한다. */
+  /** 코어의 확인에 `unsolicited`(A9)와 제목(`title`)을 더한다. */
   confirm(
     message: string,
-    opts?: { confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean },
+    opts?: { title?: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean },
   ): Promise<boolean>;
 }
 

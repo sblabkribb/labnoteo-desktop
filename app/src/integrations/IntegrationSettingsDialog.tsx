@@ -37,6 +37,23 @@ import {
 import { SelectField } from '../ui/SelectField';
 import { McpClientSection, mcpClientDepsFor, type McpClientDeps } from './mcpClient/McpClientSection';
 import { ScholarSection } from './scholar/ScholarSection';
+import { GithubSection, type GithubDeps, type GithubFocus } from './GithubSection';
+import {
+  githubAccount,
+  githubAppSettingsGet,
+  githubAppSettingsSet,
+  githubDefaultOwnerGet,
+  githubDefaultOwnerSet,
+  githubOwners,
+  githubSetToken,
+  githubSignInStart,
+  githubSignInWait,
+  githubSignOut,
+  githubStatuses,
+  githubUnlink,
+} from './githubIpc';
+import { forgetGithubStatus, setGithubStatuses } from '../github/statusStore';
+import { openExternal, tauriExternalDeps } from '../links/openExternal';
 
 export type { IntegrationSettingsValue } from './probes';
 export { notifySecretsChange, onIntegrationChange, onSecretsChange, probeFor, registerProbe } from './probes';
@@ -63,6 +80,8 @@ export interface IntegrationDeps {
     runBytes(name: string, bytes: Uint8Array): Promise<ImportOutcome>;
     remove(permanent: boolean): Promise<DeleteOutcome>;
   };
+  /** 설정의 GitHub 묶음(spec §9). 없으면 그리지 않는다. */
+  github?: GithubDeps;
 }
 
 function pickIntegration(s: AppSettings): IntegrationSettingsValue {
@@ -98,6 +117,38 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
  */
 export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauriInvoke): IntegrationDeps {
   let current = pickIntegration(ctx.settings);
+  let readmeOverlay = ctx.settings.githubReadmeOverlay !== false;
+  const external = tauriExternalDeps((kind, message) => ctx.host.notify(kind, message));
+  const github: GithubDeps = {
+    account: () => githubAccount(invoke),
+    secretStatus: () => secretStatus(invoke),
+    signInStart: () => githubSignInStart(invoke),
+    signInWait: (signal) => githubSignInWait({ signal }, invoke),
+    signOut: () => githubSignOut(invoke),
+    setToken: (value) => githubSetToken(value, invoke),
+    // 설정에서 읽은 상태와 끊은 연결은 실험 탭의 표시와 메뉴(statusStore)에도 바로 반영한다.
+    statuses: async () => {
+      const all = await githubStatuses(invoke);
+      if (all && typeof all === 'object') setGithubStatuses(all);
+      return all;
+    },
+    unlink: async (folder) => {
+      await githubUnlink(folder, invoke);
+      forgetGithubStatus(folder);
+    },
+    openExternal: (url) => openExternal(url, external),
+    copy: (text) => external.copy(text),
+    appSettings: () => githubAppSettingsGet(invoke),
+    setAppSettings: (patch) => githubAppSettingsSet(patch, invoke),
+    readmeOverlay: () => readmeOverlay,
+    async commitReadmeOverlay(value) {
+      if ((await ctx.updateSettings({ githubReadmeOverlay: value })) === false) throw new Error('settings were not saved');
+      readmeOverlay = value;
+    },
+    owners: (signal) => githubOwners({ signal }, invoke),
+    defaultOwner: async () => (await githubDefaultOwnerGet(invoke)) ?? undefined,
+    setDefaultOwner: (owner) => githubDefaultOwnerSet(owner, invoke),
+  };
   return {
     value: () => current,
     async commit(patch) {
@@ -119,14 +170,16 @@ export function integrationDepsFor(ctx: CommandContext, invoke: InvokeFn = tauri
       runBytes: (name, bytes) => importConnectionsBytes(name, bytes, invoke as unknown as RawInvoke),
       remove: (permanent) => deleteImportedFile(permanent, invoke),
     },
+    github,
   };
 }
 
 const DEFAULTS = fromPluginData(undefined);
 
-const EMPTY_STATUS: SecretStatus = {
-  set: { partbankDesktop: false, partbankWeb: false, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false, webSearch: false },
-  epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0, webSearch: 0 },
+/** 아직 읽지 못한 키 상태: 모든 자리가 비어 있다(GitHub 두 자리와 웹 검색 키 포함). */
+export const EMPTY_STATUS: SecretStatus = {
+  set: { partbankDesktop: false, partbankWeb: false, llmOpenai: false, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false, github: false, githubRefresh: false, webSearch: false },
+  epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 0, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0, github: 0, githubRefresh: 0, webSearch: 0 },
 };
 
 /** 키가 묶이는 주소 설정. 이 값이 바뀌면 키 상태를 다시 읽는다. */
@@ -154,6 +207,7 @@ const PART_LABEL: Record<ImportPart, () => string> = {
   partbank: () => t('integrations.import.part.partbank'),
   bfworkflow: () => t('integrations.import.part.bfworkflow'),
   mcpServer: () => t('mcpClient.import.part'),
+  github: () => t('github.import.part'),
 };
 
 const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
@@ -201,6 +255,10 @@ const PROBLEM_TEXT: Record<ImportProblem, () => string> = {
   needsToken: () => t('mcpClient.import.needsToken', ''),
   urlSecret: () => t('mcpClient.import.urlSecret', ''),
   tooMany: () => t('mcpClient.import.tooMany', ''),
+  // GitHub 항목에만 오는 까닭
+  badToken: () => t('github.import.badToken'),
+  badClientId: () => t('github.import.badClientId'),
+  appData: () => t('github.import.appData'),
 };
 
 /** MCP 서버 항목의 줄: "{이름}: 까닭"(spec §9). 이름은 파일의 키를 다듬은 것이고 평문으로만 보인다. */
@@ -228,7 +286,11 @@ const DELETED_TEXT: Record<Exclude<DeleteOutcome, 'trashUnavailable'>, () => str
 function summaryLines(out: ImportOutcome): ImportLine[] {
   if (out.status === 'refused') return [{ text: REFUSAL_TEXT[out.reason](), warn: true }];
   const lines: ImportLine[] = out.imported.map((i) => ({
-    text: t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
+    // GitHub 은 API 키가 아니라 토큰을 가져온다.
+    text:
+      i.keySaved && i.part === 'github'
+        ? t('github.import.importedToken', PART_LABEL[i.part]())
+        : t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
     warn: false,
   }));
   const mcp = out.mcp ?? [];
@@ -306,6 +368,8 @@ export function IntegrationSettingsPage(props: {
   onLeave: () => Promise<void>;
   commitRef?: MutableRefObject<(() => Promise<void>) | null>;
   autoFocus?: boolean;
+  /** 열 때 초점을 줄 곳(`openSettings(page, {focus})`). */
+  focus?: GithubFocus;
 }) {
   const { deps } = props;
   const autoFocus = useRef(props.autoFocus === true);
@@ -913,6 +977,7 @@ export function IntegrationSettingsPage(props: {
           />
         ) : null}
         {deps.mcp ? <SkillSection notify={deps.mcp.notify} invoke={deps.mcp.invoke} /> : null}
+        {deps.github ? <GithubSection deps={deps.github} onLeave={leave} focus={props.focus} /> : null}
         {/* 파일로 한 번에 가져오기: 위의 칸을 채우는 지름길(선택). 직접 넣는 칸이 먼저 보이게 맨 끝에 둔다. */}
         {deps.importFile ? (
           <section className="integration-section">

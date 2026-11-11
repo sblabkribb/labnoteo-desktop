@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { Icon } from '../ui/Icon';
@@ -15,6 +15,14 @@ function composing(e: KeyboardEvent): boolean {
 }
 
 const basename = (p: string): string => p.split('/').filter(Boolean).pop() ?? p;
+
+/** 고르기 칸에 들어갈 이름: 길면 가운데를 줄임표로 줄인다(번호와 끝 이름이 남는다). 고르기 칸은 줄임표를 그리지 않는다. */
+export function shortName(name: string, max = 36): string {
+  const chars = [...name];
+  if (chars.length <= max) return name;
+  const tail = Math.min(16, Math.floor((max - 1) / 2));
+  return `${chars.slice(0, max - 1 - tail).join('')}…${chars.slice(-tail).join('')}`;
+}
 
 /** 웹 검색 안내 칩을 닫았거나 그 단추를 눌렀다: 이 실행(앱 세션) 동안 다시 보이지 않는다. */
 let webHintDone = false;
@@ -165,11 +173,11 @@ export function Bubble(props: {
     (field ?? root.current?.querySelector<HTMLElement>('.pet-chip[aria-pressed="true"]'))?.focus();
   }, [chip, ready]);
 
-  // 새 글이 오면 맨 아래를 보인다
-  const last = chat.messages[chat.messages.length - 1];
-  useEffect(() => {
+  // 대화가 바뀌면 맨 아래를 보인다: 새 글만이 아니라 글이 끝난 뒤에 붙는 출처·도구 요약·"노트에 넣기"도(메시지 배열은 바뀔
+  // 때마다 새것이다). 그것들이 그려진 뒤에 스크롤하도록 layout effect 다.
+  useLayoutEffect(() => {
     logEnd.current?.scrollIntoView?.({ block: 'end' });
-  }, [chat.messages.length, last?.text]);
+  }, [chat.messages, chat.streaming]);
 
   const unitOpTarget = openIsWorkflow ? props.activePath : target || undefined;
   const canSend = (): boolean => {
@@ -276,10 +284,16 @@ export function Bubble(props: {
           <label className="pet-field-label" htmlFor={`${props.id}-wf`}>
             {t('chip.pickWorkflow')}
           </label>
-          <select id={`${props.id}-wf`} className="pet-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+          <select
+            id={`${props.id}-wf`}
+            className="pet-select"
+            value={target}
+            title={target ? basename(target) : undefined}
+            onChange={(e) => setTarget(e.target.value)}
+          >
             {workflows.map((p) => (
-              <option key={p} value={p}>
-                {basename(p)}
+              <option key={p} value={p} title={basename(p)}>
+                {shortName(basename(p))}
               </option>
             ))}
           </select>

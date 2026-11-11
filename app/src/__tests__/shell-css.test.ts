@@ -161,4 +161,13 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.editor-frame:focus-within')!.decls.outline).toBe('none');
     expect(ruleFor('.editor-frame')!.decls.isolation).toBe('isolate');
   });
+
+  it('GitHub 창의 본문은 창 높이(76vh) 안에서 스크롤한다: 찾은 것이 많아도 단추가 창 밖으로 나가지 않는다', () => {
+    expect(ruleFor('.dialog')!.decls['max-height']).toBe('76vh');
+    const body = ruleFor('.dialog.github-dialog .github-form')!;
+    expect(body.decls['min-height']).toBe('0');
+    expect(body.decls['overflow-y']).toBe('auto');
+    // 파일 목록은 줄어들지 않는다(최대 40vh): 찾은 것이 많으면 목록이 0px 로 눌리지 않고 본문이 스크롤한다
+    expect(ruleFor('.github-files')!.decls.flex).toBe('none');
+  });
 });

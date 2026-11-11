@@ -4,7 +4,7 @@ import { useId, type ReactNode } from 'react';
  * 설정 창의 한 줄(Obsidian 의 설정 줄): 왼쪽에 이름과 설명, 오른쪽에 조작. 조작의 이름은 부르는 쪽이 aria-label 로 준다
  * (Segmented·SelectMenu·Toggle 은 label 을 받는다). 설명은 이 줄의 그룹이 aria-describedby 로 읽힌다.
  */
-export function SettingRow(props: { label: string; description?: string; control: ReactNode }) {
+export function SettingRow(props: { label: string; description?: ReactNode; control: ReactNode }) {
   const id = useId();
   return (
     <div className="setting-row" role="group" aria-labelledby={`${id}-name`} aria-describedby={props.description ? `${id}-desc` : undefined}>

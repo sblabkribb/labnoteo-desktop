@@ -187,6 +187,10 @@ describe('everything is a command (Task 12)', () => {
       'editor.insert.codeBlock',
       'editor.insert.hr',
       'editor.insert.mathBlock',
+      'github.uploadExperiment',
+      'github.openOnGithub',
+      'github.finishUpload',
+      'github.disconnect',
     ];
     for (const id of ids) {
       const c = appCommandById(id);

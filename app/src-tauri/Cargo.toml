@@ -56,15 +56,27 @@ dom_smoothie = "=0.18.0"
 zip = { version = "9.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 png = "0.18"
 
+# The GitHub token is held in `Zeroizing` while Rust uses it (already in the lock).
+zeroize = "1.9.1"
+# GitHub upload engine (gitsync): an app-owned bare repo, commit and push over
+# WinHTTP. No ssh, no vendored OpenSSL (OpenSSL is gated to non-Windows Unix),
+# libgit2 built from source (libgit2-sys 0.18.x = libgit2 1.9.x).
+git2 = { version = "=0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
+
 [features]
 # Never in `default`, release or CI builds (guarded by src/__tests__/releaseFeatures.test.ts):
 # lets the test exe's fetch_page reach exactly the loopback ports listed in
 # LABNOTEO_E2E_FAKE_PORTS (the fake web pages of the real-app check).
 e2e-fakes = []
+# Test builds only (P-R7, P-R15): the GitHub endpoints may be overridden with a
+# loopback URL through LABNOTEO_GITHUB_TEST_BASE / LABNOTEO_GITHUB_TEST_GIT_BASE,
+# and the GitHub keychain accounts end in "|test-build". Never on in a release.
+github-test-endpoints = []
 
 [target.'cfg(windows)'.dependencies]
-# SO_EXCLUSIVEADDRUSE on the MCP listener (C2); 0.61.2 is already in the lock.
-windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+# SO_EXCLUSIVEADDRUSE on the MCP listener (C2); GetLocalTime for the GitHub commit
+# message. 0.61.2 is already in the lock.
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_Foundation", "Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

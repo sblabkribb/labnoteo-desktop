@@ -12,7 +12,10 @@ import { runCommand } from '../commands/runCommand';
 import { coreT } from '../i18n';
 import { linkIndex } from '../../links/linkIndex';
 import { copyText, markdownLinkFor } from '../../links/clipboard';
-import { editorMenu, noteTreeMenu } from '../menus';
+import { editorMenu, noteTreeMenu, viewMoreMenu } from '../menus';
+import { githubActions } from '../../github/commands';
+import { resetGithubStatusesForTest, setGithubStatuses } from '../../github/statusStore';
+import type { FolderStatus } from '../../integrations/githubIpc';
 import { ContextMenu } from '../ui/ContextMenu';
 import { closeMenu, openMenu, type MenuAction, type MenuItem } from '../ui/menuStore';
 import { mountEditor } from './editorHarness';
@@ -230,6 +233,102 @@ describe('noteTreeMenu CSV export', () => {
     await runCommand(h.ctx, byLabel(noteTreeMenu(h.ctx, entry(EXP, true), []), ALL).run);
     expect(h.vault.files()[`${EXP}/002_Y.labnote_table1.csv`]).toBe('\uFEFFa,b\n1,2\n');
     expect(h.vault.files()['notes/b_table1.csv']).toBeUndefined();
+  });
+});
+
+describe('GitHub items', () => {
+  const EXP = 'labnote/001_x';
+  const LEGACY = 'labnote/002_y';
+  const linked = (over: Partial<FolderStatus> = {}): FolderStatus => ({
+    linked: true,
+    state: 'pushed',
+    changedCount: 0,
+    folderMissing: false,
+    fullName: 'me/x',
+    htmlUrl: 'https://github.com/me/x',
+    ...over,
+  });
+  const gh = (items: MenuItem[]) => {
+    const at = items.findIndex((i) => i.section === 'github.menu.section');
+    if (at < 0) return [];
+    const out: MenuItem[] = [];
+    for (const i of items.slice(at)) {
+      if (i.separator || !(i as MenuAction).labelKey?.startsWith('github.')) break;
+      out.push(i);
+    }
+    return out;
+  };
+  const keys = (items: MenuItem[]) => gh(items).map((i) => (i as MenuAction).labelKey);
+
+  afterEach(() => {
+    resetGithubStatusesForTest();
+    vi.restoreAllMocks();
+  });
+
+  it('an unlinked experiment folder offers Upload to GitHub, in its own section after a separator; other folders none', () => {
+    h = createTestHost();
+    const items = noteTreeMenu(h.ctx, entry(EXP, true), []);
+    expect(keys(items)).toEqual(['github.menu.upload']);
+    const at = items.findIndex((i) => i.section === 'github.menu.section');
+    expect(items[at - 1].separator).toBe(true);
+    expect((items[at] as MenuAction).icon).toBe('upload');
+    for (const dir of ['notes', 'labnote', `${EXP}/data`]) expect(keys(noteTreeMenu(h.ctx, entry(dir, true), []))).toEqual([]);
+    // 파일 줄에는 없다
+    expect(keys(noteTreeMenu(h.ctx, entry(`${EXP}/README.labnote.md`, false), []))).toEqual([]);
+  });
+
+  it('a legacy experiment folder (README.md) qualifies too', () => {
+    h = createTestHost({ [`${LEGACY}/README.md`]: '# old\n' });
+    expect(keys(noteTreeMenu(h.ctx, entry(LEGACY, true), []))).toEqual(['github.menu.upload']);
+  });
+
+  it('a linked experiment shows Upload changes, Open on GitHub, then Disconnect (danger, last)', () => {
+    h = createTestHost();
+    setGithubStatuses({ [EXP]: linked({ changedCount: 2 }) });
+    const items = noteTreeMenu(h.ctx, entry(EXP, true), []);
+    expect(keys(items)).toEqual(['github.menu.uploadChanges', 'github.menu.open', 'github.menu.unlink']);
+    const list = gh(items) as MenuAction[];
+    expect(list.map((i) => i.icon)).toEqual(['cloud-upload', 'external-link', 'trash-2']);
+    expect(list[2].danger).toBe(true);
+    expect(list.slice(0, 2).every((i) => !i.danger)).toBe(true);
+  });
+
+  it('an unfinished upload shows Finish (plus Open when there is a repo)', () => {
+    h = createTestHost();
+    setGithubStatuses({ [EXP]: linked({ state: 'committed' }) });
+    expect(keys(noteTreeMenu(h.ctx, entry(EXP, true), []))).toEqual(['github.menu.finish', 'github.menu.open']);
+    setGithubStatuses({ [EXP]: linked({ state: 'repoCreating', htmlUrl: undefined }) });
+    expect(keys(noteTreeMenu(h.ctx, entry(EXP, true), []))).toEqual(['github.menu.finish']);
+  });
+
+  it('each item runs the same action as the matching command, on the menu folder', async () => {
+    h = createTestHost();
+    const upload = vi.spyOn(githubActions, 'upload').mockResolvedValue(undefined);
+    const open = vi.spyOn(githubActions, 'open').mockResolvedValue(undefined);
+    const disconnect = vi.spyOn(githubActions, 'disconnect').mockResolvedValue(undefined);
+    const finish = vi.spyOn(githubActions, 'finish').mockResolvedValue(undefined);
+    await runCommand(h.ctx, (gh(noteTreeMenu(h.ctx, entry(EXP, true), []))[0] as MenuAction).run);
+    expect(upload).toHaveBeenCalledWith(h.ctx, EXP);
+    setGithubStatuses({ [EXP]: linked() });
+    const [changes, openItem, unlink] = gh(noteTreeMenu(h.ctx, entry(EXP, true), [])) as MenuAction[];
+    await runCommand(h.ctx, changes.run);
+    await runCommand(h.ctx, openItem.run);
+    await runCommand(h.ctx, unlink.run);
+    expect(upload).toHaveBeenLastCalledWith(h.ctx, EXP);
+    expect(open).toHaveBeenCalledWith(h.ctx, EXP);
+    expect(disconnect).toHaveBeenCalledWith(h.ctx, EXP);
+    setGithubStatuses({ [EXP]: linked({ state: 'committed' }) });
+    await runCommand(h.ctx, (gh(noteTreeMenu(h.ctx, entry(EXP, true), []))[0] as MenuAction).run);
+    expect(finish).toHaveBeenCalledWith(h.ctx, EXP);
+  });
+
+  it('the note header menu of an experiment README has the same items; other notes none', () => {
+    h = createTestHost();
+    expect(keys(viewMoreMenu(h.ctx, `${EXP}/README.labnote.md`))).toEqual(['github.menu.upload']);
+    setGithubStatuses({ [EXP]: linked() });
+    expect(keys(viewMoreMenu(h.ctx, `${EXP}/README.labnote.md`))).toEqual(['github.menu.uploadChanges', 'github.menu.open', 'github.menu.unlink']);
+    expect(keys(viewMoreMenu(h.ctx, `${EXP}/001_X.labnote.md`))).toEqual([]);
+    expect(keys(viewMoreMenu(h.ctx, 'notes/a.labnote.md'))).toEqual([]);
   });
 });
 

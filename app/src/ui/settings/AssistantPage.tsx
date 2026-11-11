@@ -657,7 +657,17 @@ export function HistoryRow(deps: HistoryRowDeps = {}) {
   return (
     <SettingRow
       label={t('settings.assistant.history')}
-      description={folders === undefined ? desc : `${t('settings.assistant.history.count', folders)} ${desc}`}
+      description={
+        folders === undefined ? (
+          desc
+        ) : (
+          // 수는 따로 한 줄(설명 앞에 붙이면 "…0개 실험마다 …" 처럼 한 문장으로 읽힌다)
+          <>
+            <span className="setting-desc-line">{desc}</span>{' '}
+            <span className="setting-desc-line">{t('settings.assistant.history.count', folders)}</span>
+          </>
+        )
+      }
       control={
         <button type="button" className="btn danger" {...softOff(busy || folders === 0, () => void run())}>
           {t('settings.assistant.history.clearAll')}

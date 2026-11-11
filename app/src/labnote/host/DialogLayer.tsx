@@ -26,6 +26,10 @@ import { SkinGalleryDialog } from '../../assistant/skins/GalleryDialog';
 
 /** App.tsx 가 .shell 밖, 알림 층 뒤에 그리는 도우미 층의 id. */
 export const PET_LAYER_ID = 'pet-layer';
+import { SignInDialog } from '../../github/SignInDialog';
+import { UploadDialog } from '../../github/UploadDialog';
+import { PreviewDialog, QuickDialog } from '../../github/PreviewDialog';
+import { DivergedDialog } from '../../github/DivergedDialog';
 
 function Body({ entry }: { entry: DialogEntry }) {
   const onDone = (value: unknown) => settleDialog(entry.id, value);
@@ -76,6 +80,16 @@ function Body({ entry }: { entry: DialogEntry }) {
       return <SkinEditorDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
     case 'skinGallery':
       return <SkinGalleryDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubSignIn':
+      return <SignInDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubDestination':
+      return <UploadDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubPreview':
+      return <PreviewDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubQuick':
+      return <QuickDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
+    case 'githubDiverged':
+      return <DivergedDialog spec={spec} onDone={onDone} onCancel={onCancel} />;
   }
 }
 

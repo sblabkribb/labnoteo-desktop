@@ -26,7 +26,8 @@ export function ConfirmDialog(props: {
     <DialogFrame
       role="alertdialog"
       className="confirm"
-      label={t('dialog.confirmLabel')}
+      title={spec.title}
+      label={spec.title ? undefined : t('dialog.confirmLabel')}
       describedBy={`${id}-message`}
       onCancel={props.onCancel}
       unsolicited={spec.unsolicited}

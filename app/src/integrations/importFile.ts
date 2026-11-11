@@ -11,7 +11,8 @@ import type { RawInvoke } from '../fs/vaultImage';
  */
 
 /** `mcpServer`: Claude-Desktop 모양 JSON 의 `mcpServers`(또는 VS Code 의 `servers`) 항목 하나. */
-export type ImportPart = 'llm' | 'partbank' | 'bfworkflow' | 'mcpServer';
+/** `github`: 토큰은 자격 증명 관리자의 GitHub 칸에, Client ID 는 앱 전체 GitHub 설정에(Rust). 볼트 설정에는 아무것도 오지 않는다. */
+export type ImportPart = 'llm' | 'partbank' | 'bfworkflow' | 'mcpServer' | 'github';
 
 export type ImportRefusal = 'insideVault' | 'tooLarge' | 'unreadable' | 'notText' | 'unrecognized' | 'wrongType';
 
@@ -35,7 +36,11 @@ export type ImportProblem =
   | 'otherHeaders'
   | 'needsToken'
   | 'urlSecret'
-  | 'tooMany';
+  | 'tooMany'
+  // GitHub 항목(feat/github-upload)
+  | 'badToken'
+  | 'badClientId'
+  | 'appData';
 
 /** 가져온 MCP 서버 하나(Rust `McpImported`). 토큰도 헤더 값도 없다. */
 export interface McpImported {

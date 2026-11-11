@@ -33,10 +33,61 @@ export interface PetSnapshot {
   skin: string;
 }
 
+/**
+ * 창 크기와, 도우미가 덮지 않을 창 틀(px): 위는 보기 머리(도구 단추), 왼쪽은 리본, 아래는 상태 표시줄.
+ * 틀이 없으면(테스트) 0 이다.
+ */
 export interface Viewport {
   w: number;
   h: number;
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
 }
+
+/** 화면 좌표의 사각형(getBoundingClientRect 와 같은 꼴). */
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** 말풍선과 그림, 말풍선과 창 끝 사이(px). */
+export const BUBBLE_GAP = 8;
+
+/**
+ * 말풍선 자리(assistant 명세 §4.2): 그림 위가 기본이고, 위에 자리가 모자라고 아래가 더 넓으면 아래로 뒤집는다.
+ * 가로는 그림의 오른쪽 끝에 맞추되 창 틀 안으로 민다. `maxH` 는 고른 쪽에 남은 높이다(대화 칸이 그 안에서 스크롤한다).
+ * 위로 열면 `bottom`(창 아래 끝에서 잰 px)을, 아래로 열면 `top` 을 건다: 글이 늘어도 그림 쪽 끝은 그대로다.
+ */
+export function bubblePlace(
+  pet: Box,
+  bubble: { w: number; h: number },
+  vp: Viewport,
+): { side: 'above' | 'below'; left: number; top: number; bottom: number; maxH: number } {
+  const area = { left: (vp.left ?? 0) + BUBBLE_GAP, top: (vp.top ?? 0) + BUBBLE_GAP, right: vp.w - (vp.right ?? 0) - BUBBLE_GAP, bottom: vp.h - (vp.bottom ?? 0) - BUBBLE_GAP };
+  const above = Math.max(0, pet.top - BUBBLE_GAP - area.top);
+  const below = Math.max(0, area.bottom - (pet.bottom + BUBBLE_GAP));
+  const side = bubble.h <= above || above >= below ? 'above' : 'below';
+  const maxH = Math.floor(side === 'above' ? above : below);
+  const left = Math.round(Math.max(area.left, Math.min(pet.right - bubble.w, area.right - bubble.w)));
+  const top = Math.round(pet.bottom + BUBBLE_GAP);
+  const bottom = Math.round(vp.h - (pet.top - BUBBLE_GAP));
+  return { side, left, top, bottom, maxH };
+}
+
+/**
+ * 화면 배율에 맞춘 그림 배율: 그림 한 칸이 기기 픽셀 정수 개가 되게 한다(150% 에서 3배는 한 칸 4.5 기기 픽셀이라 선 굵기가
+ * 4와 5로 번갈아 보인다 → 5 기기 픽셀). 100%·200% 에서는 그대로다.
+ */
+export function snapScale(scale: number, dpr: number): number {
+  if (!(dpr > 0) || !Number.isFinite(dpr)) return scale;
+  return Math.max(1, Math.round(scale * dpr)) / dpr;
+}
+
+const screenDpr = (): number => (typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1);
 
 export interface PetStore {
   get(): PetSnapshot;
@@ -47,7 +98,7 @@ export interface PetStore {
   setOpen(open: boolean, restore?: () => void): void;
   /** 닫을 때 쓸 초점 돌려주기를 꺼낸다(한 번만). */
   takeRestore(): (() => void) | undefined;
-  /** 화면 기준으로 옮긴다(dx > 0 은 오른쪽, dy > 0 은 아래). 뷰포트 안으로 자르고 저장한다. */
+  /** 화면 기준으로 옮긴다(dx > 0 은 오른쪽, dy > 0 은 아래). 뷰포트 안(상태 표시줄·리본·보기 머리 밖)으로 자르고 저장한다. */
   moveBy(dx: number, dy: number): void;
   /** 끄는 중: 오프셋을 그 자리로(자르되 저장하지 않는다). */
   dragTo(x: number, y: number): void;
@@ -55,7 +106,7 @@ export interface PetStore {
   commit(): void;
   /** 기본 구석(오른쪽 아래)으로 되돌리고 저장한다. */
   reset(): void;
-  /** 창 크기가 바뀌었다: 그 안으로 자른다(저장하지 않는다). */
+  /** 창 크기가 바뀌었다: 그 안(창 틀 밖)으로 자른다(저장하지 않는다). */
   clampTo(w: number, h: number): void;
   setHidden(hidden: boolean): void;
   toggleVisible(): void;
@@ -65,8 +116,9 @@ export interface PetStore {
 }
 
 /** 스프라이트 한 변(px): 지금은 기본 스킨의 틀 크기 × 배율. */
-export function petSize(scale: number, skin: SkinManifest = BUILTIN_SKIN): { w: number; h: number } {
-  return { w: skin.frame.width * scale, h: skin.frame.height * scale };
+export function petSize(scale: number, skin: SkinManifest = BUILTIN_SKIN, dpr: number = screenDpr()): { w: number; h: number } {
+  const s = snapScale(scale, dpr);
+  return { w: Math.ceil(skin.frame.width * s), h: Math.ceil(skin.frame.height * s) };
 }
 
 /** 자리가 창의 어디쯤인지(aria-live 안내용): 오프셋은 오른쪽·아래에서 잰다. */
@@ -100,8 +152,33 @@ export interface PetStoreOptions {
   viewport?: () => Viewport;
 }
 
-const windowViewport = (): Viewport =>
-  typeof window === 'undefined' ? { w: Infinity, h: Infinity } : { w: window.innerWidth, h: window.innerHeight };
+/** 창 틀의 크기 토큰(tokens.css). 읽지 못하면 0. */
+function token(style: CSSStyleDeclaration, name: string): number {
+  const n = parseFloat(style.getPropertyValue(name));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+const windowViewport = (): Viewport => {
+  if (typeof window === 'undefined') return { w: Infinity, h: Infinity };
+  const style = getComputedStyle(document.documentElement);
+  return {
+    w: window.innerWidth,
+    h: window.innerHeight,
+    top: token(style, '--viewheader-h'),
+    left: token(style, '--ribbon-w'),
+    bottom: token(style, '--statusbar-h'),
+    right: 0,
+  };
+};
+
+/** 오른쪽·아래에서 잰 자리를 창 틀 안으로 자른다. 창이 너무 작으면 오른쪽·아래 틀에 붙인다. */
+function clampIn(pos: PetPos, vp: Viewport, size: { w: number; h: number }): PetPos {
+  const fit = (n: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(Math.max(lo, hi), n)));
+  return {
+    x: fit(pos.x, vp.right ?? 0, vp.w - (vp.left ?? 0) - size.w),
+    y: fit(pos.y, vp.bottom ?? 0, vp.h - (vp.top ?? 0) - size.h),
+  };
+}
 
 export function createPetStore(opts: PetStoreOptions = {}): PetStore {
   const layout = opts.layout ?? defaultLayout;
@@ -119,12 +196,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
     for (const fn of [...subs]) fn();
   };
 
-  const clamp = (pos: PetPos, scale = snap.scale): PetPos => {
-    const vp = viewport();
-    const size = petSize(scale);
-    const fit = (n: number, max: number) => Math.round(Math.min(Math.max(0, max), Math.max(0, n)));
-    return { x: fit(pos.x, vp.w - size.w), y: fit(pos.y, vp.h - size.h) };
-  };
+  const clamp = (pos: PetPos, scale = snap.scale): PetPos => clampIn(pos, viewport(), petSize(scale));
 
   // 설정 창, Rust 읽기, 다른 창에서 바뀐 값을 따른다(끄는 동안의 자리는 덮지 않는다)
   layout.subscribe((prefs) => {
@@ -186,9 +258,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
       save(clamp({ x: PET_DEFAULT.x, y: PET_DEFAULT.y }));
     },
     clampTo(w, h) {
-      const size = petSize(snap.scale);
-      const fit = (n: number, max: number) => Math.round(Math.min(Math.max(0, max), Math.max(0, n)));
-      const pos = { x: fit(snap.pos.x, w - size.w), y: fit(snap.pos.y, h - size.h) };
+      const pos = clampIn(snap.pos, { ...viewport(), w, h }, petSize(snap.scale));
       if (pos.x !== snap.pos.x || pos.y !== snap.pos.y) emit({ pos });
     },
     setHidden(hidden) {

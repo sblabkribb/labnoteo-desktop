@@ -10,6 +10,7 @@ import { fileInfo, openWithDefaultApp, revealInFolder } from '../vaultOpen';
 import { clearLinkJournal, readLinkJournal, writeLinkJournalHeader, writeLinkJournalNote } from '../../links/journalIpc';
 import { offerPluginLlmKey } from '../../integrations/importLlmKey';
 import * as net from '../../integrations/netIpc';
+import * as gh from '../../integrations/githubIpc';
 import { deleteImportedFile, importConnectionsBytes, importConnectionsFile } from '../../integrations/importFile';
 import { openInBrowser } from '../../labnote/print/openInBrowser';
 import * as scan from '../../labnote/scan/scanIpc';
@@ -37,6 +38,7 @@ const fixture: Record<string, string[]> = JSON.parse(
  * SP7 Part C 의 mcp_* 커맨드 아홉은 Task 36 의 mcpIpc.ts 래퍼로 비웠다.
  * MCP 클라이언트 커맨드 여덟 개(Task 5a, Rust)는 Task 5b 의 netIpc.ts 래퍼가 비웠다.
  * 문헌 검색 커맨드 두 개(Task 11, Rust)는 Task 13 의 scholar/ipc.ts 래퍼가 비웠다.
+ * feat/github-upload: github_* 커맨드 열여덟은 Task 11 의 githubIpc.ts 래퍼로 비웠다.
  */
 const PENDING_TS_WRAPPERS: readonly string[] = [];
 
@@ -239,6 +241,25 @@ describe('IPC 인자 이름 계약', () => {
     await gallery.fetchGalleryIndex(r.invoke);
     await gallery.fetchGallerySkin('flasko-blue', r.invoke);
     await gallery.openSubmitPage('flasko-blue', r.invoke);
+    // feat/github-upload: GitHub 커맨드, 래퍼마다 한 번씩(토큰은 githubSetToken 만 보낸다)
+    await gh.githubSignInStart(r.invoke);
+    await gh.githubSignInWait({}, r.invoke);
+    await gh.githubAccount(r.invoke);
+    await gh.githubSignOut(r.invoke);
+    await gh.githubSetToken('ghp_FAKE0000000000000000000000000000000000', r.invoke);
+    await gh.githubAppSettingsGet(r.invoke);
+    await gh.githubAppSettingsSet({ clientId: null }, r.invoke);
+    await gh.githubOwners({}, r.invoke);
+    await gh.githubNameCheck('me', 'exp', r.invoke);
+    await gh.githubResolveRepo('me/exp', r.invoke);
+    await gh.githubPlan({ folder: 'labnote/001_A', target: { kind: 'update' }, sampleIds: [], infoFindings: [] }, r.invoke);
+    await gh.githubUpload({ planId: 'p', choices: {} }, r.invoke);
+    await gh.githubRetry({ folder: 'labnote/001_A' }, r.invoke);
+    await gh.githubFolderStatus('labnote/001_A', r.invoke);
+    await gh.githubStatuses(r.invoke);
+    await gh.githubDefaultOwnerGet(r.invoke);
+    await gh.githubDefaultOwnerSet('lab', r.invoke);
+    await gh.githubUnlink('labnote/001_A', r.invoke);
 
     const expected = Object.fromEntries(
       Object.entries(fixture)

@@ -166,6 +166,34 @@ describe('PetLayer', () => {
     expect(pet()).toBeTruthy();
   });
 
+  it('the bubble flips below a pet at the top edge and is pushed inside the window at the left edge (Visual QA)', () => {
+    const rect = (left: number, top: number) => ({ left, top, right: left + 64, bottom: top + 64, width: 64, height: 64, x: left, y: top, toJSON: () => ({}) });
+    let petRect = rect(940, 0);
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return (this.classList.contains('pet') ? petRect : rect(0, 0)) as DOMRect;
+    });
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(352);
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    try {
+      const { store } = setup();
+      fireEvent.click(pet());
+      const bubble = () => screen.getByRole('dialog') as HTMLElement;
+      expect(bubble().dataset.side).toBe('below');
+      expect(bubble().style.getPropertyValue('--bubble-top')).toBe(px(64 + 8));
+      expect(bubble().style.getPropertyValue('--bubble-max-h')).toBe(px(768 - 8 - (64 + 8)));
+      // moved to the bottom-left corner: above the pet, but never left of the window
+      petRect = rect(0, 704);
+      act(() => store.moveBy(-8, 0));
+      expect(bubble().dataset.side).toBe('above');
+      expect(bubble().style.getPropertyValue('--bubble-left')).toBe(px(8));
+      expect(bubble().style.getPropertyValue('--bubble-bottom')).toBe(px(768 - (704 - 8)));
+    } finally {
+      spy.mockRestore();
+      width.mockRestore();
+      height.mockRestore();
+    }
+  });
+
   it('the bubble can hide the pet', () => {
     const { layout } = setup();
     fireEvent.click(pet());

@@ -130,6 +130,12 @@ the app ships no Node.js or other runtime for them. They connect from outside, o
 
 The assistant does not relay these tools; they talk to the MCP server directly.
 
+### Upload to GitHub
+
+Sign in to GitHub once with a short code, and each experiment folder becomes its own private
+repository under your account or your lab's organization. You check the list of files before
+anything is sent, and you can revoke the app's access on github.com at any time.
+
 ### Light, dark, English, Korean
 
 Choose a light or dark theme, or match Windows. Switch between English and Korean at any time;
@@ -187,9 +193,9 @@ labnoteO Desktop aims to carry over every labnoteO feature, so nobody needs Obsi
 | [bfworkflow](https://github.com/sblabkribb/bfworkflow) integration: catalog sync, notes from designs | Available |
 | LLM assistant (any OpenAI-compatible endpoint, including local models) and MCP server | Available |
 | CSV export of experiment tables | Planned |
-| Git automation for research repositories | Planned |
+| Upload an experiment folder to GitHub (private by default) | Available |
 
-API keys (PartBank, bfworkflow, LLM, Slack) are stored in Windows Credential Manager, never in the
+API keys (PartBank, bfworkflow, LLM, Slack, GitHub) are stored in Windows Credential Manager, never in the
 vault.
 
 ## License

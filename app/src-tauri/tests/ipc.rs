@@ -43,6 +43,16 @@ fn has_48_hex(s: &str) -> bool {
     false
 }
 
+/// The fixed fake GitHub token the tests use (never a real one).
+const FAKE_GITHUB_TOKEN: &str = "ghp_FAKEipc000000000000000000000000000000";
+
+/// Fails when `s` holds anything shaped like a GitHub token, or the fake one.
+fn assert_no_github_token(s: &str) {
+    for shape in ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", FAKE_GITHUB_TOKEN] {
+        assert!(!s.contains(shape), "a response holds a GitHub token ({shape}): {s}");
+    }
+}
+
 #[test]
 fn ipc_argument_names_match_the_typescript_side() {
     let dir = std::env::temp_dir().join(format!("labnoteo-ipc-{}", std::process::id()));
@@ -61,6 +71,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::net::secrets::Secrets::memory())
         .manage(labnoteo_app_lib::net::NetState::default())
         .manage(labnoteo_app_lib::net::mcp_client::McpClients::default())
+        .manage(labnoteo_app_lib::net::github::GithubState::default())
         .manage(labnoteo_app_lib::net::IntegrationDirs(dir.join("data").join("integrations")))
         .manage(labnoteo_app_lib::scan::ScanFolderState::inert())
         .manage(labnoteo_app_lib::mcp::McpState::default())
@@ -391,6 +402,182 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert_eq!(ok("secret_clear", args("secret_clear", vec![json!("partbankWeb")])), Value::Null);
     let status = ok("secret_status", args("secret_status", vec![]));
     assert_eq!((&status["set"]["partbankWeb"], &status["epoch"]["partbankWeb"]), (&json!(false), &json!(2)));
+
+    // GitHub keys: only the GitHub sign-in (Rust) writes them. The webview's
+    // key commands refuse both slots before touching the store.
+    let first_github = responses.borrow().len();
+    for slot in ["github", "githubRefresh"] {
+        let e = call("secret_set", args("secret_set", vec![json!(slot), json!(FAKE_GITHUB_TOKEN)])).unwrap_err();
+        assert_eq!(e["kind"], "badInput");
+        assert_eq!(e["message"], "GitHub keys are managed by the GitHub settings");
+        assert_eq!(call("secret_clear", args("secret_clear", vec![json!(slot)])).unwrap_err()["kind"], "badInput");
+    }
+    let status = ok("secret_status", args("secret_status", vec![]));
+    for slot in ["github", "githubRefresh"] {
+        assert_eq!((&status["set"][slot], &status["epoch"][slot]), (&json!(false), &json!(0)), "{status}");
+    }
+    // App-wide GitHub settings: no vault needed, offline, Rust-only files.
+    assert_eq!(
+        ok("github_app_settings_get", args("github_app_settings_get", vec![])),
+        json!({"clientIdDefault": true, "forgetOnExit": false})
+    );
+    assert_eq!(
+        ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": "Iv1.lab", "forgetOnExit": true})])),
+        json!({"clientId": "Iv1.lab", "clientIdDefault": false, "forgetOnExit": true})
+    );
+    assert_eq!(
+        call("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": "no/way"})])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert!(call("github_app_settings_set", json!({"patch": {"token": FAKE_GITHUB_TOKEN}})).is_err());
+    assert_eq!(
+        ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": null, "forgetOnExit": false})])),
+        json!({"clientIdDefault": true, "forgetOnExit": false})
+    );
+    assert!(dir.join("data").join("integrations").join("github").join("app.json").is_file());
+    // GitHub sign-in, offline paths only (the device flow itself is tested
+    // in `net::github::auth` against a loopback fake). This build must have
+    // no built-in client ID, or the start below would reach github.com.
+    assert!(
+        labnoteo_app_lib::net::config::DEFAULT_GITHUB_CLIENT_ID.is_empty()
+            && option_env!("LABNOTEO_GITHUB_CLIENT_ID").map_or(true, str::is_empty),
+        "this test must never reach GitHub: build it without a client ID"
+    );
+    assert_eq!(
+        ok("github_sign_in_start", args("github_sign_in_start", vec![])),
+        json!({"outcome": "notConfigured"})
+    );
+    // No started flow: `expired` (get a new code), nothing sent.
+    assert_eq!(
+        ok("github_sign_in_wait", args("github_sign_in_wait", vec![json!("gh-wait-1")])),
+        json!({"outcome": "expired"})
+    );
+    for bad in ["xyz", "ghr_FAKE", ""] {
+        assert_eq!(
+            ok("github_set_token", args("github_set_token", vec![json!(bad)])),
+            json!({"outcome": "badToken"})
+        );
+    }
+    assert_eq!(ok("github_account", args("github_account", vec![])), Value::Null);
+    assert_eq!(ok("github_sign_out", args("github_sign_out", vec![])), Value::Null);
+    assert_eq!(ok("github_account", args("github_account", vec![])), Value::Null);
+    assert!(call("github_set_token", json!({"token": FAKE_GITHUB_TOKEN})).is_err());
+    assert!(call("github_sign_in_wait", json!({})).is_err());
+    // Destination checks, offline paths only (the network paths are tested in
+    // `net::github::repos` against a loopback fake): a bad name or a
+    // non-GitHub URL answers before anything is sent, and with no token the
+    // answer is "sign in" with nothing sent either.
+    for (owner, name) in [("kim-lab", ".."), ("kim-lab", "x.git"), ("../x", "exp"), ("kim-lab", "단백질")] {
+        assert_eq!(
+            ok("github_name_check", args("github_name_check", vec![json!(owner), json!(name)])),
+            json!({"outcome": "invalidName"})
+        );
+    }
+    for url in ["https://gitlab.com/o/r", "https://github.com.evil.example/o/r", "o/..", ""] {
+        assert_eq!(
+            ok("github_resolve_repo", args("github_resolve_repo", vec![json!(url)])),
+            json!({"outcome": "invalidUrl"})
+        );
+    }
+    assert_eq!(
+        ok("github_owners", args("github_owners", vec![json!("gh-owners-1")])),
+        json!({"outcome": "needsSignIn"})
+    );
+    assert_eq!(
+        ok("github_name_check", args("github_name_check", vec![json!("kim-lab"), json!("exp")])),
+        json!({"outcome": "needsSignIn"})
+    );
+    assert_eq!(
+        ok("github_resolve_repo", args("github_resolve_repo", vec![json!("kim-lab/exp")])),
+        json!({"outcome": "needsSignIn"})
+    );
+    assert!(call("github_owners", json!({})).is_err());
+    assert!(call("github_name_check", json!({"owner": "kim-lab"})).is_err());
+    // The upload plan is local only: a folder that is not an experiment
+    // answers `notExperiment`, `update` of an unlinked one `notLinked`, and a
+    // bad repo name is refused, all offline and with nothing written.
+    for folder in ["notes", "labnote/001_missing", "../x"] {
+        assert_eq!(
+            ok(
+                "github_plan",
+                args("github_plan", vec![json!(folder), json!({"kind": "create", "owner": "kim-lab", "name": "exp", "private": true}), json!([]), json!([])])
+            ),
+            json!({"outcome": "notExperiment"})
+        );
+    }
+    std::fs::create_dir_all(dir.join("vault").join("labnote").join("001_ipc")).unwrap();
+    assert_eq!(
+        ok("github_plan", args("github_plan", vec![json!("labnote/001_ipc"), json!({"kind": "update"}), json!([]), json!([])])),
+        json!({"outcome": "notLinked"})
+    );
+    assert_eq!(
+        call(
+            "github_plan",
+            args("github_plan", vec![json!("labnote/001_ipc"), json!({"kind": "link", "owner": "kim-lab", "name": "x.git"}), json!([]), json!([])])
+        )
+        .unwrap_err()["kind"],
+        "badInput"
+    );
+    assert!(call("github_plan", json!({"folder": "labnote/001_ipc"})).is_err());
+    // The upload names only a plan: an unknown one is `planExpired` with
+    // nothing sent, and choices that try to add anything are refused.
+    assert_eq!(
+        ok(
+            "github_upload",
+            args(
+                "github_upload",
+                vec![json!("gh-up-1"), json!("0123456789abcdef0123456789abcdef"), json!({"untick": [], "allowHits": [], "includeSamples": false})]
+            )
+        ),
+        json!({"outcome": "planExpired"})
+    );
+    assert!(call("github_upload", json!({"requestId": "x", "planId": "y", "choices": {"add": ["x"]}})).is_err());
+    // "마저 하기" for a folder with no link: refused before anything is sent.
+    assert_eq!(
+        call("github_retry", args("github_retry", vec![json!("gh-retry-1"), json!("labnote/001_ipc")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    // Status, default owner and unlink are offline and answer for an unlinked folder.
+    assert_eq!(
+        ok("github_folder_status", args("github_folder_status", vec![json!("labnote/001_ipc")])),
+        json!({"linked": false, "state": "planned", "changedCount": 0, "folderMissing": false})
+    );
+    assert_eq!(ok("github_statuses", args("github_statuses", vec![])), json!({}));
+    assert_eq!(ok("github_default_owner_get", args("github_default_owner_get", vec![])), Value::Null);
+    assert_eq!(
+        call("github_default_owner_set", args("github_default_owner_set", vec![json!("a/b")])).unwrap_err()["kind"],
+        "badInput"
+    );
+    assert_eq!(ok("github_default_owner_set", args("github_default_owner_set", vec![json!("kim-lab")])), Value::Null);
+    assert_eq!(ok("github_default_owner_get", args("github_default_owner_get", vec![])), json!("kim-lab"));
+    assert_eq!(ok("github_unlink", args("github_unlink", vec![json!("labnote/001_ipc")])), Value::Null);
+    // The links document is Rust-only: no integration state names it.
+    for name in ["githubLinks", "githubStatusCache", "githubApp"] {
+        assert!(call("integration_state_read", json!({"name": name})).is_err(), "{name}");
+        assert!(call("integration_state_write", json!({"name": name, "content": "{}"})).is_err(), "{name}");
+    }
+    // `vault_rename` (now with the integration dirs) re-keys a link in Rust.
+    let links_file = std::fs::read_dir(dir.join("data").join("integrations").join("github"))
+        .unwrap()
+        .map(|e| e.unwrap().path().join("links.json"))
+        .find(|p| p.is_file())
+        .expect("the default owner was saved in links.json");
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&links_file).unwrap()).unwrap();
+    doc["links"] = json!({"labnote/001_ipc": {"linkId": "0123456789abcdef0123456789abcdef", "owner": "kim-lab", "name": "exp", "state": "pushed"}});
+    std::fs::write(&links_file, doc.to_string()).unwrap();
+    ok("vault_rename", args("vault_rename", vec![json!("labnote/001_ipc"), json!("labnote/001_moved")]));
+    let statuses = ok("github_statuses", args("github_statuses", vec![]));
+    assert_eq!(statuses["labnote/001_moved"]["linked"], json!(true), "{statuses}");
+    assert_eq!(statuses["labnote/001_moved"]["fullName"], json!("kim-lab/exp"));
+    assert!(statuses.get("labnote/001_ipc").is_none());
+    assert_eq!(ok("github_unlink", args("github_unlink", vec![json!("labnote/001_moved")])), Value::Null);
+    assert_eq!(ok("github_statuses", args("github_statuses", vec![])), json!({}));
+    std::fs::remove_dir_all(dir.join("vault").join("labnote")).unwrap();
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_eq!((&status["set"]["github"], &status["set"]["githubRefresh"]), (&json!(false), &json!(false)));
+    for r in responses.borrow()[first_github..].iter() {
+        assert_no_github_token(r);
+    }
 
     // Plugin import (D9): the returned JSON holds no key, and an LLM key in
     // data.json is only offered. Storing it re-reads data.json in Rust, so the
@@ -890,6 +1077,28 @@ title: 실험
     ok("secret_clear", args("secret_clear", vec![json!("ncbiEutils")]));
     assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["ncbiEutils"], false);
     ok("settings_vault_write", args("settings_vault_write", vec![json!(r#"{"schemaVersion":2}"#)]));
+    // The GitHub part: the token goes to the keychain slot and the client ID
+    // to the app-wide GitHub settings, never to the vault settings or the
+    // answer. Owner and visibility keys are ignored.
+    let conn = format!("GITHUB_CLIENT_ID=Iv1.import\nGITHUB_TOKEN={FAKE_GITHUB_TOKEN}\nGITHUB_OWNER=kim-lab\n");
+    let done = raw_call("integration_import_bytes", vec!["conn.env"], conn.into_bytes()).unwrap();
+    assert_no_github_token(&done.to_string());
+    assert_eq!(
+        done,
+        json!({"status": "done", "imported": [{"part": "github", "keySaved": true}], "invalid": [], "mcp": [], "settings": {}})
+    );
+    let status = ok("secret_status", args("secret_status", vec![]));
+    assert_no_github_token(&status.to_string());
+    assert_eq!(status["set"]["github"], true);
+    assert_eq!(
+        ok("github_app_settings_get", args("github_app_settings_get", vec![])),
+        json!({"clientId": "Iv1.import", "clientIdDefault": false, "forgetOnExit": false})
+    );
+    let bad = raw_call("integration_import_bytes", vec!["conn.json"], br#"{"github":{"token":"abc"}}"#.to_vec()).unwrap();
+    assert_eq!(bad["invalid"], json!([{"part": "github", "field": "token", "reason": "badToken"}]));
+    assert_eq!(ok("github_sign_out", args("github_sign_out", vec![])), Value::Null);
+    ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": null})]));
+    assert_eq!(ok("secret_status", args("secret_status", vec![]))["set"]["github"], false);
 
     // The MCP token (Credential Manager; here the memory store): the webview
     // learns a flag and an epoch, and the copy goes to the clipboard from Rust.
@@ -1345,6 +1554,23 @@ fn llm_frame_event_matches_the_typescript_side() {
     assert_eq!(keys, fields, "payload field names vs ipc-events.json");
     assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
     assert_eq!(payload[ev["payload"]["fields"]["data"].as_str().unwrap()], "d");
+}
+
+#[test]
+fn github_progress_event_matches_the_typescript_side() {
+    use labnoteo_app_lib::gitsync::upload::{GithubProgress, Stage, PROGRESS_EVENT};
+    let fixture: Value = serde_json::from_str(EVENTS).unwrap();
+    let ev = &fixture["githubProgress"];
+    assert_eq!(ev["name"], PROGRESS_EVENT);
+    let payload = serde_json::to_value(GithubProgress { request_id: "r".into(), stage: Stage::Creating, done: 1, total: 2 }).unwrap();
+    let keys: std::collections::BTreeSet<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+    let fields: std::collections::BTreeSet<&str> =
+        ev["payload"]["fields"].as_object().unwrap().values().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(keys, fields, "payload field names vs ipc-events.json");
+    assert_eq!(payload[ev["payload"]["fields"]["requestId"].as_str().unwrap()], "r");
+    assert_eq!(payload[ev["payload"]["fields"]["stage"].as_str().unwrap()], "creating");
+    assert_eq!(payload[ev["payload"]["fields"]["done"].as_str().unwrap()], 1);
+    assert_eq!(payload[ev["payload"]["fields"]["total"].as_str().unwrap()], 2);
 }
 
 #[test]

@@ -6,6 +6,8 @@ import type { CommandContext } from '../../../labnote/commands/context';
 import { getMode, setMode } from '../../live/mode';
 import { appCommands, clearAppCommandsForTest, displayKey, registerAllAppCommands, registerAppCommand } from '../appCommands';
 import { setLang } from '../../../i18n/lang';
+import { githubActions } from '../../../github/commands';
+import { resetGithubStatusesForTest, setGithubStatuses } from '../../../github/statusStore';
 import { check as pluginCheck } from '@tauri-apps/plugin-updater';
 import { resetUpdateStoreForTest, startUpdateChecks, updateState } from '../../../update/updateStore';
 
@@ -38,6 +40,62 @@ afterEach(() => {
   vi.unstubAllGlobals();
   clearAppCommandsForTest();
   clearCommandsForTest();
+});
+
+describe('GitHub app commands', () => {
+  const IDS = ['github.uploadExperiment', 'github.openOnGithub', 'github.finishUpload', 'github.disconnect'];
+  const EXP = 'labnote/001_x';
+  const at = (path: string | undefined) => ({ activePath: () => path }) as unknown as CommandContext;
+  const find = (id: string) => appCommands().find((c) => c.id === id)!;
+  afterEach(() => {
+    resetGithubStatusesForTest();
+    vi.restoreAllMocks();
+  });
+
+  it('the four commands are registered once, with ko and en names and icons', () => {
+    for (const id of IDS) {
+      expect(appCommands().filter((c) => c.id === id), id).toHaveLength(1);
+      const c = find(id);
+      expect(catalogs.ko[c.nameKey], id).toBeTruthy();
+      expect(catalogs.en[c.nameKey], id).toBeTruthy();
+      expect(c.icon, id).toBeTruthy();
+    }
+    expect(find('github.uploadExperiment').nameKey).toBe('github.cmd.upload');
+    expect(find('github.openOnGithub').nameKey).toBe('github.cmd.open');
+    expect(find('github.finishUpload').nameKey).toBe('github.cmd.finish');
+    expect(find('github.disconnect').nameKey).toBe('github.cmd.unlink');
+  });
+
+  it('none is available outside an experiment folder', () => {
+    for (const p of [undefined, 'notes/a.labnote.md', 'labnote/notes.md', 'README.md']) {
+      for (const id of IDS) expect(find(id).available!(at(p)), `${id} ${p}`).toBe(false);
+    }
+  });
+
+  it('availability follows the link state of the active experiment', () => {
+    const inside = at(`${EXP}/data/x.labnote.md`);
+    const avail = () => IDS.filter((id) => find(id).available!(inside));
+    expect(avail()).toEqual(['github.uploadExperiment']);
+    setGithubStatuses({ [EXP]: { linked: true, state: 'pushed', changedCount: 0, folderMissing: false, htmlUrl: 'https://github.com/me/x' } });
+    expect(avail()).toEqual(['github.uploadExperiment', 'github.openOnGithub', 'github.disconnect']);
+    setGithubStatuses({ [EXP]: { linked: true, state: 'committed', changedCount: 0, folderMissing: false } });
+    expect(avail()).toEqual(['github.uploadExperiment', 'github.finishUpload', 'github.disconnect']);
+  });
+
+  it('each command runs its action on the active experiment folder', async () => {
+    const spies = {
+      upload: vi.spyOn(githubActions, 'upload').mockResolvedValue(undefined),
+      open: vi.spyOn(githubActions, 'open').mockResolvedValue(undefined),
+      finish: vi.spyOn(githubActions, 'finish').mockResolvedValue(undefined),
+      disconnect: vi.spyOn(githubActions, 'disconnect').mockResolvedValue(undefined),
+    };
+    const c = at(`${EXP}/README.labnote.md`);
+    await find('github.uploadExperiment').run(c);
+    await find('github.openOnGithub').run(c);
+    await find('github.finishUpload').run(c);
+    await find('github.disconnect').run(c);
+    for (const s of Object.values(spies)) expect(s).toHaveBeenCalledWith(c, EXP);
+  });
 });
 
 describe('app-command registry', () => {

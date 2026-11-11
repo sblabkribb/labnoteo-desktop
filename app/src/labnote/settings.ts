@@ -73,6 +73,11 @@ export type AppSettings = Pick<
   ncbiEmail: string;
   /** 앱에만 있는 키(문헌 검색): Crossref 에 `mailto` 로 보낼 이메일. 기본 ''(보내지 않음). 이메일 모양이 아니면 ''. */
   crossrefMailto: string;
+  /**
+   * 앱에만 있는 키(GitHub 올리기): 올릴 때 GitHub 첫 화면용 README 를 만들어 함께 올린다(보관함에는 쓰지 않는다).
+   * 기본 켬. 저장된 값이 꼭 false 일 때만 끈다. Rust `ServiceConfig::github_readme_overlay` 도 같은 규칙이다.
+   */
+  githubReadmeOverlay?: boolean;
 };
 
 /** 문헌 검색 출처별 켬/끔. */
@@ -305,6 +310,8 @@ const KEYS = [
   'scholarSources',
   'ncbiEmail',
   'crossrefMailto',
+  // feat/github-upload(Task 1): GitHub 첫 화면용 README. 앱 키다. clientId·forgetOnExit 는 앱 전체 설정이라 Rust 에만 있다.
+  'githubReadmeOverlay',
 ] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /** 플러그인에 없는 앱 키의 기본값. */
@@ -318,6 +325,7 @@ const APP_DEFAULTS = {
   llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
   ncbiEmail: '',
   crossrefMailto: '',
+  githubReadmeOverlay: true,
 } as const;
 
 function pick(s: LabnoteSettings): AppSettings {
@@ -375,6 +383,8 @@ export function fromStored(raw: unknown): AppSettings {
     settings.scholarSources = cleanScholarSources(lit.scholarSources);
     settings.ncbiEmail = cleanContactEmail(lit.ncbiEmail);
     settings.crossrefMailto = cleanContactEmail(lit.crossrefMailto);
+    // feat/github-upload(Task 1): 저장된 값이 꼭 false 일 때만 끈다.
+    if ((raw as { githubReadmeOverlay?: unknown }).githubReadmeOverlay === false) settings.githubReadmeOverlay = false;
   }
   return settings;
 }
