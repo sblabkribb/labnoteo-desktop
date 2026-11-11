@@ -408,6 +408,8 @@ const ko: Record<string, string> = {
   'bfw.catalogsConfirm':
     'bfworkflow 카탈로그로 보관함 카탈로그를 바꿉니다: 추가 {0}, 변경 {1}, 보관함에만 있는 항목 {2}은 그대로, 건너뜀 {3}.',
   'bfw.apply': '바꾸기',
+  'bfw.catalogsConfirmTitle': 'bfworkflow 카탈로그 동기화',
+  'bfw.catalogsUpdated': '카탈로그를 바꿨습니다: {0}개 추가, {1}개 변경.',
   'bfw.catalogBroken': '{0}을(를) 카탈로그로 읽을 수 없어 그대로 두었습니다. JSON을 고친 뒤 다시 동기화하세요.',
   'bfw.probe.ok': '{0}(으)로 연결됨. 읽기 {1}, AI {2}.',
   'bfw.probe.yes': '가능',
@@ -1794,6 +1796,8 @@ const en: Record<string, string> = {
   'bfw.catalogsCurrent': 'The catalogs are already up to date.',
   'bfw.catalogsConfirm': 'Update the vault catalogs from bfworkflow: {0} added, {1} changed, {2} vault-only kept, {3} skipped.',
   'bfw.apply': 'Update',
+  'bfw.catalogsConfirmTitle': 'Sync bfworkflow catalogs',
+  'bfw.catalogsUpdated': 'Catalogs updated: {0} added, {1} changed.',
   'bfw.catalogBroken': '{0} could not be read as a catalog, so it was left as it is. Fix its JSON and sync again.',
   'bfw.probe.ok': 'Connected as {0}. Read {1}, AI {2}.',
   'bfw.probe.yes': 'yes',

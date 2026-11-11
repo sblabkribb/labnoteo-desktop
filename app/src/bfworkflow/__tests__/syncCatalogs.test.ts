@@ -112,6 +112,9 @@ describe('bfworkflow: Sync catalogs', () => {
     // 1 added workflow (WT010) + 1 added sw (USW005); 1 changed (WB030); 1 kept (WX999); 0 skipped
     expect(s.th.asked.confirm[0].message).toBe(t('bfw.catalogsConfirm', 2, 1, 1, 0));
     expect(s.th.asked.confirm[0].opts?.confirmLabel).toBe(t('bfw.apply'));
+    // real-server check: the confirm has a title, and the end says what changed
+    expect(s.th.asked.confirm[0].opts?.title).toBe(t('bfw.catalogsConfirmTitle'));
+    expect(s.th.notes).toEqual([{ kind: 'info', message: t('bfw.catalogsUpdated', 2, 1) }]);
     expect(s.th.refreshes()).toBe(1);
   });
 
@@ -143,6 +146,7 @@ describe('bfworkflow: Sync catalogs', () => {
     expect(s.th.asked.confirm).toHaveLength(1);
     expect(s.th.vault.files()).toEqual(before);
     expect(s.th.refreshes()).toBe(0);
+    expect(s.th.notes).toEqual([]);
   });
 
   it('offline keeps the vault catalogs and warns', async () => {
@@ -316,7 +320,7 @@ describe('bfworkflow readiness and probe', () => {
   it('the bfw texts exist in ko and en', () => {
     for (const k of [
       'bfw.offline', 'bfw.keyRefused', 'bfw.noScope', 'bfw.rateLimited', 'bfw.notConfigured', 'bfw.desktopNotRunning',
-      'bfw.failed', 'bfw.syncing', 'bfw.catalogsCurrent', 'bfw.catalogsConfirm', 'bfw.apply', 'bfw.probe.ok',
+      'bfw.failed', 'bfw.syncing', 'bfw.catalogsCurrent', 'bfw.catalogsConfirm', 'bfw.catalogsConfirmTitle', 'bfw.catalogsUpdated', 'bfw.apply', 'bfw.probe.ok',
       'bfw.probe.yes', 'bfw.probe.no', 'bfw.probe.ai.noScope', 'bfw.probe.ai.adminOnly', 'bfw.catalogBroken',
       'integrations.redirected', 'integrations.insecure', 'integrations.keychain', 'integrations.tooLarge', 'integrations.badRequest',
     ]) {

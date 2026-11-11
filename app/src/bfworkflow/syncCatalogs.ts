@@ -181,6 +181,7 @@ export async function runBfwSyncCatalogs(ctx: CommandContext, invoke?: InvokeFn)
       return;
     }
     const ok = await host.confirm(t('bfw.catalogsConfirm', added, changed, kept, server.skipped), {
+      title: t('bfw.catalogsConfirmTitle'),
       confirmLabel: t('bfw.apply'),
     });
     if (!ok) return;
@@ -191,6 +192,7 @@ export async function runBfwSyncCatalogs(ctx: CommandContext, invoke?: InvokeFn)
       await host.fs.write(f.path, `${JSON.stringify({ ...f.json, ...meta, [f.listKey]: f.items }, null, 2)}\n`);
     }
     ctx.refresh();
+    host.notify('info', t('bfw.catalogsUpdated', added, changed));
   } catch (e) {
     if (!(e instanceof NetError)) throw e;
     if (e.kind === 'cancelled') return;
