@@ -316,6 +316,41 @@ describe('Assistant pane: search server key row', () => {
     expect(document.body.textContent).not.toContain('raw-rust-text');
   });
 
+  it('when the saved search address is on the LLM server, says the LLM key is used (no second entry needed)', async () => {
+    const status = (set: boolean) => vi.fn(async () => secretStatusOf({ webSearch: set }));
+    const same = { status: status(false), searchUrl: async () => 'https://LLM.example:443/v1', llmEndpoint: () => 'https://llm.example/v1' };
+    render(<WebSearchKeyRow {...same} />);
+    await settle();
+    const row = () => screen.getByRole('group', { name: '검색 서버 키' });
+    expect(row().textContent).toContain('검색 주소가 LLM과 같은 서버라 LLM 키를 써요. 따로 넣지 않아도 돼요.');
+    cleanup();
+    // Another origin (port, host or scheme): no such hint.
+    for (const searchUrl of ['https://llm.example:8443/v1', 'https://search.example/v1', 'http://llm.example/v1']) {
+      render(<WebSearchKeyRow status={status(false)} searchUrl={async () => searchUrl} llmEndpoint={() => 'https://llm.example/v1'} />);
+      await settle();
+      expect(row().textContent, searchUrl).not.toContain('따로 넣지 않아도 돼요');
+      cleanup();
+    }
+    // No search address saved yet, or no LLM address: no hint.
+    render(<WebSearchKeyRow status={status(false)} searchUrl={async () => undefined} llmEndpoint={() => 'https://llm.example/v1'} />);
+    await settle();
+    expect(row().textContent).not.toContain('따로 넣지 않아도 돼요');
+    cleanup();
+    render(<WebSearchKeyRow status={status(false)} searchUrl={async () => 'https://llm.example/v1'} llmEndpoint={() => ''} />);
+    await settle();
+    expect(row().textContent).not.toContain('따로 넣지 않아도 돼요');
+    cleanup();
+    // A search key of its own wins: the hint goes away.
+    render(<WebSearchKeyRow status={status(true)} searchUrl={async () => 'https://llm.example/v1'} llmEndpoint={() => 'https://llm.example/v1'} />);
+    await settle();
+    expect(row().textContent).not.toContain('따로 넣지 않아도 돼요');
+    cleanup();
+    setLang('en');
+    render(<WebSearchKeyRow {...same} />);
+    await settle();
+    expect(screen.getByRole('group', { name: 'Search server key' }).textContent).toContain('same server as the LLM');
+  });
+
   it('follows the language', async () => {
     setLang('en');
     await setupKey();

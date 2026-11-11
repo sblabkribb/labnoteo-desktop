@@ -11,6 +11,7 @@ import { assistantSession } from '../../assistant/useAssistantSession';
 import { t } from '../../i18n/t';
 import { clearSecret, secretStatus, setSecret, type SecretStatus } from '../../integrations/netIpc';
 import { notifySecretsChange } from '../../integrations/secretsEvents';
+import { resolveEndpoint } from '../../integrations/UrlField';
 import { useLang } from '../../i18n/useLang';
 import { confirmDialog } from '../../labnote/host/dialogStore';
 import { notify as toast } from '../../labnote/host/toastStore';
@@ -27,7 +28,12 @@ import { SettingRow, Toggle } from './SettingRow';
  * 갤러리 주소(Task 19), 대화 기록(Task 10), 외부 도우미(Task 21, MCP 서버가 있는 연동 쪽으로 가는 단추). 줄 차례는 명세 §10.1 과 같다. 스킨 가져오기(Task 17), 내 스킨 만들기(Task 18), 갤러리(Task 19)는 묻는 창이 설정 창 뒤에 줄 서지 않게 `leave` 로 설정 창을 닫은 뒤에 연다.
  */
 export function AssistantPage(
-  props: { leave?: (after: () => Promise<void>) => void; showPage?: (page: 'integrations') => void } = {},
+  props: {
+    leave?: (after: () => Promise<void>) => void;
+    showPage?: (page: 'integrations') => void;
+    /** 보관함 설정의 OpenAI 호환 LLM 주소(검색 서버 키 줄의 "LLM 키를 써요" 안내용). */
+    llmEndpoint?: () => string;
+  } = {},
 ) {
   useLang();
   const { pet } = useLayout();
@@ -57,7 +63,7 @@ export function AssistantPage(
       />
       <SkinRow leave={props.leave} />
       <WebSearchRow onSaved={() => setSearchRev((n) => n + 1)} />
-      <WebSearchKeyRow key={searchRev} />
+      <WebSearchKeyRow key={searchRev} llmEndpoint={props.llmEndpoint} />
       <GalleryRow />
       <HistoryRow />
       <ExternalAssistantsRow showPage={props.showPage} />
@@ -394,6 +400,23 @@ export interface WebSearchKeyRowDeps {
   /** `webSearch` 슬롯에 저장(저장된 검색 주소의 origin 에 묶인다). 주소가 없으면 `notConfigured`. */
   setSecret?: (value: string) => Promise<void>;
   clearSecret?: () => Promise<void>;
+  /** 이 PC 에 저장된 웹 검색 주소(없으면 undefined). */
+  searchUrl?: () => Promise<string | undefined>;
+  /** 보관함 설정의 OpenAI 호환 LLM 주소(Rust 가 같은 origin 이면 이 키를 대신 쓴다). */
+  llmEndpoint?: () => string;
+}
+
+/** 두 주소가 같은 origin(스킴·호스트·포트)인가. 읽을 수 없는 주소는 아니다. Rust `search_key` 와 같은 규칙. */
+function sameOrigin(searchUrl: string | undefined, llmEndpoint: string | undefined): boolean {
+  if (!searchUrl || !llmEndpoint) return false;
+  const llm = resolveEndpoint(llmEndpoint);
+  let search: URL;
+  try {
+    search = new URL(searchUrl);
+  } catch {
+    return false;
+  }
+  return !!llm && llm.origin === search.origin;
 }
 
 /**
@@ -407,8 +430,10 @@ export function WebSearchKeyRow(deps: WebSearchKeyRowDeps = {}) {
   const status = deps.status ?? (() => secretStatus());
   const save = deps.setSecret ?? ((value: string) => setSecret('webSearch', value));
   const clear = deps.clearSecret ?? (() => clearSecret('webSearch'));
+  const readSearchUrl = deps.searchUrl ?? (async () => (await readAssistantConfig()).searxngUrl);
   const input = useRef<HTMLInputElement>(null);
   const [isSet, setIsSet] = useState(false);
+  const [usesLlmKey, setUsesLlmKey] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -416,6 +441,10 @@ export function WebSearchKeyRow(deps: WebSearchKeyRowDeps = {}) {
     let live = true;
     status().then(
       (s) => live && setIsSet(s.set.webSearch === true),
+      () => undefined
+    );
+    readSearchUrl().then(
+      (url) => live && setUsesLlmKey(sameOrigin(url, deps.llmEndpoint?.())),
       () => undefined
     );
     return () => {
@@ -488,6 +517,7 @@ export function WebSearchKeyRow(deps: WebSearchKeyRowDeps = {}) {
             }}
           />
           <span className="setting-status">{isSet ? t('integrations.keySet') : t('integrations.keyNotSet')}</span>
+          {usesLlmKey && !isSet ? <span className="setting-status">{t('settings.assistant.searchKey.usesLlm')}</span> : null}
           <button type="button" className="btn" {...softOff(busy, () => void store())}>
             {t('integrations.saveKey')}
           </button>
