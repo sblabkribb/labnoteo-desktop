@@ -512,7 +512,8 @@ button.crumb:hover:not(:disabled) { background: var(--bg-hover); color: var(--te
   color: var(--text-muted);
   font-size: inherit;
 }
-.update-pill[aria-disabled="true"] { cursor: default; }
+/* 받는 동안(aria-disabled)도 흐리지 않는다: 위의 꺼진 단추 규칙(opacity 0.45)이 흐린 글자를 한 번 더 흐려 진행률이 읽히지 않았다 */
+.update-pill[aria-disabled="true"] { cursor: default; opacity: 1; }
 .update-pill:not([aria-disabled="true"]):hover { background: var(--bg-hover); color: var(--text); }
 .update-pill .icon { color: currentColor; }
 .update-pill[data-state="determinate"]::after,

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 import OLD_APP_CSS_SELECTORS from './appCssSelectors.json';
-import { allCss, declarations, literalColours, parseRules, readStyles, STYLE_FILES, SYSTEM_COLOURS } from './css';
+import { allCss, compareSpecificity, declarations, literalColours, parseRules, readStyles, STYLE_FILES, specificity, SYSTEM_COLOURS } from './css';
 
 /** 규칙마다 `@-규칙 머리 선택자` (맨 바깥이면 선택자만). appCssSelectors.json 과 같은 모양. */
 function selectorKeys(css: string): Set<string> {
@@ -152,6 +152,14 @@ describe('update button and toaster (spec §3.1)', () => {
 
   it('the bottom-left toaster sits above the status bar, so a toast never covers the update pill', () => {
     expect(decl('.toaster-bottom-left', 'bottom')).toEqual(['calc(var(--statusbar-h) + var(--space-5))']);
+  });
+
+  // 받는 동안 알약은 aria-disabled 다. 앱 전체의 꺼진 단추 규칙(opacity 0.45)이 흐린 글자(--text-muted)를 한 번 더 흐려
+  // 진행률 글자가 읽히지 않았다(녹화 2026-11-12). 알약은 그 규칙을 이기는 자기 규칙으로 불투명하게 남는다.
+  it('a disabled (downloading) update pill is not faded by the global disabled-button opacity', () => {
+    expect(decl('button[aria-disabled="true"]', 'opacity')).toEqual(['0.45']);
+    expect(decl('.update-pill[aria-disabled="true"]', 'opacity')).toEqual(['1']);
+    expect(compareSpecificity(specificity('.update-pill[aria-disabled="true"]'), specificity('button[aria-disabled="true"]'))).toBeGreaterThan(0);
   });
 
   it('the pill progress bar width comes only from --update-progress (set with CSSOM)', () => {
