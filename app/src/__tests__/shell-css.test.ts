@@ -167,7 +167,13 @@ describe('앱 셸 CSS 계약', () => {
     const body = ruleFor('.dialog.github-dialog .github-form')!;
     expect(body.decls['min-height']).toBe('0');
     expect(body.decls['overflow-y']).toBe('auto');
-    // 파일 목록은 줄어들지 않는다(최대 40vh): 찾은 것이 많으면 목록이 0px 로 눌리지 않고 본문이 스크롤한다
+    // 파일 목록은 줄어들지 않는다: 찾은 것이 많으면 목록이 0px 로 눌리지 않고 본문이 스크롤한다
     expect(ruleFor('.github-files')!.decls.flex).toBe('none');
+    // 스크롤은 본문 하나만: 목록이 따로 스크롤하면 스크롤 막대가 둘 겹치고 마지막 묶음이 legend 에서 잘린다(visual QA)
+    expect(ruleFor('.github-files')!.decls['max-height']).toBeUndefined();
+    expect(ruleFor('.github-files')!.decls.overflow).toBeUndefined();
+    // 고칠 것이 있는 파일은 목록에서 눈에 띈다
+    expect(ruleFor('.github-file.flagged')!.decls.color).toBe('var(--danger)');
+    expect(ruleFor('.github-badge.fix')!.decls.color).toBe('var(--danger)');
   });
 });

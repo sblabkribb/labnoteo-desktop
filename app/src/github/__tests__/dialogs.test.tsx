@@ -393,6 +393,46 @@ describe('preview dialog', () => {
     expect((screen.getByRole('button', { name: t('github.preview.upload') }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('warning paths all read from the experiment folder: unused pictures drop the folder prefix (review)', () => {
+    renderLayer();
+    void openIn(() =>
+      githubPreviewDialog(
+        plan({
+          yellow: [
+            { kind: 'unscanned', paths: ['images/scan.png'] },
+            { kind: 'info', info: 'unused', count: 1, paths: [`${HEAD.folder}/images/u.png`], names: [] },
+          ],
+        }),
+        HEAD,
+        { openFile: () => undefined },
+      ),
+    );
+    expect(screen.getByText('images/scan.png')).toBeTruthy();
+    expect(screen.getByText('images/u.png')).toBeTruthy();
+    expect(document.querySelector('.github-yellow')!.textContent).not.toContain(HEAD.folder);
+  });
+
+  it('the file with an open finding is marked in the list and the must-fix section comes before the list (visual QA)', async () => {
+    renderLayer();
+    const hit = { kind: 'apiKey' as const, path: 'images/notes.md', line: 3, masked: 'sk-…a9f1', lineHash: 'h', overridable: true };
+    void openIn(() =>
+      githubPreviewDialog(plan({ files: [...plan().files, { path: 'images/notes.md', size: 10, change: 'new' }], red: [{ kind: 'secret', hit }] }), HEAD, {
+        openFile: () => undefined,
+      }),
+    );
+    const row = screen.getByRole('checkbox', { name: 'notes.md' }).closest('.github-file')!;
+    expect(row.classList.contains('flagged')).toBe(true);
+    expect(row.textContent).toContain(t('github.preview.badgeFix'));
+    expect(screen.getByRole('checkbox', { name: 'bench.jpg' }).closest('.github-file')!.classList.contains('flagged')).toBe(false);
+    const red = document.querySelector('.github-red')!;
+    const files = document.querySelector('.github-files')!;
+    expect(red.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // the secret line names the folder too, so the same name in two folders is not confused
+    expect(red.textContent).toContain('images/notes.md');
+    await userEvent.click(screen.getByRole('button', { name: t('github.preview.leaveOut') }));
+    expect(row.classList.contains('flagged')).toBe(false);
+  });
+
   it('the shared-samples checkbox is off by default and lists each entry', async () => {
     renderLayer();
     const p = openIn(() => githubPreviewDialog(plan({ samples: [{ id: 'DNA-20250527-003', type: 'DNA', name: 'pUC19-GFP' }] }), HEAD, { openFile: () => undefined }));

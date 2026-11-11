@@ -19,6 +19,7 @@ import { layoutStore, useLayout } from '../layoutStore';
 import { openSettings } from '../SettingsModal';
 import { Segmented } from '../Segmented';
 import { SelectField } from '../SelectField';
+import { softOff } from '../softOff';
 import { SettingRow, Toggle } from './SettingRow';
 
 /**
@@ -69,19 +70,6 @@ export function AssistantPage(
       <ExternalAssistantsRow showPage={props.showPage} />
     </>
   );
-}
-
-/**
- * 지금 누를 수 없는 단추: `disabled` 대신 `aria-disabled` 로 끈다. `disabled` 가 된 단추는 키보드 초점을 본문으로
- * 떨구어 Esc·Tab 이 설정 창에 닿지 않는다(Task 22 실앱 점검). 꺼진 동안 누르면 아무 일도 하지 않는다.
- */
-function softOff(off: boolean, run: () => void) {
-  return {
-    'aria-disabled': off || undefined,
-    onClick: () => {
-      if (!off) run();
-    },
-  };
 }
 
 export interface SkinRowDeps {

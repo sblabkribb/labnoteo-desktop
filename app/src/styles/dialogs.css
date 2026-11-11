@@ -452,8 +452,8 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-visibility.public { color: var(--warning); }
 .github-public > p { display: flex; gap: var(--space-2); }
 .dialog.github-preview { width: min(44rem, 100%); }
-.github-files { display: flex; flex-direction: column; gap: var(--space-3); max-height: 40vh; overflow: auto; flex: none; }
-.github-folder { margin: 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-m); }
+.github-files { display: flex; flex-direction: column; gap: var(--space-3); flex: none; }
+.github-folder { min-width: 0; margin: 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-m); }
 .github-folder legend { padding: 0 var(--space-2); color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
 .github-file { display: flex; align-items: center; gap: var(--space-3); min-height: 1.8em; }
 .github-file-pad { display: inline-block; width: 1em; }
@@ -462,6 +462,8 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-badge { padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-s); color: var(--text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
 .github-badge.new { color: var(--success); }
 .github-badge.deleted { color: var(--danger); }
+.github-file.flagged { color: var(--danger); font-weight: 600; }
+.github-badge.fix { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--danger); border-color: currentColor; }
 .github-excluded summary { cursor: pointer; color: var(--text-muted); }
 .github-excluded ul, .github-red ul, .github-yellow ul, .github-samples ul, .github-diverged-files { margin: var(--space-2) 0 0; padding-left: var(--space-6); }
 .github-excluded li { color: var(--text-muted); }

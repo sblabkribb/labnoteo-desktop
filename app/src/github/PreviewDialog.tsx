@@ -4,6 +4,7 @@ import { useLang } from '../i18n/useLang';
 import { DialogFrame } from '../labnote/host/DialogFrame';
 import type { DialogSpec } from '../labnote/host/dialogStore';
 import { Icon } from '../ui/Icon';
+import { softOff } from '../ui/softOff';
 import { formatBytes } from '../viewers/viewerStatus';
 import type { AllowedHit, Change, Hit, PlanFile, Red, UploadChoices, Yellow } from '../integrations/githubIpc';
 import type { PreviewHead, ReadyPlan } from './githubFlow';
@@ -58,8 +59,13 @@ function hitKind(h: Hit): string {
   }
 }
 
-/** 확인할 것(노랑) 한 줄: 글과 덧붙일 파일 이름. */
-function yellowLines(yellow: readonly Yellow[]): Array<{ text: string; names: string[] }> {
+/** 보관함 기준 경로를 실험 폴더 기준으로(계획의 다른 경로와 같게). 폴더 밖의 경로는 그대로 둔다. */
+function inFolder(folder: string, path: string): string {
+  return folder !== '' && path.startsWith(`${folder}/`) ? path.slice(folder.length + 1) : path;
+}
+
+/** 확인할 것(노랑) 한 줄: 글과 덧붙일 파일 이름. 이름은 모두 실험 폴더 기준이다(`folder` 는 보관함 기준 실험 폴더). */
+function yellowLines(yellow: readonly Yellow[], folder: string): Array<{ text: string; names: string[] }> {
   const out: Array<{ text: string; names: string[] }> = [];
   const large = yellow.filter((y): y is Extract<Yellow, { kind: 'large' }> => y.kind === 'large');
   if (large.length > 0) out.push({ text: t('github.preview.big', large.length), names: large.map((y) => `${base(y.path)} (${size(y.size)})`) });
@@ -97,7 +103,8 @@ function yellowLines(yellow: readonly Yellow[]): Array<{ text: string; names: st
             out.push({ text: t('github.preview.outside', y.count), names: y.paths });
             break;
           case 'unused':
-            out.push({ text: t('github.preview.unused', y.count), names: y.paths });
+            // Rust 는 쓰지 않는 사진을 보관함 기준으로 적는다: 확인 못 한 파일처럼 실험 폴더 기준으로 보인다
+            out.push({ text: t('github.preview.unused', y.count), names: y.paths.map((p) => inFolder(folder, p)) });
             break;
         }
         break;
@@ -106,23 +113,6 @@ function yellowLines(yellow: readonly Yellow[]): Array<{ text: string; names: st
     }
   }
   return out;
-}
-
-/**
- * spec §5.4 화면 C: Rust 가 세운 계획을 보인다. 웹뷰는 파일을 빼거나(체크 해제) 키가 아니라고 확인할 수만 있다:
- * 파일을 더하는 요소는 없다. 빨간 항목이 남아 있는 동안 [올리기] 는 꺼져 있다. 공용 시료는 기본으로 올리지 않는다.
- */
-/**
- * 지금 누를 수 없는 단추: `disabled` 대신 `aria-disabled` 로 끈다. 누르자마자 `disabled` 가 되면 키보드 초점이 본문으로 떨어져
- * 긴 목록에서 자리를 잃는다(설정 창의 softOff 와 같은 까닭). 꺼진 동안 누르면 아무 일도 하지 않는다.
- */
-function softOff(off: boolean, run: () => void) {
-  return {
-    'aria-disabled': off || undefined,
-    onClick: () => {
-      if (!off) run();
-    },
-  };
 }
 
 /** 고쳐야 할 항목 한 줄. 풀리면 흐리게 긋고, 화면 읽기 프로그램도 알 수 있게 "해결됨" 을 글자로 단다. */
@@ -135,6 +125,10 @@ function RedRow(props: { done: boolean; children: ReactNode }) {
   );
 }
 
+/**
+ * spec §5.4 화면 C: Rust 가 세운 계획을 보인다. 웹뷰는 파일을 빼거나(체크 해제) 키가 아니라고 확인할 수만 있다:
+ * 파일을 더하는 요소는 없다. 빨간 항목이 남아 있는 동안 [올리기] 는 꺼져 있다. 공용 시료는 기본으로 올리지 않는다.
+ */
 export function PreviewDialog(props: {
   spec: Extract<DialogSpec, { kind: 'githubPreview' }>;
   onDone: (value: UploadChoices) => void;
@@ -192,7 +186,11 @@ export function PreviewDialog(props: {
     }
   };
   const blocking = plan.red.filter((r) => !resolved(r));
-  const yellows = yellowLines(plan.yellow);
+  const yellows = yellowLines(plan.yellow, head.folder);
+  /** 아직 풀리지 않은 빨간 항목이 가리키는 파일: 목록에서 눈에 띄게 한다. */
+  const flagged = new Set(
+    blocking.flatMap((r) => (r.kind === 'secret' && !r.fromSample ? [r.hit.path] : r.kind === 'tooLarge' || r.kind === 'unreadable' ? [r.path] : [])),
+  );
 
   const upload = () => {
     if (blocking.length > 0) return;
@@ -211,7 +209,7 @@ export function PreviewDialog(props: {
       case 'secret':
         return (
           <>
-            <p>{t('github.preview.secret', base(r.hit.path), r.hit.line, hitKind(r.hit), r.hit.masked)}</p>
+            <p>{t('github.preview.secret', r.hit.path, r.hit.line, hitKind(r.hit), r.hit.masked)}</p>
             {r.fromSample ? null : (
               <div className="github-actions">
                 <button
@@ -316,14 +314,24 @@ export function PreviewDialog(props: {
           </span>
         </p>
         <p className="prompt-hint">{t('github.preview.summary', sending.length, size(bytes), new Set([...plan.excluded.map((x) => x.path), ...untick]).size)}</p>
+        {/* 고칠 것을 목록보다 먼저: 파일이 많아도 무엇을 고칠지 먼저 보인다 */}
+        {plan.red.length > 0 ? (
+          <section className="github-red" aria-label={t('github.preview.mustFix')}>
+            <h3>
+              <Icon name="circle-x" size={14} /> <span>{t('github.preview.mustFix')}</span>
+            </h3>
+            <ul>{plan.red.map(redRow)}</ul>
+          </section>
+        ) : null}
         <div className="github-files" role="group" aria-label={t('github.preview.title')}>
           {groups.map(([folder, files]) => (
             <fieldset key={folder} className="github-folder">
               <legend>{folder || '/'}</legend>
               {files.map((f) => {
                 const b = badge(f.change);
+                const fix = flagged.has(f.path);
                 return (
-                  <div key={f.path} className="github-file">
+                  <div key={f.path} className={fix ? 'github-file flagged' : 'github-file'}>
                     {tickable(f) ? (
                       <input
                         id={`${id}-${f.path}`}
@@ -338,6 +346,11 @@ export function PreviewDialog(props: {
                       {base(f.path)}
                     </label>
                     <span className="github-file-size">{size(f.size)}</span>
+                    {fix ? (
+                      <span className="github-badge fix">
+                        <Icon name="circle-x" size={12} /> <span>{t('github.preview.badgeFix')}</span>
+                      </span>
+                    ) : null}
                     {b ? <span className={`github-badge ${f.change}`}>{b}</span> : null}
                   </div>
                 );
@@ -356,14 +369,6 @@ export function PreviewDialog(props: {
               ))}
             </ul>
           </details>
-        ) : null}
-        {plan.red.length > 0 ? (
-          <section className="github-red" aria-label={t('github.preview.mustFix')}>
-            <h3>
-              <Icon name="circle-x" size={14} /> <span>{t('github.preview.mustFix')}</span>
-            </h3>
-            <ul>{plan.red.map(redRow)}</ul>
-          </section>
         ) : null}
         {yellows.length > 0 ? (
           <section className="github-yellow" aria-label={t('github.preview.check')}>
