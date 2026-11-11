@@ -150,8 +150,8 @@ export function tidyAnswer(text: string): string {
   let out = text.replace(new RegExp(`${ECHOED_TAG.source}[ \t]*\r?\n?`, 'gi'), '');
   // 2. Fence ids and source attributes mentioned in prose.
   out = out.replace(/\s*\bsource\s*=\s*"[^"\n]*"/gi, '');
-  out = out.replace(/\s*[([]\s*(?:fence\s+|block\s+)?id\s*[:=]?\s*["'`]?[0-9a-f]{12}["'`]?\s*[)\]]/gi, '');
-  out = out.replace(/\s*(?:fence\s+|block\s+)?\bid\s*[:=]\s*["'`]?[0-9a-f]{12}\b["'`]?/gi, '');
+  out = out.replace(/\s*[([]\s*(?:fence\s+|block\s+)?id\s*[:=]?\s*[\x22\x27\x60]?[0-9a-f]{12}[\x22\x27\x60]?\s*[)\]]/gi, '');
+  out = out.replace(/\s*(?:fence\s+|block\s+)?\bid\s*[:=]\s*[\x22\x27\x60]?[0-9a-f]{12}\b[\x22\x27\x60]?/gi, '');
   // 3. Sentences that talk about the fences.
   out = out
     .split('\n')
