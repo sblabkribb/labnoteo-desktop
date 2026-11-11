@@ -358,6 +358,18 @@ describe('IntegrationSettingsPage', () => {
     expect(t('integrations.ai.manualHint')).toMatch(/[가-힣]/);
   });
 
+  it('in Korean, clicking "직접 입력" switches the provider and focuses the address field', async () => {
+    setLang('ko');
+    const deps = fakeDeps({ llmProvider: 'none' });
+    show(deps);
+    await userEvent.click(await screen.findByRole('button', { name: '직접 입력' }));
+    expect(deps.commit).toHaveBeenCalledWith({ llmProvider: 'openai' });
+    const ep = (await screen.findByLabelText(coreT('OpenAI endpoint'))) as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(ep));
+    expect((screen.getAllByRole('combobox') as HTMLSelectElement[]).some((el) => el.value === 'openai')).toBe(true);
+    expect(screen.queryByRole('button', { name: '직접 입력' })).toBeNull();
+  });
+
   it('an OpenAI-compatible base URL ending in /v1 is accepted and saved as typed, with no warning', async () => {
     const deps = fakeDeps({ llmProvider: 'openai' });
     show(deps);
