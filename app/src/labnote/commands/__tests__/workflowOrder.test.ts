@@ -298,6 +298,24 @@ describe('delete', () => {
     expect(files()['notes/memo.md']).toBe(`[[001_WB010_Oligo.labnote|올리고]] 그리고 [클론](../${DIR}/002_WB020_Clone.labnote.md)\n`);
   });
 
+  it('deleting the open Workflow note opens the experiment README instead of leaving no note open', async () => {
+    h = modern();
+    h.setActive(`${DIR}/${B}`);
+    h.answer.confirm(true);
+    h.answer.choose('close');
+    expect(await deleteWorkflow(h.ctx, `${DIR}/${B}`)).toBe(true);
+    expect(h.opened.at(-1)).toBe(`${DIR}/README.labnote.md`);
+  });
+
+  it('deleting a Workflow note that is not open leaves the open note alone', async () => {
+    h = modern();
+    h.setActive('notes/memo.md');
+    h.answer.confirm(true);
+    h.answer.choose('keep');
+    await deleteWorkflow(h.ctx, `${DIR}/${B}`);
+    expect(h.opened).toEqual([]);
+  });
+
   it('cancel keeps everything', async () => {
     h = modern();
     const before = { ...files() };

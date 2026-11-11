@@ -412,7 +412,8 @@ export async function deleteWorkflow(ctx: CommandContext, path: string): Promise
   const ok = await host.confirm(message, { title: t('wfOrder.delete'), confirmLabel: t('fileOps.delete.confirmLabel'), destructive: true });
   if (!ok) return false;
   const active = ctx.activePath();
-  if (active !== undefined && samePath(active, path) && !(await ctx.closeActive())) {
+  const wasOpen = active !== undefined && samePath(active, path);
+  if (wasOpen && !(await ctx.closeActive())) {
     host.notify('warn', t('fileOps.unsaved'));
     return false;
   }
@@ -436,6 +437,8 @@ export async function deleteWorkflow(ctx: CommandContext, path: string): Promise
   }
   await offerTableCsvCleanupOnDelete(host, [path]);
   ctx.refresh();
+  // 지운 노트가 열려 있었으면 빈 편집기 대신 그 실험의 README 를 연다(번호 당기기를 묻는 동안에도 실험이 보인다)
+  if (wasOpen && (await host.fs.exists(state.readmePath))) await ctx.openFile(state.readmePath);
 
   if (state.order.ok) await offerCloseGap(ctx, dir, state.order.items, name);
   return true;
