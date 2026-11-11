@@ -18,6 +18,11 @@
  *   2026-11-11: 기록이 있는 실험에서 섹션 만들기가 4번 모두 생각 고리에 빠졌고, 기록이 없는 실험에서는 25초에 미리보기까지
  *   갔다). 대화는 기록을 보내되 답이 없던 차례는 뺀다(`answeredTurns`). 저장된 기록 파일은 그대로다.
  * - 생각을 끄고 다시 보내도 생각 고리로 끝나면 오류에 되풀이된 대목(`errorDetail`, ai/loopDetail)을 싣는다.
+ * - 확인 글의 오염 까닭(real-server check, 2026-11-11): 오염이 저장된 기록에서만 왔으면(이번 차례에 MCP 도구도 바깥 결과도
+ *   없었다) 확인 글은 "이전 대화에서 바깥 내용을 읽었어요"라고 말한다(`ConfirmNote.historyOnly`). 이번 차례가 바깥 내용을
+ *   읽었다고 말하지 않는다. 기록의 오염은 읽기 전용 `web_search` 확인에도 그대로 둔다: 앞서 읽은 바깥 글이 울타리에 싸여
+ *   프롬프트에 있으니 그 글이 검색어에 노트 내용을 실어 PC 밖으로 보내게 할 수 있다. 확인은 남기고 까닭만 바로 말한다.
+ *   만들기 칩은 기록을 보내지 않으므로 이 확인을 보지 않는다.
  * - 웹 도구(Task 14): 대화 칩에서, 이 PC 의 `assistant.json` 에 검색 주소가 있을 때만 `web_search`/`fetch_page` 를 준다.
  *   `fetch_page` 의 허용 목록은 이번 차례의 사용자 글과 이 폴더 기록의 사용자 글, 검색 결과, 문헌 검색 결과의 링크다.
  *   검색 중 상태 줄은 보낼 검색어를 그대로 보인다(`web.queryShown`). 한도(검색 3번, 페이지 5개)는 실행마다 새로 센다.
@@ -201,8 +206,14 @@ export function noticeTranslator(base: Translator): Translator {
  * 도구 호출의 확인(askAgentCommand 와 같은 글): 외부 도구는 앱이 쓴 외부 확인 글, core/앱 도구는 쓰는 대상과 미리보기,
  * 바깥 내용이 닿은 뒤면 `ai.confirm.tainted` 를 덧붙인다. 기록된 줄을 지우는 변경은 파괴적 단추로 묻는다.
  */
-export function approvalConfirm(env: AiEnv, external: ReadonlyMap<string, ExternalToolMeta>): AgentDeps['confirm'] {
-  return (call, tool, preview, note) => {
+export function approvalConfirm(
+  env: AiEnv,
+  external: ReadonlyMap<string, ExternalToolMeta>,
+  /** 오염이 저장된 기록에서만 왔는지(이번 차례가 바깥 내용을 읽지 않았다). 없으면 false. */
+  historyOnly: () => boolean = () => false
+): AgentDeps['confirm'] {
+  return (call, tool, preview, rawNote) => {
+    const note = rawNote?.tainted && historyOnly() ? { ...rawNote, historyOnly: true } : rawNote;
     const meta = external.get(tool.name);
     if (meta) {
       return env.host.confirm(externalApprovalMessage(call, meta, !!tool.mutates, note), {
@@ -214,7 +225,7 @@ export function approvalConfirm(env: AiEnv, external: ReadonlyMap<string, Extern
     const path = typeof call.arguments.documentPath === 'string' ? call.arguments.documentPath : null;
     // 도구 id 와 "이(가)" 대신 하는 일을 말로(Visual QA)
     const ask = appT('pet.confirm.write', toolLabel(tool.name));
-    const tainted = note?.tainted ? `${ask}\n\n${appT('ai.confirm.tainted')}` : ask;
+    const tainted = note?.tainted ? `${ask}\n\n${note.historyOnly ? appT('ai.confirm.taintedHistory') : appT('ai.confirm.tainted')}` : ask;
     // The web line is shown in addition when web content reached the run (assistant spec §7.3, §11).
     const prompt = note?.web ? `${tainted}\n\n${appT('web.tainted')}` : tainted;
     // add_section (Task 11A): a new section, worded by the app ("adds … at the end"), not core's "replaces".
@@ -279,11 +290,13 @@ function webStatus(tool: ToolDef, meta: ExternalToolMeta | undefined, args: Reco
 function instrument(
   tool: ToolDef,
   meta: ExternalToolMeta | undefined,
-  hooks: { running(line: string): void; cite(src: Source): number; scholarLinks?(text: string): void }
+  hooks: { running(line: string): void; cite(src: Source): number; scholarLinks?(text: string): void; outside?(): void }
 ): ToolDef {
   return {
     ...tool,
     async handler(ctx, args): Promise<ToolResult> {
+      // An external tool ran: its result (or error) taints the run in runAgent, so the taint is no longer history only.
+      if (meta) hooks.outside?.();
       const notePath = notePathOf(tool, args);
       const docPath = typeof args.documentPath === 'string' ? args.documentPath : undefined;
       hooks.running(
@@ -452,7 +465,11 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     const web =
       chip && chip !== 'chat' ? undefined : await webToolsFor(env, turn, run$.signal, cite);
     const meta = new Map<string, ExternalToolMeta>([...external.meta, ...(web?.meta ?? [])]);
+    let readOutside = false;
     const hooks = {
+      outside: () => {
+        readOutside = true;
+      },
       running: (line: string) => {
         state('think');
         sink.status(line);
@@ -574,7 +591,12 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
       temperature: 0.2,
       signal: run$.signal,
       external: meta,
-      confirm: approvalConfirm(env, meta),
+      // History is the only taint while no MCP tool is offered (runAgent taints at once for one) and no outside result came.
+      confirm: approvalConfirm(
+        env,
+        meta,
+        () => earlier.initialTaint.length > 0 && !readOutside && ![...meta.values()].some((m) => m.kind === 'mcp')
+      ),
       onDelta: (text) => {
         state('talk');
         sink.delta(text);

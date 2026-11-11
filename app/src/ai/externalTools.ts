@@ -26,11 +26,14 @@ export interface ExternalToolMeta {
 /**
  * runAgent 가 confirm 의 넷째 인자로 넘기는 것(spec §7.4). `webAfterTaint`: 바깥 내용이 닿은 뒤의 `web_search`
  * (검색어가 PC 밖으로 나간다, assistant spec §7.1). `web`: 이 실행에 웹에서 온 내용이 닿았다(확인 글에 웹 줄을 붙인다).
+ * `historyOnly`(앱 도우미가 confirm 을 감쌀 때 단다, builtinRuntime): 오염이 저장된 기록에서만 왔다. 이번 차례는 바깥 내용을
+ * 읽지 않았으므로 확인 글은 "이전 대화에서 읽었다"고 말한다(real-server check, 2026-11-11).
  */
 export interface ConfirmNote {
   tainted: boolean;
   reason?: 'crossServer' | 'bigArgs' | 'webAfterTaint';
   web?: boolean;
+  historyOnly?: boolean;
 }
 
 export interface ExternalTools {
@@ -114,9 +117,9 @@ export function externalApprovalMessage(call: ToolCall, meta: ExternalToolMeta, 
   const tool = meta.toolTitle ?? call.name;
   const parts = [t('mcpClient.confirm.title', server, tool)];
   if (mutates) parts.push(t('mcpClient.confirm.writes'));
-  if (note?.reason === 'crossServer') parts.push(t('ai.confirm.crossServer'));
+  if (note?.reason === 'crossServer') parts.push(note.historyOnly ? t('ai.confirm.crossServerHistory') : t('ai.confirm.crossServer'));
   if (note?.reason === 'bigArgs') parts.push(t('mcpClient.confirm.bigArgs'));
-  if (note?.tainted && mutates) parts.push(t('ai.confirm.tainted'));
+  if (note?.tainted && mutates) parts.push(note.historyOnly ? t('ai.confirm.taintedHistory') : t('ai.confirm.tainted'));
   if (note?.web && (mutates || note.reason)) parts.push(t('web.tainted'));
   parts.push(`${t('mcpClient.confirm.args')}\n${argsPreview(call.arguments)}`);
   return parts.join('\n\n');
@@ -129,10 +132,10 @@ export function externalApprovalMessage(call: ToolCall, meta: ExternalToolMeta, 
 function webApprovalMessage(call: ToolCall, mutates: boolean, note?: ConfirmNote): string {
   const page = call.name === 'fetch_page';
   const parts = [page ? t('web.confirm.fetch') : t('web.confirm.search')];
-  if (note?.reason === 'webAfterTaint') parts.push(t('web.confirm.why'));
-  if (note?.reason === 'crossServer') parts.push(t('ai.confirm.crossServer'));
+  if (note?.reason === 'webAfterTaint') parts.push(note.historyOnly ? t('web.confirm.whyHistory') : t('web.confirm.why'));
+  if (note?.reason === 'crossServer') parts.push(note.historyOnly ? t('ai.confirm.crossServerHistory') : t('ai.confirm.crossServer'));
   if (note?.reason === 'bigArgs') parts.push(t('mcpClient.confirm.bigArgs'));
-  if (note?.tainted && mutates) parts.push(t('ai.confirm.tainted'));
+  if (note?.tainted && mutates) parts.push(note.historyOnly ? t('ai.confirm.taintedHistory') : t('ai.confirm.tainted'));
   if (note?.web && (mutates || note.reason)) parts.push(t('web.tainted'));
   parts.push(page ? t('web.confirm.url', oneLine(call.arguments.url)) : t('web.confirm.query', queryLine(call.arguments)));
   return parts.join('\n\n');

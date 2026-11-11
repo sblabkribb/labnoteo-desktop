@@ -34,6 +34,22 @@ describe('externalApprovalMessage', () => {
     expect(msg).not.toContain(t('web.tainted'));
   });
 
+  it('a taint that came only from saved history says an earlier turn read outside content (real-server check)', () => {
+    const msg = externalApprovalMessage(search('PCR'), WEB, false, { tainted: true, reason: 'webAfterTaint', historyOnly: true });
+    expect(msg).toBe(['AI가 웹을 검색하려고 해요.', '이전 대화에서 바깥 내용을 읽었어요. 그 내용이 검색어에 끼어들 수 있어서 먼저 물어봐요.', '보낼 검색어: PCR'].join('\n\n'));
+    expect(msg).not.toContain(t('web.confirm.why'));
+    const cross = externalApprovalMessage({ id: 'c', name: 'mcp_a_read', arguments: {} }, { ...MCP, readOnly: true }, false, {
+      tainted: true,
+      reason: 'crossServer',
+      historyOnly: true,
+    });
+    expect(cross).toContain(t('ai.confirm.crossServerHistory'));
+    expect(cross).not.toContain(t('ai.confirm.crossServer'));
+    const write = externalApprovalMessage({ id: 'c', name: 'mcp_a_write', arguments: {} }, MCP, true, { tainted: true, historyOnly: true });
+    expect(write).toContain(t('ai.confirm.taintedHistory'));
+    expect(write).not.toContain(t('ai.confirm.tainted'));
+  });
+
   it('the query line is one line without control or bidi characters', () => {
     const msg = externalApprovalMessage(search('a\nb‮c\u0007'), WEB, false, { tainted: true, reason: 'webAfterTaint' });
     expect(msg).toContain(t('web.confirm.query', 'a bc'));
