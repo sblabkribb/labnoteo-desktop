@@ -1,20 +1,14 @@
 # labnoteO Desktop
 
-**The labnoteO lab notebook as one Windows app. One installer, no plugins, no setup.**
+**A Windows app for biology lab notebooks**
 
-labnoteO Desktop is a standalone Windows app for [labnoteO](https://github.com/sblabkribb/labnoteo),
-the Markdown lab notebook for biology and bioinformatics experiments. It installs with a single
-installer and needs no other software or plugins. Your notes stay plain `.labnote.md` Markdown files
-in a folder on your PC, so the same folder also works with the labnoteO plugin and any Markdown editor.
+labnoteO Desktop is a Windows app for [labnoteO](https://github.com/sblabkribb/labnoteo), the Markdown
+lab notebook for biology and bioinformatics experiments. Your notes are plain `.labnote.md` Markdown
+files in a folder on your PC, so any Markdown editor can open them too.
 
 **English** · [한국어](README.ko.md)
 
-[Features](#features) · [Install](#install) · [Build from source](#build-from-source) · [Roadmap](#roadmap) · [Changelog](CHANGELOG.md) · [Apache-2.0 License](LICENSE)
-
-> **Version 0.2.0.** Every labnoteO plugin feature is ported to the desktop app: samples,
-> Workflows, PartBank, bfworkflow, AI commands, note IDs and scan import. On top of that the app has
-> its own in-app assistant, GitHub upload and automatic updates. See the [changelog](CHANGELOG.md)
-> for what changed since 0.1.0.
+[Features](#features) · [Install](#install) · [Build from source](#build-from-source) · [Changelog](CHANGELOG.md) · [Apache-2.0 License](LICENSE)
 
 ## Features
 
@@ -23,34 +17,33 @@ own interface, running against a demo vault with made-up data and no real server
 
 **Getting started**
 [Start](#1-start-with-one-installer) ·
-[New note](#2-create-a-note-in-one-step) ·
-[Editor](#3-edit-with-live-preview) ·
-[Tables](#4-tables) ·
-[Links](#5-links-backlinks-and-outline) ·
-[Search](#6-search-the-whole-vault)<br>
+[Editor](#2-editor-and-tables) ·
+[Links](#3-links-backlinks-and-outline) ·
+[Search](#4-search-the-whole-vault)<br>
 **Running an experiment**
-[New experiment](#7-new-experiment-and-its-first-workflow) ·
-[Workflows](#8-workflows-and-unit-operations) ·
-[Reorder](#9-reorder-insert-and-delete-workflows-move-unit-operations) ·
-[Status](#10-experiment-status-and-the-workflow-done-checkbox) ·
-[Samples](#11-samples) ·
-[Attachments](#12-attachments-image-and-csv-viewers-csv-export) ·
-[PartBank](#13-partbank-and-bfworkflow) ·
-[Worksheets](#14-note-ids-qr-codes-and-worksheets) ·
-[Scans](#15-scan-import)<br>
+[New experiment](#5-new-experiment-and-its-first-workflow) ·
+[Workflows](#6-workflows-and-unit-operations) ·
+[Reorder](#7-reorder-insert-and-delete-workflows-move-unit-operations) ·
+[Status](#8-experiment-status-and-the-workflow-done-checkbox) ·
+[Samples](#9-samples) ·
+[Attachments](#10-attachments-image-and-csv-viewers-csv-export) ·
+[PartBank](#11-partbank) ·
+[bfworkflow](#12-bfworkflow) ·
+[Worksheets](#13-note-ids-qr-codes-and-worksheets) ·
+[Scans](#14-scan-import)<br>
 **AI**
-[Provider](#16-ai-provider-and-result-summaries) ·
-[Assistant](#17-the-assistant) ·
-[Drafts](#18-ai-drafts-planning-and-method) ·
-[Lookups](#19-lookups-web-literature-partbank-and-the-workflow-server)<br>
+[Provider](#15-ai-provider-and-result-summaries) ·
+[Assistant](#16-the-assistant) ·
+[Drafts](#17-ai-drafts-planning-and-method) ·
+[Lookups](#18-lookups-web-literature-partbank-and-the-workflow-server)<br>
 **Sharing and connecting**
-[GitHub](#20-upload-to-github) ·
-[MCP](#21-mcp-server-and-external-mcp-servers) ·
-[Other AI tools](#22-using-another-ai-tool)<br>
+[GitHub](#19-upload-to-github) ·
+[MCP](#20-mcp-server-and-external-mcp-servers) ·
+[Other AI tools](#21-using-another-ai-tool)<br>
 **Make it yours**
-[Skins](#23-assistant-skins-and-the-gallery) ·
-[Theme and language](#24-light-dark-english-korean) ·
-[Updates](#25-automatic-updates)
+[Skins](#22-assistant-skins-and-the-gallery) ·
+[Theme and language](#23-light-dark-english-korean) ·
+[Updates](#24-automatic-updates)
 
 ### Getting started
 
@@ -62,14 +55,7 @@ keep in it are never touched. Notes are saved as `.labnote.md` files in that fol
 
 ![Pick a folder on first launch and land in the vault, then open a note from the Files tab](docs/images/en/labnoteo-start.gif)
 
-#### 2. Create a note in one step
-
-Right-click a folder, choose **New note here**, name it and start writing. The note list follows
-changes on disk, including files created, renamed or deleted outside the app.
-
-![Create a note from a folder's menu, type its body and watch it save](docs/images/en/labnoteo-newnote.gif)
-
-#### 3. Edit with live preview
+#### 2. Editor and tables
 
 Formatting shows as you type, and a note's front matter appears as a Properties grid with a status
 chip. Edits save automatically, and if a note changes on disk while you are editing, the app asks
@@ -79,14 +65,12 @@ command by purpose and shows its shortcut.
 
 ![Type into a note with live preview, open the right-click menu, switch to source with Ctrl+E and use the Ctrl+O quick switcher](docs/images/en/labnoteo-editor.gif)
 
-#### 4. Tables
-
 Insert a table and move between cells with Tab. Pressing Tab in the last cell adds a new row, so
 you can fill in results without typing the Markdown pipes yourself.
 
 ![Insert a table, fill in IPTG, OD600 and GFP values with Tab, and add rows from the last cell](docs/images/en/labnoteo-tables.gif)
 
-#### 5. Links, backlinks and outline
+#### 3. Links, backlinks and outline
 
 Type `[[` to link another note with autocomplete. Click a link to open it, see which notes link
 back, and jump between headings with the outline. Outline and links live in the right sidebar,
@@ -94,7 +78,7 @@ which you open from the ribbon.
 
 ![Link a protocol note with autocomplete, jump to a heading in the outline, then follow a link and check its backlinks](docs/images/en/labnoteo-links.gif)
 
-#### 6. Search the whole vault
+#### 4. Search the whole vault
 
 Full-text search across every note, backed by a local SQLite index. It also matches inside words,
 which matters for Korean, where a term is usually followed by a particle.
@@ -103,7 +87,7 @@ which matters for Korean, where a term is usually followed by a particle.
 
 ### Running an experiment
 
-#### 7. New experiment and its first Workflow
+#### 5. New experiment and its first Workflow
 
 An experiment is a folder; inside it each Workflow is a numbered note, and each Workflow holds
 Unit Operations. **New experiment** asks only for a title and the experimenter (already filled
@@ -113,7 +97,7 @@ bfworkflow** pulls your lab's own.
 
 ![Create an experiment, then pick its first Workflow (WB150) from the catalog](docs/images/en/labnoteo-experiment.gif)
 
-#### 8. Workflows and Unit Operations
+#### 6. Workflows and Unit Operations
 
 The Experiments panel lists experiments with their Workflows and Unit Operations, grouped by status,
 experimenter, project, last update or open discussion. **Add UO** inserts a Unit Operation from the
@@ -122,7 +106,7 @@ the panel as you work, and the note's `last_updated` is stamped for you.
 
 ![Open a Workflow note from the Experiments panel, add an SDS-PAGE Unit Operation and tick the Workflow in the README](docs/images/en/labnoteo-workflows.gif)
 
-#### 9. Reorder, insert and delete Workflows; move Unit Operations
+#### 7. Reorder, insert and delete Workflows; move Unit Operations
 
 Move a Workflow with its menu, Alt+Shift+Up/Down or by dragging. **Add Workflow after this** inserts
 one in between, and **Delete Workflow…** moves it to the Recycle Bin. The file numbers, links and
@@ -130,7 +114,7 @@ the README checklist follow every change. Unit Operations move the same way insi
 
 ![Move a Workflow up and back, insert one in between, delete it, then move a Unit Operation](docs/images/en/labnoteo-wforder.gif)
 
-#### 10. Experiment status and the Workflow done checkbox
+#### 8. Experiment status and the Workflow done checkbox
 
 Click an experiment's status icon to pick its status (such as Planned, In progress, Needs review,
 Completed, Failed, Discontinued or Needs repeat) or clear it; the experiment moves to that group. Each
@@ -139,14 +123,14 @@ Workflow has a done checkbox, in the tree and in the note header, and the experi
 
 ![Change an experiment's status from its icon, then tick a Workflow done in the tree and in the note header](docs/images/en/labnoteo-status.gif)
 
-#### 11. Samples
+#### 9. Samples
 
 Type `@` to reference a sample. The Samples panel shows each sample's description and storage
 location, and one command writes the experiment's sample table into the note.
 
 ![Reference a DNA sample with @, open the Samples panel and insert the experiment's sample list](docs/images/en/labnoteo-samples.gif)
 
-#### 12. Attachments, image and CSV viewers, CSV export
+#### 10. Attachments, image and CSV viewers, CSV export
 
 Files you drop into a note are saved in the experiment's `resources` folder. Images and CSV files
 open right in the app (zoom and fit for images, a table for CSV), and other files get a card with
@@ -155,22 +139,29 @@ of the experiment) writes CSV files next to the note.
 
 ![Open a CSV and a gel image in the app, export a note's tables to CSV and open the result](docs/images/en/labnoteo-files.gif)
 
-#### 13. PartBank and bfworkflow
+#### 11. PartBank
 
 Search PartBank for a part and register it as a sample in one step; its storage location comes
-along, and usage can be reported back. [bfworkflow](https://github.com/sblabkribb/bfworkflow), the
-Workflow server, connects the same way, to sync its catalog and create notes from designs.
+along, and usage can be reported back.
 
 ![Search PartBank for a GFP plasmid and register it as a sample with its storage location](docs/images/en/labnoteo-partbank.gif)
 
-#### 14. Note IDs, QR codes and worksheets
+#### 12. bfworkflow
+
+Connect the Workflow server, [bfworkflow](https://github.com/sblabkribb/bfworkflow), to sync your
+lab's catalog (**Sync catalogs from bfworkflow** in the command palette) and create notes straight
+from a design on the server (**Create notes from a bfworkflow design**).
+
+![Syncing the Workflow and Unit Operation catalogs from the bfworkflow server after reviewing the changes, then creating two Workflow notes in the experiment from a server design](docs/images/en/labnoteo-bfworkflow.gif)
+
+#### 13. Note IDs, QR codes and worksheets
 
 Every note gets an ID with a QR code and barcode. Print an A4 worksheet per Unit Operation, or the
 whole note, and fill it in by hand at the bench.
 
 ![Show a note's QR code and print a worksheet for one Unit Operation](docs/images/en/labnoteo-print.gif)
 
-#### 15. Scan import
+#### 14. Scan import
 
 Photograph or scan a filled-in worksheet and import it: the QR code finds the right note, and the
 image is filed under the matching Unit Operation. Scans can also come in from a watched folder or a
@@ -180,7 +171,7 @@ Slack channel.
 
 ### AI
 
-#### 16. AI provider and result summaries
+#### 15. AI provider and result summaries
 
 Connect any OpenAI-compatible endpoint, including a local model. **Test connection** checks the
 model and reads its context window. Thinking mode, max output tokens and temperature are under
@@ -189,7 +180,7 @@ as **Summarize Workflow results** put the answer into the note as a callout with
 
 ![Set up an OpenAI-compatible provider, test the connection, then summarize Workflow results into a callout](docs/images/en/labnoteo-ai.gif)
 
-#### 17. The assistant
+#### 16. The assistant
 
 Flasko, the flask in the bottom-right corner, is the in-app assistant. Click it for quick chips
 (how-to, add a section, a Unit Operation or a Workflow) or a free chat. Questions about Workflows and
@@ -200,7 +191,7 @@ history is kept per experiment in this PC's app folder, never in the vault.
 
 ![Ask Flasko about the WB150 Workflow, see the cited catalog sources, insert the answer and approve a new Unit Operation](docs/images/en/labnoteo-assistant.gif)
 
-#### 18. AI drafts: planning and Method
+#### 17. AI drafts: planning and Method
 
 **AI: Draft Unit Operation planning** first shows the context it will send (README, earlier steps,
 catalog description, protocol) with a token estimate, so you can untick what should stay private. It
@@ -212,7 +203,7 @@ it in the file.
 
 ![Check the context sources, watch the planning draft stream in, mark a block reviewed, then draft a Method section](docs/images/en/labnoteo-aidraft.gif)
 
-#### 19. Lookups: web, literature, PartBank and the Workflow server
+#### 18. Lookups: web, literature, PartBank and the Workflow server
 
 The assistant can look things up for you and show where each answer came from: PartBank parts and
 their storage locations (labelled mine, group or public), papers from PubMed, Europe PMC, Crossref
@@ -223,7 +214,7 @@ server. All of these tools are read-only, and a web search asks before it runs.
 
 ### Sharing and connecting
 
-#### 20. Upload to GitHub
+#### 19. Upload to GitHub
 
 Sign in to GitHub once with a short code, and each experiment folder becomes its own private
 repository under your account or your lab's organization. Before anything is sent you check the
@@ -233,7 +224,7 @@ any time.
 
 ![Sign in with a device code, choose a private repository, check the files and upload an experiment](docs/images/en/labnoteo-github.gif)
 
-#### 21. MCP server and external MCP servers
+#### 20. MCP server and external MCP servers
 
 Turn on the built-in MCP server to let an AI client read and work with your notes. It listens on
 127.0.0.1 only, and the app copies a ready-made client setup with your access token. In the other
@@ -242,7 +233,7 @@ per server whether the assistant may use their tools.
 
 ![Enable the MCP server, copy the client setup, then look at the external MCP servers and the SKILL.md row](docs/images/en/labnoteo-mcp.gif)
 
-#### 22. Using another AI tool
+#### 21. Using another AI tool
 
 Flasko runs on the app's own AI (the provider you set in Settings → Integrations). Other AI tools,
 such as Claude Code or DeepSeek Harness (`dsh`), are not built into the app and the app ships no
@@ -258,7 +249,7 @@ The assistant does not relay these tools; they talk to the MCP server directly.
 
 ### Make it yours
 
-#### 23. Assistant skins and the gallery
+#### 22. Assistant skins and the gallery
 
 Change the assistant's look with skins. Browse the skin gallery, preview each skin's animations,
 check its author and licence, and install it. You can also import and export `.labnoteo-skin` files,
@@ -266,14 +257,14 @@ or make your own skin from PNG sprite sheets with a live preview.
 
 ![Open the assistant settings, install a skin from the gallery and watch the assistant change](docs/images/en/labnoteo-skins.gif)
 
-#### 24. Light, dark, English, Korean
+#### 23. Light, dark, English, Korean
 
 Choose a light or dark theme, or match Windows, from the appearance button in the status bar.
 Switch between English and Korean at any time; the switch is instant and keeps unsaved edits.
 
 ![Switch to the dark theme, back to light, then switch the interface language](docs/images/en/labnoteo-settings.gif)
 
-#### 25. Automatic updates
+#### 24. Automatic updates
 
 The installed app checks for a new version when it starts, every 6 hours, and when you come back
 after more than an hour away. A new version downloads quietly in the background, and the button at
@@ -291,7 +282,7 @@ page. To build it yourself, see [build from source](#build-from-source).
 
 - The installer is not code-signed, so Windows SmartScreen shows a warning on first install.
   Choose **More info → Run anyway**.
-- Once installed, the app [updates itself](#25-automatic-updates) from new releases.
+- Once installed, the app [updates itself](#24-automatic-updates) from new releases.
 
 ### What you set up yourself
 
@@ -331,30 +322,6 @@ the app and the labnoteO plugin share the same note logic. A scheduled workflow
 (`sync-core`) checks for a new labnoteO release every 6 hours. When the app's tests and build pass on
 it, the update goes into `main` automatically; when they fail, an issue reports which release broke
 the app.
-
-## Roadmap
-
-labnoteO Desktop aims to carry over every labnoteO feature, so everything works from this one app.
-
-| Area | Status |
-|---|---|
-| Vault, note list, Markdown editor, autosave, full-text search, themes, English/Korean | Available |
-| Editor: live preview, Properties grid, tables, wikilink autocomplete and navigation, backlinks, outline, context menu, command palette and quick switcher | Available |
-| Experiments: new-experiment dialog, Experiments panel, Workflows and Unit Operations, reorder/insert/delete, status menu, Workflow done checkbox, checklists | Available |
-| Samples: `@` autocomplete, sample view, experiment sample tables | Available |
-| Attachments with image and CSV viewers | Available |
-| CSV export of experiment tables | Available |
-| PartBank integration: part search, storage locations, usage reports | Available |
-| Note IDs, QR codes and barcodes, worksheet printing, scan import (scan folder, Slack) | Available |
-| [bfworkflow](https://github.com/sblabkribb/bfworkflow) integration: catalog sync, notes from designs | Available |
-| AI: any OpenAI-compatible endpoint including local models, summaries, planning and Method drafts with review highlight | Available |
-| Assistant: chat with source chips, catalog-first answers, web/literature/PartBank/Workflow server lookups, skins and gallery | Available |
-| MCP server and external MCP servers | Available |
-| Upload an experiment folder to GitHub (private by default) | Available |
-| Automatic updates | Available |
-
-API keys (PartBank, bfworkflow, LLM, web search, Slack, GitHub, MCP client tokens) are stored in
-Windows Credential Manager, never in the vault.
 
 ## License
 
