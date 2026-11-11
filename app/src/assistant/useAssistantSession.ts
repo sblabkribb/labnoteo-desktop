@@ -297,6 +297,8 @@ export function createAssistantSession(initial: SessionDeps = {}): AssistantSess
         tainted: res.tainted,
         ...(res.sources.length ? { sources: res.sources } : {}),
         ...tag,
+        // A turn with no model text that changed nothing is not sent with the next chat turn (compact answeredTurns).
+        answered: !!res.content.trim() || res.executed.some((e) => e.outcome === 'done' && e.mutates),
       };
       const messages = [...base.messages, userMsg, replyMsg].slice(-HISTORY_MAX_MESSAGES);
       const next: HistoryDoc = { ...base, folder: folder ?? '', updated: doneTs, messages };

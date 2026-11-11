@@ -26,7 +26,7 @@ import { pathKey } from '../paths';
 import { aiAnswerDialog } from './aiAnswerDialog';
 import type { AgentRun } from './llmAgent';
 import { countToolOutcomes } from './llmAgent';
-import { describeLlmError } from './llmError';
+import { describeLlmError, outputCutMessage } from './llmError';
 import type { ChatMessage, ChatResult } from './llmProvider';
 import { sampleUsages } from './sampleQuery';
 import { scopeErrorText } from '../context/appTools';
@@ -310,6 +310,8 @@ export async function complete(
       env.host.notify('warn', noAnswerMessage(env, result.thinkingOnly));
       return undefined;
     }
+    // A cut answer is still used; the user is told its end may be missing.
+    if (result.truncated) env.host.notify('warn', outputCutMessage());
     return { ...result, content };
   } catch (err) {
     const message = describeLlmError(err, env.settings(), env.t);

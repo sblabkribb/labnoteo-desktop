@@ -43,7 +43,7 @@ import { noAnswerMessage, replyLanguageInstruction, toolContext, toolRunNotice }
 import { buildApprovalMessage, erasesRecordedLines } from '../labnote/port/approvalMessage';
 import { experimentReadmes } from '../labnote/port/experiments';
 import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llmAgent';
-import { describeLlmError } from '../labnote/port/llmError';
+import { describeLlmError, outputCutMessage } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
 import { answeredTurns, historyBudget, toPromptMessages, type PromptMessages } from './compact';
 import { chipNeedsScope, chipSystemPrompt, chipTools } from './chips';
@@ -618,6 +618,8 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
               : env.host.t('The assistant gave no answer.')
         );
       }
+      // An answer cut at the output cap is shown with a short notice: its end may be missing.
+      if (run.truncated && run.content.trim()) parts.push(outputCutMessage());
       if (run.executed.length > 0 || run.stoppedAtLimit) parts.push(toolRunNotice(noticeEnv, run.executed));
       return parts;
     };

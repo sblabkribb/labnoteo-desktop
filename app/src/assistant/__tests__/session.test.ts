@@ -82,6 +82,27 @@ describe('folderOfNote', () => {
 });
 
 describe('assistant session', () => {
+  it('marks each saved reply answered: model text or a vault change, not a notice-only turn (2026-11-11 review)', async () => {
+    const write = { call: { id: 'c', name: 'add_section', arguments: {} }, outcome: 'done' as const, mutates: true };
+    const read = { call: { id: 'r', name: 'read_note', arguments: {} }, outcome: 'done' as const, mutates: false };
+    const results: Array<Partial<AssistantResult>> = [
+      { content: '답' },
+      { content: '', executed: [write], notice: () => 'AI tools used: 1 change.' },
+      { content: '', executed: [read], notice: () => 'The assistant gave no answer.' },
+    ];
+    const { rt } = runtime(async () => results.shift()!);
+    const { session, mem } = setup({ rt });
+    session.setActivePath(NOTE_A);
+    await flush();
+    for (const q of ['1', '2', '3']) await session.send(q);
+    const saved = mem.writes.at(-1)!.doc.messages.filter((m) => m.role === 'assistant');
+    expect(saved.map((m) => [m.text, m.answered])).toEqual([
+      ['답', true],
+      ['AI tools used: 1 change.', true],
+      ['The assistant gave no answer.', false],
+    ]);
+  });
+
   it('loads the folder history, streams a reply into it and writes it back with the token it read', async () => {
     const { rt, turns } = runtime(async (_t, sink) => {
       sink.state('think');

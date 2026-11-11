@@ -129,6 +129,7 @@ const ko: Record<string, string> = {
   'ai.loopDetail.show': '반복된 부분 보기',
   'ai.loopDetail.repeated': '되풀이된 대목:',
   'ai.loopDetail.before': '그 앞의 생각:',
+  'ai.outputCut': '답이 출력 한도에서 끊겨 끝부분이 빠졌을 수 있어요. 더 짧게 나눠 부탁하거나 {0} 값을 늘려 보세요.',
   'ai.outputLimit': '출력 한도에 닿아 답을 끝내지 못했어요. 요청을 더 짧게 나누거나, {0} 값을 늘리거나 비워 두세요(생각 모드를 끄면 한도가 답에 더 많이 쓰여요).',
   'ai.err.emptyEndpoint': 'AI 서버 주소가 비어 있습니다. {0} 에 주소를 넣어 주세요.',
   'ai.err.badScheme': 'AI 서버 주소가 http:// 나 https:// 주소가 아닙니다. {0} 을(를) 확인해 주세요.',
@@ -147,7 +148,7 @@ const ko: Record<string, string> = {
   'integrations.ai.maxOutput': '최대 출력 토큰',
   'integrations.ai.maxOutputPlaceholder': '비우면 자동(작업마다)',
   'integrations.ai.maxOutputHint':
-    '모델이 한 번에 쓸 수 있는 답의 길이(토큰)입니다. 비워 두면 작업마다 정합니다: 도우미·에이전트 4096, 초안·요약 8192, 대화 기록 요약 2048. 수를 넣으면 모든 요청에 그 값을 씁니다. 어느 쪽이든 컨텍스트 창에서 보낼 글을 뺀 만큼을 넘지 않습니다.',
+    '모델이 한 번에 쓸 수 있는 답의 길이(토큰)입니다. 비워 두면 작업마다 정합니다: 도우미·에이전트 4096, 초안·요약 8192, 대화 기록 요약 2048. 수를 넣으면 모든 요청에 그 값을 씁니다. 연결 확인으로 서버의 컨텍스트 한도를 알아낸 뒤에는 그 한도에서 보낼 글을 뺀 만큼을 넘지 않습니다.',
   'integrations.ai.maxOutputInvalid': '256 이상의 정수를 넣거나 비워 두세요.',
   'integrations.ai.thinking': '생각 모드',
   'integrations.ai.thinking.auto': '자동',
@@ -1698,6 +1699,7 @@ const en: Record<string, string> = {
   'ai.loopDetail.show': 'Show the repeated part',
   'ai.loopDetail.repeated': 'The repeated passage:',
   'ai.loopDetail.before': 'Just before it:',
+  'ai.outputCut': 'The answer stopped at the output limit, so its end may be missing. Ask for less at a time, or raise {0}.',
   'ai.outputLimit': 'The answer hit the output limit before it was finished. Split the request into smaller parts, or raise or clear {0} (with thinking off more of the limit goes to the answer).',
   'ai.err.emptyEndpoint': 'The AI server address is empty. Enter it in {0}.',
   'ai.err.badScheme': 'The AI server address is not an http:// or https:// address. Check {0}.',
@@ -1716,7 +1718,7 @@ const en: Record<string, string> = {
   'integrations.ai.maxOutput': 'Max output tokens',
   'integrations.ai.maxOutputPlaceholder': 'Blank: automatic per task',
   'integrations.ai.maxOutputHint':
-    'How long one answer of the model may be, in tokens. Left blank, each task sets it: assistant and agent 4096, drafts and summaries 8192, chat history summary 2048. A number is used for every request. Either way it never exceeds the context window minus the text being sent.',
+    'How long one answer of the model may be, in tokens. Left blank, each task sets it: assistant and agent 4096, drafts and summaries 8192, chat history summary 2048. A number is used for every request. Once Test connection has found the context limit of the server, it never exceeds that limit minus the text being sent.',
   'integrations.ai.maxOutputInvalid': 'Enter a whole number of 256 or more, or leave it blank.',
   'integrations.ai.thinking': 'Thinking',
   'integrations.ai.thinking.auto': 'Auto',

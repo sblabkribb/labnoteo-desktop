@@ -71,10 +71,16 @@ export type AppSettings = Pick<
   llmThinking: ThinkingSetting;
   /**
    * 앱에만 있는 키(real-server check, 2026-11-11): 요청마다 보낼 출력 토큰 한도. null(빈칸)이면 작업마다 정한 값(도구 차례 4096,
-   * 글 8192, 기록 요약 2048, llmProvider outputTokens)이고, 수를 넣으면 모든 요청이 그 값이다. 어느 쪽이든 컨텍스트 창에서
-   * 프롬프트를 뺀 만큼을 넘지 않는다. `OUTPUT_TOKENS_SETTING_MIN`-`LLM_CONTEXT_WINDOW_MAX` 정수만 살린다.
+   * 글 8192, 기록 요약 2048, llmProvider outputTokens)이고, 수를 넣으면 모든 요청이 그 값이다. 어느 쪽이든 서버 한도를 알 때만
+   * (Ollama num_ctx, 연결 시험이 저장한 `llmServerLimit`) 그 한도에서 프롬프트를 뺀 만큼을 넘지 않는다. `OUTPUT_TOKENS_SETTING_MIN`-`LLM_CONTEXT_WINDOW_MAX` 정수만 살린다.
    */
   llmMaxOutputTokens: number | null;
+  /**
+   * 앱에만 있는 키(2026-11-11 review): 연결 시험이 서버에서 받은 모델의 컨텍스트 한도(vLLM `max_model_len`)와 그때의 제공자·주소·모델
+   * (`serverLimitKey`). 지금 설정과 맞을 때만 출력 한도를 그 한도 안으로 줄인다(`serverContextLimit`). 모르면 null: 출력 한도는
+   * 작업마다 정한 값이고 서버가 제 한도를 지킨다.
+   */
+  llmServerLimit: ServerLimit | null;
   /**
    * 앱에만 있는 키(MCP 클라이언트, spec §5.1): AI 가 쓸 외부 MCP 서버. 기본 []. 토큰은 여기 없다(자격 증명 관리자).
    * 틀린 항목은 버린다(`cleanMcpServers`, Rust `config::parse_mcp_servers` 와 같은 규칙).
@@ -177,6 +183,36 @@ export function suggestContextWindow(current: number, limit: number): number {
   if (!Number.isInteger(limit) || limit <= 0) return current;
   const cap = clampContextWindow(limit);
   return current === LLM_CONTEXT_WINDOW_DEFAULT || current > cap ? cap : current;
+}
+
+/** 연결 시험이 알아낸 서버의 컨텍스트 한도와, 그것을 알아낸 제공자·주소·모델. */
+export interface ServerLimit {
+  key: string;
+  tokens: number;
+}
+
+/** 서버 한도가 어느 연결의 것인지: 제공자, 다듬은 주소, 다듬은 모델. */
+export function serverLimitKey(provider: string, endpoint: string, model: string): string {
+  return `${provider}|${endpoint.trim()}|${model.trim()}`;
+}
+
+/** 저장된 서버 한도: 모양이 맞으면 그대로, 아니면 null. */
+export function cleanServerLimit(v: unknown): ServerLimit | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as { key?: unknown; tokens?: unknown };
+  return typeof o.key === 'string' && typeof o.tokens === 'number' && Number.isInteger(o.tokens) && o.tokens > 0
+    ? { key: o.key, tokens: o.tokens }
+    : null;
+}
+
+/** 지금 쓰는 OpenAI 호환 연결의 서버 한도(토큰). 연결 시험이 이 제공자·주소·모델에서 알아낸 적이 없으면 undefined. */
+export function serverContextLimit(
+  s: Pick<AppSettings, 'llmProvider' | 'llmEndpointOllama' | 'llmEndpointOpenai' | 'llmModel' | 'llmServerLimit'>
+): number | undefined {
+  const limit = s.llmServerLimit;
+  if (!limit) return undefined;
+  const endpoint = s.llmProvider === 'ollama' ? s.llmEndpointOllama : s.llmEndpointOpenai;
+  return limit.key === serverLimitKey(s.llmProvider, endpoint ?? '', s.llmModel ?? '') ? limit.tokens : undefined;
 }
 
 /** temperature 설정의 범위. */
@@ -431,6 +467,8 @@ const KEYS = [
   'llmThinking',
   // 출력 토큰 한도(2026-11-11). 앱 키다. null 이면 작업마다 정한 값.
   'llmMaxOutputTokens',
+  // 연결 시험이 알아낸 서버 컨텍스트 한도(2026-11-11 review). 앱 키다. null 이면 모른다.
+  'llmServerLimit',
   // MCP 클라이언트(Task 5b): 외부 MCP 서버. 앱 키다.
   'mcpClientServers',
   // 문헌 검색(Task 11): 출처 스위치와 연락처 이메일. 앱 키다.
@@ -455,6 +493,7 @@ const APP_DEFAULTS = {
   llmTemperature: null,
   llmThinking: 'auto',
   llmMaxOutputTokens: null,
+  llmServerLimit: null,
   ncbiEmail: '',
   crossrefMailto: '',
   githubReadmeOverlay: true,
@@ -513,6 +552,7 @@ export function fromStored(raw: unknown): AppSettings {
     settings.llmTemperature = cleanTemperature((raw as { llmTemperature?: unknown }).llmTemperature);
     settings.llmThinking = cleanThinking((raw as { llmThinking?: unknown }).llmThinking);
     settings.llmMaxOutputTokens = cleanMaxOutputTokens((raw as { llmMaxOutputTokens?: unknown }).llmMaxOutputTokens);
+    settings.llmServerLimit = cleanServerLimit((raw as { llmServerLimit?: unknown }).llmServerLimit);
     // MCP 클라이언트(Task 5b): 칸마다 검사하고 틀린 항목은 버린다. 평문 http 허락은 위에서 읽은 목록을 쓴다.
     settings.mcpClientServers = cleanMcpServers((raw as { mcpClientServers?: unknown }).mcpClientServers, settings.allowHttpOrigins);
     // 문헌 검색(Task 11): 출처는 꼭 false 인 것만 끄고, 이메일은 모양이 맞을 때만 살린다.

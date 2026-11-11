@@ -216,14 +216,13 @@ describe('provider.chat', () => {
     expect(chatBody(n.calls, 0).options).toEqual({ temperature: 0.2, num_predict: expect.any(Number) });
   });
 
-  it('openai body is identical with and without contextWindow, but for the output cap it bounds', async () => {
+  it('openai body is identical with and without contextWindow (the window is not a server limit)', async () => {
     const f = replying({ choices: [{ message: { content: 'x' } }] });
     const p = createLlmProvider(withProvider('openai', { llmModel: 'm' }), f.invoke)!;
     const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
     await p.chat(msgs, { temperature: 0.2 });
     await p.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
-    expect({ ...chatBody(f.calls, 1), max_tokens: 0 }).toEqual({ ...chatBody(f.calls, 0), max_tokens: 0 });
-    expect(chatBody(f.calls, 1).max_tokens).toBeLessThanOrEqual(4096);
+    expect(chatBody(f.calls, 1)).toEqual(chatBody(f.calls, 0));
     expect(chatBody(f.calls, 0)).toEqual({ model: 'm', messages: [{ role: 'user', content: 'x' }], temperature: 0.2, max_tokens: expect.any(Number) });
   });
 

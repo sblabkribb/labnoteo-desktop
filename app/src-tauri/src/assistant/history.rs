@@ -14,8 +14,9 @@
 //!   refuses with `vaultChanged` when it differs, so a reply that ends after a
 //!   vault switch never lands in another vault's same-named folder. The token
 //!   is compared, never used as a path.
-//! - The document holds user text, assistant text, the taint flag and the source
-//!   list only (`deny_unknown_fields`): never tool results or fetched pages.
+//! - The document holds user text, assistant text, the taint flag, the source
+//!   list, the chip id and the answered flag only (`deny_unknown_fields`): never
+//!   tool results or fetched pages.
 //!   Caps: 300 messages, 384 KiB per file, 4 KiB per source label.
 //! - A stored file that no longer parses (or is over the caps) is moved aside to
 //!   `<key>.json.bad` and the folder starts over empty.
@@ -107,6 +108,10 @@ pub struct Message {
     pub sources: Option<Vec<Source>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chip: Option<Chip>,
+    /// Assistant replies only: whether the turn left model text or a vault change worth sending with the next
+    /// chat turn (`StoredMessage.answered`). Absent in older files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered: Option<bool>,
 }
 
 impl HistoryDoc {
@@ -677,6 +682,26 @@ mod tests {
         let wire = serde_json::to_value(&back).unwrap();
         assert_eq!(wire["messages"][0].get("tainted"), None, "absent optionals stay absent");
         assert_eq!(wire["messages"][0]["chip"], "unitOp");
+        assert_eq!(wire["messages"][1].get("answered"), None);
+    }
+
+    #[test]
+    fn the_answered_flag_round_trips_and_stays_a_bool() {
+        let fx = Fx::new(&["A"]);
+        let r = read(&fx.dirs, &fx.vault, "A").unwrap();
+        let mut a = msg("2", "assistant", "AI tools used: 1 change.");
+        a["answered"] = json!(true);
+        let mut b = msg("4", "assistant", "The assistant gave no answer.");
+        b["answered"] = json!(false);
+        write(&fx.dirs, &fx.vault, "A", &r.token, doc(vec![msg("1", "user", "q"), a, msg("3", "user", "q2"), b])).unwrap();
+        let back = read(&fx.dirs, &fx.vault, "A").unwrap().doc;
+        assert_eq!(back.messages[1].answered, Some(true));
+        assert_eq!(back.messages[3].answered, Some(false));
+        assert_eq!(back.messages[0].answered, None);
+        let mut bad = msg("1", "assistant", "x");
+        bad["answered"] = json!("yes");
+        let r = read(&fx.dirs, &fx.vault, "A").unwrap();
+        assert!(write(&fx.dirs, &fx.vault, "A", &r.token, doc(vec![bad])).is_err());
     }
 
     #[test]

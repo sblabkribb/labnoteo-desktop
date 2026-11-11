@@ -9,17 +9,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { t } from '../../i18n/t';
 import { fakeInvoke } from '../../integrations/__tests__/fakeNet';
 import type { ListenFn, LlmFrame } from '../../integrations/netIpc';
-import { describeLlmError, OutputLimitError } from '../../labnote/port/llmError';
+import { describeLlmError, OutputLimitError, outputCutMessage } from '../../labnote/port/llmError';
 import {
   createLlmProvider,
   outputTokens,
   OUTPUT_TOKENS_COMPACT,
-  OUTPUT_TOKENS_MIN,
+  OUTPUT_TOKENS_MARGIN,
   OUTPUT_TOKENS_TEXT,
   OUTPUT_TOKENS_TOOLS,
   type ChatMessage,
 } from '../../labnote/port/llmProvider';
-import { cleanMaxOutputTokens, fromStored, parseMaxOutputTokensInput, type AppSettings } from '../../labnote/settings';
+import {
+  cleanMaxOutputTokens,
+  cleanServerLimit,
+  fromStored,
+  parseMaxOutputTokensInput,
+  serverContextLimit,
+  serverLimitKey,
+  type AppSettings,
+} from '../../labnote/settings';
 import { assembleOllama, assembleOpenAi } from '../streamAssembler';
 
 const base: AppSettings = fromStored({});
@@ -71,15 +79,24 @@ describe('outputTokens', () => {
     expect(outputTokens(v, msgs, { maxTokens: 2048 })).toBe(20000);
   });
 
-  it('never above the context window minus the prompt estimate, and never below the floor', () => {
+  it('a known server limit bounds the cap: limit minus the prompt estimate and a margin', () => {
     const long: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(4 * 6000) }];
-    const cap = outputTokens(s({ llmContextWindow: 8192 }), long, undefined);
-    expect(cap).toBeLessThanOrEqual(8192 - 6000);
-    expect(cap).toBeGreaterThan(2000);
-    const huge: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(4 * 9000) }];
-    expect(outputTokens(s({ llmContextWindow: 8192 }), huge, undefined)).toBe(OUTPUT_TOKENS_MIN);
+    const cap = outputTokens(s({}), long, undefined, 8192)!;
+    expect(cap).toBeLessThanOrEqual(8192 - 6000 - OUTPUT_TOKENS_MARGIN);
+    expect(cap).toBeGreaterThan(1500);
     // The user's cap is bounded too.
-    expect(outputTokens(s({ llmContextWindow: 8192, llmMaxOutputTokens: 32768 }), msgs, undefined)).toBeLessThan(8192);
+    expect(outputTokens(s({ llmMaxOutputTokens: 32768 }), msgs, undefined, 8192)).toBeLessThan(8192);
+  });
+
+  it('when a known limit leaves less than the floor, no cap at all (never prompt + cap over the limit)', () => {
+    const huge: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(4 * 7900) }];
+    expect(outputTokens(s({}), huge, undefined, 8192)).toBeUndefined();
+  });
+
+  it('the configured context window alone never shrinks the cap (review: an 8k prompt left 256 tokens)', () => {
+    const long: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(4 * 8000) }];
+    expect(outputTokens(s({ llmContextWindow: 8192 }), long, { tools: [tool] })).toBe(OUTPUT_TOKENS_TOOLS);
+    expect(outputTokens(s({ llmContextWindow: 8192 }), long, undefined)).toBe(OUTPUT_TOKENS_TEXT);
   });
 });
 
@@ -179,5 +196,75 @@ describe('a reply cut at the cap', () => {
     expect(r.content).toBe('done');
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(bodies(f.calls, 'llm_chat_stream')[1].chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+});
+
+describe('a server limit the app knows (2026-11-11 review)', () => {
+  const ep = 'https://llm.example.test/v1';
+  const conn = { llmProvider: 'openai' as const, llmEndpointOpenai: ep, llmModel: 'qwen3.6-35b-a3b' };
+
+  it('is the saved max_model_len only for the connection it was found on', () => {
+    const saved = { key: serverLimitKey('openai', ep, 'qwen3.6-35b-a3b'), tokens: 32768 };
+    expect(serverContextLimit(s({ ...conn, llmServerLimit: saved }))).toBe(32768);
+    expect(serverContextLimit(s({ ...conn, llmModel: 'other', llmServerLimit: saved }))).toBeUndefined();
+    expect(serverContextLimit(s({ ...conn, llmEndpointOpenai: 'https://elsewhere.test', llmServerLimit: saved }))).toBeUndefined();
+    expect(serverContextLimit(s(conn))).toBeUndefined();
+    expect(fromStored({ llmServerLimit: saved }).llmServerLimit).toEqual(saved);
+    expect(cleanServerLimit({ key: 'k', tokens: 0 })).toBeNull();
+    expect(cleanServerLimit({ key: 1, tokens: 10 })).toBeNull();
+    expect(base.llmServerLimit).toBeNull();
+  });
+
+  it('openai: max_tokens stays under the saved limit; with no room the body has no max_tokens', async () => {
+    const f = okOpenai();
+    const saved = { key: serverLimitKey('openai', ep, 'qwen3.6-35b-a3b'), tokens: 8192 };
+    const p = createLlmProvider(s({ ...conn, llmServerLimit: saved }), f.invoke)!;
+    await p.chat([{ role: 'user', content: 'a'.repeat(4 * 6000) }]);
+    await p.chat([{ role: 'user', content: 'a'.repeat(4 * 7900) }]);
+    const sent = bodies(f.calls);
+    expect(sent[0].max_tokens as number).toBeLessThanOrEqual(8192 - 6000 - OUTPUT_TOKENS_MARGIN);
+    expect('max_tokens' in sent[1]).toBe(false);
+  });
+
+  it('openai without a saved limit sends the task value even after a long tool result (8192 window untouched)', async () => {
+    const f = okOpenai();
+    const p = createLlmProvider(s(conn), f.invoke)!;
+    await p.chat([{ role: 'user', content: 'a'.repeat(4 * 8000) }], { tools: [tool] });
+    expect(bodies(f.calls)[0].max_tokens).toBe(OUTPUT_TOKENS_TOOLS);
+  });
+
+  it('ollama: the num_ctx the request sends bounds num_predict', async () => {
+    const f = okOllama();
+    await createLlmProvider(s({ llmProvider: 'ollama', llmModel: 'llama3.1' }), f.invoke)!.chat([{ role: 'user', content: 'a'.repeat(4 * 3000) }], {
+      contextWindow: 4096,
+    });
+    const options = bodies(f.calls)[0].options as Record<string, number>;
+    expect(options.num_ctx).toBe(4096);
+    expect(options.num_predict).toBeLessThanOrEqual(4096 - 3000 - OUTPUT_TOKENS_MARGIN);
+  });
+});
+
+describe('a cut reply with text', () => {
+  it('keeps its text and truncated, but drops its tool calls (a half-streamed call never runs)', async () => {
+    const f = fakeInvoke({
+      llm_chat: () => ({
+        status: 200,
+        text: JSON.stringify({
+          choices: [
+            {
+              message: { content: 'Adding the section', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'add_section', arguments: '{"heading":"PC' } }] },
+              finish_reason: 'length',
+            },
+          ],
+        }),
+      }),
+    });
+    const r = await createLlmProvider(s({ llmProvider: 'openai', llmModel: 'm' }), f.invoke)!.chat(msgs, { tools: [tool] });
+    expect(r).toEqual({ content: 'Adding the section', toolCalls: [], truncated: true });
+  });
+
+  it('the cut-answer notice names the Max output tokens setting', () => {
+    const sentence = outputCutMessage();
+    expect(sentence).toBe(t('ai.outputCut', `${t('cmd.integrationSettings')} → ${t('integrations.aiProvider')} → ${t('integrations.ai.advanced')} → ${t('integrations.ai.maxOutput')}`));
   });
 });

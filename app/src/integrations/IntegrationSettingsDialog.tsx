@@ -10,6 +10,7 @@ import { ContextWindowField } from '../labnote/context/ContextWindowField';
 import {
   BFW_DEFAULT_URL,
   LLM_CONTEXT_WINDOW_DEFAULT,
+  serverLimitKey,
   suggestContextWindow,
   cleanMcpServers,
   fromPluginData,
@@ -102,6 +103,7 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     llmTemperature: s.llmTemperature,
     llmThinking: s.llmThinking,
     llmMaxOutputTokens: s.llmMaxOutputTokens,
+    llmServerLimit: s.llmServerLimit,
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: [...s.allowHttpOrigins],
@@ -964,11 +966,17 @@ export function IntegrationSettingsPage(props: {
                   after={async (out) => {
                     // The server's context limit (vLLM max_model_len): an untouched default takes it, a larger value
                     // shrinks to it, a value the user chose stays (settings suggestContextWindow).
+                    // The limit is also kept with the connection it came from: the output cap stays inside it (outputTokens).
                     if (out.contextLimit == null) return undefined;
                     const current = valRef.current.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT;
                     const next = suggestContextWindow(current, out.contextLimit);
-                    if (next === current) return t('ai.probeContextKept', String(out.contextLimit));
-                    await save({ llmContextWindow: next });
+                    const d = draftRef.current;
+                    const llmServerLimit = { key: serverLimitKey(provider, d[endpointKey], d.llmModel), tokens: out.contextLimit };
+                    if (next === current) {
+                      await save({ llmServerLimit });
+                      return t('ai.probeContextKept', String(out.contextLimit));
+                    }
+                    await save({ llmContextWindow: next, llmServerLimit });
                     return t('ai.probeContext', String(out.contextLimit), String(next));
                   }}
                 />

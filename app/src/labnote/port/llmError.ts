@@ -65,6 +65,16 @@ function errorDetail(body: string): string {
  * host (real-server check, 2026-11-11: those end up in screenshots), calls the server "the AI server" rather than
  * naming a vendor, and names the settings rows by the labels the settings page shows.
  */
+/** Where the Max output tokens setting is. */
+function maxOutputSetting(): string {
+  return [t('cmd.integrationSettings'), t('integrations.aiProvider'), t('integrations.ai.advanced'), t('integrations.ai.maxOutput')].join(' → ');
+}
+
+/** The notice beside an answer that stopped at the output cap with some text (ChatResult.truncated): its end may be missing. */
+export function outputCutMessage(): string {
+  return t('ai.outputCut', maxOutputSetting());
+}
+
 export function describeLlmError(err: unknown, settings: AppSettings, translate: Translator): string {
   // A cancel the user asked for needs no notice, whatever the settings say.
   if (err instanceof NetError && err.kind === 'cancelled') return '';
@@ -97,9 +107,7 @@ export function describeLlmError(err: unknown, settings: AppSettings, translate:
   }
 
   if (err instanceof ReasoningLoopError) return t('ai.reasoningLoop');
-  if (err instanceof OutputLimitError) {
-    return t('ai.outputLimit', [t('cmd.integrationSettings'), t('integrations.aiProvider'), t('integrations.ai.advanced'), t('integrations.ai.maxOutput')].join(' → '));
-  }
+  if (err instanceof OutputLimitError) return t('ai.outputLimit', maxOutputSetting());
 
   if (err instanceof NetError) {
     switch (err.kind) {

@@ -99,6 +99,7 @@ function wireMessage(m: StoredMessage): StoredMessage {
   if (m.tainted !== undefined) out.tainted = m.tainted;
   if (m.sources !== undefined) out.sources = m.sources.map(wireSource);
   if (m.chip !== undefined) out.chip = m.chip;
+  if (m.answered !== undefined) out.answered = m.answered;
   return out;
 }
 

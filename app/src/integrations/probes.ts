@@ -42,6 +42,8 @@ export type IntegrationSettingsValue = Pick<
   Partial<Pick<AppSettings, 'llmThinking'>> &
   // AI provider > Advanced: the max-output-tokens field (MaxOutputField). Optional so older values still type-check.
   Partial<Pick<AppSettings, 'llmMaxOutputTokens'>> &
+  // AI provider: the server context limit the connection check found (outputTokens bounds the cap by it).
+  Partial<Pick<AppSettings, 'llmServerLimit'>> &
   // MCP 클라이언트(Task 5b): 외부 MCP 서버 목록(토큰 없음). 없으면 []로 읽는다(예전 값도 타입이 맞게 선택 칸).
   Partial<Pick<AppSettings, 'mcpClientServers'>> &
   // 문헌 검색(Task 13): 출처 스위치와 연락처 이메일. 선택 칸이라 예전 값도 타입이 맞는다(없으면 기본값으로 읽는다).

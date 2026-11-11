@@ -17,7 +17,7 @@ import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { openNote } from '../../labnote/openNotes';
 import { askAgentCommand } from '../../labnote/port/aiAskAgent';
-import { ReasoningLoopError } from '../../labnote/port/llmError';
+import { outputCutMessage, ReasoningLoopError } from '../../labnote/port/llmError';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
 import {
   builtinRuntime,
@@ -601,7 +601,15 @@ describe('builtinRuntime', () => {
       msg('user', '섹션 만들어 줘'),
       msg('assistant', `${'The assistant gave no answer.'} ${t('pet.tools.summary', t('pet.tools.failed', 2))} Failed: add_section — x.`),
       msg('user', '도구 해 봐'),
-      msg('assistant', t('pet.tools.summary', t('pet.tools.read', 3))),
+      msg('assistant', `${t('pet.tools.summary', t('pet.tools.read', 3))} ${t('pet.tools.unchanged')}`),
+      // A tool-only turn that changed the vault is kept: a follow-up ("add more to that section") needs it.
+      msg('user', 'PCR 섹션 추가해 줘'),
+      msg('assistant', t('pet.tools.summary', t('pet.tools.changed.one'))),
+      // A flagged reply follows its flag, whatever its text says.
+      msg('user', '다시'),
+      msg('assistant', 'The assistant gave no answer.', { answered: true }),
+      msg('user', '그건?'),
+      msg('assistant', '진짜 답 같지만', { answered: false }),
       msg('user', '둘째 질문'),
       msg('assistant', '둘째 답'),
     ];
@@ -609,10 +617,22 @@ describe('builtinRuntime', () => {
     expect(p.seen[0].slice(1)).toEqual([
       { role: 'user', content: '첫 질문' },
       { role: 'assistant', content: '첫 답' },
+      { role: 'user', content: 'PCR 섹션 추가해 줘' },
+      { role: 'assistant', content: t('pet.tools.summary', t('pet.tools.changed.one')) },
+      { role: 'user', content: '다시' },
+      { role: 'assistant', content: 'The assistant gave no answer.' },
       { role: 'user', content: '둘째 질문' },
       { role: 'assistant', content: '둘째 답' },
       { role: 'user', content: '셋째' },
     ]);
+  });
+
+  it('an answer cut at the output cap is shown with a short notice that its end may be missing', async () => {
+    const p = new Script([{ content: '앞부분만', toolCalls: [], truncated: true }]);
+    const { rt } = await setup(p);
+    const r = await rt.run(turnOf('길게 써 줘'), recordSink().sink, go());
+    expect(r.content).toBe('앞부분만');
+    expect(r.notice?.()).toContain(outputCutMessage());
   });
 
   it('a reasoning loop that the retry did not cure carries the repeated part (redacted) under the error', async () => {

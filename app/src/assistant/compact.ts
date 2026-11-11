@@ -8,8 +8,9 @@
  *   입력 문서는 바꾸지 않는다. 문서는 한 폴더의 것 하나만 받으므로 다른 폴더의 기록은 읽을 수 없다.
  * - 실패하면(`CompactionError`) 기록은 그대로이고, `toPromptMessages` 가 예산에 맞는 최근 메시지만 보낸다
  *   (`truncateToTokens`).
- * - `answeredTurns`(real-server check, 2026-11-11): 대화가 보낼 기록에서 답이 없던 차례(모델 글 없이 끝 알림만 남은 답:
- *   "답을 주지 않았습니다", "너무 많은 단계", 도구 사용 요약)를 그 사용자 글과 함께 뺀다. 오류·고리·취소로 끝난 차례는
+ * - `answeredTurns`(real-server check, 2026-11-11): 대화가 보낼 기록에서 답이 없던 차례(모델 글 없이 끝 알림만 남고 보관함도
+ *   그대로인 답: "답을 주지 않았습니다", 아무것도 바꾸지 못한 도구 이야기)를 그 사용자 글과 함께 뺀다. 새 답은 저장할 때의
+ *   `answered` 표시로, 예전 답은 글로 가린다. 보관함을 바꾼 도구 차례는 글이 없어도 남는다. 오류·고리·취소로 끝난 차례는
  *   처음부터 저장되지 않는다(useAssistantSession). 저장된 기록 파일은 그대로다: 보낼 때만 거른다.
  * - `toPromptMessages`: 오염된 요약과 메시지는 울타리에 싸서 보내고, 그런 것이 하나라도 가면 실행을 오염된 채로
  *   시작하게 `initialTaint` 를 준다(R11). 요약은 시스템 메시지가 아니라 기록 앞의 사용자 메시지다.
@@ -163,44 +164,59 @@ export async function prepareHistory(
   }
 }
 
-/** 끝 알림(builtinRuntime noticeParts)이 시작하는 플러그인 문장들. 키가 영어 원문이다. */
-const NOTICE_KEYS = [
-  'AI stopped after too many steps.',
+/** 답이 없던 차례에만 붙는 끝 알림(builtinRuntime noticeParts)의 첫 문장들. 키가 영어 원문이다. */
+const NO_ANSWER_KEYS = [
   'The assistant gave no answer.',
   'The assistant gave no answer. What you asked may be outside the tools it can use.',
   'The model gave no answer (it only thought). Try again or choose another model.',
   'The model gave no answer. Try again or choose another model.',
   'The AI used no tools; nothing in the vault changed.',
 ];
+/** 도구 이야기로 시작하는 끝 알림: 아무것도 바꾸지 못했을 때만(`UNCHANGED_KEY` 가 함께 있을 때) 답이 없던 차례다. */
+const TOOL_NOTICE_KEYS = ['AI stopped after too many steps.'];
+const UNCHANGED_KEY = 'Nothing in the vault changed.';
 
-let noticeStarts: string[] | undefined;
+interface NoticeText {
+  noAnswer: string[];
+  toolHeads: string[];
+  unchanged: string[];
+}
+let noticeText: NoticeText | undefined;
 
-/** 끝 알림의 첫머리: 두 언어 모두(언어를 바꾼 뒤에도 앞서 저장된 알림을 알아본다). */
-function noticePrefixes(): string[] {
-  if (noticeStarts) return noticeStarts;
-  const out = new Set<string>();
-  for (const key of NOTICE_KEYS) {
-    out.add(key);
-    const ko = vendorKo(key);
-    if (ko) {
-      out.add(ko);
-      out.add(koTerms(ko));
-    }
-  }
-  for (const cat of Object.values(catalogs)) {
-    const summary = cat['pet.tools.summary'];
-    const head = summary?.split('{0}')[0]?.trim();
-    if (head) out.add(head);
-  }
-  noticeStarts = [...out];
-  return noticeStarts;
+/** 플러그인 문장의 두 언어 글(언어를 바꾼 뒤에도 앞서 저장된 알림을 알아본다). */
+function bothLanguages(key: string): string[] {
+  const ko = vendorKo(key);
+  return ko ? [key, ko, koTerms(ko)] : [key];
 }
 
-/** 저장된 답이 모델의 글 없이 끝 알림만 남은 것인지(답이 없던 차례). */
+function notices(): NoticeText {
+  if (noticeText) return noticeText;
+  const noAnswer = NO_ANSWER_KEYS.flatMap(bothLanguages);
+  const toolHeads = TOOL_NOTICE_KEYS.flatMap(bothLanguages);
+  const unchanged = bothLanguages(UNCHANGED_KEY);
+  for (const cat of Object.values(catalogs)) {
+    const head = cat['pet.tools.summary']?.split('{0}')[0]?.trim();
+    if (head) toolHeads.push(head);
+    const same = cat['pet.tools.unchanged']?.trim();
+    if (same) unchanged.push(same);
+  }
+  noticeText = { noAnswer: [...new Set(noAnswer)], toolHeads: [...new Set(toolHeads)], unchanged: [...new Set(unchanged)] };
+  return noticeText;
+}
+
+/**
+ * 저장된 답이 다음 차례에 보낼 것 없이 끝난 차례인지. 새 기록은 `answered` 표시로 정한다(모델의 글이 있거나 보관함을 바꿨으면
+ * 보낸다). 표시가 없는 예전 기록만 글로 가늠한다: 빈 글, 답이 없다는 알림, 또는 도구 이야기(도구 사용 요약, 너무 많은 단계)
+ * 이면서 "보관함은 그대로" 문장이 있는 것. 무언가를 바꾼 도구 차례(예: add_section 만 하고 글이 없던 답)는 남는다.
+ */
 export function isNoticeOnly(m: StoredMessage): boolean {
   if (m.role !== 'assistant') return false;
+  if (m.answered !== undefined) return !m.answered;
   const text = m.text.trim();
-  return text === '' || noticePrefixes().some((p) => text.startsWith(p));
+  if (text === '') return true;
+  const n = notices();
+  if (n.noAnswer.some((p) => text.startsWith(p))) return true;
+  return n.toolHeads.some((p) => text.startsWith(p)) && n.unchanged.some((u) => text.includes(u));
 }
 
 /**

@@ -5,7 +5,7 @@ import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import { coreT } from '../../labnote/i18n';
 import type { CommandContext } from '../../labnote/commands/context';
-import { fromPluginData, type AppSettings } from '../../labnote/settings';
+import { fromPluginData, serverLimitKey, type AppSettings } from '../../labnote/settings';
 import { styleAttributes } from '../../labnote/host/__tests__/harness';
 import {
   IntegrationSettingsPage,
@@ -426,7 +426,9 @@ describe('IntegrationSettingsPage', () => {
     show(d);
     await userEvent.click(await screen.findByText(coreT('Test connection')));
     expect(await screen.findByText(`Connected. ${t('ai.probeContext', '262144', '262144')}`)).toBeTruthy();
-    expect(d.commit).toHaveBeenCalledWith({ llmContextWindow: 262144 });
+    // The limit is kept with the connection it came from (the output cap stays inside it).
+    const limit = { key: serverLimitKey('openai', d.value().llmEndpointOpenai, 'qwen3.6-35b-a3b'), tokens: 262144 };
+    expect(d.commit).toHaveBeenCalledWith({ llmContextWindow: 262144, llmServerLimit: limit });
     expect((screen.getByLabelText(t('aiCtx.window.label')) as HTMLSelectElement).value).toBe('custom');
     cleanup();
     const chosen = fakeDeps({ llmProvider: 'openai', llmModel: 'qwen3.6-35b-a3b', llmContextWindow: 32768 });
@@ -434,6 +436,7 @@ describe('IntegrationSettingsPage', () => {
     await userEvent.click(await screen.findByText(coreT('Test connection')));
     expect(await screen.findByText(`Connected. ${t('ai.probeContextKept', '262144')}`)).toBeTruthy();
     expect(chosen.commit).not.toHaveBeenCalledWith(expect.objectContaining({ llmContextWindow: expect.anything() }));
+    expect(chosen.commit).toHaveBeenCalledWith({ llmServerLimit: expect.objectContaining({ tokens: 262144 }) });
     off();
   });
 

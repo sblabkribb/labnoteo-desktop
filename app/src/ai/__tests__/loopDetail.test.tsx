@@ -68,6 +68,18 @@ describe('loopDetail', () => {
     expect(d.text).not.toContain('gpu7');
   });
 
+  it('times, ratios and step:12 in the reasoning are not taken for a host:port', () => {
+    const raw = 'Incubate at 10:30 for 45 min, dilute 1:100, then step:12. Server lab.example.org:8080 and 10.0.0.5:8000.';
+    const out = redactLoopText(raw, settings);
+    expect(out).toContain('10:30');
+    expect(out).toContain('1:100');
+    expect(out).toContain('step:12');
+    expect(out).not.toContain('lab.example.org');
+    expect(out).not.toContain('8080');
+    expect(out).not.toContain('10.0.0.5');
+    expect(out).not.toContain('8000');
+  });
+
   it('Korean labels keep the copy in Korean', () => {
     setLang('ko');
     const d = loopDetail(new ReasoningLoopError('반복', ''), settings)!;

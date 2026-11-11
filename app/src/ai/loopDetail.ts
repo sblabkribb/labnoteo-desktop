@@ -20,7 +20,9 @@ const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]]+/gi;
 const BEARER_RE = /\bbearer\s+\S+/gi;
 const PREFIXED_KEY_RE = /\b(?:sk|pk|rk|hf|xox[abp]|gh[pousr])[-_][A-Za-z0-9_-]{6,}/gi;
 const LONG_TOKEN_RE = /[A-Za-z0-9_\-+/=]{32,}/g;
-const HOST_PORT_RE = /\b(?:[a-z0-9-]+\.)*[a-z0-9-]+:\d{2,5}\b/gi;
+// A host before the port: localhost, an IPv4 address, or a dotted name ending in a label that starts with a letter.
+// Times ('10:30'), ratios ('1:100') and 'step:12' are ordinary reasoning text and stay.
+const HOST_PORT_RE = /\b(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*):\d{2,5}\b/gi;
 const IP_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 // eslint-disable-next-line no-control-regex
 const UNSAFE_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‎‏‪-‮⁦-⁩]/g;

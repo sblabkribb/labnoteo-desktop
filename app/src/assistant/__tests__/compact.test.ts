@@ -342,9 +342,17 @@ describe('answeredTurns (real-server check: failed turns are not sent again)', (
   it('knows the end notices in both languages, and leaves real answers alone', () => {
     const ko = vendorKo('The assistant gave no answer.')!;
     expect(isNoticeOnly(msg('assistant', ko))).toBe(true);
-    expect(isNoticeOnly(msg('assistant', catalogs.ko['pet.tools.summary'].replace('{0}', '2번 읽음')))).toBe(true);
-    expect(isNoticeOnly(msg('assistant', catalogs.en['pet.tools.summary'].replace('{0}', '1 lookup')))).toBe(true);
-    expect(isNoticeOnly(msg('assistant', 'AI stopped after too many steps. AI tools used: 12 lookups.'))).toBe(true);
+    const koSame = catalogs.ko['pet.tools.unchanged'];
+    const enSame = catalogs.en['pet.tools.unchanged'];
+    expect(isNoticeOnly(msg('assistant', `${catalogs.ko['pet.tools.summary'].replace('{0}', '조회 2건')} ${koSame}`))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', `${catalogs.en['pet.tools.summary'].replace('{0}', '1 lookup')} ${enSame}`))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', `AI stopped after too many steps. AI tools used: 12 lookups. ${enSame}`))).toBe(true);
+    // A tool-only turn that changed the vault is kept (review: a follow-up needs it).
+    expect(isNoticeOnly(msg('assistant', catalogs.ko['pet.tools.summary'].replace('{0}', '바꿈 1건')))).toBe(false);
+    expect(isNoticeOnly(msg('assistant', 'AI stopped after too many steps. AI tools used: 1 change, 11 lookups.'))).toBe(false);
+    // The saved flag decides over the text.
+    expect(isNoticeOnly(msg('assistant', 'The assistant gave no answer. Here is why…', { answered: true }))).toBe(false);
+    expect(isNoticeOnly(msg('assistant', 'Some text', { answered: false }))).toBe(true);
     expect(isNoticeOnly(msg('assistant', ''))).toBe(true);
     expect(isNoticeOnly(msg('assistant', 'PCR 조건은 95도 30초입니다.'))).toBe(false);
     expect(isNoticeOnly(msg('user', 'The assistant gave no answer.'))).toBe(false);

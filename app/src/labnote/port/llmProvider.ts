@@ -1,10 +1,10 @@
 // Ported from app/vendor/labnoteo/src/llm/provider.ts:27-267 sha256:50318941b2f8b631
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. ChatOptions gains contextWindow (feat/ai-context): Ollama merges it into options as num_ctx beside temperature; the OpenAI body ignores it. Task 6 (assistant spec §6.2, app only): LlmProvider gains an optional chatStream(messages, opts, onDelta), implemented by both providers: the same body with stream: true goes to llmChatStream (llm_chat_stream + llm://frame events, integrations/netIpc), the frames are assembled by ../../ai/streamAssembler (OpenAI SSE tool-call deltas merged by index, Ollama NDJSON) into the same ChatResult, and each content delta goes to onDelta in order; a 2xx JSON answer (stream ignored) is read like chat's; a non-2xx answer, or a status/notJson error, before the first frame falls back to one non-streamed chat (never after a frame, never on a network error). chat's body building and reply reading are factored into body()/read() so both paths share them; createLlmProvider takes an optional listen for tests. Thinking mode (2026-11-11, app only): both providers share an abstract WireProvider; ChatOptions gains thinking (forces 'on' | 'off') and onRetry; each request's mode is settings thinkingFor (auto: qwen3 off on tool turns) and goes out the documented way (OpenAI-compatible chat_template_kwargs.enable_thinking, Ollama top-level think) with the model's recommended sampling for that mode (temperature, top_p, top_k, min_p, presence_penalty; a typed llmTemperature replaces only the temperature); a 400/422 to a body with the extra fields (top_k, min_p, chat_template_kwargs | think) is sent once more without them, and the provider then leaves them out; a streamed request that asked for thinking and hit a ReasoningLoopError or a ReasoningStall (timeout after reasoning only), with no answer text shown yet, is sent once more with thinking off after onRetry; the non-streamed OpenAI reply also reads message.reasoning. Output cap (real-server check 2026-11-11, app only): every request carries one, OpenAI-compatible max_tokens and Ollama options.num_predict (outputTokens: ChatOptions.maxTokens, else 4096 for a turn with tools and 8192 without; a saved llmMaxOutputTokens replaces either; never above the context window minus the estimated prompt, at least OUTPUT_TOKENS_MIN); an OpenAI-compatible request with thinking on also carries thinking_token_budget (half the cap, at most THINKING_BUDGET_MAX), an extra field the 400/422 resend strips; finish_reason / done_reason 'length' sets ChatResult.truncated, and with no answer text throws OutputLimitError, which a streamed request that asked for thinking also answers with the one resend with thinking off. The JSON body is otherwise built and the reply parsed as in the vendor file.
+// Changes: requestUrl({url, method, headers, body, throw:false}) → llmChat({provider, body, signal}) (integrations/netIpc), so the webview never names a host or holds a key: Rust builds the URL (joinUrl(endpoint, '/api/chat' | '/v1/chat/completions'), with https:// for a scheme-less non-loopback host, D8) and the Authorization: Bearer header from the stored settings and Windows Credential Manager (Task 6); joinUrl is kept for display and tests only; openaiBase (new, app only) mirrors Rust's openai_base so a displayed OpenAI-compatible URL drops one final /v1 segment of the endpoint before /v1/... is appended, as Rust does (C-R1); a NetError of kind status → LlmHttpError('Ollama' | 'OpenAI', status, body), every other NetError kind is rethrown as is for describeLlmError, and a 2xx text that is not JSON → NetError('notJson') where Obsidian's res.json threw; ChatOptions gains signal (cancels through net_cancel); LabnoteSettings → AppSettings, which has no llmApiKey, so OpenAiProvider no longer builds headers; LlmProvider gains label ('Ollama' | 'OpenAI-compatible', for the progress title) and model; createLlmProvider takes an optional invoke for tests. ChatOptions gains contextWindow (feat/ai-context): Ollama merges it into options as num_ctx beside temperature; the OpenAI body ignores it. Task 6 (assistant spec §6.2, app only): LlmProvider gains an optional chatStream(messages, opts, onDelta), implemented by both providers: the same body with stream: true goes to llmChatStream (llm_chat_stream + llm://frame events, integrations/netIpc), the frames are assembled by ../../ai/streamAssembler (OpenAI SSE tool-call deltas merged by index, Ollama NDJSON) into the same ChatResult, and each content delta goes to onDelta in order; a 2xx JSON answer (stream ignored) is read like chat's; a non-2xx answer, or a status/notJson error, before the first frame falls back to one non-streamed chat (never after a frame, never on a network error). chat's body building and reply reading are factored into body()/read() so both paths share them; createLlmProvider takes an optional listen for tests. Thinking mode (2026-11-11, app only): both providers share an abstract WireProvider; ChatOptions gains thinking (forces 'on' | 'off') and onRetry; each request's mode is settings thinkingFor (auto: qwen3 off on tool turns) and goes out the documented way (OpenAI-compatible chat_template_kwargs.enable_thinking, Ollama top-level think) with the model's recommended sampling for that mode (temperature, top_p, top_k, min_p, presence_penalty; a typed llmTemperature replaces only the temperature); a 400/422 to a body with the extra fields (top_k, min_p, chat_template_kwargs | think) is sent once more without them, and the provider then leaves them out; a streamed request that asked for thinking and hit a ReasoningLoopError or a ReasoningStall (timeout after reasoning only), with no answer text shown yet, is sent once more with thinking off after onRetry; the non-streamed OpenAI reply also reads message.reasoning. Output cap (real-server check 2026-11-11, app only): every request carries one, OpenAI-compatible max_tokens and Ollama options.num_predict (outputTokens: ChatOptions.maxTokens, else 4096 for a turn with tools and 8192 without; a saved llmMaxOutputTokens replaces either; bounded only by a limit the server is known to enforce, Ollama's num_ctx or the max_model_len the connection check saved for this connection, minus the estimated prompt and OUTPUT_TOKENS_MARGIN, and left out when that leaves less than OUTPUT_TOKENS_MIN); an OpenAI-compatible request with thinking on also carries thinking_token_budget (half the cap, at most THINKING_BUDGET_MAX), an extra field the 400/422 resend strips; finish_reason / done_reason 'length' sets ChatResult.truncated, and with no answer text throws OutputLimitError (with text the turn's tool calls are dropped, so a cut turn runs no tools), which a streamed request that asked for thinking also answers with the one resend with thinking off. The JSON body is otherwise built and the reply parsed as in the vendor file.
 import type { ToolDef } from '@labnoteo/core';
 import { llmChat, llmChatStream, NetError, type InvokeFn, type ListenFn } from '../../integrations/netIpc';
 import { OllamaAssembler, OpenAiAssembler, ReasoningStall, type StreamAssembler } from '../../ai/streamAssembler';
-import { recommendedSampling, thinkingFor, type AppSettings, type ThinkingMode } from '../settings';
+import { recommendedSampling, serverContextLimit, thinkingFor, type AppSettings, type ThinkingMode } from '../settings';
 import { estimateTokens } from '../context/tokens';
 import { LlmHttpError, OutputLimitError, ReasoningLoopError } from './llmError';
 
@@ -67,7 +67,7 @@ export interface ChatOptions {
   onRetry?: () => void;
   /**
    * This task's output cap in tokens (history compaction asks for {@link OUTPUT_TOKENS_COMPACT}). Omitted → 4096 for a
-   * turn with tools, 8192 without. A saved `llmMaxOutputTokens` replaces it; the context window still bounds it.
+   * turn with tools, 8192 without. A saved `llmMaxOutputTokens` replaces it; a server limit known to the app still bounds it ({@link outputTokens}).
    */
   maxTokens?: number;
 }
@@ -78,29 +78,44 @@ export const OUTPUT_TOKENS_TOOLS = 4096;
 export const OUTPUT_TOKENS_TEXT = 8192;
 /** Output cap of the history compaction summary. */
 export const OUTPUT_TOKENS_COMPACT = 2048;
-/** The smallest cap ever sent, even when the prompt estimate leaves less room. */
+/** The smallest cap ever sent. When a known server limit leaves less room than this, no cap is sent at all. */
 export const OUTPUT_TOKENS_MIN = 256;
 /** The most reasoning tokens asked for with thinking on (vLLM thinking_token_budget). */
 export const THINKING_BUDGET_MAX = 4096;
+/** Room kept free under a known server limit for what the prompt estimate misses (chat template, tool-call framing). */
+export const OUTPUT_TOKENS_MARGIN = 256;
+
+/** The estimated prompt of a request in tokens: the messages and, when offered, the tool schemas. */
+export function promptTokens(messages: readonly ChatMessage[], opts: ChatOptions | undefined): number {
+  return (
+    messages.reduce((n, m) => n + 4 + estimateTokens(m.content) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0), 0) +
+    (opts?.tools?.length ? estimateTokens(JSON.stringify(toolSchemas(opts.tools))) : 0)
+  );
+}
 
 /**
  * The output cap of one request (real-server check, 2026-11-11: without one a looping request streamed for the whole
  * 300 s LLM_TIMEOUT). The vault's `llmMaxOutputTokens` when set, else the task's (`maxTokens`, or by whether tools are
- * offered), and never more than the context window (`llmContextWindow`, which the connection check fits to the
- * server's max_model_len) minus the estimated prompt, so the server does not refuse prompt + cap as too long.
+ * offered). `serverLimit` is a limit the server is known to enforce on prompt + output: Ollama's `num_ctx` that this
+ * request sends, or the vLLM `max_model_len` the connection check found for this connection (settings
+ * serverContextLimit). Only then is the cap kept under that limit minus the estimated prompt and a margin
+ * ({@link OUTPUT_TOKENS_MARGIN}); the configured context window alone never shrinks it, the server enforces its own
+ * limit. When a known limit leaves less than {@link OUTPUT_TOKENS_MIN}, undefined: the request carries no cap rather
+ * than one the server refuses (prompt + cap over the limit is a 400 that no resend fixes).
  */
 export function outputTokens(
-  settings: Pick<AppSettings, 'llmContextWindow' | 'llmMaxOutputTokens'>,
+  settings: Pick<AppSettings, 'llmMaxOutputTokens'>,
   messages: readonly ChatMessage[],
-  opts: ChatOptions | undefined
-): number {
-  const wanted = settings.llmMaxOutputTokens ?? opts?.maxTokens ?? (opts?.tools?.length ? OUTPUT_TOKENS_TOOLS : OUTPUT_TOKENS_TEXT);
-  const window = opts?.contextWindow ?? settings.llmContextWindow;
-  if (!window || window <= 0) return Math.max(OUTPUT_TOKENS_MIN, wanted);
-  const prompt =
-    messages.reduce((n, m) => n + 4 + estimateTokens(m.content) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0), 0) +
-    (opts?.tools?.length ? estimateTokens(JSON.stringify(toolSchemas(opts.tools))) : 0);
-  return Math.max(OUTPUT_TOKENS_MIN, Math.min(wanted, window - prompt));
+  opts: ChatOptions | undefined,
+  serverLimit?: number
+): number | undefined {
+  const wanted = Math.max(
+    OUTPUT_TOKENS_MIN,
+    settings.llmMaxOutputTokens ?? opts?.maxTokens ?? (opts?.tools?.length ? OUTPUT_TOKENS_TOOLS : OUTPUT_TOKENS_TEXT)
+  );
+  if (!serverLimit || serverLimit <= 0) return wanted;
+  const room = serverLimit - promptTokens(messages, opts) - OUTPUT_TOKENS_MARGIN;
+  return room < OUTPUT_TOKENS_MIN ? undefined : Math.min(wanted, room);
 }
 
 /** The sampling fields a request may carry. Undefined fields are left out of the body. */
@@ -157,10 +172,15 @@ function stalledThinking(e: unknown): boolean {
   return e instanceof ReasoningLoopError || e instanceof ReasoningStall || e instanceof OutputLimitError;
 }
 
-/** A reply cut at the output cap before any answer text has nothing to show: it is an error. */
+/**
+ * A reply cut at the output cap before any answer text has nothing to show: it is an error. A cut reply with text
+ * keeps the text and `truncated` (callers say the answer may be incomplete), but never its tool calls: a call cut
+ * mid-stream may carry partial arguments, so a truncated turn runs no tools.
+ */
 function checkCut(result: ChatResult): ChatResult {
-  if (result.truncated && !result.content.trim()) throw new OutputLimitError();
-  return result;
+  if (!result.truncated) return result;
+  if (!result.content.trim()) throw new OutputLimitError();
+  return result.toolCalls.length ? { ...result, toolCalls: [] } : result;
 }
 
 /** finish_reason / done_reason 'length' as the `truncated` flag (left out otherwise). */
@@ -428,8 +448,11 @@ abstract class WireProvider implements LlmProvider {
     return samplingOf(this.settings, opts, mode);
   }
 
-  protected outputCap(messages: ChatMessage[], opts: ChatOptions | undefined): number {
-    return outputTokens(this.settings, messages, opts);
+  /** The limit this provider's server enforces on prompt + output, when known (see {@link outputTokens}). */
+  protected abstract serverLimit(opts: ChatOptions | undefined): number | undefined;
+
+  protected outputCap(messages: ChatMessage[], opts: ChatOptions | undefined): number | undefined {
+    return outputTokens(this.settings, messages, opts, this.serverLimit(opts));
   }
 
   private async withExtras<T>(full: Record<string, unknown>, run: (body: Record<string, unknown>) => Promise<T>): Promise<T> {
@@ -491,6 +514,11 @@ class OllamaProvider extends WireProvider {
   readonly label = 'Ollama';
   protected readonly errorName = 'Ollama';
   protected readonly extraKeys: readonly string[] = ['think'];
+
+  /** The num_ctx this request sends is the window Ollama runs it in. */
+  protected serverLimit(opts: ChatOptions | undefined): number | undefined {
+    return opts?.contextWindow;
+  }
 
   /** Ollama keys tool results by `tool_name` and takes arguments as objects. */
   private static toWire(messages: ChatMessage[]): unknown[] {
@@ -554,6 +582,11 @@ class OpenAiProvider extends WireProvider {
   // thinking_token_budget its reasoning cap.
   protected readonly extraKeys: readonly string[] = ['top_k', 'min_p', 'chat_template_kwargs', 'thinking_token_budget'];
 
+  /** The max_model_len the connection check found for this endpoint and model; the configured window is not one. */
+  protected serverLimit(): number | undefined {
+    return serverContextLimit(this.settings);
+  }
+
   /** OpenAI keys tool results by `tool_call_id` and takes arguments as JSON strings. */
   private static toWire(messages: ChatMessage[]): unknown[] {
     return messages.map(m => {
@@ -590,7 +623,7 @@ class OpenAiProvider extends WireProvider {
       // vLLM's documented per-request switch for Qwen3 (the /no_think soft switch does not work on qwen3.6).
       ...(mode ? { chat_template_kwargs: { enable_thinking: mode === 'on' } } : {}),
       // Reasoning may use at most half the cap, so the answer always has room.
-      ...(mode === 'on' ? { thinking_token_budget: Math.min(THINKING_BUDGET_MAX, Math.floor(cap / 2)) } : {}),
+      ...(mode === 'on' && cap != null ? { thinking_token_budget: Math.min(THINKING_BUDGET_MAX, Math.floor(cap / 2)) } : {}),
       tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
     };
   }

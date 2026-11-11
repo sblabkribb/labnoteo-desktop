@@ -775,3 +775,14 @@ describe('runAgent: taint gate for external tools', () => {
     expect(run).toMatchObject({ tainted: false, taintSources: [] });
   });
 });
+
+describe('a turn cut at the output cap (2026-11-11 review)', () => {
+  it('runs none of its tool calls, ends the run, and says the answer was cut', async () => {
+    const { tools, ran } = makeTools();
+    const p = new ScriptedProvider([{ content: 'Writing it now', toolCalls: [call('write_thing')], truncated: true }]);
+    const run = await runAgent([{ role: 'user', content: 'go' }], { provider: p, ctx: ctx(), confirm: allow, tools });
+    expect(ran).toEqual([]);
+    expect(run).toMatchObject({ content: 'Writing it now', truncated: true, executed: [], stoppedAtLimit: false });
+    expect(p.seen).toHaveLength(1);
+  });
+});

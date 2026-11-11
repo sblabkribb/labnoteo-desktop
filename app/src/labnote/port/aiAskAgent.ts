@@ -20,7 +20,7 @@ import { aiAnswerDialog } from './aiAnswerDialog';
 import { insertBlock, KOREAN_TERMS_INSTRUCTION, noAnswerMessage, toolContext, toolRunNotice } from './aiCommon';
 import { buildApprovalMessage, erasesRecordedLines } from './approvalMessage';
 import { countToolOutcomes, runAgent } from './llmAgent';
-import { describeLlmError } from './llmError';
+import { describeLlmError, outputCutMessage } from './llmError';
 import type { LlmProvider } from './llmProvider';
 
 /**
@@ -237,6 +237,8 @@ ${appT('ai.confirm.tainted')}` : ask;
         );
       }
     } else {
+      // An answer cut at the output cap is still offered, with a warning that its end may be missing.
+      if (run.truncated) env.host.notify('warn', outputCutMessage());
       // The answer only goes in on request (#77), possibly minutes later, so
       // the note must still be the one open.
       void aiAnswerDialog({

@@ -30,6 +30,12 @@ export interface StoredMessage {
   tainted?: boolean;
   sources?: Source[];
   chip?: ChipId;
+  /**
+   * 답에만(2026-11-11 review): 그 차례가 다음 대화에 보낼 만한 것을 남겼는지. 모델의 글이 있거나 보관함을 바꿨으면 true,
+   * 끝 알림만 남은 차례(답 없음, 너무 많은 단계, 아무것도 바꾸지 못한 도구 이야기)면 false. 예전 기록에는 없다(compact
+   * `isNoticeOnly` 가 글로 가늠한다).
+   */
+  answered?: boolean;
 }
 
 export interface AssistantTurn {

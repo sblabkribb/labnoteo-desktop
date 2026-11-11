@@ -94,6 +94,16 @@ describe('assistant history IPC client', () => {
     expect(doc).toEqual(copy);
   });
 
+  it('toWireDoc keeps the answered flag of a reply (Rust stores it)', () => {
+    const doc: HistoryDoc = {
+      version: 1,
+      folder: 'A',
+      updated: 0,
+      messages: [{ id: '2', role: 'assistant', text: 'AI tools used: 1 change.', ts: 2, answered: true, extra: 'x' } as HistoryDoc['messages'][number]],
+    };
+    expect(toWireDoc(doc).messages[0]).toEqual({ id: '2', role: 'assistant', text: 'AI tools used: 1 change.', ts: 2, answered: true });
+  });
+
   it('clear, clear-all and stats send nothing but the folder', async () => {
     const f = fakeInvoke({
       assistant_history_clear: () => null,
