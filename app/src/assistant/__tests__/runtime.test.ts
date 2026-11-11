@@ -23,6 +23,7 @@ import {
   ANSWER_FORM_RULES,
   builtinRuntime,
   CATALOG_RULES,
+  dropUnknownCites,
   EARLIER_REPLIES_RULES,
   FRESH_LOOKUP_NOTE,
   EARLIER_UNTRUSTED_RULES,
@@ -214,7 +215,8 @@ describe('builtinRuntime', () => {
     expect(rec.status).toContain(t('assistant.status.read', '001_WD010_A.labnote.md'));
     const src: Source = { kind: 'note', label: '001_WD010_A.labnote.md', target: NOTE };
     expect(rec.sources).toEqual([[1, src]]);
-    expect(r).toMatchObject({ content: '결과는 [1] 에 있어요. [3]', sources: [src], tainted: false });
+    // The streamed text is as the model wrote it; the shown and saved answer drops [3], which no tool gave (2026-11-11).
+    expect(r).toMatchObject({ content: '결과는 [1] 에 있어요.', sources: [src], tainted: false });
     expect(r.executed.map((e) => [e.call.name, e.outcome])).toEqual([['read_note', 'done']]);
     // The model is told the citation number with the result.
     const toolMsg = p.seen[1].find((m) => m.role === 'tool')!;
@@ -530,6 +532,36 @@ describe('builtinRuntime', () => {
     const r = await rt.run(turnOf('메모 요약해 줘'), recordSink().sink, go());
     expect(r.content).toBe('메모가 있어요 [1].\n다음 단계는 PCR 이에요.');
     expect(r.sources).toHaveLength(1);
+  });
+
+  it('a catalog lookup gives each hit a catalog source chip; a [n] no tool gave is dropped', async () => {
+    const p = new Script([
+      toolTurn('search_catalog', { query: 'UHW010' }),
+      answer('UHW010 은 Liquid Handling 이에요 [1]. 장비는 Multiple dispenser system 이에요 [2].'),
+    ]);
+    const { rt, th } = await setup(p);
+    await th.host.fs.write(
+      'resources/workflows/unitoperations_hw_en.json',
+      JSON.stringify({
+        version: '1',
+        language: 'English',
+        lastUpdated: '2026-11-11',
+        unitOperations: [{ id: 'UHW010', name: 'Liquid Handling', description: 'Basic liquid operations', equipment: 'Multiple dispenser system' }],
+      })
+    );
+    const r = await rt.run(turnOf('UHW010 이 뭐야?'), recordSink().sink, go());
+    expect(r.sources).toEqual([
+      { kind: 'note', label: t('assistant.source.catalog', 'UHW010 Liquid Handling'), target: 'resources/workflows/unitoperations_hw_en.json' },
+    ]);
+    const toolMsg = p.seen[1].find((m) => m.role === 'tool')!.content;
+    expect(JSON.parse(toolMsg).results[0]).toMatchObject({ id: 'UHW010', cite: 1 });
+    expect(r.content).toBe('UHW010 은 Liquid Handling 이에요 [1]. 장비는 Multiple dispenser system 이에요.');
+  });
+
+  it('dropUnknownCites keeps known numbers, code indexes and links', () => {
+    expect(dropUnknownCites('A [1] B [2][3].', 1)).toBe('A [1] B.');
+    expect(dropUnknownCites('arr[2] and [x](y) and [2](http://a)', 0)).toBe('arr[2] and [x](y) and [2](http://a)');
+    expect(dropUnknownCites('no cites', 0)).toBe('no cites');
   });
 
   it('tidyAnswer keeps ordinary text, uuids and real [n] as they are', () => {

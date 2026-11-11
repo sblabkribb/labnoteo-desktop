@@ -369,6 +369,39 @@ function notePathOf(tool: ToolDef, args: Record<string, unknown>): string | unde
   return undefined;
 }
 
+/** 카탈로그 결과 하나의 파일(보관함 상대 경로): 출처 칩이 연다. */
+function catalogFileOf(hit: { kind?: unknown; category?: unknown }): string {
+  if (hit.kind === 'workflow') return 'resources/workflows/workflows_en.json';
+  return hit.category === 'SW' ? 'resources/workflows/unitoperations_sw_en.json' : 'resources/workflows/unitoperations_hw_en.json';
+}
+
+/**
+ * `search_catalog` 결과마다 출처 번호를 단다(real-app check, 2026-11-11: 카탈로그로 답하고도 출처가 없어 모델이 없는
+ * [1] 을 달았다). 이름표는 "카탈로그 · UHW010 Liquid Handling", 대상은 그 카탈로그 파일이다.
+ */
+function citeCatalog(res: ToolResult, cite: (src: Source) => number): ToolResult {
+  const data = res.data as { results?: unknown } | undefined;
+  if (!res.ok || !data || !Array.isArray(data.results)) return res;
+  const results = data.results.map((r: unknown) => {
+    if (!r || typeof r !== 'object') return r;
+    const hit = r as { id?: unknown; name?: unknown; kind?: unknown; category?: unknown };
+    const label = [hit.id, hit.name].filter((x) => typeof x === 'string' && x).join(' ');
+    if (!label) return r;
+    const n = cite({ kind: 'note', label: appT('assistant.source.catalog', label), target: catalogFileOf(hit) });
+    return n ? { ...(r as object), cite: n } : r;
+  });
+  return { ...res, data: { ...data, results } };
+}
+
+/**
+ * 답의 `[n]` 가운데 출처 장부에 없는 번호(모델이 지어낸 인용)를 뺀다. 이름 바로 뒤의 `[n]`(코드의 `a[1]`)과 링크
+ * `[1](…)` 는 인용이 아니라 그대로 둔다.
+ */
+export function dropUnknownCites(text: string, known: number): string {
+  const out = text.replace(/ ?(?<!\w)\[([1-9]\d{0,2})\](?![(:])/g, (m, n: string) => (Number(n) <= known ? m : ''));
+  return out === text ? text : out.trim();
+}
+
 /** 웹 도구의 상태 줄: 검색은 보낼 검색어 그대로(spec §7.1), 페이지는 호스트. 웹 도구가 아니면 undefined. */
 function webStatus(tool: ToolDef, meta: ExternalToolMeta | undefined, args: Record<string, unknown>): string | undefined {
   if (meta?.kind !== 'web') return undefined;
@@ -412,6 +445,7 @@ function instrument(
                 : statusLabel(tool.name))
       );
       const res = await tool.handler(ctx, args);
+      if (tool.name === 'search_catalog' && !meta) return citeCatalog(res, hooks.cite);
       if (res.ok && meta?.kind === 'scholar' && typeof res.data === 'string') hooks.scholarLinks?.(res.data);
       if (!res.ok || !notePath) return res;
       const n = hooks.cite({ kind: 'note', label: basename(notePath), target: notePath });
@@ -749,7 +783,8 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
 
     // real-server check (2026-11-11): the model sometimes echoed fence tags, wrote [cite:n] or talked about fence ids;
     // none of that is shown or saved, and [cite:n] becomes the [n] the source chips read.
-    const answerText = tidyAnswer(run.content);
+    // A [n] that no tool result gave is not a citation: it is dropped rather than left as a dead number.
+    const answerText = dropUnknownCites(tidyAnswer(run.content), ledger.list().length);
 
     // 끝 알림은 그릴 때마다 지금 언어로 다시 만든다(언어를 바꾸면 지난 답의 알림도 따라 바뀐다, Visual QA)
     const noticeEnv: AiEnv = { ...env, host: { ...env.host, t: noticeTranslator(env.host.t) } };
