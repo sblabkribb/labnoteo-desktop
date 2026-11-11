@@ -794,6 +794,7 @@ describe('builtinRuntime', () => {
       for (const rule of Object.values(PARTBANK_RULES)) expect(sys).not.toContain(rule);
       expect(sys).toContain(labToolRules(['partbank_search_parts']));
       expect(sys).toContain('you cannot create or change anything in partbank.');
+      expect(sys).toContain("say whose it is from its scope: mine, group (with the group's name) or public");
       expect(sys).toContain(UNTRUSTED_RULES);
     });
 
@@ -925,7 +926,7 @@ describe('builtinRuntime', () => {
       expect(p.dialogs.every((d) => d === undefined)).toBe(true);
       expect(rec.status[0]).toBe(t('assistant.status.tool', t('tool.name.partbankSearchParts')));
       const link = 'https://partbank.kbiofoundry.kr/workspace/parts/665f00000000000000000001';
-      expect(res.sources).toEqual([{ kind: 'web', label: 'partbank: KBp_aa0406 sfGFP', target: link }]);
+      expect(res.sources).toEqual([{ kind: 'web', label: `partbank (${t('lab.pb.scope.mine')}): KBp_aa0406 sfGFP`, target: link }]);
       expect(res.tainted).toBe(true);
       const toolMsg = p.seen[1].find((m) => m.role === 'tool');
       expect(toolMsg?.content).toContain('<untrusted-data source=\\"partbank:search_parts\\"');

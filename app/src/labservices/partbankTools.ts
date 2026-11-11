@@ -6,6 +6,7 @@
  */
 import type { JsonSchema, ToolDef } from '@labnoteo/core';
 import type { Source } from '../assistant/sources';
+import { t } from '../i18n/t';
 import { toNetError } from '../integrations/netIpc';
 import {
   badArgs,
@@ -27,6 +28,20 @@ import { OID, PB_TYPES, partbankGroupLink, partbankItemLink, type PbScope, type 
 import { clip, compact, firstStr, fitRows, isRecord, listOf, num, records, str } from './shape';
 
 export const PARTBANK_TOOL_NAMES = ['partbank_search_parts', 'partbank_lookup_part', 'partbank_list_groups'] as const;
+
+/** 항목이 어디의 것인지, 지금 언어로: 내 것 / 그룹(이름) / 공개. 모르면 빈 글. 각 `t` 는 글자로 적는다(번역 목록 검사). */
+export function scopeWord(scope: PbScope | undefined, group?: string | null): string {
+  switch (scope) {
+    case 'mine':
+      return t('lab.pb.scope.mine');
+    case 'group':
+      return group ? t('lab.pb.scope.groupNamed', group) : t('lab.pb.scope.group');
+    case 'public':
+      return t('lab.pb.scope.public');
+    default:
+      return '';
+  }
+}
 
 /** 검색 줄 설명의 최대 글자 수. */
 export const PB_ROW_DESC_MAX = 160;
@@ -147,9 +162,17 @@ export function partbankTools(o: PartbankToolOpts): ToolDef[] {
     }
   };
 
-  const addCite = (row: SearchRow | Record<string, unknown>, kid: string | undefined, name: string | undefined, link: string | null) => {
+  /** 출처 칩의 이름표: 어디의 것인지(내 것 / 그룹 이름 / 공개)를 앞에 둔다. 모르면 빼고. */
+  const addCite = (
+    kid: string | undefined,
+    name: string | undefined,
+    link: string | null,
+    scope: PbScope | undefined,
+    group: string | null | undefined
+  ) => {
     if (!link || !o.cite) return undefined;
-    const label = `partbank: ${[kid, name].filter(Boolean).join(' ') || 'item'}`;
+    const where = scopeWord(scope, group);
+    const label = `partbank${where ? ` (${where})` : ''}: ${[kid, name].filter(Boolean).join(' ') || 'item'}`;
     const n = o.cite({ kind: 'web', label, target: link });
     return n || undefined;
   };
@@ -174,7 +197,7 @@ export function partbankTools(o: PartbankToolOpts): ToolDef[] {
       description: clip(item.description, PB_ROW_DESC_MAX),
       link,
     });
-    const n = addCite(row, kid, name, link);
+    const n = addCite(kid, name, link, scope, group);
     if (n) row.cite = n;
     return row;
   };
@@ -324,7 +347,9 @@ export function partbankTools(o: PartbankToolOpts): ToolDef[] {
         const item = isRecord(detail) && isRecord(detail.item) ? detail.item : isRecord(detail) ? detail : {};
         if (!scope && item.owner_is_me === true) scope = 'mine';
         const out = shapeDetail(item, a.type, id, scope, origin, gid);
-        const n = addCite(out, out.kid as string | undefined, out.name as string | undefined, out.link as string | null);
+        const group = scope === 'group' ? await groupName(gid) : null;
+        if (scope === 'group' && group) out.group = group;
+        const n = addCite(out.kid as string | undefined, out.name as string | undefined, out.link as string | null, scope, group);
         if (n) out.cite = n;
         for (const inc of a.include) {
           if (inc === 'stock') out.stock = shapeStock(await get(`/stock-box/by-resource/${a.type}/${id}`));

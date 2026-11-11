@@ -30,7 +30,8 @@ export type LabToolName = (typeof PARTBANK_TOOL_NAMES)[number] | (typeof WORKFLO
 /** 시스템 프롬프트 문단의 조각(design §7). 준 도구의 서비스 것만 넣는다(`labToolRules`). */
 export const LAB_TOOL_RULES = {
   partbank:
-    "partbank_* tools read the lab's partbank: where mine = the user's workspace, group = a shared group, public = the public registry.",
+    "partbank_* tools read the lab's partbank: where mine = the user's workspace, group = a shared group, public = the public registry. " +
+    "For every partbank item in your answer, say whose it is from its scope: mine, group (with the group's name) or public.",
   workflow:
     "workflow_* tools read the lab's Workflow server: the user's designs and their saved protocol notes, and " +
     "(workflow_get_method) summaries mined from published papers, which are not the lab's own protocol. They only add to " +

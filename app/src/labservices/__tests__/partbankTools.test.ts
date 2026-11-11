@@ -7,7 +7,7 @@ import { t } from '../../i18n/t';
 import { NetError } from '../../integrations/netIpc';
 import type { Source } from '../../assistant/sources';
 import { newRunState } from '../common';
-import { partbankTools, PB_SEQUENCE_MAX } from '../partbankTools';
+import { partbankTools, PB_SEQUENCE_MAX, scopeWord } from '../partbankTools';
 import { RESULT_MAX_CHARS } from '../shape';
 import { call, dataOf, fakeLab, oid, unfence } from './fakeLab';
 
@@ -66,7 +66,12 @@ describe('partbank_search_parts: where "all" goes through /search/global', () =>
     expect(rows[1].length).toBe(4200);
     expect(JSON.stringify(d)).not.toContain('ATGATG');
     expect(rows.every((r) => !('sequence' in r))).toBe(true);
-    expect(sources.map((s) => s.label)).toEqual(['partbank: KBp_aa0001 sfGFP mine', 'partbank: KBd_bb0002 GFP device', 'partbank: KBv_cc0003 GFP vector']);
+    // Each chip says whose the item is (real-app check, 2026-11-11).
+    expect(sources.map((s) => s.label)).toEqual([
+      'partbank (mine): KBp_aa0001 sfGFP mine',
+      'partbank (group Synbio team): KBd_bb0002 GFP device',
+      'partbank (public): KBv_cc0003 GFP vector',
+    ]);
     expect(rows.map((r) => r.cite)).toEqual([1, 2, 3]);
     expect(d.total).toBe(3);
     expect(d.more).toBeUndefined();
@@ -222,6 +227,25 @@ describe('partbank_lookup_part', () => {
     ]);
     expect(sent[0].body).toEqual({ query: 'KBp_aa0406', limit: 10, types: ['part'] });
     expect(d.link).toBe(`${ORIGIN}/workspace/parts/${oid(7)}`);
+  });
+
+  it("a group item's lookup names its group in the result and on the chip; the scope words follow the UI language", async () => {
+    const { tools, sources } = build({
+      'POST /search/global': { results: [{ id: oid(7), kid: 'KBp_aa0406', type: 'part', owner_is_me: false, group_id: G1 }] },
+      [`/parts/${oid(7)}`]: PART,
+      '/groups/': GROUPS,
+    });
+    const d = dataOf(await call(tools, 'partbank_lookup_part', { type: 'part', kid: 'KBp_aa0406' }));
+    expect(d).toMatchObject({ scope: 'group', group: 'Synbio team' });
+    expect(sources.map((s) => s.label)).toEqual(['partbank (group Synbio team): KBp_aa0406 sfGFP']);
+    setLang('ko');
+    expect([scopeWord('mine'), scopeWord('group', 'A'), scopeWord('group'), scopeWord('public'), scopeWord(undefined)]).toEqual([
+      '내 것',
+      '그룹 A',
+      '그룹',
+      '공개',
+      '',
+    ]);
   });
 
   it('a KID with no exact hit is notFound without a detail call', async () => {
