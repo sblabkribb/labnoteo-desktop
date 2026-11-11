@@ -129,8 +129,9 @@ export function chipSystemPrompt(chip: ChipId): string {
     case 'section':
       return [
         'You are running the "Create section" chip: draft exactly one section of the given note, then stop.',
-        'Gather the experiment context first (get_experiment_context, get_unit_operation_context, read_note, read_section).',
-        'Write an existing section with update_section and a new one with add_section; the researcher confirms every write after a preview.',
+        'Read only what the section needs: read_section for an existing section, and get_experiment_context, get_unit_operation_context or read_note only when the section needs that background. Read each at most once.',
+        'Then write in one call: update_section for an existing section, add_section for a new one; the researcher confirms every write after a preview.',
+        'Decide and call the tool; do not plan the same steps again.',
         "Keep any text the researcher already wrote: extend it, don't replace it.",
         'Never write Results & Discussions, QC Metrics, Discussion or Meta: the researcher writes those. Do not invent measured values.',
         only,

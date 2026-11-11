@@ -24,6 +24,7 @@ import {
   chipGate,
   chipLabel,
   chipRequest,
+  chipSystemPrompt,
   chipTools,
   chipUserLine,
   isWorkflowNotePath,
@@ -202,6 +203,15 @@ describe('builtinRuntime in chip mode', () => {
       expect(p.seen[0][0].content).toContain('chip');
     }
     expect(externalAgentTools).not.toHaveBeenCalled();
+  });
+
+  it('the section prompt does not make the model gather every context tool before it writes (real-app check)', () => {
+    // qwen3.6 looped for 300 s between "gather the context first" and "the section is new: add_section".
+    const prompt = chipSystemPrompt('section');
+    expect(prompt).not.toMatch(/Gather the experiment context first/);
+    expect(prompt).toContain('only when');
+    expect(prompt).toContain('one call');
+    expect(prompt).toContain('do not plan the same steps again');
   });
 
   it('the unitOp prompt leaves filling sections to the Create section chip', async () => {
