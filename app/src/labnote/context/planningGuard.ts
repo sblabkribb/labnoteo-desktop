@@ -211,6 +211,60 @@ const SECTION_HEADING_RE = /^####\s+(.+?)\s*#*\s*$/;
 const isBlank = (text: string): boolean => text.trim() === '';
 const sameHeading = (a: string, b: string): boolean => a.normalize('NFC').trimEnd() === b.normalize('NFC').trimEnd();
 
+/** A Markdown list item (`- x`, `* x`, `+ x`, `1. x`, `1) x`). */
+const LIST_ITEM_RE = /^\s{0,3}(?:[-*+]|\d+[.)])\s+\S/;
+/** A list marker, a task box and blockquote marks in front of a line. */
+const LINE_LEAD_RE = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/;
+/** A sample ID (`PRT-1`, `DNA-12-3`), lower-cased, as a line's head before ` — `. */
+const SAMPLE_ID_HEAD_RE = /^[a-z][a-z0-9_]*-\d+(?:-\d+)*$/;
+
+/** The comparison form of a line: no list marker or quote marks, spaces folded, lower case, NFC. */
+function lineKey(line: string): string {
+  return line.normalize('NFC').replace(LINE_LEAD_RE, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** The sample ID a line starts with (`- PRT-1 — name` and `- PRT-1` give `prt-1`), else undefined. */
+function idHead(key: string): string | undefined {
+  const at = key.indexOf(' — ');
+  const head = (at < 0 ? key : key.slice(0, at)).trim();
+  return SAMPLE_ID_HEAD_RE.test(head) ? head : undefined;
+}
+
+/**
+ * The lines of `body` that `existing` does not hold yet, compared by `lineKey` (and by sample ID for
+ * `ID — name` lines, so a prefilled Input is not listed again). Lines inside code fences are kept as
+ * they are; blank runs left by skipped lines fold to one. Empty when nothing is new.
+ */
+function newLines(body: string, existing: string): string {
+  const keys = new Set<string>();
+  const ids = new Set<string>();
+  for (const line of existing.split(/\r?\n/)) {
+    const key = lineKey(line);
+    if (key === '') continue;
+    keys.add(key);
+    const id = idHead(key);
+    if (id) ids.add(id);
+  }
+  const out: string[] = [];
+  let fence: OpenFence | null = null;
+  for (const line of body.split(/\r?\n/)) {
+    const next = stepFence(line, fence);
+    const inFence = fence !== null || next !== fence;
+    fence = next;
+    if (!inFence) {
+      const key = lineKey(line);
+      if (key === '') {
+        if (out.length > 0 && out[out.length - 1].trim() !== '') out.push(line);
+        continue;
+      }
+      const id = idHead(key);
+      if (keys.has(key) || (id !== undefined && ids.has(id))) continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
 interface Edit {
   start: number;
   end: number;
@@ -223,8 +277,10 @@ interface Edit {
  * `md` with the draft written into the planning sections of the unit op at
  * the 0-based `unitOpIndex`, or null when the heading there changed (the note
  * moved while the model answered). An empty or placeholder-only section is
- * replaced by the draft; after researcher text the draft is appended after a
- * blank line; a missing planning heading is inserted in template order.
+ * replaced by the draft; after researcher text only the drafted lines the
+ * section does not hold yet are appended (a list goes on as the same list,
+ * other text after a blank line; nothing when every line is there); a missing
+ * planning heading is inserted in template order.
  * With a `header` (the "Keep an AI-draft note in the file" setting) a replaced
  * or new section starts with a `> [!note] header` line and an appended draft
  * is an AI callout; with `header` null (the default, 2026-11-11) the draft
@@ -313,10 +369,15 @@ export function applyPlanningDraft(
           });
         }
       } else {
+        // Only the lines the section does not hold yet (real-server check, 2026-11-11).
+        const fresh = newLines(body, text);
+        if (fresh === '') continue;
+        // A list goes on as the same list; anything else starts after a blank line, in every section alike.
+        const joinList = header === null && LIST_ITEM_RE.test(lines[last].text) && LIST_ITEM_RE.test(fresh.split('\n')[0]);
         edits.push({
           start: lineEnd(last),
           end: lineEnd(last),
-          text: eol + eol + appended(body),
+          text: (joinList ? eol : eol + eol) + appended(fresh),
           rank,
         });
       }

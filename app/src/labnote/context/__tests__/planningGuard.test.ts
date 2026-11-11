@@ -456,7 +456,7 @@ describe('applyPlanningDraft without a header (default)', () => {
     expect(md).not.toContain('[!note]');
     expect(md).not.toContain('INVENTED');
     expect(sectionBody(md, 1, 'Input')).toBe('- PRT-1 — expression culture');
-    expect(sectionBody(md, 1, 'Reagent')).toBe('- IPTG 1 M stock (researcher)\n\n- LB medium (assumed)');
+    expect(sectionBody(md, 1, 'Reagent')).toBe('- IPTG 1 M stock (researcher)\n- LB medium (assumed)');
     expect(sectionBody(md, 1, 'Method')).toBe('1. Add IPTG\n2. Shake overnight');
     expect(md).toContain('- Shaker\n\n#### Parameters\n- Temperature: 18 °C\n\n#### Method\n');
     for (const name of ['Meta', 'Results & Discussions', 'Equipment']) expect(sectionSpan(md, 1, name)).toBe(sectionSpan(NOTE, 1, name));
@@ -473,6 +473,54 @@ describe('applyPlanningDraft without a header (default)', () => {
   it('a section that already holds an old marker-line draft counts as filled: the new draft is appended, the old one kept', () => {
     const old = applyPlanningDraft(NOTE, TARGET, new Map([['Method', '- old step']]), HEADER) as string;
     const md = applyPlanningDraft(old, TARGET, new Map([['Method', '- new step']]), null) as string;
-    expect(sectionBody(md, 1, 'Method')).toBe(`> [!note] ${HEADER}\n\n- old step\n\n- new step`);
+    expect(sectionBody(md, 1, 'Method')).toBe(`> [!note] ${HEADER}\n\n- old step\n- new step`);
+  });
+});
+
+// Real-server check (2026-11-11): a section that already had content got the same lines again (the prefilled
+// Input IDs, '- Thermal Cycler' in Equipment). The draft now adds only the lines that are not there yet.
+describe('applyPlanningDraft merges into a filled section', () => {
+  it('skips lines already in the section and continues the list with the new ones', () => {
+    const note = NOTE.replace('#### Equipment\n- Shaker', '#### Equipment\n- Shaker\n- Thermal Cycler');
+    const md = applyPlanningDraft(note, TARGET, new Map([['Equipment', '- Thermal Cycler\n-  shaker \n- Centrifuge']]), null) as string;
+    expect(sectionBody(md, 1, 'Equipment')).toBe('- Shaker\n- Thermal Cycler\n- Centrifuge');
+  });
+
+  it('leaves the section as it is when every drafted line is already there', () => {
+    const md = applyPlanningDraft(NOTE, TARGET, new Map([['Reagent', '* IPTG 1 M stock (researcher)']]), null) as string;
+    expect(md).toBe(NOTE);
+  });
+
+  it('does not repeat prefilled Input IDs, with or without their registry names', () => {
+    const note = NOTE.replace(`#### Input\n${HW_PLACEHOLDERS.Input}\n\n#### Reagent`, '#### Input\n- PRT-1 — expression culture\n- PRT-2\n\n#### Reagent');
+    const md = applyPlanningDraft(
+      note,
+      TARGET,
+      new Map([['Input', '- PRT-1\n- PRT-2 — lysate\n- LB medium 1 L']]),
+      null
+    ) as string;
+    expect(sectionBody(md, 1, 'Input')).toBe('- PRT-1 — expression culture\n- PRT-2\n- LB medium 1 L');
+  });
+
+  it('every section appends the same way: list after list without a gap, other text after a blank line', () => {
+    const note = NOTE.replace('#### Method\n\n#### Output', '#### Method\nMix gently.\n\n#### Output');
+    const md = applyPlanningDraft(
+      note,
+      TARGET,
+      new Map([
+        ['Reagent', '- LB medium'],
+        ['Equipment', '- Incubator'],
+        ['Method', '1. Mix gently.\n2. Add IPTG'],
+      ]),
+      null
+    ) as string;
+    expect(sectionBody(md, 1, 'Reagent')).toBe('- IPTG 1 M stock (researcher)\n- LB medium');
+    expect(sectionBody(md, 1, 'Equipment')).toBe('- Shaker\n- Incubator');
+    expect(sectionBody(md, 1, 'Method')).toBe('Mix gently.\n\n2. Add IPTG');
+  });
+
+  it('with the kept AI-draft note the callout holds only the new lines', () => {
+    const md = applyPlanningDraft(NOTE, TARGET, new Map([['Reagent', '- IPTG 1 M stock (researcher)\n- LB medium']]), HEADER) as string;
+    expect(sectionBody(md, 1, 'Reagent')).toBe(`- IPTG 1 M stock (researcher)\n\n> [!note] ${HEADER}\n> - LB medium`);
   });
 });
