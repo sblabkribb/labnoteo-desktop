@@ -573,6 +573,7 @@ describe('builtinRuntime', () => {
     ]);
     const ext: ToolDef = {
       name: 'mcp_rapid_search_parts',
+      mutates: false,
       description: 'search parts',
       inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
       handler: async () => ({ ok: true, data: '[]' }),
