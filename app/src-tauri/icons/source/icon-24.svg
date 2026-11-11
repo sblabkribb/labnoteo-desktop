@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- labnoteO app icon, 24 px master (20, 24, 30, 36, 40 px). One unit = one pixel at 24 px. -->
+  <path d="M3 2 H20 Q23 2 23 5 V21 Q23 24 20 24 H3 Z" fill="#9b8cc4"/>
+  <path d="M3 2 H19 Q22 2 22 5 V20 Q22 23 19 23 H3 Z" fill="#ece8f4"/>
+  <rect x="1" y="0" width="19" height="22" rx="2.5" fill="#472c7b"/>
+  <path d="M3.5 0 H5 V22 H3.5 Q1 22 1 19.5 V2.5 Q1 0 3.5 0 Z" fill="#83ccd2"/>
+  <rect x="10" y="3" width="5" height="2" rx="0.5" fill="#ffffff"/>
+  <path d="M11 5 H14 V9 L18 18 Q18.5 19 17.5 19 H7.5 Q6.5 19 7 18 L11 9 Z" fill="#ffffff"/>
+  <path d="M8.778 14 H16.222 L18 18 Q18.5 19 17.5 19 H7.5 Q6.5 19 7 18 Z" fill="#83ccd2"/>
+</svg>
