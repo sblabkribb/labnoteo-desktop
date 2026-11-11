@@ -111,6 +111,31 @@ describe('draftMethodCommand (#112)', () => {
     expect(currentDialog()).toBeNull();
   });
 
+  it("sends the Unit Operation's and the Workflow's catalog descriptions with the request, and never seeds a missing catalog", async () => {
+    const meta = (key: string, list: unknown[]) => JSON.stringify({ version: '1', language: 'English', lastUpdated: '2026-11-11', [key]: list });
+    const th = host({
+      [NOTE]: BODY,
+      'resources/workflows/workflows_en.json': meta('workflows', [{ id: 'WD010', name: 'Design', category: 'Design', description: 'CAT-WF designs' }]),
+      'resources/workflows/unitoperations_hw_en.json': meta('unitOperations', [
+        { id: 'UHW010', name: 'Liquid Handling', description: 'CAT-UO moves liquids', equipment: 'Pipette robot' },
+      ]),
+    });
+    await mountAt(th, NOTE, IN_METHOD);
+    const { f, env } = aiEnv(th, () => reply('1. 원심분리'));
+    await draftMethodCommand(env);
+    const user = sent(f)[0].find((m) => m.role === 'user')!.content;
+    expect(user).toContain('CAT-WF designs');
+    expect(user).toContain('CAT-UO moves liquids');
+    expect(user).toContain('equipment: Pipette robot');
+
+    const bare = host({ [OTHER]: BODY });
+    await mountAt(bare, OTHER, IN_METHOD);
+    const b = aiEnv(bare, () => reply('1. 원심분리'));
+    await draftMethodCommand(b.env);
+    expect(sent(b.f)[0].find((m) => m.role === 'user')!.content).not.toContain('Catalog description');
+    expect(await bare.host.fs.exists('resources/workflows/workflows_en.json')).toBe(false);
+  });
+
   it('writes the draft without moving the cursor and notifies', async () => {
     const th = host({ [NOTE]: BODY });
     await mountAt(th, NOTE, IN_METHOD);

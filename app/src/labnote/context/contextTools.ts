@@ -12,7 +12,15 @@ import type { SearchResults } from '../../search/indexApi';
 import { KOREAN_TERMS_INSTRUCTION } from '../port/aiCommon';
 import { experimentReadmes } from '../port/experiments';
 import { buildChain, canonicalSection, MAX_FILE_BYTES, MAX_WORKFLOW_FILES, previousUnitOp, type UnitOpNode } from './chain';
-import { buildContext, catalogFromTools, registryAliases, renderContext, type BuildInput, type BuiltContext } from './contextBuilder';
+import {
+  buildContext,
+  catalogFromTools,
+  registryAliases,
+  renderContext,
+  workflowCatalogFromTools,
+  type BuildInput,
+  type BuiltContext,
+} from './contextBuilder';
 import { draftableSections, PLANNING_RULES } from './planningPrompt';
 import { prefillInput } from './prefill';
 import { assertInScope, experimentFolderOf, findExperiment, resolveScope, ScopeError, type ExperimentRef, type Scope } from './scope';
@@ -470,6 +478,7 @@ function buildInput(ctx: ScopedToolContext, scope: Scope, args: Record<string, u
     customTypes: ctx.customTypes,
     globalSampleFolder: ctx.globalSampleFolder,
     catalog: catalogFromTools(ctx),
+    workflowCatalog: workflowCatalogFromTools(ctx),
   };
 }
 

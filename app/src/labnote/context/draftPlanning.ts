@@ -19,7 +19,7 @@ import { overrideOr } from '../i18n';
 import { LLM_CONTEXT_WINDOW_DEFAULT } from '../settings';
 import { contextBudget } from './budget';
 import { buildChain, previousUnitOp, unitOpAtLine, type ExperimentChain, type UnitOpNode } from './chain';
-import { buildContext, catalogFromTools, registryAliases, type BuiltContext } from './contextBuilder';
+import { buildContext, catalogFromTools, registryAliases, workflowCatalogFromTools, type BuiltContext } from './contextBuilder';
 import { applyPlanningDraft, parsePlanningReply } from './planningGuard';
 import { buildPlanningMessages, draftableSections } from './planningPrompt';
 import { applyPrefill, prefillInput, type PrefillResult } from './prefill';
@@ -193,6 +193,7 @@ export async function draftPlanningCommand(deps: DraftDeps): Promise<void> {
       customTypes,
       globalSampleFolder: env.sampleEnv().globalFolder(),
       catalog: catalogFromTools(toolContext(env, { scope: at.scope })),
+      workflowCatalog: workflowCatalogFromTools(toolContext(env, { scope: at.scope })),
     });
   } catch (err) {
     if (!(err instanceof ScopeError)) throw err;

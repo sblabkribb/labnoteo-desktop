@@ -10,7 +10,7 @@ export type SourceReason = 'default' | 'user' | 'trimmed';
 export interface ContextSource {
   /**
    * Stable id: 'readme:goal', 'wf:<path>', 'uo:<path>#<i>', 'uo:<path>#<i>:results',
-   * 'sample:<type>:<id>', 'catalog:<opId>', 'target', 'target:input-prefill', 'named:<folder>'.
+   * 'sample:<type>:<id>', 'catalog:<opId>', 'catalog:wf:<workflowId>', 'target', 'target:input-prefill', 'named:<folder>'.
    */
   id: string;
   kind: SourceKind;

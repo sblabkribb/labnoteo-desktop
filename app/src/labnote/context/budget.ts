@@ -201,7 +201,8 @@ function rankOf(s: ContextSource): number {
     case 'sample':
       return 4;
     case 'catalog':
-      return 5;
+      // The target's Workflow definition is a few lines and says what the step is for: kept with the goal.
+      return s.id.startsWith('catalog:wf:') ? 2 : 5;
     case 'workflow':
       return 6;
     case 'named':

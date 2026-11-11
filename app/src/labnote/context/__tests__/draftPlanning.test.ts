@@ -246,6 +246,36 @@ describe('draftPlanningCommand', () => {
     expect(userText(p)).toContain('[UHW030 Induction]');
   });
 
+  it("offers the Workflow's and the Unit Operation's catalog descriptions (ticked) and sends them with the request", async () => {
+    const files = {
+      ...vault(),
+      'resources/workflows/workflows_en.json': JSON.stringify({
+        version: '1',
+        language: 'English',
+        lastUpdated: '2026-11-11',
+        workflows: [{ id: 'WB030', name: 'Protein Expression', category: 'Build', description: 'CATALOG-WF expresses a protein in E. coli' }],
+      }),
+      'resources/workflows/unitoperations_hw_en.json': JSON.stringify({
+        version: '1',
+        language: 'English',
+        lastUpdated: '2026-11-11',
+        unitOperations: [{ id: 'UHW030', name: 'Induction', description: 'CATALOG-UO induces expression', equipment: 'Shaking incubator' }],
+      }),
+    };
+    const { th } = await setup(files, WF2, IN_TARGET);
+    const p = fakeProvider(PLANNING_REPLY);
+    const d = deps(envWith(th, p));
+    await draftPlanningCommand(d);
+    const sources = d.picked[0].model.sources;
+    const wf = sources.find(s => s.id === 'catalog:wf:WB030');
+    const uo = sources.find(s => s.id === 'catalog:UHW030');
+    expect(wf).toMatchObject({ kind: 'catalog', included: true, required: false });
+    expect(uo).toMatchObject({ kind: 'catalog', included: true });
+    expect(uo!.text).toContain('equipment: Shaking incubator');
+    expect(userText(p)).toContain('CATALOG-WF expresses a protein');
+    expect(userText(p)).toContain('CATALOG-UO induces expression');
+  });
+
   it('passes the window from settings to pickSources and the picked window to provider.chat', async () => {
     const { th } = await setup(vault(), WF2, IN_TARGET);
     const p = fakeProvider(PLANNING_REPLY);

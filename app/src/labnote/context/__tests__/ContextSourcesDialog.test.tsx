@@ -65,6 +65,8 @@ describe('ContextSourcesDialog', () => {
     const labelOf = (id: string) => rowOf(id).querySelector('label > span > span')!.textContent;
     expect(labelOf(prefill.id)).toBe(`${prefill.label} › ${t('aiCtx.sources.previousOutput')}`);
     expect(labelOf(own.id)).toBe(own.label);
+    const cat = built.sources.find(s => s.kind === 'catalog')!;
+    expect(labelOf(cat.id)).toBe(`${cat.label} › ${t('aiCtx.sources.catalog')}`);
     const labels = built.sources.map(s => labelOf(s.id));
     expect(new Set(labels).size).toBe(labels.length);
   });

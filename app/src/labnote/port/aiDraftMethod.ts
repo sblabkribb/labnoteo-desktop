@@ -1,7 +1,7 @@
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:366-486 sha256:b4ab1d6e9c256aee
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:740-749 sha256:f38a6737dcd7e8bd
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); the Notices → env.host.notify ('info' for "Open a note…", "This workflow note has no unit operation yet…" (an 8 s Notice) and "The cursor was above…"); getSeoulDateString comes from core (@labnoteo/core/lib/dateUtils); 'Configure an AI provider in settings first.' (createLlmProvider(plugin.settings) is null) → env.provider is null → notify('info', overrideOr('ai.configureFirst')) (D21), before any question; noteRef(plugin, path) → noteRef(env, path), whose rename subscription is released on every early return (a closed pick, a declined confirm, no reply) and otherwise by deliverToNote; complete returns a ChatResult, so its content is read off it; complete, deliverToNote, writeMethodDraft and unitOpContext come from port/aiCommon.ts (Task 31). The prompts, the 6000 / 2000 / 4000 caps and the callout header are the vendor's; the free-note user message is joined with '\n' instead of one template (src/__tests__/escapes.test.ts reads "Context:" followed by an escape as a drive path); the string is the same; for the same reason the unit operation's heading is read into a constant before the template. toNoteCallout (vendor :744) is copied here as well, exported for the summary commands (Task 33). 2026-11-11 (user decision): the callout header goes into the note only when the vault setting aiDraftNoteInFile is on (keepDraftNote); by default the draft goes in as plain content (neutralised) and the open editor highlights the inserted lines until they are reviewed (withAiDraftReview, editor/live/aiDraftReview.ts), which is never written to the file.
+// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); the Notices → env.host.notify ('info' for "Open a note…", "This workflow note has no unit operation yet…" (an 8 s Notice) and "The cursor was above…"); getSeoulDateString comes from core (@labnoteo/core/lib/dateUtils); 'Configure an AI provider in settings first.' (createLlmProvider(plugin.settings) is null) → env.provider is null → notify('info', overrideOr('ai.configureFirst')) (D21), before any question; noteRef(plugin, path) → noteRef(env, path), whose rename subscription is released on every early return (a closed pick, a declined confirm, no reply) and otherwise by deliverToNote; complete returns a ChatResult, so its content is read off it; complete, deliverToNote, writeMethodDraft and unitOpContext come from port/aiCommon.ts (Task 31). The prompts, the 6000 / 2000 / 4000 caps and the callout header are the vendor's; the free-note user message is joined with '\n' instead of one template (src/__tests__/escapes.test.ts reads "Context:" followed by an escape as a drive path); the string is the same; for the same reason the unit operation's heading is read into a constant before the template. toNoteCallout (vendor :744) is copied here as well, exported for the summary commands (Task 33). 2026-11-11 (user decision): the unit-operation request also carries the catalog description and equipment/software of the Unit Operation and its Workflow (catalogBrief, read only), so a draft matches what the step does. 2026-11-11 (user decision): the callout header goes into the note only when the vault setting aiDraftNoteInFile is on (keepDraftNote); by default the draft goes in as plain content (neutralised) and the open editor highlights the inserted lines until they are reviewed (withAiDraftReview, editor/live/aiDraftReview.ts), which is never written to the file.
 import {
   cleanMethodDraft,
   extractMethodBody,
@@ -17,7 +17,8 @@ import type { AiEnv } from '../../ai/aiEnv';
 import { markAiDraft } from '../../editor/live/aiDraftReview';
 import { overrideOr } from '../i18n';
 import { openNote } from '../openNotes';
-import { complete, deliverToNote, noteRef, replyLanguageInstruction, unitOpContext, writeMethodDraft } from './aiCommon';
+import { catalogBrief } from '../context/contextBuilder';
+import { complete, deliverToNote, noteRef, replyLanguageInstruction, toolContext, unitOpContext, writeMethodDraft } from './aiCommon';
 
 /**
  * Draft a Method section. Inside a unit operation the draft replaces that unit
@@ -116,6 +117,12 @@ export async function draftMethodCommand(env: AiEnv): Promise<void> {
 
     const chosenLoc = loc;
     const heading = chosenLoc.unitOpHeading.replace(/^###\s+/, '');
+    let catalog = '';
+    try {
+      catalog = await catalogBrief(toolContext(env), target.path.split('/').pop() ?? '', chosenLoc.unitOpHeading);
+    } catch {
+      // A catalog that cannot be read leaves the request as it was.
+    }
     const out = await complete(env, [
       {
         role: 'system',
@@ -125,7 +132,7 @@ export async function draftMethodCommand(env: AiEnv): Promise<void> {
       },
       {
         role: 'user',
-        content: `Draft the Method body for the unit operation "${heading}".\n\n${unitOpContext(text, chosenLoc)}`,
+        content: `Draft the Method body for the unit operation "${heading}".\n\n${unitOpContext(text, chosenLoc)}${catalog ? `\n\n${catalog}` : ''}`,
       },
     ]);
     if (!out) return;

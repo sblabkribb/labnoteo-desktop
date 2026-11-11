@@ -14,7 +14,7 @@ import {
   type UnitOpNode,
   type WorkflowNode,
 } from '../context/chain';
-import { buildContext, catalogFromTools, registryAliases, renderContext, type BuildInput } from '../context/contextBuilder';
+import { buildContext, catalogFromTools, registryAliases, renderContext, workflowCatalogFromTools, type BuildInput } from '../context/contextBuilder';
 import {
   folderKey,
   MAX_TOKENS_DEFAULT,
@@ -66,6 +66,7 @@ function buildInput(ctx: ScopedToolContext, scope: Scope): Omit<BuildInput, 'tar
     customTypes: ctx.customTypes,
     globalSampleFolder: ctx.globalSampleFolder,
     catalog: catalogFromTools(ctx),
+    workflowCatalog: workflowCatalogFromTools(ctx),
   };
 }
 

@@ -49,9 +49,15 @@ const issueText = (i: ChainIssue): string =>
 
 /**
  * The row label. The Input prefill is labelled by the unit op whose Output it carries, which also has its own row,
- * so it says what it is (real-server check, 2026-11-11: two rows read the same).
+ * so it says what it is (real-server check, 2026-11-11: two rows read the same). A catalog row says it is the catalog
+ * description (what the Workflow tab shows), not a note.
  */
-const rowLabel = (s: ContextSource): string => (s.kind === 'prefill' ? `${s.label} › ${t('aiCtx.sources.previousOutput')}` : s.label);
+const rowLabel = (s: ContextSource): string =>
+  s.kind === 'prefill'
+    ? `${s.label} › ${t('aiCtx.sources.previousOutput')}`
+    : s.kind === 'catalog'
+      ? `${s.label} › ${t('aiCtx.sources.catalog')}`
+      : s.label;
 
 function SourceRow(props: { source: ContextSource; onToggle: (on: boolean) => void }) {
   const s = props.source;

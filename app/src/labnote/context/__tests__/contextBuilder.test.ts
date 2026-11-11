@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { MemFileSystem, type LabnoteFs } from '@labnoteo/core';
-import { buildContext, catalogFromTools, renderContext, MAX_SAMPLE_SOURCES, type BuildInput } from '../contextBuilder';
+import { ensureWorkflowResources } from '@labnoteo/core/lib/workflowDataLoader';
+import {
+  buildContext,
+  catalogFromTools,
+  renderContext,
+  MAX_SAMPLE_SOURCES,
+  workflowCatalogFromTools,
+  workflowIdOf,
+  type BuildInput,
+} from '../contextBuilder';
+import { applyBudget } from '../budget';
 import type { Scope } from '../scope';
 import type { ContextSource } from '../types';
 import {
@@ -419,6 +429,37 @@ describe('buildContext: exclude, budget and caps', () => {
     expect(calls).toContain('UHW030');
   });
 
+  it("offers the target Workflow's catalog description, ticked and not required, before the Unit Operation catalog", async () => {
+    const asked: string[] = [];
+    const ctx = await build({
+      workflowCatalog: async id => {
+        asked.push(id);
+        return id === 'WB010' ? { name: 'Cloning', category: 'Build', description: 'Clone a DNA part into a vector' } : undefined;
+      },
+    });
+    expect(asked).toEqual(['WB010']);
+    const wf = byId(ctx.sources, 'catalog:wf:WB010');
+    expect(wf).toMatchObject({ kind: 'catalog', label: 'WB010 Cloning', required: false, included: true });
+    expect(wf.text).toBe('Workflow WB010 Cloning\ncategory: Build\ndescription: Clone a DNA part into a vector');
+    expect(wf.tokens).toBeLessThan(40);
+    const ids = ctx.sources.map(s => s.id);
+    expect(ids.indexOf('catalog:wf:WB010')).toBeLessThan(ids.indexOf('catalog:UHW020'));
+    expect(renderContext(ctx)).toContain('<<source id="catalog:wf:WB010">>');
+    expect(byId(await build({ workflowCatalog: async () => undefined }).then(c => c.sources), 'catalog:UHW020')).toBeTruthy();
+    expect((await build()).sources.some(s => s.id.startsWith('catalog:wf:'))).toBe(false);
+    expect((await build({ target: undefined, workflowCatalog: async () => ({ name: 'x' }) })).sources.some(s => s.id.startsWith('catalog:wf:'))).toBe(false);
+  });
+
+  it('keeps the Workflow catalog source with the goal when the budget is tight, and the user can untick it', async () => {
+    const full = await build({ workflowCatalog: async () => ({ name: 'Cloning', description: 'Clone' }) });
+    const wfTokens = byId(full.sources, 'catalog:wf:WB010').tokens;
+    const required = full.sources.filter(s => s.required).reduce((n, s) => n + s.tokens, 0);
+    const tight = applyBudget(full.sources, required + wfTokens + 5, () => undefined);
+    expect(byId(tight.sources, 'catalog:wf:WB010').included).toBe(true);
+    const off = await build({ workflowCatalog: async () => ({ name: 'Cloning' }), exclude: ['catalog:wf:WB010'] });
+    expect(byId(off.sources, 'catalog:wf:WB010')).toMatchObject({ included: false, reason: 'user' });
+  });
+
   it('survives a catalog that throws', async () => {
     const ctx = await build({
       catalog: async () => {
@@ -439,6 +480,27 @@ describe('catalogFromTools', () => {
     expect(def?.name).toBeTruthy();
     expect(typeof def?.description).toBe('string');
     expect(await catalog('ZZZ999')).toBeUndefined();
+  });
+});
+
+describe('workflowCatalogFromTools', () => {
+  it('reads the vault Workflow catalog by id, case-insensitively, and never seeds a missing one', async () => {
+    const fs = new MemFileSystem({});
+    const lookup = workflowCatalogFromTools({ fs, workspaceRoot: '.' });
+    expect(await lookup('WB030')).toBeUndefined();
+    expect(await fs.exists('resources/workflows/workflows_en.json')).toBe(false);
+    await ensureWorkflowResources(fs, '.');
+    const def = await lookup('wb030');
+    expect(def?.name).toBeTruthy();
+    expect(def?.description).toBeTruthy();
+    expect(def?.category).toBeTruthy();
+    expect(await lookup('WZ999')).toBeUndefined();
+  });
+
+  it('workflowIdOf reads the code of a workflow note name', () => {
+    expect(workflowIdOf('001_WB010_Cloning.labnote.md')).toBe('WB010');
+    expect(workflowIdOf('002_wd020_x.md')).toBe('WD020');
+    expect(workflowIdOf('README.labnote.md')).toBeUndefined();
   });
 });
 
