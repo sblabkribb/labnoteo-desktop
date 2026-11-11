@@ -28,6 +28,7 @@ import {
   EARLIER_UNTRUSTED_RULES,
   noticeTranslator,
   PARTBANK_RULES,
+  tidyAnswer,
   RECHECK_NOTE,
   ungroundedIds,
   STATUS_TITLE_MAX,
@@ -518,6 +519,25 @@ describe('builtinRuntime', () => {
     const { rt } = await setup(p);
     const r = await rt.run(turnOf('목록 보여줘'), recordSink().sink, go());
     expect(r.content).toBe('내 Workflow 디자인: A');
+  });
+
+  it('[cite:n] becomes the [n] of a source chip, and fence ids and fence talk are taken out of the answer', async () => {
+    const p = new Script([
+      toolTurn('read_note', { path: NOTE }),
+      answer('메모가 있어요 [cite:1]. 이 내용은 <untrusted-data> 블록(id: 0123456789ab)에서 왔어요.\n다음 단계는 PCR 이에요.'),
+    ]);
+    const { rt } = await setup(p);
+    const r = await rt.run(turnOf('메모 요약해 줘'), recordSink().sink, go());
+    expect(r.content).toBe('메모가 있어요 [1].\n다음 단계는 PCR 이에요.');
+    expect(r.sources).toHaveLength(1);
+  });
+
+  it('tidyAnswer keeps ordinary text, uuids and real [n] as they are', () => {
+    const plain = 'Design 7f3a9c21-b04e-4c3d-9a1b-0123456789ab has 3 parts [2].';
+    expect(tidyAnswer(plain)).toBe(plain);
+    expect(tidyAnswer('see [cite: 2, 3] and (cite:4)')).toBe('see [2][3] and [4]');
+    expect(tidyAnswer('From the result (fence id="0123456789ab"): GFP.')).toBe('From the result: GFP.');
+    expect(tidyAnswer('The untrusted-data block says nothing. GFP is KBp_1.')).toBe('GFP is KBp_1.');
   });
 
   it('a clean history does not taint the run', async () => {

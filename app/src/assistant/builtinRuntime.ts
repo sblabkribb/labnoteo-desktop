@@ -134,6 +134,47 @@ export const ANSWER_FORM_RULES =
   'Write citations only as [n]; never write [cite:n], "cite" fields, tool names or JSON. Never mention data blocks, ' +
   'untrusted-data tags, fences or their ids in your answer.';
 
+/** 울타리 이야기(태그 이름, 울타리 id)가 든 문장. */
+const FENCE_TALK = /untrusted[-_ ]?data|fence\s*id|울타리/i;
+/** 베낀 울타리 태그 그 자체(속성이 있거나 닫는 태그): 이야기가 아니라 `stripFenceTags` 가 지운다. */
+const ECHOED_TAG = /<\s*\/\s*untrusted[-_]data\b[^>\n]*>|<\s*untrusted[-_]data\b[^>\n]*\b(?:source|id)\s*=[^>\n]*>/gi;
+const talksAboutFences = (s: string): boolean => FENCE_TALK.test(s.replace(ECHOED_TAG, ''));
+
+/**
+ * 보이고 저장되는 답을 다듬는다(real-app check, 2026-11-11): 베낀 울타리 태그를 지우고(`stripFenceTags`), `[cite:n]`·
+ * `(cite: n)` 꼴은 출처 칩이 되는 `[n]` 으로 바꾸고, 울타리 id(`id="0123456789ab"`, `(id: …)`)와 울타리를 말하는
+ * 문장은 뺀다. 다른 글은 그대로 둔다.
+ */
+export function tidyAnswer(text: string): string {
+  // 1. Echoed fence tags (with attributes, or closing) go first, as stripFenceTags would take them.
+  let out = text.replace(new RegExp(`${ECHOED_TAG.source}[ \t]*\r?\n?`, 'gi'), '');
+  // 2. Fence ids and source attributes mentioned in prose.
+  out = out.replace(/\s*\bsource\s*=\s*"[^"\n]*"/gi, '');
+  out = out.replace(/\s*[([]\s*(?:fence\s+|block\s+)?id\s*[:=]?\s*["'`]?[0-9a-f]{12}["'`]?\s*[)\]]/gi, '');
+  out = out.replace(/\s*(?:fence\s+|block\s+)?\bid\s*[:=]\s*["'`]?[0-9a-f]{12}\b["'`]?/gi, '');
+  // 3. Sentences that talk about the fences.
+  out = out
+    .split('\n')
+    .map((line) => {
+      if (!talksAboutFences(line)) return line;
+      return line
+        .split(/(?<=[.!?。])\s+/)
+        .filter((sentence) => !talksAboutFences(sentence))
+        .join(' ');
+    })
+    .join('\n');
+  // 4. Any tag left, then [cite:n] → [n].
+  out = stripFenceTags(out);
+  out = out.replace(/[[(（【]\s*cite\s*[:：#]?\s*(\d+(?:\s*[,，]\s*\d+)*)\s*[\])）】]/gi, (_m, nums: string) =>
+    nums
+      .split(/\s*[,，]\s*/)
+      .map((n) => `[${n}]`)
+      .join('')
+  );
+  out = out.replace(/\n{3,}/g, '\n\n');
+  return out === text ? text : out.trim();
+}
+
 const PARTBANK_LOCAL_RULES =
   "list_samples, search_samples and get_sample read only this vault's local sample registry, not partbank. " +
   'Never claim that partbank has or lacks a part. If you look in the local sample registry instead, say that it is the local registry.';
@@ -695,15 +736,16 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     // bubble) and asked once more with a stronger note; the second answer stands either way.
     if (earlier.taintedReplies && outsideTools && run.executed.length === 0 && !run.stoppedAtLimit) {
       const ground = [turn.summary ?? '', ...earlier.messages.map((m) => m.content), turn.userText].join('\n');
-      if (ungroundedIds(stripFenceTags(run.content), ground).length > 0) {
+      if (ungroundedIds(tidyAnswer(run.content), ground).length > 0) {
         sink.reset?.();
         state('think');
         run = await runAgent([...messages.slice(0, -1), { role: 'user', content: `${turn.userText}\n\n${RECHECK_NOTE}` }], agentDeps);
       }
     }
 
-    // real-server check (2026-11-11): the model sometimes echoed fence tags; they are never shown or saved.
-    const answerText = stripFenceTags(run.content);
+    // real-server check (2026-11-11): the model sometimes echoed fence tags, wrote [cite:n] or talked about fence ids;
+    // none of that is shown or saved, and [cite:n] becomes the [n] the source chips read.
+    const answerText = tidyAnswer(run.content);
 
     // 끝 알림은 그릴 때마다 지금 언어로 다시 만든다(언어를 바꾸면 지난 답의 알림도 따라 바뀐다, Visual QA)
     const noticeEnv: AiEnv = { ...env, host: { ...env.host, t: noticeTranslator(env.host.t) } };
