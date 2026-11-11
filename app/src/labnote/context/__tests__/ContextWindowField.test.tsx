@@ -24,6 +24,17 @@ function mount(value: number) {
 const select = () => screen.getByLabelText(t('aiCtx.window.label')) as HTMLSelectElement;
 const custom = () => screen.queryByLabelText(t('aiCtx.window.customLabel')) as HTMLInputElement | null;
 
+describe('ContextWindowField layout', () => {
+  it('the select sits in a select-field like the other settings controls, and the custom value has its own row (visual QA)', () => {
+    mount(12345);
+    const wrap = select().parentElement!;
+    expect(wrap.classList.contains('select-field')).toBe(true);
+    expect(wrap.parentElement!.classList.contains('integration-field')).toBe(true);
+    // the custom input is not a second right-column control competing with the select
+    expect(custom()!.parentElement!.classList.contains('integration-field-sub')).toBe(true);
+  });
+});
+
 describe('windowSetting', () => {
   it('parses and clamps a typed value', () => {
     expect(parseWindowInput('4096')).toBe(4096);

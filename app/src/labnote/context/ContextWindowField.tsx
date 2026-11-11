@@ -3,6 +3,7 @@
 // live in windowSetting.ts.
 import { useId, useRef, useState } from 'react';
 import { t } from '../../i18n/t';
+import { SelectField } from '../../ui/SelectField';
 import { WINDOW_PRESETS } from './sourcesModel';
 import { isPresetWindow, parseWindowInput } from './windowSetting';
 
@@ -62,16 +63,16 @@ export function ContextWindowField(props: ContextWindowFieldProps) {
       <label className="prompt-question" htmlFor={`${id}-window`}>
         {t('aiCtx.window.label')}
       </label>
-      <select id={`${id}-window`} value={custom ? CUSTOM : String(selected)} onChange={(e) => onSelect(e.currentTarget.value)}>
+      <SelectField id={`${id}-window`} value={custom ? CUSTOM : String(selected)} onChange={(e) => onSelect(e.currentTarget.value)}>
         {WINDOW_PRESETS.map((n) => (
           <option key={n} value={String(n)}>
             {t('aiCtx.sources.windowOption', String(n))}
           </option>
         ))}
         <option value={CUSTOM}>{t('aiCtx.window.custom')}</option>
-      </select>
+      </SelectField>
       {custom ? (
-        <>
+        <div className="integration-field-sub">
           <label className="prompt-question" htmlFor={`${id}-custom`}>
             {t('aiCtx.window.customLabel')}
           </label>
@@ -94,7 +95,7 @@ export function ContextWindowField(props: ContextWindowFieldProps) {
               }
             }}
           />
-        </>
+        </div>
       ) : null}
       {invalid ? <p className="prompt-hint warn">{t('aiCtx.window.invalid')}</p> : null}
       <p className="prompt-hint">{t('aiCtx.window.hint')}</p>

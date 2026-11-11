@@ -93,6 +93,9 @@
 .integration-group { display: flex; flex-direction: column; gap: var(--space-4); }
 .integration-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .integration-field input[type="text"], .integration-field input[type="password"] { width: 100%; box-sizing: border-box; }
+/* 한 칸 안의 덧붙은 줄(컨텍스트 창의 직접 입력): 이름은 왼쪽, 칸은 오른쪽 */
+.integration-field-sub { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.integration-field-sub > input[type="text"] { width: 16rem; }
 .integration-key-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
 .integration-key-state { color: var(--text-muted); font-size: 0.93em; }
 .integration-key-state.set { color: var(--text); font-weight: 600; }
@@ -388,7 +391,8 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .settings-page .integration-field > [role="alert"],
 .settings-page .integration-field > .warn,
 .settings-page .integration-field > .integration-allow,
-.settings-page .integration-field > .switch-label { grid-column: 1 / -1; }
+.settings-page .integration-field > .switch-label,
+.settings-page .integration-field > .integration-field-sub { grid-column: 1 / -1; }
 .settings-page .integration-key-row { flex-wrap: nowrap; }
 /* 설정 줄에서는 키 상태를 이름 바로 옆의 작은 꼬리표로: 왼쪽 칸 가운데에 뜨지 않게 */
 .settings-page .integration-key-head { justify-content: flex-start; align-items: center; gap: var(--space-3); }

@@ -14,6 +14,11 @@ const decl = (selector: string, prop: string) =>
     .map((d) => d.value);
 
 describe('settings rows', () => {
+  it('a sub-row (the custom context window) spans the field and keeps its input at the end (visual QA)', () => {
+    expect(decl('.settings-page .integration-field > .integration-field-sub', 'grid-column')).toEqual(['1 / -1']);
+    expect(decl('.integration-field-sub', 'justify-content')).toEqual(['space-between']);
+  });
+
   it('the control group wraps and may shrink, aligned to the end', () => {
     expect(decl('.setting-control', 'flex-wrap')).toEqual(['wrap']);
     expect(decl('.setting-control', 'flex')).toEqual(['0 1 auto']);
