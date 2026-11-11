@@ -79,6 +79,7 @@ export async function confirmAndInstall(
   const drop = () => discardStagedSkin(staged.stagingId, invoke).catch(() => undefined);
   const { manifest } = staged;
   const ok = await confirmDialog(t('skin.installConfirm', manifest.name, manifest.author, manifest.licence), {
+    title: t('skin.install.title'),
     confirmLabel: t('skin.import.install'),
   });
   if (!ok) {
@@ -91,7 +92,10 @@ export async function confirmAndInstall(
       installed = await installSkin(staged.stagingId, false, invoke);
     } catch (e) {
       if (toSkinError(e).kind !== 'exists') throw e;
-      const replace = await confirmDialog(t('skin.replaceConfirm', manifest.name), { confirmLabel: t('skin.replace') });
+      const replace = await confirmDialog(t('skin.replaceConfirm', manifest.name), {
+        title: t('skin.install.title'),
+        confirmLabel: t('skin.replace'),
+      });
       if (!replace) {
         await drop();
         return undefined;

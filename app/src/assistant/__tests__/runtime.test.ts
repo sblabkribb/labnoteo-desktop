@@ -399,6 +399,8 @@ describe('builtinRuntime', () => {
     expect(message).toContain('새 메모');
     expect(message).not.toContain('This replaces section');
     expect(opts).toEqual({ title: t('pet.confirm.title'), confirmLabel: 'Allow', destructive: false });
+    // one neutral title for every approval (web search too, which changes nothing): "action", like ko "AI 작업 확인"
+    expect(t('pet.confirm.title')).toBe("Check the AI's action");
     expect(docOf(NOTE)).toContain('## Notes\n\n새 메모');
     expect(rec.status).toContain(t('assistant.status.write', '001_WD010_A.labnote.md'));
   });

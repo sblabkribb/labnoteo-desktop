@@ -4,7 +4,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { readFileSync } from 'node:fs';
 import type { InvokeFn } from '../../../integrations/netIpc';
 import { setLang } from '../../../i18n/lang';
-import { catalogs } from '../../../i18n/t';
+import { catalogs, t } from '../../../i18n/t';
 import { DialogLayer } from '../../../labnote/host/DialogLayer';
 import { closeAllDialogs } from '../../../labnote/host/dialogStore';
 import type { CommandContext } from '../../../labnote/commands/context';
@@ -173,6 +173,8 @@ describe('importSkinFile flow', () => {
     click('설치');
     const confirm = await screen.findByRole('alertdialog');
     expect(confirm.textContent).toContain('Pipette <b>Pal</b> (Kim, CC-BY-4.0) 스킨을 설치할까요?');
+    // the confirm has a title like the other dialogs (the gallery uses the same confirm; visual QA: empty title bar)
+    expect(screen.getByRole('alertdialog', { name: t('skin.install.title') })).toBe(confirm);
     click('취소');
     expect(await s.run).toBeUndefined();
     expect(s.calls.map((c) => c[0])).toEqual(['skin_import_pick', 'skin_staging_discard']);
@@ -201,6 +203,7 @@ describe('importSkinFile flow', () => {
     await screen.findByRole('alertdialog');
     click('설치');
     await waitFor(() => expect(screen.getByRole('alertdialog').textContent).toContain('바꿀까요'));
+    expect(screen.getByRole('alertdialog', { name: t('skin.install.title') })).toBeTruthy();
     click('바꾸기');
     expect(await s.run).toEqual(manifest);
     expect(s.calls.filter((c) => c[0] === 'skin_install').map((c) => c[1])).toEqual([
