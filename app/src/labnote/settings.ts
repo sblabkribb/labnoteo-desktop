@@ -60,6 +60,11 @@ export type AppSettings = Pick<
    */
   llmContextWindow: number;
   /**
+   * 앱에만 있는 키(real-server check, 2026-11-11): 모델에 보낼 temperature. null(빈칸)이면 지금처럼 각 요청이 정한 값을 보낸다.
+   * 0-2 의 유한한 수만 살린다. qwen3 같은 생각하는 모델은 0.2 에서 같은 생각을 되풀이할 수 있어서 보관함마다 바꿀 수 있다.
+   */
+  llmTemperature: number | null;
+  /**
    * 앱에만 있는 키(MCP 클라이언트, spec §5.1): AI 가 쓸 외부 MCP 서버. 기본 []. 토큰은 여기 없다(자격 증명 관리자).
    * 틀린 항목은 버린다(`cleanMcpServers`, Rust `config::parse_mcp_servers` 와 같은 규칙).
    */
@@ -151,6 +156,24 @@ export const LLM_CONTEXT_WINDOW_MAX = 1_000_000;
 export function clampContextWindow(v: unknown): number {
   if (typeof v !== 'number' || !Number.isInteger(v)) return LLM_CONTEXT_WINDOW_DEFAULT;
   return Math.min(LLM_CONTEXT_WINDOW_MAX, Math.max(LLM_CONTEXT_WINDOW_MIN, v));
+}
+
+/** temperature 설정의 범위. */
+export const LLM_TEMPERATURE_MAX = 2;
+
+/** 저장된 temperature: 0-2 의 유한한 수면 그대로, 아니면 null(빈칸, 요청이 정한 값). */
+export function cleanTemperature(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= LLM_TEMPERATURE_MAX ? v : null;
+}
+
+/**
+ * 설정 칸에 친 temperature: 빈칸은 null(요청이 정한 값), 0-2 의 십진수(쉼표 소수점도 받는다)는 그 수, 나머지는 'invalid'.
+ */
+export function parseTemperatureInput(raw: string): number | null | 'invalid' {
+  const s = raw.trim().replace(',', '.');
+  if (s === '') return null;
+  if (!/^\d+(?:\.\d+)?$|^\.\d+$/.test(s)) return 'invalid';
+  return cleanTemperature(Number(s)) ?? 'invalid';
 }
 
 /** MCP 서버의 기본 포트(플러그인과 같다). */
@@ -310,6 +333,8 @@ const KEYS = [
   'imageFolder',
   // feat/ai-context(Task 8): 모델의 컨텍스트 창. 앱 키다.
   'llmContextWindow',
+  // 모델 temperature(2026-11-11). 앱 키다. null 이면 요청이 정한 값.
+  'llmTemperature',
   // MCP 클라이언트(Task 5b): 외부 MCP 서버. 앱 키다.
   'mcpClientServers',
   // 문헌 검색(Task 11): 출처 스위치와 연락처 이메일. 앱 키다.
@@ -331,6 +356,7 @@ const APP_DEFAULTS = {
   defaultExperimenter: '',
   imageFolder: 'resources',
   llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
+  llmTemperature: null,
   ncbiEmail: '',
   crossrefMailto: '',
   githubReadmeOverlay: true,
@@ -385,6 +411,8 @@ export function fromStored(raw: unknown): AppSettings {
     if (o.imageFolder === 'images' || o.imageFolder === 'resources') settings.imageFolder = o.imageFolder;
     // feat/ai-context(Task 8): 컨텍스트 창은 정수만 살리고 범위로 잘라 맞춘다.
     settings.llmContextWindow = clampContextWindow((raw as { llmContextWindow?: unknown }).llmContextWindow);
+    // temperature(2026-11-11): 0-2 의 수만 살리고, 아니면 빈칸(null).
+    settings.llmTemperature = cleanTemperature((raw as { llmTemperature?: unknown }).llmTemperature);
     // MCP 클라이언트(Task 5b): 칸마다 검사하고 틀린 항목은 버린다. 평문 http 허락은 위에서 읽은 목록을 쓴다.
     settings.mcpClientServers = cleanMcpServers((raw as { mcpClientServers?: unknown }).mcpClientServers, settings.allowHttpOrigins);
     // 문헌 검색(Task 11): 출처는 꼭 false 인 것만 끄고, 이메일은 모양이 맞을 때만 살린다.

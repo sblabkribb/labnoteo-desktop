@@ -52,6 +52,38 @@ describe('Integration settings hook-ups (Task 17)', () => {
     expect(commit).toHaveBeenCalledWith({ llmContextWindow: 16384 });
   });
 
+  it('the temperature field under Advanced is blank by default, saves 0-2, clears to blank and refuses anything else', async () => {
+    const { d, commit } = deps({ llmProvider: 'openai' });
+    render(<IntegrationSettingsPage deps={d} onLeave={async () => {}} />);
+    await flush();
+    const advanced = screen.getByText(t('integrations.ai.advanced')).closest('details')!;
+    expect(advanced.open).toBe(false);
+    const input = screen.getByLabelText(t('integrations.ai.temperature')) as HTMLInputElement;
+    expect(advanced.contains(input)).toBe(true);
+    expect(input.value).toBe('');
+    fireEvent.change(input, { target: { value: '0.6' } });
+    fireEvent.blur(input);
+    await flush();
+    expect(commit).toHaveBeenLastCalledWith({ llmTemperature: 0.6 });
+    fireEvent.change(input, { target: { value: '3' } });
+    fireEvent.blur(input);
+    await flush();
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(t('integrations.ai.temperatureInvalid'))).toBeTruthy();
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    await flush();
+    expect(commit).toHaveBeenLastCalledWith({ llmTemperature: null });
+    expect(screen.queryByText(t('integrations.ai.temperatureInvalid'))).toBeNull();
+    cleanup();
+    // A saved value opens Advanced so it is not hidden
+    const saved = deps({ llmProvider: 'ollama', llmTemperature: 0.7 });
+    render(<IntegrationSettingsPage deps={saved.d} onLeave={async () => {}} />);
+    await flush();
+    expect((screen.getByLabelText(t('integrations.ai.temperature')) as HTMLInputElement).value).toBe('0.7');
+    expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(true);
+  });
+
   it('mounts the SKILL.md section after the MCP section and calls only skill_status for it', async () => {
     const r = fakeInvoke({
       mcp_status: () => ({ running: false, port: null, tokenSet: false, tokenEpoch: 0 }),

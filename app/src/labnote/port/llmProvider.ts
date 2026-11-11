@@ -65,6 +65,14 @@ function ollamaOptions(opts: ChatOptions | undefined): Record<string, number> | 
   return Object.keys(out).length ? out : undefined;
 }
 
+/**
+ * The temperature a request sends: the vault's `llmTemperature` when it is set (Settings > Integrations > AI provider >
+ * Advanced, real-server check 2026-11-11: thinking models such as qwen3 loop at 0.2), else what the caller asked for.
+ */
+function temperatureOf(settings: AppSettings, opts: ChatOptions | undefined): number | undefined {
+  return settings.llmTemperature ?? opts?.temperature;
+}
+
 export interface LlmProvider {
   /** `'ollama'` or `'openai'`, as the plugin's `provider.name`. */
   readonly name: 'ollama' | 'openai';
@@ -322,7 +330,7 @@ class OllamaProvider implements LlmProvider {
       messages: OllamaProvider.toWire(messages),
       stream: false,
       tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
-      options: ollamaOptions(opts),
+      options: ollamaOptions({ ...opts, temperature: temperatureOf(this.settings, opts) }),
     };
   }
 
@@ -401,7 +409,7 @@ class OpenAiProvider implements LlmProvider {
     return {
       model: this.settings.llmModel,
       messages: OpenAiProvider.toWire(messages),
-      temperature: opts?.temperature,
+      temperature: temperatureOf(this.settings, opts),
       tools: opts?.tools?.length ? toolSchemas(opts.tools) : undefined,
     };
   }

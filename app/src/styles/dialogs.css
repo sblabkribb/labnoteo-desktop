@@ -83,6 +83,8 @@
 /* 진행 창(SP6 Task 12): 줄 목록만 스크롤한다. 긴 줄은 감싼다 */
 .progress-lines { margin: 0; padding: 0; list-style: none; min-height: 0; max-height: 40vh; overflow-y: auto; color: var(--text-muted); font-size: 0.93em; }
 .progress-line { padding: 1px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.integration-advanced > summary { cursor: pointer; color: var(--text-muted); }
+.integration-advanced[open] > summary { margin-bottom: var(--space-2); }
 .progress-status { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 0.93em; font-variant-numeric: tabular-nums; }
 .ai-answer { margin: 0 0 var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; font: inherit; }
 

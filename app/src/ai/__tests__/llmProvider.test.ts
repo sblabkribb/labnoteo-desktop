@@ -168,6 +168,26 @@ describe('provider.chat', () => {
     expect(chatBody(f.calls, 3).options).toBeUndefined();
   });
 
+  it('the vault temperature setting replaces the caller temperature for both providers; blank keeps it (real-server check)', async () => {
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
+    const o = replying({ choices: [{ message: { content: 'x' } }] });
+    const openai = createLlmProvider(withProvider('openai', { llmModel: 'm', llmTemperature: 0.7 }), o.invoke)!;
+    await openai.chat(msgs, { temperature: 0.2 });
+    await openai.chat(msgs);
+    expect(chatBody(o.calls, 0).temperature).toBe(0.7);
+    expect(chatBody(o.calls, 1).temperature).toBe(0.7);
+    const l = replying({ message: { content: 'x' } });
+    const ollama = createLlmProvider(withProvider('ollama', { llmTemperature: 0 }), l.invoke)!;
+    await ollama.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
+    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0, num_ctx: 4096 });
+    const b = replying({ choices: [{ message: { content: 'x' } }] });
+    const blank = createLlmProvider(withProvider('openai', { llmModel: 'm', llmTemperature: null }), b.invoke)!;
+    await blank.chat(msgs, { temperature: 0.2 });
+    await blank.chat(msgs);
+    expect(chatBody(b.calls, 0).temperature).toBe(0.2);
+    expect('temperature' in chatBody(b.calls, 1) && chatBody(b.calls, 1).temperature !== undefined).toBe(false);
+  });
+
   it('openai body is identical with and without contextWindow', async () => {
     const f = replying({ choices: [{ message: { content: 'x' } }] });
     const p = createLlmProvider(withProvider('openai', { llmModel: 'm' }), f.invoke)!;

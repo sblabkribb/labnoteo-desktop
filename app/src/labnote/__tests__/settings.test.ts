@@ -6,6 +6,7 @@ import {
   isOriginUrl,
   isServiceUrl,
   loadVaultSettings,
+  parseTemperatureInput,
   saveVaultSettings,
   type AppSettings,
 } from '../settings';
@@ -66,6 +67,7 @@ describe('보관함별 설정', () => {
         'legacyNotesOfferDismissed',
         'llmEndpointOllama',
         'llmContextWindow',
+        'llmTemperature',
         'llmEndpointOpenai',
         'llmModel',
         'llmProvider',
@@ -270,6 +272,22 @@ describe('보관함별 설정', () => {
     await saveVaultSettings({ ...settings, llmContextWindow: 4096 }, store.invoke);
     expect(JSON.parse(store.stored()!).llmContextWindow).toBe(4096);
     expect((await loadVaultSettings(store.invoke)).settings.llmContextWindow).toBe(4096);
+  });
+
+  it('llmTemperature (app-only key) is blank (null) by default, keeps 0-2 and drops anything else, and survives a save and reload', async () => {
+    expect(fromPluginData(undefined).llmTemperature).toBeNull();
+    expect(fromPluginData({ llmTemperature: 0.7 }).llmTemperature).toBeNull(); // not a plugin key
+    expect(fromStored({}).llmTemperature).toBeNull();
+    for (const ok of [0, 0.7, 1, 2]) expect(fromStored({ llmTemperature: ok }).llmTemperature).toBe(ok);
+    for (const odd of [-0.1, 2.01, '0.7', NaN, Infinity, true, [1]]) expect(fromStored({ llmTemperature: odd }).llmTemperature).toBeNull();
+    const store = fakeStore({ stored: JSON.stringify({ schemaVersion: 3 }) });
+    const { settings } = await loadVaultSettings(store.invoke);
+    await saveVaultSettings({ ...settings, llmTemperature: 0.6 }, store.invoke);
+    expect((await loadVaultSettings(store.invoke)).settings.llmTemperature).toBe(0.6);
+    expect(parseTemperatureInput('')).toBeNull();
+    expect(parseTemperatureInput('  0.6 ')).toBe(0.6);
+    expect(parseTemperatureInput('1,5')).toBe(1.5);
+    for (const bad of ['3', '-1', 'abc', '0.5.1', '1e0']) expect(parseTemperatureInput(bad)).toBe('invalid');
   });
 
   it('literature search (app-only keys): sources default on, emails default empty, both survive a save and reload', async () => {
