@@ -15,5 +15,10 @@ fn main() {
         println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg-tests=/MANIFESTINPUT:{dir}/test-manifest.xml");
     }
+    // Any rerun-if-changed above turns off Cargo's "rerun on any change" default, so the
+    // icons (embedded in the exe as its Windows resource) and the config must be named,
+    // or a changed icon never reaches the next build.
+    println!("cargo:rerun-if-changed=icons");
+    println!("cargo:rerun-if-changed=tauri.conf.json");
     tauri_build::build()
 }
