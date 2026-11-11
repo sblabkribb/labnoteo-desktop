@@ -1080,6 +1080,7 @@ const ko: Record<string, string> = {
   'scholar.emailInvalid': '이메일 주소 모양이 아니라 저장하지 않았어요.',
   // 떠 있는 도우미(assistant 명세 §4, §11)
   'pet.open': '어시스턴트 열기',
+  'pet.closeAssistant': '어시스턴트 닫기',
   'pet.title': '어시스턴트',
   'pet.greeting': '무엇을 도와드릴까요?',
   'pet.close': '닫기',
@@ -2430,6 +2431,7 @@ const en: Record<string, string> = {
   'scholar.emailInvalid': 'This is not an email address, so it was not saved.',
   // Floating assistant (assistant spec §4, §11)
   'pet.open': 'Open assistant',
+  'pet.closeAssistant': 'Close assistant',
   'pet.title': 'Assistant',
   'pet.greeting': 'What can I help with?',
   'pet.close': 'Close',

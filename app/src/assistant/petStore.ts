@@ -160,14 +160,27 @@ function token(style: CSSStyleDeclaration, name: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-const windowViewport = (): Viewport => {
+/**
+ * 왼쪽 독(파일·실험 패널과 아래의 보관함 바꾸기)의 오른쪽 끝. 닫혀 있거나, 좁은 창에서 본문 위에 떠서 열리는 서랍이면 0:
+ * 도우미가 독 위에 앉아 보관함 바꾸기 같은 단추를 가리지 않게 한다(Alt+Shift+화살표로 옮길 때, visual QA).
+ */
+function dockRight(): number {
+  if (document.documentElement.dataset.leftHidden === 'true') return 0;
+  const dock = document.querySelector<HTMLElement>('.sidebar.dock');
+  if (!dock || getComputedStyle(dock).position === 'fixed') return 0;
+  const r = dock.getBoundingClientRect();
+  return r.width > 0 ? r.right : 0;
+}
+
+/** 창 틀: 위 머리줄, 왼쪽 리본과 (열려 있으면) 독, 아래 상태 줄을 뺀 곳. */
+export const windowViewport = (): Viewport => {
   if (typeof window === 'undefined') return { w: Infinity, h: Infinity };
   const style = getComputedStyle(document.documentElement);
   return {
     w: window.innerWidth,
     h: window.innerHeight,
     top: token(style, '--viewheader-h'),
-    left: token(style, '--ribbon-w'),
+    left: Math.max(token(style, '--ribbon-w'), dockRight()),
     bottom: token(style, '--statusbar-h'),
     right: 0,
   };

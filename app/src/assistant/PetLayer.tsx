@@ -179,7 +179,8 @@ export function PetLayer(props: {
     setHint(t('pet.moved', areaLabel(store.get().pos, store)));
   };
 
-  const label = t('pet.open');
+  // 누르면 할 일을 이름으로: 말풍선이 열려 있으면 "어시스턴트 닫기"
+  const label = snap.open ? t('pet.closeAssistant') : t('pet.open');
   return (
     <div ref={wrap} className="pet-wrap" data-open={snap.open}>
       {snap.open && (

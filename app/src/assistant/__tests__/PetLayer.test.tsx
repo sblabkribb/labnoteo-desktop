@@ -33,7 +33,7 @@ function setup() {
   return { layout, store };
 }
 
-const pet = () => screen.getByRole('button', { name: '어시스턴트 열기' });
+const pet = () => document.querySelector<HTMLButtonElement>('button.pet')!;
 const wrap = () => pet().closest('.pet-wrap') as HTMLElement;
 const px = (n: number) => String(n) + 'px';
 
@@ -77,6 +77,8 @@ describe('PetLayer', () => {
     setLang('en');
     setup();
     expect(screen.getByRole('button', { name: 'Open assistant' })).toBeTruthy();
+    fireEvent.click(pet());
+    expect(screen.getByRole('button', { name: 'Close assistant' })).toBe(pet());
   });
 
   it('the state attribute follows the store', () => {
@@ -95,7 +97,10 @@ describe('PetLayer', () => {
     expect(dialog.textContent).toContain('무엇을 도와드릴까요?');
     expect(pet().getAttribute('aria-expanded')).toBe('true');
     expect(pet().getAttribute('aria-controls')).toBe(dialog.id);
+    // the name says what a press does now: close while the bubble is open (review)
+    expect(screen.getByRole('button', { name: '어시스턴트 닫기' })).toBe(pet());
     fireEvent.click(pet());
+    expect(screen.getByRole('button', { name: '어시스턴트 열기' })).toBe(pet());
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(pet());
     fireEvent.click(screen.getByRole('button', { name: '닫기' }));

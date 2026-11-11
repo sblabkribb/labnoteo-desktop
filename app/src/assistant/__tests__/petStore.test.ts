@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createLayoutStore, PET_DEFAULT, type UiPrefs } from '../../ui/layoutStore';
 import { BUILTIN_SKIN } from '../skins/builtin';
-import { applySkinVars, BUBBLE_GAP, bubblePlace, createPetStore, DONE_MS, MOVE_STEP, MOVE_STEP_BIG, petArea, petSize, snapScale, type Viewport } from '../petStore';
+import { applySkinVars, BUBBLE_GAP, bubblePlace, createPetStore, DONE_MS, MOVE_STEP, MOVE_STEP_BIG, petArea, petSize, snapScale, windowViewport, type Viewport } from '../petStore';
 
 function memoryStorage(): Storage {
   const m = new Map<string, string>();
@@ -25,6 +25,42 @@ function setup(viewport: Viewport = { w: 1200, h: 800 }) {
 }
 
 afterEach(() => vi.useRealTimers());
+
+describe('the window frame the pet stays in', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    document.documentElement.removeAttribute('style');
+    delete document.documentElement.dataset.leftHidden;
+  });
+
+  function dockAt(right: number) {
+    const dock = document.createElement('aside');
+    dock.className = 'sidebar dock';
+    dock.getBoundingClientRect = () => ({ left: 44, right, width: right - 44, top: 0, bottom: 800, height: 800, x: 44, y: 0, toJSON: () => ({}) }) as DOMRect;
+    document.body.append(dock);
+  }
+
+  it('keeps clear of the ribbon, the open left dock (vault switcher) and the status bar (visual QA)', () => {
+    document.documentElement.style.setProperty('--ribbon-w', '44px');
+    document.documentElement.style.setProperty('--statusbar-h', '26px');
+    dockAt(304);
+    const vp = windowViewport();
+    expect(vp.left).toBe(304);
+    expect(vp.bottom).toBe(26);
+    // with the dock open, Alt+Shift+Left stops at the dock edge instead of parking on the vault switcher
+    const layout = createLayoutStore({ storage: () => memoryStorage(), invoke: vi.fn(async () => null) });
+    const store = createPetStore({ layout, viewport: () => ({ ...windowViewport(), w: 1200, h: 800 }) });
+    for (let i = 0; i < 60; i++) store.moveBy(-MOVE_STEP_BIG, 0);
+    expect(1200 - store.get().pos.x - petSize(store.get().scale).w).toBeGreaterThanOrEqual(304);
+  });
+
+  it('a hidden dock gives the room back to the pet; only the ribbon is kept clear', () => {
+    document.documentElement.style.setProperty('--ribbon-w', '44px');
+    dockAt(304);
+    document.documentElement.dataset.leftHidden = 'true';
+    expect(windowViewport().left).toBe(44);
+  });
+});
 
 describe('pet state machine', () => {
   it('starts idle and closed; done goes back to idle after 1.6 s; another state cancels that', () => {
