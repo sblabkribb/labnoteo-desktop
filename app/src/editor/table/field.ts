@@ -4,6 +4,7 @@ import { syntaxTree } from '@codemirror/language';
 import { sampleCellKey } from '../../samples/cellMarks';
 import { parseTable } from './model';
 import { TableWidget, toggleRawTable } from './widget';
+import { editorLang } from '../live/editorLang';
 import { cellEditorExtension } from './cellEditor';
 import { tableCommandsExtension } from './commands';
 import { tablePasteExtension } from './paste';
@@ -136,13 +137,14 @@ function build(state: EditorState): DecorationSet {
   const tables = findTables(state);
   // 셀의 샘플 표시(Task 10): 열쇠가 바뀐 표만 위젯이 다시 그린다. 표가 없으면 구하지 않는다.
   const samplesKey = tables.length ? sampleCellKey(state) : '';
+  const lang = state.facet(editorLang);
   for (const span of tables) {
     if (overlaps(raw, span.from, span.to)) continue;
     // 문서의 줄 구분자와 상관없이 `\n` 으로 읽는다: CodeMirror 의 위치는 줄바꿈을 한 글자로 센다
     const source = state.doc.sliceString(span.from, span.to);
     const model = parseTable(source, 0, source.length);
     if (!model) continue;
-    out.add(span.from, span.to, Decoration.replace({ widget: new TableWidget(source, model, editable, samplesKey), block: true }));
+    out.add(span.from, span.to, Decoration.replace({ widget: new TableWidget(source, model, editable, samplesKey, lang), block: true }));
   }
   return out.finish();
 }

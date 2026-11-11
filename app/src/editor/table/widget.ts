@@ -1,6 +1,7 @@
 import { Facet, StateEffect } from '@codemirror/state';
 import { EditorView, WidgetType } from '@codemirror/view';
 import { t } from '../../i18n/t';
+import { getLang, type Lang } from '../../i18n/lang';
 import { rows, type Align, type Cell, type TableModel } from './model';
 import { sampleCellDecorator } from '../../samples/cellMarks';
 import { renderInline, type InlineDecorator } from './renderInline';
@@ -199,6 +200,19 @@ function disarm(root: Element): void {
 function labelToolbar(bar: HTMLElement): void {
   bar.setAttribute('aria-label', t('table.toolbar'));
   for (const b of bar.querySelectorAll<HTMLButtonElement>('button')) setLabel(b);
+}
+
+/** 표 틀 안의 글(도구 막대, 열린 메뉴, 넘치는 셀의 title)을 지금 언어로 다시 단다. */
+function relabelTable(wrap: HTMLElement): void {
+  const bar = toolbarOf(wrap);
+  if (bar) labelToolbar(bar);
+  const menu = menuOf(wrap);
+  if (menu) {
+    menu.setAttribute('aria-label', t('table.menu'));
+    for (const b of menu.querySelectorAll<HTMLButtonElement>('button')) setLabel(b);
+  }
+  const title = t('table.overflow');
+  for (const c of wrap.querySelectorAll<HTMLElement>('.lno-cell-overflow')) c.title = title;
 }
 
 /** 이 표에서 마지막으로 누르거나 포커스를 준 칸. 셀 편집기가 떠 있지 않을 때 연산의 기준이 된다. */
@@ -536,12 +550,14 @@ export class TableWidget extends WidgetType {
      * 바뀌면 같은 원문이라도 셀을 다시 그린다.
      */
     readonly samplesKey: string = '',
+    /** 이름표(도구 막대, 메뉴, 넘치는 셀)를 단 언어. 바뀌면 updateDOM 이 표를 그대로 두고 이름표만 다시 단다. */
+    readonly lang: Lang = getLang(),
   ) {
     super();
   }
 
   eq(other: TableWidget): boolean {
-    return other.source === this.source && other.canEdit === this.canEdit && other.samplesKey === this.samplesKey;
+    return other.source === this.source && other.canEdit === this.canEdit && other.samplesKey === this.samplesKey && other.lang === this.lang;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -549,12 +565,7 @@ export class TableWidget extends WidgetType {
     const wrap = doc.createElement('div');
     wrap.className = 'lno-table-wrap';
     // 막대의 이름표와 넘치는 셀의 title 은 열 때 다시 단다: 언어를 바꾼 뒤에 다시 그리지 않아도 새 언어로 읽힌다
-    const relabel = () => {
-      const bar = toolbarOf(wrap);
-      if (bar) labelToolbar(bar);
-      const title = t('table.overflow');
-      for (const c of wrap.querySelectorAll<HTMLElement>('.lno-cell-overflow')) c.title = title;
-    };
+    const relabel = () => relabelTable(wrap);
     wrap.addEventListener('pointerenter', relabel);
     wrap.addEventListener('focusin', relabel);
     listenForCells(wrap, view);
@@ -577,9 +588,15 @@ export class TableWidget extends WidgetType {
       bar?.remove();
       closeMenu(wrap);
     }
+    // 언어가 바뀌었다(editorLang): 표와 셀 편집기는 그대로 두고 이름표만 지금 언어로 다시 단다
+    if (wrap.dataset.lang !== this.lang) {
+      wrap.dataset.lang = this.lang;
+      relabelTable(wrap);
+    }
 
     const m = this.model;
-    const paint: Paint = this.samplesKey ? { decorate: sampleCellDecorator(view.state), key: this.samplesKey } : PLAIN;
+    // 샘플 표시의 title 이 지역화된다: 언어가 바뀌면 열쇠가 달라져 셀을 다시 그린다(셀 편집기가 든 칸은 빼고)
+    const paint: Paint = this.samplesKey ? { decorate: sampleCellDecorator(view.state), key: `${this.samplesKey}\u0000${this.lang}` } : PLAIN;
     const table = tableOf(wrap);
     const active = table ? activeIn(table) : undefined;
     if (!table || !sameShape(table, m)) {

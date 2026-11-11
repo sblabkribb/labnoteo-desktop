@@ -5,6 +5,8 @@ import type { SyntaxNode } from '@lezer/common';
 import { isFenceMark, revealInline, revealLine, skipRanges, touchedLines } from './reveal';
 import { isRealLink, unitOpHeading, type UnitOpKind } from './links';
 import { t } from '../../i18n/t';
+import type { Lang } from '../../i18n/lang';
+import { editorLang, langChanged } from './editorLang';
 import { CheckboxWidget, LabelWidget, bulletWidget, toggleTaskAt } from './widgets';
 import { isImageTarget, resolveImagePath, splitAltSize } from './imagePath';
 import { ImageWidget, imageLoader } from './imageWidget';
@@ -85,7 +87,13 @@ const MAX_LIST_DEPTH = 8;
 const listLine = Array.from({ length: MAX_LIST_DEPTH }, (_, i) => Decoration.line({ class: `lno-li lno-li-d${i + 1}` }));
 const olMark = Decoration.mark({ class: 'lno-ol-mark' });
 const bullet = Decoration.replace({ widget: bulletWidget });
-const checkbox = [false, true].map((checked) => Decoration.replace({ widget: new CheckboxWidget(checked) }));
+/** 언어마다 체크박스 장식 한 벌(이름표가 언어를 따른다). */
+const checkboxes = new Map<Lang, Decoration[]>();
+const checkboxFor = (lang: Lang): Decoration[] => {
+  let set = checkboxes.get(lang);
+  if (!set) checkboxes.set(lang, (set = [false, true].map((checked) => Decoration.replace({ widget: new CheckboxWidget(checked, lang) }))));
+  return set;
+};
 const taskDoneLine = Decoration.line({ class: 'lno-task-done' });
 
 const quoteLine = Decoration.line({ class: 'lno-quote' });
@@ -129,7 +137,8 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
   const skips = skipRanges(state);
   const lines = touchedLines(state);
   const tree = syntaxTree(state);
-  // 링크의 제목 글(title)은 그릴 때 읽는다: 언어를 바꾸면 다음 다시 그리기부터 새 언어다
+  // 글(링크 제목, 체크박스 이름표, 실험자)은 만들 때 읽는다: 언어가 바뀌면(langChanged) 장식을 다시 만든다
+  const checkbox = checkboxFor(state.facet(editorLang));
   const linkMark = Decoration.mark({ class: 'lno-link', attributes: { title: t('live.link.title') } });
   const unresolvedLinkMark = Decoration.mark({ class: 'lno-link lno-unresolved', attributes: { title: t('live.link.title') } });
   const unresolvedWikiMark = Decoration.mark({ class: 'lno-wikilink lno-unresolved', attributes: { title: t('links.create.title') } });
@@ -451,7 +460,8 @@ class LivePlugin {
       u.selectionSet ||
       u.viewportChanged ||
       syntaxTree(u.startState) !== syntaxTree(u.state) ||
-      u.startState.facet(linkResolution) !== u.state.facet(linkResolution)
+      u.startState.facet(linkResolution) !== u.state.facet(linkResolution) ||
+      langChanged(u)
     ) {
       ({ decorations: this.decorations, hidden: this.hidden } = buildDecorations(u.view));
       this.pending = false;

@@ -20,6 +20,8 @@ import { parseFrontMatterYaml } from '@labnoteo/core';
 import { frontMatterText } from '../../labnote/frontMatterText';
 import { toDocBreaks } from '../../labnote/editTarget';
 import { t } from '../../i18n/t';
+import { getLang, type Lang } from '../../i18n/lang';
+import { editorLang, langChanged } from './editorLang';
 import { addKey, APP_KEYS, editValue, isWikilinkValue, keyOfLine, READ_ONLY_KEYS, removeKey, renameKey } from './frontEdit';
 import { tableOptions } from '../table/field';
 import { toggleMode } from './mode';
@@ -413,13 +415,15 @@ export class PropertiesWidget extends WidgetType {
     readonly block: FrontBlock,
     readonly version: number = -1,
     readonly notePath: string = '',
+    /** The language the grid's words (YAML로 편집, 속성 추가, 실험자 …) were drawn in. A switch redraws the grid. */
+    readonly lang: Lang = getLang(),
   ) {
     super();
     this.links = cellLinks(block);
   }
 
   eq(o: PropertiesWidget): boolean {
-    return this.block.text === o.block.text && this.version === o.version && this.notePath === o.notePath;
+    return this.block.text === o.block.text && this.version === o.version && this.notePath === o.notePath && this.lang === o.lang;
   }
 
   /** What a wikilink cell shows now. */
@@ -446,6 +450,7 @@ export class PropertiesWidget extends WidgetType {
     // 클릭 위치가 어긋난다. 간격은 감싼 틀의 padding 이 맡는다.
     const wrap = document.createElement('div');
     wrap.className = 'lno-props-wrap';
+    wrap.dataset.lang = this.lang;
     wrap.append(box);
     // 격자의 단추에 초점이 있을 때 누른 글자는 버린다: 편집 가능한 본문 안이라 브라우저가 앞서 고치던 입력으로 초점을 옮겨
     // 그 값에 글을 덧붙인다. Enter·Space·Tab·단축키는 그대로 둔다.
@@ -526,6 +531,8 @@ export class PropertiesWidget extends WidgetType {
 
   /** 같은 키들(같은 순서·종류)이면 값만 제자리에서 바꾼다. 초점이 있고 고치던 입력은 건드리지 않는다. */
   updateDOM(root: HTMLElement, view: EditorView): boolean {
+    // 다른 언어로 그린 격자는 통째로 새로 그린다: 이름, 단추, 이름표가 모두 글이다
+    if (root.dataset.lang !== this.lang) return false;
     const dom = root.querySelector<HTMLElement>(':scope > .lno-props');
     if (!dom) return false;
     const rowEls = [...dom.querySelectorAll<HTMLElement>(':scope > .lno-props-row')];
@@ -825,7 +832,7 @@ function buildGrid(state: EditorState): DecorationSet {
   if (state.field(rawFront, false)) return Decoration.none;
   const block = frontBlock(state);
   if (!block) return Decoration.none;
-  const widget = new PropertiesWidget(block, resolutionVersion(state), gridNotePath(state));
+  const widget = new PropertiesWidget(block, resolutionVersion(state), gridNotePath(state), state.facet(editorLang));
   return Decoration.set([Decoration.replace({ widget, block: true }).range(block.from, block.to)]);
 }
 
@@ -839,7 +846,8 @@ export const propertiesField = StateField.define<DecorationSet>({
       tr.state.field(rawFront, false) !== tr.startState.field(rawFront, false) ||
       // 링크 풀이(파일이 바뀔 때만 새 값이다)나 노트가 바뀌면 위키링크 칸을 제자리에서 다시 칠한다
       tr.state.facet(linkResolution) !== tr.startState.facet(linkResolution) ||
-      gridNotePath(tr.state) !== gridNotePath(tr.startState);
+      gridNotePath(tr.state) !== gridNotePath(tr.startState) ||
+      langChanged(tr);
     return changed ? buildGrid(tr.state) : deco;
   },
   provide: (f) => [EditorView.decorations.from(f), EditorView.atomicRanges.of((v) => v.state.field(f)), lockSync],
