@@ -354,6 +354,22 @@ describe('assistant bubble chat', () => {
     expect(log().textContent).not.toContain('남은 글');
   });
 
+  it('Insert into note adds the cited sources under the reply, so its [n] do not dangle in the note', async () => {
+    const { store, actions } = setup({
+      plan: async (_t, sink) => {
+        sink.source(1, NOTE_SRC);
+        sink.source(2, URL_SRC);
+        return { content: '웹 [2] 에 따르면', sources: [NOTE_SRC, URL_SRC] };
+      },
+    });
+    await open(store);
+    await type('q');
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    await settle();
+    await userEvent.click(screen.getByRole('button', { name: '노트에 넣기' }));
+    expect(actions.insert).toHaveBeenCalledWith('웹 [2] 에 따르면\n\n출처:\n- [2] [Example page](<https://example.test/a?q=1#x>)', false);
+  });
+
   it('Insert into note passes the reply text and its taint to the action', async () => {
     const { store, actions } = setup({ plan: async () => ({ content: '넣을 답', tainted: true }) });
     await open(store);

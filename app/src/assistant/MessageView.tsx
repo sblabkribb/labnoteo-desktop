@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { t } from '../i18n/t';
 import { Icon } from '../ui/Icon';
-import { SourceLedger, type Source } from './sources';
+import { SourceLedger, textWithSources, type Source } from './sources';
 import type { ChatItem } from './useAssistantSession';
 
 /** 열린 노트(섹션 만들기 칩이 제목을 고르는 데 쓴다). `cursorLine` 은 0부터. */
@@ -95,7 +95,7 @@ export function MessageView({ item, actions }: { item: ChatItem; actions?: Bubbl
       ) : null}
       {assistant && !item.pending && item.text && actions?.insert ? (
         <div className="pet-msg-actions">
-          <button type="button" className="btn pet-msg-insert" onClick={() => void actions.insert!(item.text, item.tainted)}>
+          <button type="button" className="btn pet-msg-insert" onClick={() => void actions.insert!(textWithSources(item.text, ledger, t('pet.sources')), item.tainted)}>
             <Icon name="file-plus" size={14} />
             <span>{t('pet.insert')}</span>
           </button>

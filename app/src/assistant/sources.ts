@@ -70,6 +70,23 @@ export function noteFileOf(target: string): string {
   return m ? m[1] : target;
 }
 
+/**
+ * "노트에 넣기" 로 넣을 글: 답이 인용한(장부에 있는) 번호의 출처 목록을 끝에 붙인다. 그러지 않으면 노트에 `[2]` 만 남고
+ * 가리킬 곳이 없다. 번호는 답의 번호 그대로, 작은 것부터. 웹·논문은 마크다운 링크(`<주소>` 꼴이라 괄호·빈칸이 있어도
+ * 깨지지 않는다), 노트·카탈로그는 이름표만 적는다. 이름표의 대괄호는 링크를 깨지 않게 둥근 괄호로 바꾼다.
+ * 인용이 없으면 글 그대로.
+ */
+export function textWithSources(text: string, ledger: SourceLedger, heading: string): string {
+  const cited = [...new Set(ledger.render(text).flatMap((p) => (typeof p === 'string' ? [] : [p.n])))].sort((a, b) => a - b);
+  if (cited.length === 0) return text;
+  const lines = cited.map((n) => {
+    const src = ledger.get(n)!;
+    const label = src.label.replace(/\[/g, '(').replace(/\]/g, ')');
+    return src.kind === 'note' ? `- [${n}] ${label}` : `- [${n}] [${label}](<${src.target}>)`;
+  });
+  return [text.replace(/\s+$/, ''), '', `${heading}:`, ...lines].join('\n');
+}
+
 export class SourceLedger {
   private readonly entries: Source[] = [];
 

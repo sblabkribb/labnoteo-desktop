@@ -2,7 +2,7 @@
  * 출처 장부(assistant spec §4.5): 도구가 내준 출처에 [n] 번호를 붙이고, 답의 [n] 을 장부에 있는 것만 링크로 만든다.
  */
 import { describe, expect, it } from 'vitest';
-import { SOURCE_LABEL_MAX, SourceLedger, type Source } from '../sources';
+import { SOURCE_LABEL_MAX, SourceLedger, textWithSources, type Source } from '../sources';
 
 const note = (path: string, label = path): Source => ({ kind: 'note', label, target: path });
 const web = (url: string, label = url): Source => ({ kind: 'web', label, target: url });
@@ -110,5 +110,32 @@ describe('SourceLedger.render', () => {
   it('does not read markup: [1](javascript:x) only links the known number, the rest stays text', () => {
     const l = ledger();
     expect(l.render('[1](javascript:x)')).toEqual([{ n: 1, src: l.get(1) }, '(javascript:x)']);
+  });
+});
+
+describe('textWithSources ("Insert into note")', () => {
+  const ledger = () =>
+    SourceLedger.from([
+      note('resources/workflows/workflows_en.json#WB150', '카탈로그 · WB150 PCR-based Target Amplification'),
+      web('https://example.org/a b', 'Thermo [guide]'),
+      note('labnote/001_A/README.labnote.md', 'README.labnote.md'),
+    ]);
+
+  it('appends the sources the answer cites, in number order, so no [n] in the note dangles', () => {
+    const text = 'PCR 을 돌립니다 [2]. 카탈로그 기준입니다 [1]. 다시 [2].';
+    expect(textWithSources(text, ledger(), '출처')).toBe(
+      [
+        text,
+        '',
+        '출처:',
+        '- [1] 카탈로그 · WB150 PCR-based Target Amplification',
+        '- [2] [Thermo (guide)](<https://example.org/a%20b>)',
+      ].join('\n'),
+    );
+  });
+
+  it('leaves an answer without ledger citations as it is', () => {
+    expect(textWithSources('인용 없음 [9]', ledger(), '출처')).toBe('인용 없음 [9]');
+    expect(textWithSources('그냥 답', new SourceLedger(), '출처')).toBe('그냥 답');
   });
 });
