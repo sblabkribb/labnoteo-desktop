@@ -220,54 +220,148 @@ describe('workflow_get_protocol_notes', () => {
 });
 
 describe('workflow_get_method', () => {
-  it('without uoId summarises the Workflow from the paper knowledge base and says it is not the lab protocol', async () => {
-    const { tools, sent } = build({
-      '/api/workflows/WD001': {
-        name: 'DNA assembly',
-        domain: 'Design',
-        hardware_uos: [{ uo_id: 'UHW100', name: 'PCR' }, 'UHW250'],
-        software_uos: [{ id: 'USW020', name: 'Primer design' }],
-        uo_connections: [{ from_uo: 'USW020', to_uo: 'UHW100', transfer_object: 'primer list' }],
-        qc_checkpoints: [{ after_uo: 'UHW100', check: 'gel band', action_on_fail: 'repeat PCR' }],
-      },
-    });
-    const d = dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WD001' }));
-    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WD001']);
-    expect(d.hardwareUos).toEqual([{ uoId: 'UHW100', name: 'PCR' }, { uoId: 'UHW250' }]);
-    expect(d.softwareUos).toEqual([{ uoId: 'USW020', name: 'Primer design' }]);
-    expect(d.connections).toEqual(['USW020 -> UHW100 (primer list)']);
-    expect(d.qcCheckpoints).toEqual([{ afterUo: 'UHW100', check: 'gel band', onFail: 'repeat PCR' }]);
-    expect(d.link).toBe(`${ORIGIN}/workflows/WD001`);
+  // Real server shapes (verify.md, 2026-11-11): the detail has no UO list; /resources has it; /papers is an array of runs.
+  const DETAIL = { id: 'WB005', name: 'Golden Gate assembly', domain: 'Build', description: 'Type IIS assembly', paper_count: 12, run_count: 10, extracted_count: 9, extraction_rate: 0.75, state: { runs: [] } };
+  const RESOURCES = {
+    workflow_id: 'WB005',
+    total_papers: 12,
+    hardware_uos: [
+      { catalog_id: 'UHW010', name: 'Liquid handling', occurrence_count: 7, source_papers: ['p1'], is_new: false },
+      { catalog_id: 'UHW100', name: 'PCR', occurrence_count: 4 },
+    ],
+    software_uos: [{ catalog_id: 'USW020', name: 'Primer design', occurrence_count: 3 }],
+    equipment: [{ name: 'thermocycler', count: 6, source_papers: ['p1'] }, { name: 'thermocycler', count: 1 }],
+    consumables: [{ name: 'PCR tubes', count: 3 }],
+    reagents: [{ name: 'BsaI', count: 8 }],
+    samples: [{ name: 'pUC19', count: 2 }],
+  };
+  const notFound = (what: string) => () => {
+    throw new NetError('status', 'raw-rust-text', 404, `{"detail":"${what} not found"}`);
+  };
+
+  it('without uoId lists the Unit Operations from /resources and says it is not the lab protocol', async () => {
+    const { tools, sent } = build({ '/api/workflows/WB005': DETAIL, '/api/workflows/WB005/resources': RESOURCES });
+    const d = dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WB005' }));
+    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WB005', '/api/workflows/WB005/resources']);
+    expect(d).toMatchObject({ workflowId: 'WB005', name: 'Golden Gate assembly', domain: 'Build', paperCount: 12 });
+    expect(d.hardwareUos).toEqual([
+      { uoId: 'UHW010', name: 'Liquid handling', papers: 7 },
+      { uoId: 'UHW100', name: 'PCR', papers: 4 },
+    ]);
+    expect(d.softwareUos).toEqual([{ uoId: 'USW020', name: 'Primer design', papers: 3 }]);
+    expect(d.link).toBe(`${ORIGIN}/workflows/WB005`);
     expect(d.source).toBe(PAPER_NOTICE);
   });
 
-  it('with uoId reads the Unit Operation detail, clips fields and the whole result; papers accepted first', async () => {
+  it('with uoId reads the Unit Operation detail, clips fields and the whole result', async () => {
     const { tools, sent } = build({
-      '/api/workflows/WD001/uo/UHW100': {
+      '/api/workflows/WB005/uo/UHW010': {
+        id: 'UHW010',
+        name: 'Liquid handling',
         type: 'hardware',
         input: ['template DNA', 'primers'],
         output: 'amplicon',
         equipment: ['thermocycler'],
         consumables: ['tubes'],
         material_and_method: 'm'.repeat(2000),
+        method: 'short',
         parameters: { annealing: '58 C', cycles: 30 },
         environment: 'e'.repeat(2000),
         result: 'r'.repeat(2000),
         discussion: 'd'.repeat(2000),
       },
-      '/api/workflows/WD001/papers': { papers: [{ title: 'Rejected paper', panel_verdict: 'reject' }, { title: 'Good paper', panel_verdict: 'accept' }], runs: [] },
-      '/api/workflows/WD001/resources': { equipment_uses: [{ name: 'thermocycler' }, { name: 'thermocycler' }], tool_uses: ['Benchling'] },
     });
-    const res = await call(tools, 'workflow_get_method', { workflowId: 'WD001', uoId: 'UHW100', include: ['papers', 'resources'] });
-    const d = dataOf(res);
-    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WD001/uo/UHW100', '/api/workflows/WD001/papers', '/api/workflows/WD001/resources']);
-    expect(d).toMatchObject({ type: 'hardware', input: 'template DNA; primers', parameters: 'annealing: 58 C; cycles: 30' });
+    const d = dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WB005', uoId: 'UHW010' }));
+    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WB005/uo/UHW010']);
+    expect(d).toMatchObject({ name: 'Liquid handling', type: 'hardware', input: 'template DNA; primers', parameters: 'annealing: 58 C; cycles: 30' });
+    expect((d.method as string).startsWith('mmm')).toBe(true);
     expect((d.method as string).length).toBeLessThanOrEqual(800);
-    const { papers, resources, source, link, cite, ...uo } = d;
+    const { source, link, cite, ...uo } = d;
     expect(JSON.stringify(uo).length).toBeLessThanOrEqual(6000);
-    expect(papers).toEqual([{ title: 'Good paper', verdict: 'accept' }, { title: 'Rejected paper', verdict: 'reject' }]);
-    expect(resources).toEqual({ equipment: ['thermocycler'], tools: ['Benchling'] });
-    expect([source, link, cite]).toEqual([PAPER_NOTICE, `${ORIGIN}/workflows/WD001`, 1]);
+    expect([source, link, cite]).toEqual([PAPER_NOTICE, `${ORIGIN}/workflows/WB005`, 1]);
+  });
+
+  it('include papers flattens the runs (accepted first, no duplicates); include resources reads the real keys', async () => {
+    const run = (n: number, papers: unknown[]) => ({ run_id: `r${n}`, search_date: '2026-10-01', query: 'golden gate', papers });
+    const { tools, sent } = build({
+      '/api/workflows/WB005': DETAIL,
+      '/api/workflows/WB005/resources': RESOURCES,
+      '/api/workflows/WB005/papers': [
+        run(1, [{ paper_id: 'a', title: 'Rejected paper', panel_verdict: 'reject', doi: '10.1/a', year: 2020 }]),
+        run(2, [
+          { paper_id: 'b', title: 'Good paper', panel_verdict: 'accept', doi: '10.1/b', year: 2022, journal: 'NAR' },
+          { paper_id: 'a', title: 'Rejected paper', panel_verdict: 'reject', doi: '10.1/a' },
+        ]),
+      ],
+    });
+    const d = dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WB005', include: ['papers', 'resources'] }));
+    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WB005', '/api/workflows/WB005/resources', '/api/workflows/WB005/papers']);
+    expect(d.papers).toEqual([
+      { title: 'Good paper', verdict: 'accept', year: 2022, doi: '10.1/b' },
+      { title: 'Rejected paper', verdict: 'reject', year: 2020, doi: '10.1/a' },
+    ]);
+    expect(d.resources).toEqual({
+      equipment: ['thermocycler (6)'],
+      consumables: ['PCR tubes (3)'],
+      reagents: ['BsaI (8)'],
+      samples: ['pUC19 (2)'],
+    });
+  });
+
+  it('a large /papers answer is cut to 10 papers and the result stays small', async () => {
+    const runs = Array.from({ length: 10 }, (_, r) => ({
+      run_id: `r${r}`,
+      papers: Array.from({ length: 40 }, (_, i) => ({ title: `Paper ${r}-${i} ${'t'.repeat(300)}`, panel_verdict: i % 2 ? 'accept' : 'reject', abstract: 'x'.repeat(500), doi: `10.1/${r}-${i}` })),
+    }));
+    const { tools } = build({ '/api/workflows/WB005/uo/UHW010': { type: 'hardware' }, '/api/workflows/WB005/papers': runs });
+    const d = dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WB005', uoId: 'UHW010', include: ['papers'] }));
+    expect((d.papers as unknown[]).length).toBe(10);
+    expect((d.papers as Array<{ verdict: string }>).every((p) => p.verdict === 'accept')).toBe(true);
+    expect(JSON.stringify(d).length).toBeLessThan(6000);
+  });
+
+  it('a Workflow without paper data (404) is a normal answer that says so, not a failure', async () => {
+    const { tools, sent } = build({ '/api/workflows/WD010': notFound('Workflow WD010'), '/api/workflows/WD010/resources': notFound('Workflow WD010') });
+    const res = await call(tools, 'workflow_get_method', { workflowId: 'WD010', include: ['papers'] });
+    expect(res.ok).toBe(true);
+    const d = dataOf(res);
+    expect(d).toMatchObject({ workflowId: 'WD010', noPaperData: true });
+    expect(String(d.note)).toMatch(/no paper summaries/i);
+    expect(d.link).toBeUndefined();
+    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WD010']);
+    expect(JSON.stringify(d)).not.toContain('raw-rust-text');
+  });
+
+  it('with uoId on a Workflow without paper data: the UO 404 and the Workflow 404 give noPaperData', async () => {
+    const { tools, sent } = build({
+      '/api/workflows/WD010/uo/UHW040': notFound('Workflow WD010'),
+      '/api/workflows/WD010/resources': notFound('Workflow WD010'),
+    });
+    const res = await call(tools, 'workflow_get_method', { workflowId: 'WD010', uoId: 'UHW040' });
+    expect(res.ok).toBe(true);
+    expect(dataOf(res)).toMatchObject({ workflowId: 'WD010', uoId: 'UHW040', noPaperData: true });
+    expect(sent.map((s) => s.path)).toEqual(['/api/workflows/WD010/uo/UHW040', '/api/workflows/WD010/resources']);
+  });
+
+  it('paper_count 0 is noPaperData too', async () => {
+    const { tools } = build({ '/api/workflows/WD001': { ...DETAIL, id: 'WD001', paper_count: 0 } });
+    expect(dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WD001' }))).toMatchObject({ noPaperData: true });
+  });
+
+  it('a Unit Operation the papers of this Workflow do not cover is a normal answer with the codes they do cover', async () => {
+    const { tools } = build({ '/api/workflows/WB005/uo/UHW015': notFound('UO UHW015'), '/api/workflows/WB005/resources': RESOURCES });
+    const res = await call(tools, 'workflow_get_method', { workflowId: 'WB005', uoId: 'UHW015' });
+    expect(res.ok).toBe(true);
+    expect(dataOf(res)).toMatchObject({ workflowId: 'WB005', uoId: 'UHW015', uoNotInPapers: true, uosInPapers: ['UHW010', 'UHW100', 'USW020'] });
+  });
+
+  it('other errors are still failures', async () => {
+    const { tools } = build({
+      '/api/workflows/WB005': () => {
+        throw new NetError('status', 'raw-rust-text', 500, 'body');
+      },
+    });
+    expect((await call(tools, 'workflow_get_method', { workflowId: 'WB005' })).params).toEqual(['workflow', 'status', '500']);
   });
 
   it('refuses codes that are not catalog codes without IPC', async () => {
@@ -275,6 +369,16 @@ describe('workflow_get_method', () => {
     for (const args of [{ workflowId: 'wd001' }, { workflowId: 'WD001', uoId: 'PCR' }, { workflowId: 'WD001', include: ['extractions'] }]) {
       expect((await call(tools, 'workflow_get_method', args)).params?.[1]).toBe('badArgs');
     }
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('workflow_get_design with a catalog code', () => {
+  it('refuses a catalog Workflow code without IPC and points to workflow_get_method', async () => {
+    const { tools, sent } = build({});
+    const res = await call(tools, 'workflow_get_design', { serviceId: 'WD010' });
+    expect(res.params?.[1]).toBe('badArgs');
+    expect(unfence(res.error).inner).toMatch(/workflow_get_method/);
     expect(sent).toEqual([]);
   });
 });

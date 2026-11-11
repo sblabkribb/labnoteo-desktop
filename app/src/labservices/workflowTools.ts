@@ -7,13 +7,19 @@
  * - `/api/services` 는 서버에 검색이 없어 통째로 받고 TS 에서 거른다. 실행 안에서, 그리고 보관함·연결마다 5분 동안
  *   기억한다. 키가 바뀌면(`onSecretsChange`) 지운다.
  * - `workflow_get_method` 는 서버의 논문 지식 베이스다: 우리 실험실의 프로토콜이 아니다(결과에 그렇게 적는다).
+ *   Unit Operation 목록과 자원은 `/resources`, 논문은 `/papers`(검색 실행들의 배열)에서 읽는다(real-server check,
+ *   2026-11-11). 논문 자료가 없는 Workflow(404, `paper_count: 0`)는 실패가 아니라 `noPaperData` 답이다: 모델이 다시
+ *   찾지 않고 논문 기준 방법이 없다고 말한다.
+ * - `workflow_get_design` 은 카탈로그 코드(WD010 …)를 IPC 없이 거절하고 `workflow_get_method` 를 가리킨다.
  * 이 파일은 네트워크를 직접 쓰지 않는다: 부르는 일은 `LabIpc` 가 한다.
  */
 import type { JsonSchema, ToolDef } from '@labnoteo/core';
 import type { Source } from '../assistant/sources';
 import { savedNotes, serviceDesignToFlow } from '../bfworkflow/designToFlow';
+import { toNetError } from '../integrations/netIpc';
 import { onSecretsChange } from '../integrations/secretsEvents';
 import {
+  badArgs,
   DESC_SUFFIX,
   labTool,
   LabToolError,
@@ -41,6 +47,12 @@ const NOTE_BODY_MAX = 8000;
 const UO_FIELD_MAX = 800;
 const UO_RESULT_MAX = 6000;
 export const PAPER_NOTICE = "Summaries mined from published papers by the Workflow server; not the lab's own protocol. Say so when you use them.";
+export const NO_PAPER_NOTE =
+  'The Workflow server has no paper summaries for this Workflow, so there is no paper-based method to report. ' +
+  'Tell the user so. Do not retry, do not call other tools for it and do not make up a method.';
+const UO_NOT_IN_PAPERS_NOTE =
+  'The paper summaries of this Workflow do not cover this Unit Operation (uosInPapers lists the ones they cover). ' +
+  'Tell the user so; do not make up a method.';
 
 const ACCESS = ['any', 'owner', 'shared'] as const;
 const METHOD_INCLUDE = ['papers', 'resources'] as const;
@@ -214,7 +226,14 @@ export function workflowTools(o: WorkflowToolOpts): ToolDef[] {
       inputSchema: DESIGN_SCHEMA,
       check: (args) => {
         onlyKeys(args, ['serviceId', 'includeNotes']);
-        return { serviceId: reqString(args, 'serviceId', BFW_ID, 64), includeNotes: optBool(args, 'includeNotes') };
+        const serviceId = reqString(args, 'serviceId', BFW_ID, 64);
+        // real-server check: the model passed a catalog code (WD010) here; that only ever answers 404.
+        if (WF_CODE.test(serviceId)) {
+          throw badArgs(
+            `"${serviceId}" is a catalog Workflow code, not a design id. Use workflow_get_method for catalog codes, or workflow_list_designs to find design ids.`
+          );
+        }
+        return { serviceId, includeNotes: optBool(args, 'includeNotes') };
       },
       run: async (a: { serviceId: string; includeNotes: boolean }) => {
         const sid = a.serviceId;
@@ -373,14 +392,72 @@ export function workflowTools(o: WorkflowToolOpts): ToolDef[] {
     state
   );
 
+  // Real server shapes (verify, 2026-11-11): `/api/workflows/{wf}` has only the head (name, domain, paper_count …); the
+  // Unit Operations and resources are in `/resources`; `/papers` is an array of search runs, each with `papers`. A
+  // Workflow without mined papers (all WD*, some catalog codes are not there at all) answers 404: that is an answer, not
+  // a failure, so the model can say there is no paper-based method instead of retrying.
+  const read404 = async (path: string): Promise<{ json: unknown } | null> => {
+    try {
+      return { json: await ipc.bfwRead(path) };
+    } catch (e) {
+      if (e instanceof LabToolError) throw e;
+      const err = toNetError(e);
+      if (err.kind === 'status' && err.status === 404) return null;
+      throw e;
+    }
+  };
+  const uoRows = (v: unknown) =>
+    (Array.isArray(v) ? v : [])
+      .map((u) =>
+        isRecord(u)
+          ? compact({ uoId: clip(firstStr(u, 'catalog_id', 'uo_id', 'id'), 20), name: clip(firstStr(u, 'name', 'uo_name'), 120), papers: num(u.occurrence_count) })
+          : { uoId: clip(u, 20) }
+      )
+      .filter((u) => u.uoId || (u as Record<string, unknown>).name)
+      .slice(0, 30);
+  /** 이름(그리고 논문 수) 목록: 같은 이름은 한 번, 15개까지. */
+  const tally = (v: unknown): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const x of Array.isArray(v) ? v : []) {
+      const name = clip(isRecord(x) ? firstStr(x, 'name') : x, 80);
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      const n = isRecord(x) ? num(x.count) : undefined;
+      out.push(n !== undefined ? `${name} (${n})` : name);
+      if (out.length >= 15) break;
+    }
+    return out;
+  };
+  /** `/papers` 의 실행들을 논문 목록으로(실행 50개, 실행마다 논문 500개까지 본다). DOI·제목이 같으면 한 번. */
+  const paperRows = (v: unknown) => {
+    const seen = new Set<string>();
+    const rows: Array<{ title?: string; verdict?: string; year?: number; doi?: string }> = [];
+    for (const item of listOf(v, 'papers', 'runs').slice(0, 50)) {
+      for (const p of Array.isArray(item.papers) ? records(item.papers).slice(0, 500) : [item]) {
+        const title = clip(firstStr(p, 'title'), 200);
+        if (!title) continue;
+        const doi = clip(firstStr(p, 'doi'), 100);
+        const key = (doi ?? title).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push(compact({ title, verdict: clip(firstStr(p, 'panel_verdict', 'verdict'), 20), year: num(p.year), doi }));
+      }
+    }
+    const accepted = (v?: string) => (v && /^accept/i.test(v) ? 0 : 1);
+    return rows.sort((x, y) => accepted(x.verdict) - accepted(y.verdict)).slice(0, 10);
+  };
+
   const getMethod = labTool(
     {
       name: 'workflow_get_method',
       description:
         "What published papers say about a catalog Workflow (from the Workflow server's paper knowledge base). Without uoId: its " +
-        'hardware/software Unit Operations, their order and QC checkpoints. With uoId: that Unit Operation\'s input, output, ' +
-        'equipment, consumables, method, parameters and environment. include papers lists the source papers. Use search_catalog ' +
-        `first to get the codes.${DESC_SUFFIX}`,
+        'hardware/software Unit Operations named in the papers (papers = how many mention each). With uoId: that Unit ' +
+        "Operation's input, output, equipment, consumables, method, parameters and environment. include papers lists the " +
+        'source papers; include resources the equipment, consumables, reagents and samples. If the result says noPaperData, ' +
+        'the server has no paper summaries for that Workflow: tell the user so and do not retry. Use search_catalog first to ' +
+        `get the codes.${DESC_SUFFIX}`,
       inputSchema: METHOD_SCHEMA,
       check: (args) => {
         onlyKeys(args, ['workflowId', 'uoId', 'include']);
@@ -393,46 +470,42 @@ export function workflowTools(o: WorkflowToolOpts): ToolDef[] {
       run: async (a: { workflowId: string; uoId?: string; include: Array<(typeof METHOD_INCLUDE)[number]> }) => {
         const wf = a.workflowId;
         const link = methodLink(origin, wf);
+        const noPaperData = () => compact({ workflowId: wf, uoId: a.uoId, noPaperData: true, note: NO_PAPER_NOTE });
+        let resources: Record<string, unknown> | undefined;
         let out: Record<string, unknown>;
         if (!a.uoId) {
-          const d = await ipc.bfwRead(`/api/workflows/${wf}`);
-          const w = isRecord(d) ? d : {};
-          const uos = (v: unknown) =>
-            (Array.isArray(v) ? v : [])
-              .map((u) => (isRecord(u) ? compact({ uoId: clip(firstStr(u, 'uo_id', 'id'), 20), name: clip(firstStr(u, 'name', 'uo_name'), 120) }) : { uoId: clip(u, 20) }))
-              .filter((u) => u.uoId || (u as Record<string, unknown>).name)
-              .slice(0, 30);
+          const d = await read404(`/api/workflows/${wf}`);
+          const w = d && isRecord(d.json) ? d.json : undefined;
+          if (!w || num(w.paper_count) === 0) return noPaperData();
+          const r = await read404(`/api/workflows/${wf}/resources`);
+          if (!r) return noPaperData();
+          resources = isRecord(r.json) ? r.json : {};
           out = compact({
             workflowId: wf,
             name: clip(w.name, 160),
             domain: clip(w.domain, 40),
             description: clip(w.description, 400),
-            hardwareUos: uos(w.hardware_uos),
-            softwareUos: uos(w.software_uos),
-            connections: records(w.uo_connections)
-              .slice(0, 40)
-              .map((c) => {
-                const obj = clip(firstStr(c, 'transfer_object'), 80);
-                return `${clip(firstStr(c, 'from_uo'), 20) ?? '?'} -> ${clip(firstStr(c, 'to_uo'), 20) ?? '?'}${obj ? ` (${obj})` : ''}`;
-              }),
-            qcCheckpoints: (Array.isArray(w.qc_checkpoints) ? w.qc_checkpoints : []).slice(0, 10).map((q) =>
-              isRecord(q)
-                ? compact({
-                    afterUo: clip(firstStr(q, 'after_uo'), 20),
-                    check: clip(firstStr(q, 'check', 'checkpoint', 'name', 'description', 'criteria'), 200),
-                    onFail: clip(firstStr(q, 'action_on_fail'), 160),
-                  })
-                : { check: clip(q, 200) }
-            ),
+            paperCount: num(w.paper_count),
+            hardwareUos: uoRows(resources.hardware_uos),
+            softwareUos: uoRows(resources.software_uos),
           });
         } else {
-          const d = await ipc.bfwRead(`/api/workflows/${wf}/uo/${a.uoId}`);
-          const u = isRecord(d) ? d : {};
+          const d = await read404(`/api/workflows/${wf}/uo/${a.uoId}`);
+          if (!d) {
+            // The Workflow has no paper data, or its papers do not cover this Unit Operation: /resources tells which.
+            const r = await read404(`/api/workflows/${wf}/resources`);
+            if (!r) return noPaperData();
+            const res = isRecord(r.json) ? r.json : {};
+            const codes = [...uoRows(res.hardware_uos), ...uoRows(res.software_uos)].map((u) => u.uoId).filter((x): x is string => !!x);
+            return compact({ workflowId: wf, uoId: a.uoId, uoNotInPapers: true, uosInPapers: codes, note: UO_NOT_IN_PAPERS_NOTE, link, source: PAPER_NOTICE });
+          }
+          const u = isRecord(d.json) ? d.json : {};
           const field = (v: unknown, max: number) => joinList(v, max);
           const build = (max: number) =>
             compact({
               workflowId: wf,
               uoId: a.uoId,
+              name: clip(u.name, 160),
               type: clip(u.type, 20),
               input: field(u.input, max),
               output: field(u.output, max),
@@ -447,21 +520,21 @@ export function workflowTools(o: WorkflowToolOpts): ToolDef[] {
           out = build(UO_FIELD_MAX);
           for (let max = UO_FIELD_MAX; JSON.stringify(out).length > UO_RESULT_MAX && max > 100; max = Math.floor(max * 0.7)) out = build(max);
         }
-        if (a.include.includes('papers')) {
-          const p = await ipc.bfwRead(`/api/workflows/${wf}/papers`);
-          const papers = listOf(p, 'papers').map((x) => ({ title: clip(firstStr(x, 'title'), 200), verdict: clip(firstStr(x, 'panel_verdict', 'verdict'), 20) }));
-          const accepted = (v?: string) => (v && /^accept/i.test(v) ? 0 : 1);
-          out.papers = papers
-            .filter((x) => x.title)
-            .sort((x, y) => accepted(x.verdict) - accepted(y.verdict))
-            .slice(0, 10)
-            .map((x) => compact(x));
-        }
         if (a.include.includes('resources')) {
-          const r = await ipc.bfwRead(`/api/workflows/${wf}/resources`);
-          const names = (v: unknown) =>
-            [...new Set((Array.isArray(v) ? v : []).map((x) => clip(isRecord(x) ? firstStr(x, 'name', 'equipment', 'tool') : x, 80)).filter((x): x is string => !!x))].slice(0, 15);
-          out.resources = isRecord(r) ? { equipment: names(r.equipment_uses), tools: names(r.tool_uses) } : { equipment: [], tools: [] };
+          if (!resources) {
+            const r = await read404(`/api/workflows/${wf}/resources`);
+            resources = r && isRecord(r.json) ? r.json : {};
+          }
+          out.resources = {
+            equipment: tally(resources.equipment),
+            consumables: tally(resources.consumables),
+            reagents: tally(resources.reagents),
+            samples: tally(resources.samples),
+          };
+        }
+        if (a.include.includes('papers')) {
+          const p = await read404(`/api/workflows/${wf}/papers`);
+          out.papers = p ? paperRows(p.json) : [];
         }
         out.link = link;
         const n = cite(`Workflow papers: ${wf}${a.uoId ? ` ${a.uoId}` : ''}`, link);
