@@ -116,6 +116,24 @@ export function ungroundedIds(answer: string, ground: string): string[] {
   return out;
 }
 
+/**
+ * Workflow·Unit Operation 질문의 문단(user decision 2026-11-11): 카탈로그 설명(Workflow 탭)이 먼저고, 서버의 논문 요약은
+ * 있을 때만 '논문 요약' 이라고 따로 밝혀 덧붙인다. 다른 실험 폴더의 노트는 쓰지 않는다. 코드는 지어내지 않는다.
+ * 대화에서 `search_catalog` 를 줄 때 넣는다.
+ */
+export const CATALOG_RULES =
+  'For any question about a Workflow or a Unit Operation (what it is, what it does, its equipment or software, how it ' +
+  'is done), first call search_catalog and answer from the catalog description, which is what the Workflow tab shows; ' +
+  'say that it comes from the catalog. Only then, if workflow_get_method is in your tool list, you may add what papers ' +
+  "say in a separate part labelled '논문 요약' (in English replies 'Paper summary'); if it has no paper data, say so in " +
+  "one short line. Do not use notes from other experiment folders for this. Never invent Workflow or Unit Operation " +
+  'codes: name only codes that a tool returned.';
+
+/** 답에 쓰면 안 되는 내부 표기(인용 표기와 울타리). 늘 넣는다. */
+export const ANSWER_FORM_RULES =
+  'Write citations only as [n]; never write [cite:n], "cite" fields, tool names or JSON. Never mention data blocks, ' +
+  'untrusted-data tags, fences or their ids in your answer.';
+
 const PARTBANK_LOCAL_RULES =
   "list_samples, search_samples and get_sample read only this vault's local sample registry, not partbank. " +
   'Never claim that partbank has or lacks a part. If you look in the local sample registry instead, say that it is the local registry.';
@@ -387,6 +405,7 @@ function systemPrompt(o: {
       'Your answer is shown in the chat and is not written to a note; to change a note, use the tools.',
     'Some tool results carry a "cite" number. When your answer uses such a result, cite it as [n] with that number. ' +
       'Never write a [n] that no tool result gave you.',
+    ANSWER_FORM_RULES,
     `Your tools are: ${o.tools.map((x) => x.name).join(', ')}.`,
     o.scope
       ? `The current experiment folder is "${o.scope.folder}": list_experiment, search_experiment and read_note read only inside it. ` +
@@ -399,6 +418,7 @@ function systemPrompt(o: {
         'fetch_page opens only links from web_search or literature results or links the user typed, exactly as given. ' +
         'Cite what you use from the web with its cite number.'
       : '',
+    !o.chip && o.tools.some((x) => x.name === 'search_catalog') ? CATALOG_RULES : '',
     labToolRules(o.tools.map((x) => x.name)),
     hasPartbankTool(o.tools) ? '' : PARTBANK_RULES[o.partbank ?? 'unknown'],
     o.chip ?? '',

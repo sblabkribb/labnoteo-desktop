@@ -16,7 +16,7 @@ async function seeded(): Promise<MemFileSystem> {
 
 const ctxOf = (fs: MemFileSystem): ToolContext => ({ fs, workspaceRoot: '.' });
 const run = (ctx: ToolContext, args: Record<string, unknown>) => runTool([searchCatalogTool()], 'search_catalog', ctx, args);
-type Hit = { id: string; name: string; description: string };
+type Hit = { kind: string; id: string; name: string; nameKo?: string; category: string; description: string; equipment?: string; software?: string };
 const hitsOf = (res: { ok: boolean; data?: unknown; error?: string }): Hit[] => {
   expect(res.error).toBeUndefined();
   expect(res.ok).toBe(true);
@@ -32,14 +32,18 @@ describe('search_catalog', () => {
     expect(def.mutates).toBe(false);
     expect(def.describe).toBeUndefined();
     expect(Object.keys(def.inputSchema.properties).sort()).toEqual(['kind', 'limit', 'query']);
-    expect(def.inputSchema.required).toEqual(['kind', 'query']);
+    expect(def.inputSchema.required).toEqual(['query']);
   });
 
-  it('finds a unit operation by its id and by English words; results are {id, name, description} only', async () => {
+  it('finds a unit operation by its id and by English words, with its category and equipment or software', async () => {
     const ctx = ctxOf(await seeded());
     const byId = hitsOf(await run(ctx, { kind: 'unitOp', query: 'UHW010' }));
-    expect(byId[0].id).toBe('UHW010');
-    for (const h of byId) expect(Object.keys(h).sort()).toEqual(['description', 'id', 'name']);
+    expect(byId[0]).toMatchObject({ kind: 'unitOp', id: 'UHW010', name: 'Liquid Handling', category: 'HW' });
+    expect(byId[0].equipment).toBeTruthy();
+    expect(byId[0].software).toBeUndefined();
+    const sw = hitsOf(await run(ctx, { query: 'USW005' }));
+    expect(sw[0]).toMatchObject({ kind: 'unitOp', id: 'USW005', category: 'SW' });
+    expect(sw[0].software).toBeTruthy();
     const byWord = hitsOf(await run(ctx, { kind: 'unitOp', query: 'liquid handling' }));
     expect(byWord.map((h) => h.id)).toContain('UHW010');
   });
@@ -87,6 +91,47 @@ describe('search_catalog', () => {
     expect(write).not.toHaveBeenCalled();
     expect(mkdir).not.toHaveBeenCalled();
     expect(await fs.exists('resources/workflows/workflows_en.json')).toBe(false);
+  });
+
+  it('without kind a code finds its own kind, and a name finds Workflows and Unit Operations', async () => {
+    const ctx = ctxOf(await seeded());
+    const wf = hitsOf(await run(ctx, { query: 'wb030' }));
+    expect(wf[0]).toMatchObject({ kind: 'workflow', id: 'WB030' });
+    expect(wf[0].category).toBeTruthy();
+    expect(wf.every((h) => h.kind === 'workflow')).toBe(true);
+    const both = hitsOf(await run(ctx, { query: 'assembly', limit: 10 }));
+    expect(both.some((h) => h.kind === 'workflow')).toBe(true);
+    expect(hitsOf(await run(ctx, { query: '액체 분주' }))[0].id).toBe('UHW010');
+  });
+
+  it('an exact code keeps its whole description; other hits are clipped', async () => {
+    const fs = await seeded();
+    const path = 'resources/workflows/workflows_en.json';
+    const json = JSON.parse(await fs.read(path)) as { workflows: Array<Record<string, unknown>> };
+    const long = 'x'.repeat(900);
+    json.workflows[0] = { ...json.workflows[0], description: long };
+    await fs.write(path, JSON.stringify(json));
+    const id = json.workflows[0].id as string;
+    expect(hitsOf(await run(ctxOf(fs), { query: id }))[0].description).toBe(long);
+    const byName = hitsOf(await run(ctxOf(fs), { kind: 'workflow', query: String(json.workflows[0].name) }));
+    expect(byName[0].description.length).toBeLessThan(400);
+  });
+
+  it("returns a Workflow's typical Unit Operations only when the catalog lists them", async () => {
+    const fs = await seeded();
+    const path = 'resources/workflows/workflows_en.json';
+    const json = JSON.parse(await fs.read(path)) as { workflows: Array<Record<string, unknown>> };
+    const id = json.workflows[0].id as string;
+    expect((hitsOf(await run(ctxOf(fs), { query: id }))[0] as Record<string, unknown>).unitOperations).toBeUndefined();
+    json.workflows[0] = { ...json.workflows[0], unitOperations: ['UHW010', { id: 'UHW100' }] };
+    await fs.write(path, JSON.stringify(json));
+    expect((hitsOf(await run(ctxOf(fs), { query: id }))[0] as Record<string, unknown>).unitOperations).toEqual(['UHW010', 'UHW100']);
+  });
+
+  it('a long keyword query with no hit for every word still finds the best partial matches', async () => {
+    const ctx = ctxOf(await seeded());
+    const hits = hitsOf(await run(ctx, { query: 'liquid handling protocol for my samples' }));
+    expect(hits[0].id).toBe('UHW010');
   });
 
   it('no hit is an empty list, not an error', async () => {

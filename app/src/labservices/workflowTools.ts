@@ -456,8 +456,9 @@ export function workflowTools(o: WorkflowToolOpts): ToolDef[] {
         'hardware/software Unit Operations named in the papers (papers = how many mention each). With uoId: that Unit ' +
         "Operation's input, output, equipment, consumables, method, parameters and environment. include papers lists the " +
         'source papers; include resources the equipment, consumables, reagents and samples. If the result says noPaperData, ' +
-        'the server has no paper summaries for that Workflow: tell the user so and do not retry. Use search_catalog first to ' +
-        `get the codes.${DESC_SUFFIX}`,
+        'the server has no paper summaries for that Workflow: tell the user so and do not retry. It adds to the catalog ' +
+        'description, it does not replace it: take the codes and the description from the local catalog (search_catalog) ' +
+        `first, and never guess a code.${DESC_SUFFIX}`,
       inputSchema: METHOD_SCHEMA,
       check: (args) => {
         onlyKeys(args, ['workflowId', 'uoId', 'include']);

@@ -33,7 +33,9 @@ export const LAB_TOOL_RULES = {
     "partbank_* tools read the lab's partbank: where mine = the user's workspace, group = a shared group, public = the public registry.",
   workflow:
     "workflow_* tools read the lab's Workflow server: the user's designs and their saved protocol notes, and " +
-    "(workflow_get_method) summaries mined from published papers, which are not the lab's own protocol; say so when you use them.",
+    "(workflow_get_method) summaries mined from published papers, which are not the lab's own protocol. They only add to " +
+    "the catalog description from search_catalog: label what you take from workflow_get_method as '논문 요약' (in English " +
+    "replies 'Paper summary').",
   partbankOnly: 'These tools only read; you cannot create or change anything in partbank.',
   workflowOnly: 'These tools only read; you cannot create or change anything on the Workflow server.',
   both: 'These tools only read; you cannot create or change anything in partbank or on the Workflow server.',

@@ -239,6 +239,14 @@ describe('workflow_get_method', () => {
     throw new NetError('status', 'raw-rust-text', 404, `{"detail":"${what} not found"}`);
   };
 
+  it('its description sends the model to the local catalog first and says it only adds to it', () => {
+    const { tools } = build({});
+    const d = tools.find((x) => x.name === 'workflow_get_method')!.description;
+    expect(d).toContain('search_catalog');
+    expect(d).toMatch(/adds to the catalog/);
+    expect(d).toMatch(/never guess a code/);
+  });
+
   it('without uoId lists the Unit Operations from /resources and says it is not the lab protocol', async () => {
     const { tools, sent } = build({ '/api/workflows/WB005': DETAIL, '/api/workflows/WB005/resources': RESOURCES });
     const d = dataOf(await call(tools, 'workflow_get_method', { workflowId: 'WB005' }));

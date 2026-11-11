@@ -20,7 +20,9 @@ import { askAgentCommand } from '../../labnote/port/aiAskAgent';
 import { outputCutMessage, ReasoningLoopError } from '../../labnote/port/llmError';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
 import {
+  ANSWER_FORM_RULES,
   builtinRuntime,
+  CATALOG_RULES,
   EARLIER_REPLIES_RULES,
   FRESH_LOOKUP_NOTE,
   EARLIER_UNTRUSTED_RULES,
@@ -415,9 +417,27 @@ describe('builtinRuntime', () => {
     for (const names of tools) {
       expect(names).toContain('add_section');
       expect(names).toContain('search_catalog');
+      expect(names).toContain('get_unit_operation');
       expect(names).toContain('update_section');
       expect(new Set(names).size).toBe(names.length);
     }
+  });
+
+  it('chat says to answer Workflow / Unit Operation questions from the catalog first, labels paper data and never invents codes', async () => {
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p);
+    await rt.run(turnOf('UHW010 이 뭐야?'), recordSink().sink, go());
+    const sys = p.seen[0][0].content;
+    expect(sys).toContain(CATALOG_RULES);
+    expect(CATALOG_RULES).toContain('search_catalog');
+    expect(CATALOG_RULES).toContain('논문 요약');
+    expect(CATALOG_RULES).toMatch(/Never invent Workflow or Unit Operation codes/);
+    expect(CATALOG_RULES).toMatch(/other experiment folders/);
+    expect(sys).toContain(ANSWER_FORM_RULES);
+    const q = new Script([answer('끝')]);
+    const b = await setup(q);
+    await b.rt.run(turnOf('워크플로', { mode: { kind: 'chip', chip: 'workflow', params: { documentPath: DIR } } }), recordSink().sink, go());
+    expect(q.seen[0][0].content).not.toContain(CATALOG_RULES);
   });
 
   it('add_section asks with the app wording and the added lines; allowed, it adds the section in the open editor', async () => {
