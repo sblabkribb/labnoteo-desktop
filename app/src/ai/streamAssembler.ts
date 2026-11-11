@@ -9,6 +9,7 @@
  *   `message.thinking` 만 있고 답이 없으면 `thinkingOnly`.
  * - 생각 글이 같은 대목을 되풀이하면(생각 고리) {@link ReasoningLoopError} 를 던진다: `llmChatStream` 이 요청을 멈추고
  *   그 오류로 거절한다. 고리에 빠진 모델은 LLM_TIMEOUT(300초) 내내 생각만 흘리다 "연결할 수 없다"로 끝났다(real-app check).
+ * - `reasoningOnly()` 는 생각 글만 왔는지 알려 준다: 그때의 시간 초과는 llmProvider 가 생각을 끄고 한 번 더 보낸다.
  * - `[DONE]` 과 JSON 이 아닌 프레임은 건너뛴다. `error` 가 든 프레임은 `NetError('remote')`(글은 500자까지).
  *
  * labnote/port/ 밖에 둔다: provenance 가드는 그 폴더의 모든 파일에 `// Ported from` 머리를 요구한다.
@@ -26,6 +27,8 @@ const REMOTE_MESSAGE_MAX = 500;
 export interface StreamAssembler {
   push(data: string): string;
   result(): ChatResult;
+  /** 지금까지 생각 글만 오고 답 글도 도구 호출도 없었다(생각만 하다 시간이 다 된 요청을 가린다). */
+  reasoningOnly(): boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -137,6 +140,10 @@ export class OpenAiAssembler implements StreamAssembler {
       .filter((c) => c.name !== '');
     return finish(this.content, toolCalls, this.thinking.text);
   }
+
+  reasoningOnly(): boolean {
+    return this.thinking.text.trim() !== '' && !this.content && this.calls.size === 0;
+  }
 }
 
 export class OllamaAssembler implements StreamAssembler {
@@ -171,6 +178,10 @@ export class OllamaAssembler implements StreamAssembler {
   result(): ChatResult {
     return finish(this.content, [...this.calls], this.thinking.text);
   }
+
+  reasoningOnly(): boolean {
+    return this.thinking.text.trim() !== '' && !this.content && this.calls.length === 0;
+  }
 }
 
 /** SSE 프레임 전부를 한 번에 모은다. */
@@ -185,4 +196,14 @@ export function assembleOllama(lines: readonly string[]): ChatResult {
   const a = new OllamaAssembler();
   for (const l of lines) a.push(l);
   return a.result();
+}
+
+/**
+ * 생각 글만 흘리다 시간이 다 된 요청. 종류는 그대로 `NetError('timeout')` 이라 사용자에게는 ai.timeout 이다. llmProvider 가
+ * 이것을 보고 생각을 끄고 한 번 더 보낸다.
+ */
+export class ReasoningStall extends NetError {
+  constructor() {
+    super('timeout', 'the model only reasoned until the time limit');
+  }
 }

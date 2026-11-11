@@ -473,7 +473,22 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
       model: provider.model,
       chat: (messages, opts) => provider.chat(messages, { ...opts, signal: run$.signal }),
       ...(provider.chatStream
-        ? { chatStream: (messages, opts, onDelta) => provider.chatStream!(messages, { ...opts, signal: run$.signal }, onDelta) }
+        ? {
+            chatStream: (messages, opts, onDelta) =>
+              provider.chatStream!(
+                messages,
+                {
+                  ...opts,
+                  signal: run$.signal,
+                  // A reasoning loop is sent once more with thinking off (llmProvider): the bubble says so meanwhile.
+                  onRetry: () => {
+                    state('think');
+                    sink.status(appT('ai.retrying'));
+                  },
+                },
+                onDelta
+              ),
+          }
         : {}),
     };
     // Summary first (as a user message, never in the system prompt), then the most recent history that fits;

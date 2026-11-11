@@ -122,9 +122,10 @@ const ko: Record<string, string> = {
   'ai.notFoundOpenai':
     'AI 서버에 그런 주소가 없습니다(404). {0} 을(를) 확인해 주세요: 서버 주소만 넣거나 /v1 까지 넣습니다(예: https://host 또는 https://host/v1).',
   'ai.timeout':
-    'AI 서버의 답이 제한 시간 안에 끝나지 않았습니다. 생각하는 모델이 오래 생각했을 수 있습니다. 다시 하거나 더 짧게 부탁해 보세요. 되풀이되면 AI 서버가 돌고 있는지 확인해 주세요.',
+    'AI 서버의 답이 제한 시간 안에 끝나지 않았습니다. 생각하는 모델이 오래 생각했을 수 있습니다. 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꾸거나, 더 짧게 부탁해 보세요. 되풀이되면 AI 서버가 돌고 있는지 확인해 주세요.',
   'ai.reasoningLoop':
-    'AI 모델이 같은 생각을 되풀이해서 멈췄습니다. 다시 하거나 요청을 더 짧고 분명하게 바꿔 보세요.',
+    'AI 모델이 같은 생각을 되풀이해서 멈췄습니다(생각을 끄고 한 번 더 해 봤지만 같았습니다). 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꿔 보세요. 요청을 더 짧고 분명하게 바꿔도 됩니다.',
+  'ai.retrying': '생각을 끄고 다시 시도하는 중…',
   'ai.err.emptyEndpoint': 'AI 서버 주소가 비어 있습니다. {0} 에 주소를 넣어 주세요.',
   'ai.err.badScheme': 'AI 서버 주소가 http:// 나 https:// 주소가 아닙니다. {0} 을(를) 확인해 주세요.',
   'ai.err.offline': 'AI 서버에 연결할 수 없습니다. 서버가 켜져 있는지, {0} 이(가) 맞는지 확인해 주세요.',
@@ -137,8 +138,14 @@ const ko: Record<string, string> = {
   'integrations.ai.temperaturePlaceholder': '비워 두면 기본값',
   'integrations.ai.temperatureRecommended': '비우면 모델 권장값: {0} ({1})',
   'integrations.ai.temperatureHint':
-    '0에서 2 사이의 수입니다. 비워 두면 권장값이 알려진 모델(qwen3 계열: 0.6, top_p 0.95)은 그 값을, 그 밖의 모델은 지금처럼 요청마다 정한 값을 보냅니다. 값을 넣으면 언제나 그 값이 쓰입니다.',
+    '0에서 2 사이의 수입니다. 비워 두면 권장값이 알려진 모델(qwen3 계열: 생각 끔 0.7, 생각 켬 0.6)은 그 값을, 그 밖의 모델은 지금처럼 요청마다 정한 값을 보냅니다. 값을 넣으면 temperature 는 언제나 그 값이 쓰입니다.',
   'integrations.ai.temperatureInvalid': '0에서 2 사이의 수를 넣거나 비워 두세요.',
+  'integrations.ai.thinking': '생각 모드',
+  'integrations.ai.thinking.auto': '자동',
+  'integrations.ai.thinking.on': '켬',
+  'integrations.ai.thinking.off': '끔',
+  'integrations.ai.thinkingHint':
+    '생각하는 모델(qwen3 계열 등)이 답하기 전에 오래 생각할지 정합니다. 자동은 qwen3 계열에서 도구를 쓰는 요청(어시스턴트 대화와 칩, Ask AI)은 생각을 끄고, 글만 쓰는 요청은 컨텍스트 창이 128K 이상일 때만 켭니다. 그 밖의 모델에는 아무것도 보내지 않습니다. "같은 생각을 되풀이" 오류가 나면 끔으로 두세요.',
   'tool.name.webSearch': '웹 검색',
   'tool.name.fetchPage': '웹 페이지 읽기',
   'tool.fail.web.offline.search': '웹 검색 서버에 연결하지 못했어요',
@@ -1548,9 +1555,10 @@ const en: Record<string, string> = {
   'ai.notFoundOpenai':
     'The AI server has no such address (404). Check {0}: enter the server address, with or without /v1 (for example https://host or https://host/v1).',
   'ai.timeout':
-    'The AI server did not finish its answer within the time limit. A thinking model may have thought for too long: try again, or ask for something shorter. If it keeps happening, check that the AI server is running.',
+    'The AI server did not finish its answer within the time limit. A thinking model may have thought for too long: set Thinking to Off in Integration settings → AI provider → Advanced, or ask for something shorter. If it keeps happening, check that the AI server is running.',
   'ai.reasoningLoop':
-    'The AI model kept repeating the same reasoning, so it was stopped. Try again, or make the request shorter and clearer.',
+    'The AI model kept repeating the same reasoning, so it was stopped (one more try with thinking off did the same). Set Thinking to Off in Integration settings → AI provider → Advanced, or make the request shorter and clearer.',
+  'ai.retrying': 'Trying again with thinking off…',
   'ai.err.emptyEndpoint': 'The AI server address is empty. Enter it in {0}.',
   'ai.err.badScheme': 'The AI server address is not an http:// or https:// address. Check {0}.',
   'ai.err.offline': 'Cannot connect to the AI server. Check that it is running and that {0} is right.',
@@ -1563,8 +1571,14 @@ const en: Record<string, string> = {
   'integrations.ai.temperaturePlaceholder': 'Blank for the default',
   'integrations.ai.temperatureRecommended': 'Blank: model recommended {0} ({1})',
   'integrations.ai.temperatureHint':
-    'A number from 0 to 2. Left blank, a model with a known recommendation (the qwen3 family: 0.6, top_p 0.95) gets it, and any other model gets the value each request asks for as before. A typed value always wins.',
+    'A number from 0 to 2. Left blank, a model with a known recommendation (the qwen3 family: 0.7 with thinking off, 0.6 with thinking on) gets it, and any other model gets the value each request asks for as before. A typed value always wins for the temperature.',
   'integrations.ai.temperatureInvalid': 'Enter a number from 0 to 2, or leave it blank.',
+  'integrations.ai.thinking': 'Thinking',
+  'integrations.ai.thinking.auto': 'Auto',
+  'integrations.ai.thinking.on': 'On',
+  'integrations.ai.thinking.off': 'Off',
+  'integrations.ai.thinkingHint':
+    'Whether a thinking model (such as the qwen3 family) reasons at length before it answers. Auto turns thinking off for qwen3 on requests that use tools (assistant chat and chips, Ask AI), and on for writing-only requests only when the context window is 128K or more. Other models are sent nothing. If you see the "kept repeating the same reasoning" error, choose Off.',
   'tool.name.webSearch': 'web search',
   'tool.name.fetchPage': 'reading a web page',
   'tool.fail.web.offline.search': 'Could not reach the web search service',

@@ -280,6 +280,35 @@ describe('complete', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('complete with stream: true says it is trying again while the provider resends with thinking off', async () => {
+    renderLayer();
+    const th = host({});
+    const base = createAiEnv(th.ctx);
+    let finish!: () => void;
+    const chatStream = vi.fn(
+      (_m: unknown, o: { onRetry?: () => void } | undefined, onDelta: (text: string) => void) =>
+        new Promise<{ content: string; toolCalls: [] }>((resolve) => {
+          o?.onRetry?.();
+          finish = () => {
+            onDelta('ok');
+            resolve({ content: 'ok', toolCalls: [] });
+          };
+        })
+    );
+    const env: AiEnv = { ...base, provider: { ...base.provider!, label: 'OpenAI-compatible', chat: vi.fn(), chatStream } };
+    let run!: Promise<unknown>;
+    await act(async () => {
+      run = complete(env, [{ role: 'user', content: 'hi' }], { stream: true });
+      await tick();
+    });
+    expect(document.querySelector('.progress-status')?.textContent).toBe(t('ai.retrying'));
+    await act(async () => {
+      finish();
+      await run;
+    });
+    await expect(run).resolves.toMatchObject({ content: 'ok' });
+  });
+
   it('complete with stream: true falls back to chat when the provider cannot stream', async () => {
     const th = host({});
     const { env } = aiEnv(th, () => reply('whole'));

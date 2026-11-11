@@ -84,13 +84,43 @@ describe('Integration settings hook-ups (Task 17)', () => {
     expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(true);
   });
 
+  it('the thinking field under Advanced defaults to auto, saves on and off, and a saved non-auto value opens Advanced', async () => {
+    const { d, commit } = deps({ llmProvider: 'openai', llmModel: 'qwen3.6-35b-a3b' });
+    render(<IntegrationSettingsPage deps={d} onLeave={async () => {}} />);
+    await flush();
+    expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(false);
+    const select = screen.getByLabelText(t('integrations.ai.thinking')) as HTMLSelectElement;
+    expect(select.value).toBe('auto');
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      t('integrations.ai.thinking.auto'),
+      t('integrations.ai.thinking.on'),
+      t('integrations.ai.thinking.off'),
+    ]);
+    fireEvent.change(select, { target: { value: 'off' } });
+    await flush();
+    expect(commit).toHaveBeenCalledWith({ llmThinking: 'off' });
+    cleanup();
+    const saved = deps({ llmProvider: 'ollama', llmThinking: 'off' });
+    render(<IntegrationSettingsPage deps={saved.d} onLeave={async () => {}} />);
+    await flush();
+    expect((screen.getByLabelText(t('integrations.ai.thinking')) as HTMLSelectElement).value).toBe('off');
+    expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(true);
+  });
+
   it('the blank temperature placeholder shows the model recommended value for qwen3, else the plain default', async () => {
     const q = deps({ llmProvider: 'ollama', llmModel: 'qwen3:8b' });
     render(<IntegrationSettingsPage deps={q.d} onLeave={async () => {}} />);
     await flush();
     const input = screen.getByLabelText(t('integrations.ai.temperature')) as HTMLInputElement;
-    expect(input.placeholder).toBe(t('integrations.ai.temperatureRecommended', '0.6', 'qwen3'));
-    expect(input.placeholder).toContain('0.6');
+    expect(input.placeholder).toBe(t('integrations.ai.temperatureRecommended', '0.7', 'qwen3'));
+    expect(input.placeholder).toContain('0.7');
+    cleanup();
+    const on = deps({ llmProvider: 'ollama', llmModel: 'qwen3:8b', llmThinking: 'on' });
+    render(<IntegrationSettingsPage deps={on.d} onLeave={async () => {}} />);
+    await flush();
+    expect((screen.getByLabelText(t('integrations.ai.temperature')) as HTMLInputElement).placeholder).toBe(
+      t('integrations.ai.temperatureRecommended', '0.6', 'qwen3'),
+    );
     cleanup();
     const o = deps({ llmProvider: 'openai', llmModel: 'gpt-4o-mini' });
     render(<IntegrationSettingsPage deps={o.d} onLeave={async () => {}} />);

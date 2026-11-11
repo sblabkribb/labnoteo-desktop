@@ -19,6 +19,7 @@ import { KeyField } from './KeyField';
 import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
 import { TemperatureField } from './TemperatureField';
+import { ThinkingField } from './ThinkingField';
 import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
 import { ScanSettingsSection } from '../labnote/scan/ScanSettingsSection';
@@ -97,6 +98,7 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     llmModel: s.llmModel,
     llmContextWindow: s.llmContextWindow,
     llmTemperature: s.llmTemperature,
+    llmThinking: s.llmThinking,
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: [...s.allowHttpOrigins],
@@ -903,9 +905,18 @@ export function IntegrationSettingsPage(props: {
                 </div>
                 <ContextWindowField value={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT} commit={async (patch) => { await save(patch); }} />
                 {/* 고급: 비워 두면 지금처럼 요청마다 정한 temperature. 저장된 값이 있으면 펼쳐 둔다(숨은 설정이 되지 않게). */}
-                <details className="integration-advanced" open={val.llmTemperature != null || undefined}>
+                <details
+                  className="integration-advanced"
+                  open={val.llmTemperature != null || (val.llmThinking ?? 'auto') !== 'auto' || undefined}
+                >
                   <summary>{t('integrations.ai.advanced')}</summary>
-                  <TemperatureField value={val.llmTemperature} model={val.llmModel} commit={async (patch) => { await save(patch); }} />
+                  <ThinkingField value={val.llmThinking} commit={async (patch) => { await save(patch); }} />
+                  <TemperatureField
+                    value={val.llmTemperature}
+                    model={val.llmModel}
+                    thinking={val.llmThinking}
+                    commit={async (patch) => { await save(patch); }}
+                  />
                 </details>
                 {provider === 'openai' ? (
                   <KeyField

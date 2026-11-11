@@ -213,6 +213,20 @@ describe('builtinRuntime', () => {
     expect(p.seen[0][0].content).toContain('[n]');
   });
 
+  it('a provider retry with thinking off shows the retrying status line', async () => {
+    const p = new Script([
+      (o) => {
+        o?.onRetry?.();
+        return answer('ok');
+      },
+    ]);
+    const { rt } = await setup(p);
+    const { rec, sink } = recordSink();
+    const r = await rt.run(turnOf('hi'), sink, go());
+    expect(rec.status).toEqual([t('ai.retrying')]);
+    expect(r.content).toBe('ok');
+  });
+
   it('names read tools in plain words on the status line, never the snake_case id (review)', async () => {
     const p = new Script([toolTurn('search_experiment', { query: 'PCR' }), answer('끝')]);
     const { rt } = await setup(p);

@@ -69,6 +69,7 @@ describe('보관함별 설정', () => {
         'llmEndpointOllama',
         'llmContextWindow',
         'llmTemperature',
+        'llmThinking',
         'llmEndpointOpenai',
         'llmModel',
         'llmProvider',
@@ -291,8 +292,8 @@ describe('보관함별 설정', () => {
     for (const bad of ['3', '-1', 'abc', '0.5.1', '1e0']) expect(parseTemperatureInput(bad)).toBe('invalid');
   });
 
-  it('recommendedSampling: the qwen3 family (incl. qwen3.5/3.6 names) gets temperature 0.6 and top_p 0.95; other models none', () => {
-    const qwen = { family: 'qwen3', temperature: 0.6, topP: 0.95 };
+  it('recommendedSampling: the qwen3 family (incl. qwen3.5/3.6 names) gets the non-thinking set by default; other models none', () => {
+    const qwen = { family: 'qwen3', temperature: 0.7, topP: 0.8, topK: 20, minP: 0, presencePenalty: 1.5 };
     for (const m of ['qwen3:8b', 'Qwen3-32B', 'qwen/qwen3.5-plus', 'Qwen3.6-235B-A22B', 'hf.co/x/QWEN3-30B-A3B-GGUF'])
       expect(recommendedSampling(m)).toEqual(qwen);
     for (const m of ['', 'llama3.1:8b', 'qwen2.5:7b', 'gpt-4o-mini', 'qwq:32b']) expect(recommendedSampling(m)).toBeNull();

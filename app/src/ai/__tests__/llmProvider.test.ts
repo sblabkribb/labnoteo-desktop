@@ -188,26 +188,26 @@ describe('provider.chat', () => {
     expect('temperature' in chatBody(b.calls, 1) && chatBody(b.calls, 1).temperature !== undefined).toBe(false);
   });
 
-  it('a blank temperature uses the model recommended sampling for qwen3 (0.6, top_p 0.95) on both providers; a typed value wins', async () => {
+  it('a blank temperature uses the model recommended sampling for qwen3 (non-thinking on a plain call: 0.7, top_p 0.8) on both providers; a typed value replaces only the temperature', async () => {
     const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
     const o = replying({ choices: [{ message: { content: 'x' } }] });
     const openai = createLlmProvider(withProvider('openai', { llmModel: 'qwen3.6-35b', llmTemperature: null }), o.invoke)!;
     await openai.chat(msgs, { temperature: 0.2 });
-    expect(chatBody(o.calls, 0)).toMatchObject({ temperature: 0.6, top_p: 0.95 });
+    expect(chatBody(o.calls, 0)).toMatchObject({ temperature: 0.7, top_p: 0.8, top_k: 20, presence_penalty: 1.5 });
     const l = replying({ message: { content: 'x' } });
     const ollama = createLlmProvider(withProvider('ollama', { llmModel: 'qwen3:8b', llmTemperature: null }), l.invoke)!;
     await ollama.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
-    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0.6, top_p: 0.95, num_ctx: 4096 });
-    // A typed value always wins, and then no top_p is added
+    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, num_ctx: 4096 });
+    // A typed value always wins for the temperature; the rest of the set stays
     const ty = replying({ choices: [{ message: { content: 'x' } }] });
     const typed = createLlmProvider(withProvider('openai', { llmModel: 'qwen3:8b', llmTemperature: 0.3 }), ty.invoke)!;
     await typed.chat(msgs, { temperature: 0.2 });
     expect(chatBody(ty.calls, 0).temperature).toBe(0.3);
-    expect(chatBody(ty.calls, 0).top_p).toBeUndefined();
+    expect(chatBody(ty.calls, 0).top_p).toBe(0.8);
     const tl = replying({ message: { content: 'x' } });
     const typedOllama = createLlmProvider(withProvider('ollama', { llmModel: 'qwen3:8b', llmTemperature: 1 }), tl.invoke)!;
     await typedOllama.chat(msgs);
-    expect(chatBody(tl.calls, 0).options).toEqual({ temperature: 1 });
+    expect(chatBody(tl.calls, 0).options).toEqual({ temperature: 1, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5 });
     // Other models keep today's behaviour
     const n = replying({ message: { content: 'x' } });
     const other = createLlmProvider(withProvider('ollama', { llmModel: 'llama3.1:8b', llmTemperature: null }), n.invoke)!;

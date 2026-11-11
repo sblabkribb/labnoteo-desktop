@@ -65,6 +65,11 @@ export type AppSettings = Pick<
    */
   llmTemperature: number | null;
   /**
+   * 앱에만 있는 키(2026-11-11): 생각 모드. 'auto'(기본) 는 qwen3 계열의 도구 차례에서 생각을 끄고, 'on'/'off' 는 언제나 그렇게
+   * 보낸다(`thinkingFor`). 다른 값은 'auto'.
+   */
+  llmThinking: ThinkingSetting;
+  /**
    * 앱에만 있는 키(MCP 클라이언트, spec §5.1): AI 가 쓸 외부 MCP 서버. 기본 []. 토큰은 여기 없다(자격 증명 관리자).
    * 틀린 항목은 버린다(`cleanMcpServers`, Rust `config::parse_mcp_servers` 와 같은 규칙).
    */
@@ -176,20 +181,59 @@ export function parseTemperatureInput(raw: string): number | null | 'invalid' {
   return cleanTemperature(Number(s)) ?? 'invalid';
 }
 
-/** 모델이 권하는 샘플링 값(temperature, top_p)과 그 모델 계열 이름. */
+/** 생각 모드 설정: 자동(모델에 맞춰), 켬, 끔. */
+export type ThinkingSetting = 'auto' | 'on' | 'off';
+/** 한 요청에 보내는 생각 모드. */
+export type ThinkingMode = 'on' | 'off';
+
+/** 저장된 생각 모드: 'on' 이나 'off' 면 그대로, 아니면 'auto'. */
+export function cleanThinking(v: unknown): ThinkingSetting {
+  return v === 'on' || v === 'off' ? v : 'auto';
+}
+
+/**
+ * 자동일 때 글만 쓰는 요청에서 생각을 켜는 가장 작은 컨텍스트 창(토큰). Qwen3.6 모델 카드는 생각하는 능력을 지키려면 128K 이상을
+ * 권한다: 그보다 작은 창에서는 긴 생각이 창을 다 쓰고 답이 잘린다.
+ */
+export const THINKING_CONTEXT_MIN = 131_072;
+
+/**
+ * 한 요청의 생각 모드(2026-11-11, 사용자 보고 "AI 모델이 같은 생각을 되풀이해서 멈췄습니다"). 'on'/'off' 설정은 어느 모델에나
+ * 그대로 보낸다. 자동은 권장값이 알려진 모델(qwen3 계열)만: 도구를 쓰는 차례는 끔(vLLM 은 생각 글 안의 도구 호출을 읽지 않아서
+ * 생각만 이어 가다 도구를 부르지 못했다), 글만 쓰는 차례는 창이 `THINKING_CONTEXT_MIN` 이상일 때만 켬. 그 밖의 모델은 undefined
+ * (아무것도 보내지 않는다, 지금과 같다).
+ */
+export function thinkingFor(
+  s: Pick<AppSettings, 'llmThinking' | 'llmModel' | 'llmContextWindow'>,
+  tools: boolean
+): ThinkingMode | undefined {
+  if (s.llmThinking === 'on' || s.llmThinking === 'off') return s.llmThinking;
+  if (!recommendedSampling(s.llmModel)) return undefined;
+  if (tools) return 'off';
+  return (s.llmContextWindow ?? 0) >= THINKING_CONTEXT_MIN ? 'on' : 'off';
+}
+
+/** 모델이 권하는 샘플링 값과 그 모델 계열 이름. */
 export interface RecommendedSampling {
   family: string;
   temperature: number;
   topP: number;
+  topK: number;
+  minP: number;
+  presencePenalty: number;
 }
 
 /**
- * temperature 칸이 빈칸일 때 쓸 모델 권장 샘플링(2026-11-11): 생각하는 모델 qwen3 계열(qwen3.5/3.6 이름 포함)은
- * temperature 0.6, top_p 0.95(Qwen3 모델 카드의 thinking 모드 권장값). 그 밖의 모델은 null(지금처럼 요청이 정한 값).
+ * temperature 칸이 빈칸일 때 쓸 모델 권장 샘플링(qwen3 계열, qwen3.5/3.6 이름 포함). Qwen3.6-35B-A3B 모델 카드:
+ * 생각 끔은 temperature 0.7, top_p 0.8, top_k 20, min_p 0, presence_penalty 1.5. 생각 켬은 Qwen3 카드의 0.6, top_p 0.95,
+ * top_k 20, min_p 0 에 되풀이를 줄이는 presence_penalty 1.5(3.6 카드의 일반 생각 모드 값). 모드를 주지 않으면 끔의 값.
+ * 그 밖의 모델은 null(지금처럼 요청이 정한 값).
  */
-export function recommendedSampling(model: string | null | undefined): RecommendedSampling | null {
-  if (model && /qwen3/i.test(model)) return { family: 'qwen3', temperature: 0.6, topP: 0.95 };
-  return null;
+export function recommendedSampling(model: string | null | undefined, mode: ThinkingMode = 'off'): RecommendedSampling | null {
+  if (!model || !/qwen3/i.test(model)) return null;
+  return mode === 'on'
+    ? { family: 'qwen3', temperature: 0.6, topP: 0.95, topK: 20, minP: 0, presencePenalty: 1.5 }
+    : { family: 'qwen3', temperature: 0.7, topP: 0.8, topK: 20, minP: 0, presencePenalty: 1.5 };
 }
 
 /** MCP 서버의 기본 포트(플러그인과 같다). */
@@ -351,6 +395,8 @@ const KEYS = [
   'llmContextWindow',
   // 모델 temperature(2026-11-11). 앱 키다. null 이면 요청이 정한 값.
   'llmTemperature',
+  // 생각 모드(2026-11-11). 앱 키다.
+  'llmThinking',
   // MCP 클라이언트(Task 5b): 외부 MCP 서버. 앱 키다.
   'mcpClientServers',
   // 문헌 검색(Task 11): 출처 스위치와 연락처 이메일. 앱 키다.
@@ -373,6 +419,7 @@ const APP_DEFAULTS = {
   imageFolder: 'resources',
   llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
   llmTemperature: null,
+  llmThinking: 'auto',
   ncbiEmail: '',
   crossrefMailto: '',
   githubReadmeOverlay: true,
@@ -429,6 +476,7 @@ export function fromStored(raw: unknown): AppSettings {
     settings.llmContextWindow = clampContextWindow((raw as { llmContextWindow?: unknown }).llmContextWindow);
     // temperature(2026-11-11): 0-2 의 수만 살리고, 아니면 빈칸(null).
     settings.llmTemperature = cleanTemperature((raw as { llmTemperature?: unknown }).llmTemperature);
+    settings.llmThinking = cleanThinking((raw as { llmThinking?: unknown }).llmThinking);
     // MCP 클라이언트(Task 5b): 칸마다 검사하고 틀린 항목은 버린다. 평문 http 허락은 위에서 읽은 목록을 쓴다.
     settings.mcpClientServers = cleanMcpServers((raw as { mcpClientServers?: unknown }).mcpClientServers, settings.allowHttpOrigins);
     // 문헌 검색(Task 11): 출처는 꼭 false 인 것만 끄고, 이메일은 모양이 맞을 때만 살린다.
