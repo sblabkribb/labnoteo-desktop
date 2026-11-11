@@ -9,6 +9,7 @@ import {
   OpenAiAssembler,
   assembleOllama,
   assembleOpenAi,
+  ReasoningLoopError,
 } from '../streamAssembler';
 
 const sse = (delta: unknown, extra: Record<string, unknown> = {}) =>
@@ -103,5 +104,55 @@ describe('assembleOllama', () => {
     expect(() => assembleOllama([JSON.stringify({ error: 'model not found' })])).toThrow(
       expect.objectContaining({ kind: 'remote', message: 'model not found' }),
     );
+  });
+});
+
+describe('reasoning', () => {
+  it('reads the `reasoning` delta field (vLLM) like `reasoning_content`', () => {
+    expect(assembleOpenAi([sse({ reasoning: 'hmm' }), sse({ reasoning: '...' })])).toEqual({
+      content: '',
+      toolCalls: [],
+      thinkingOnly: true,
+    });
+  });
+
+  /** The loop qwen3.6 fell into on the Create section chip (real-app check), in small deltas. */
+  const loop = [
+    'I will call `get_experiment_context` first.\nThen I will call `add_section`.\n\n',
+    'Wait, I should check if the section already exists. The prompt says "The section is new".\nSo I do not need to check.\n\n',
+    'I will draft the content.\n- Template: 1 µL\n- Primers: 1 µL each\n- dNTPs: 2 µL\n- Buffer: 5 µL\n- Water: 15.75 µL\n\n',
+  ].join('');
+  const pieces = (text: string, field: string) => (text.match(/[\s\S]{1,7}/g) ?? []).map((p) => sse({ [field]: p }));
+
+  it('stops a reply whose reasoning keeps repeating the same passage (OpenAI and Ollama)', () => {
+    const a = new OpenAiAssembler();
+    const frames = pieces(loop.repeat(20), 'reasoning');
+    let thrown: unknown;
+    let at = 0;
+    try {
+      for (const f of frames) {
+        a.push(f);
+        at += 1;
+      }
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(ReasoningLoopError);
+    // Caught after a few rounds, not at the end of the stream.
+    expect(at).toBeLessThan(frames.length / 2);
+
+    const o = new OllamaAssembler();
+    const lines = (loop.repeat(20).match(/[\s\S]{1,7}/g) ?? []).map((p) =>
+      JSON.stringify({ message: { role: 'assistant', content: '', thinking: p }, done: false })
+    );
+    expect(() => lines.forEach((l) => o.push(l))).toThrow(ReasoningLoopError);
+  });
+
+  it('long reasoning that does not repeat itself is left alone', () => {
+    const a = new OpenAiAssembler();
+    const text = Array.from({ length: 600 }, (_, i) => `Step ${i}: weigh option ${i * 7} against ${i * 13}. `).join('');
+    for (const f of pieces(text, 'reasoning_content')) a.push(f);
+    a.push(sse({ content: '답' }));
+    expect(a.result()).toEqual({ content: '답', toolCalls: [] });
   });
 });

@@ -4,15 +4,20 @@
  *
  * - OpenAI 호환(SSE): 프레임마다 `choices[0].delta` 의 `content` 를 잇고, `tool_calls[i]` 는 `index` 로 합친다
  *   (`id` 는 처음 온 값, `function.name` 은 비어 있을 때 채우고, `function.arguments` 문자열은 이어 붙인다).
- *   `reasoning_content` 만 있고 답이 없으면 `thinkingOnly`.
+ *   생각 글은 `reasoning_content` 나 `reasoning`(vLLM) 이다. 생각만 있고 답이 없으면 `thinkingOnly`.
  * - Ollama(NDJSON): 줄마다 `message.content` 를 잇고, `message.tool_calls` 는 나온 줄(보통 마지막 줄)에서 모은다.
  *   `message.thinking` 만 있고 답이 없으면 `thinkingOnly`.
+ * - 생각 글이 같은 대목을 되풀이하면(생각 고리) {@link ReasoningLoopError} 를 던진다: `llmChatStream` 이 요청을 멈추고
+ *   그 오류로 거절한다. 고리에 빠진 모델은 LLM_TIMEOUT(300초) 내내 생각만 흘리다 "연결할 수 없다"로 끝났다(real-app check).
  * - `[DONE]` 과 JSON 이 아닌 프레임은 건너뛴다. `error` 가 든 프레임은 `NetError('remote')`(글은 500자까지).
  *
  * labnote/port/ 밖에 둔다: provenance 가드는 그 폴더의 모든 파일에 `// Ported from` 머리를 요구한다.
  */
 import { NetError } from '../integrations/netIpc';
+import { ReasoningLoopError } from '../labnote/port/llmError';
 import { parseToolArguments, type ChatResult, type ToolCall } from '../labnote/port/llmProvider';
+
+export { ReasoningLoopError };
 
 /** 서버가 보낸 오류 글을 보여 줄 수 있는 길이로 자른다(Rust bfw 와 같은 500자). */
 const REMOTE_MESSAGE_MAX = 500;
@@ -48,6 +53,33 @@ function throwIfError(frame: Json): void {
   throw new NetError('remote', message);
 }
 
+/** 고리로 보는 끝 대목의 길이(글자), 그 대목이 최근 글에 나와야 하는 횟수, 살펴보는 최근 글의 길이, 살펴보는 간격. */
+const LOOP_TAIL = 240;
+const LOOP_REPEATS = 4;
+const LOOP_WINDOW = 24_000;
+const LOOP_STEP = 400;
+
+/**
+ * 생각 글을 모으고 고리를 살핀다: 끝의 `LOOP_TAIL` 자가 최근 `LOOP_WINDOW` 자 안에 `LOOP_REPEATS` 번 이상 그대로 나오면
+ * 던진다. 긴 생각이라도 같은 240자를 네 번 그대로 쓰지는 않는다. `LOOP_STEP` 자마다 한 번만 살핀다.
+ */
+class Thinking {
+  text = '';
+  private checkedAt = 0;
+
+  add(piece: string): void {
+    this.text += piece;
+    if (this.text.length - this.checkedAt < LOOP_STEP || this.text.length < LOOP_TAIL * LOOP_REPEATS) return;
+    this.checkedAt = this.text.length;
+    const recent = this.text.slice(-LOOP_WINDOW);
+    const tail = recent.slice(-LOOP_TAIL);
+    let count = 0;
+    for (let at = recent.indexOf(tail); at !== -1; at = recent.indexOf(tail, at + LOOP_TAIL)) {
+      if (++count >= LOOP_REPEATS) throw new ReasoningLoopError();
+    }
+  }
+}
+
 function finish(content: string, toolCalls: ToolCall[], thinking: string): ChatResult {
   const thinkingOnly = toolCalls.length === 0 && !content.trim() && thinking.trim() !== '';
   return { content, toolCalls, ...(thinkingOnly ? { thinkingOnly: true } : {}) };
@@ -63,7 +95,7 @@ interface PartialCall {
 
 export class OpenAiAssembler implements StreamAssembler {
   private content = '';
-  private thinking = '';
+  private readonly thinking = new Thinking();
   private readonly calls = new Map<number, PartialCall>();
 
   push(data: string): string {
@@ -73,7 +105,8 @@ export class OpenAiAssembler implements StreamAssembler {
     const choices = Array.isArray(frame.choices) ? frame.choices : [];
     const delta = asObject(asObject(choices[0])?.delta);
     if (!delta) return '';
-    if (typeof delta.reasoning_content === 'string') this.thinking += delta.reasoning_content;
+    if (typeof delta.reasoning_content === 'string') this.thinking.add(delta.reasoning_content);
+    else if (typeof delta.reasoning === 'string') this.thinking.add(delta.reasoning);
     if (Array.isArray(delta.tool_calls)) {
       delta.tool_calls.forEach((raw: unknown, pos: number) => {
         const c = asObject(raw);
@@ -102,13 +135,13 @@ export class OpenAiAssembler implements StreamAssembler {
         arguments: p.argsObject ?? parseToolArguments(p.args),
       }))
       .filter((c) => c.name !== '');
-    return finish(this.content, toolCalls, this.thinking);
+    return finish(this.content, toolCalls, this.thinking.text);
   }
 }
 
 export class OllamaAssembler implements StreamAssembler {
   private content = '';
-  private thinking = '';
+  private readonly thinking = new Thinking();
   private readonly calls: ToolCall[] = [];
 
   push(data: string): string {
@@ -117,7 +150,7 @@ export class OllamaAssembler implements StreamAssembler {
     throwIfError(frame);
     const message = asObject(frame.message);
     if (!message) return '';
-    if (typeof message.thinking === 'string') this.thinking += message.thinking;
+    if (typeof message.thinking === 'string') this.thinking.add(message.thinking);
     if (Array.isArray(message.tool_calls)) {
       for (const raw of message.tool_calls) {
         const fn = asObject(asObject(raw)?.function);
@@ -136,7 +169,7 @@ export class OllamaAssembler implements StreamAssembler {
   }
 
   result(): ChatResult {
-    return finish(this.content, [...this.calls], this.thinking);
+    return finish(this.content, [...this.calls], this.thinking.text);
   }
 }
 

@@ -121,6 +121,10 @@ const ko: Record<string, string> = {
   'ai.openaiEndpointHint': 'https://host 와 https://host/v1 둘 다 됩니다.',
   'ai.notFoundOpenai':
     '{0} 에 그런 주소가 없습니다(404). {1} 을(를) 확인해 주세요: 서버 주소만 넣거나 /v1 까지 넣습니다(예: https://host 또는 https://host/v1).',
+  'ai.timeout':
+    '{0}의 답이 제한 시간 안에 끝나지 않았습니다. 생각하는 모델이 오래 생각했을 수 있습니다. 다시 하거나 더 짧게 부탁해 보세요. 되풀이되면 {1} 서버가 돌고 있는지 확인해 주세요.',
+  'ai.reasoningLoop':
+    '{0} 모델이 같은 생각을 되풀이해서 멈췄습니다. 다시 하거나 요청을 더 짧고 분명하게 바꿔 보세요.',
   'ai.configureFirst': '연동 설정에서 AI 제공자를 먼저 설정하세요.',
   'integrations.allowHttp': '이 주소로 암호화 없이 키 보내기 허용',
   'integrations.bfw.heading': 'bfworkflow',
@@ -1479,6 +1483,10 @@ const en: Record<string, string> = {
   'ai.openaiEndpointHint': 'Both https://host and https://host/v1 work.',
   'ai.notFoundOpenai':
     '{0} has no such address (404). Check {1}: enter the server address, with or without /v1 (for example https://host or https://host/v1).',
+  'ai.timeout':
+    '{0} did not finish its answer within the time limit. A thinking model may have thought for too long: try again, or ask for something shorter. If it keeps happening, check that the server at {1} is running.',
+  'ai.reasoningLoop':
+    'The {0} model kept repeating the same reasoning, so it was stopped. Try again, or make the request shorter and clearer.',
   'ai.configureFirst': 'Configure an AI provider in Integration settings first.',
   'integrations.allowHttp': 'Allow sending the key to this address without encryption',
   'integrations.bfw.heading': 'bfworkflow',

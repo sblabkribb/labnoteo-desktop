@@ -12,6 +12,7 @@ import { coreT } from '../../labnote/i18n';
 import { describeLlmError, LlmHttpError } from '../../labnote/port/llmError';
 import { fromStored, type AppSettings } from '../../labnote/settings';
 import { registerLlmProbe } from '../llmProbe';
+import { ReasoningLoopError } from '../streamAssembler';
 
 /** 코어 키를 그대로 돌려주는 번역기(vendor 테스트와 같다): 기대 문장을 영어 원문으로 적을 수 있다. */
 const id = (key: string, ...args: Array<string | number | boolean>) =>
@@ -32,12 +33,22 @@ const openai = settingsOf({ llmProvider: 'openai' });
 const path = (label: string) => [t('cmd.integrationSettings'), 'AI provider', label].join(' → ');
 
 describe('describeLlmError', () => {
-  it('offline, timeout and tls give the connection sentence with the endpoint', () => {
+  it('offline and tls give the connection sentence with the endpoint', () => {
     expect(describeLlmError(netError('offline'), settings, id)).toBe(
       `Cannot connect to Ollama (http://localhost:11434). Check that it is running and that ${path('Ollama endpoint')} is right.`,
     );
-    expect(describeLlmError(netError('timeout'), openai, id)).toContain('Cannot connect to OpenAI (https://api.openai.com).');
     expect(describeLlmError(netError('tls'), settings, id)).toContain('Cannot connect to Ollama');
+  });
+
+  it('a timeout says the answer did not finish in time, not that the server cannot be reached (real-app check)', () => {
+    // A thinking model streamed reasoning for the whole LLM_TIMEOUT; "Cannot connect" sent the user to the network.
+    const msg = describeLlmError(netError('timeout'), openai, id);
+    expect(msg).toBe(t('ai.timeout', 'OpenAI', 'https://api.openai.com'));
+    expect(msg).not.toContain('Cannot connect');
+  });
+
+  it('a reasoning loop the stream stopped gets its own sentence', () => {
+    expect(describeLlmError(new ReasoningLoopError(), openai, id)).toBe(t('ai.reasoningLoop', 'OpenAI'));
   });
 
   it('says to enter an address when the endpoint is empty', () => {
