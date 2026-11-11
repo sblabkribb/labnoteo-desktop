@@ -2,6 +2,8 @@ import { Facet, StateField, type EditorState, type Extension } from '@codemirror
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { parseWorkflowChecklistFromReadme, workflowChecklistSectionRange } from '@labnoteo/core/lib/workflowStructure';
 import { t } from '../../i18n/t';
+import type { Lang } from '../../i18n/lang';
+import { editorLang, langChanged } from './editorLang';
 import { iconElement } from '../../ui/iconElement';
 
 /**
@@ -21,8 +23,13 @@ export const readmeEmptyState = Facet.define<ReadmeEmptyState | null, ReadmeEmpt
 });
 
 class EmptyStateWidget extends WidgetType {
-  eq(): boolean {
-    return true;
+  /** `lang`: the language the card's words were drawn in (a switch redraws it). */
+  constructor(readonly lang: Lang) {
+    super();
+  }
+
+  eq(o: EmptyStateWidget): boolean {
+    return o.lang === this.lang;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -62,7 +69,12 @@ class EmptyStateWidget extends WidgetType {
   }
 }
 
-const card = Decoration.widget({ widget: new EmptyStateWidget(), block: true, side: 1 });
+const cards = new Map<Lang, Decoration>();
+const cardFor = (lang: Lang): Decoration => {
+  let card = cards.get(lang);
+  if (!card) cards.set(lang, (card = Decoration.widget({ widget: new EmptyStateWidget(lang), block: true, side: 1 })));
+  return card;
+};
 
 /** Where the card goes: the end of the "Related Workflows" heading line, when the checklist is empty. */
 export function emptyStateAt(state: EditorState): number | null {
@@ -75,13 +87,13 @@ export function emptyStateAt(state: EditorState): number | null {
 
 function build(state: EditorState): DecorationSet {
   const at = emptyStateAt(state);
-  return at === null ? Decoration.none : Decoration.set([card.range(at)]);
+  return at === null ? Decoration.none : Decoration.set([cardFor(state.facet(editorLang)).range(at)]);
 }
 
 const emptyStateField = StateField.define<DecorationSet>({
   create: build,
   update(value, tr) {
-    if (tr.docChanged || tr.startState.facet(readmeEmptyState) !== tr.state.facet(readmeEmptyState)) return build(tr.state);
+    if (tr.docChanged || tr.startState.facet(readmeEmptyState) !== tr.state.facet(readmeEmptyState) || langChanged(tr)) return build(tr.state);
     return value;
   },
   provide: (f) => EditorView.decorations.from(f),

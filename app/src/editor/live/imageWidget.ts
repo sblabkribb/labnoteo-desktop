@@ -1,6 +1,7 @@
 import { Facet } from '@codemirror/state';
 import { WidgetType, type EditorView } from '@codemirror/view';
 import { t } from '../../i18n/t';
+import { getLang, type Lang } from '../../i18n/lang';
 import type { ImageRef } from './imagePath';
 import type { VaultImages } from './vaultImages';
 
@@ -38,17 +39,40 @@ interface Live {
 
 const lives = new WeakMap<HTMLElement, Live>();
 
+/** 감싼 것마다 그것을 그린 위젯(updateDOM 이 같은 그림인지 본다). */
+const drawnBy = new WeakMap<HTMLElement, ImageWidget>();
+
 export class ImageWidget extends WidgetType {
   constructor(
     readonly ref: ImageRef,
     readonly alt: string,
     readonly size: Size,
+    /** "찾을 수 없음" 글을 그린 언어. 언어만 바뀌면 updateDOM 이 그 글만 고친다(그림을 다시 읽지 않는다). */
+    readonly lang: Lang = getLang(),
   ) {
     super();
   }
 
-  eq(o: ImageWidget): boolean {
+  /** 같은 그림인가(언어는 보지 않는다). */
+  private sameImage(o: ImageWidget): boolean {
     return sameRef(this.ref, o.ref) && this.alt === o.alt && this.size?.width === o.size?.width && this.size?.height === o.size?.height;
+  }
+
+  eq(o: ImageWidget): boolean {
+    return this.sameImage(o) && this.lang === o.lang;
+  }
+
+  /** 언어만 바뀌었으면 제자리에서 "찾을 수 없음" 글만 고친다. 그림이 다르면 false(새로 그린다). */
+  updateDOM(dom: HTMLElement): boolean {
+    const prev = drawnBy.get(dom);
+    if (!prev || !prev.sameImage(this)) return false;
+    drawnBy.set(dom, this);
+    const span = dom.querySelector<HTMLElement>(':scope > .lno-image-missing');
+    if (span) {
+      span.textContent = this.missingText();
+      span.title = span.textContent;
+    }
+    return true;
   }
 
   /** 찾지 못했을 때 보일 글. 바깥 주소·거른 경로(후보 없음)는 대체 글을 그대로 보인다. */
@@ -68,6 +92,7 @@ export class ImageWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = 'lno-image-wrap';
+    drawnBy.set(wrap, this);
     const config = view.state.facet(imageLoader);
     const nothing = this.ref.kind === 'paths' && this.ref.candidates.length === 0;
     if (!config || nothing) {

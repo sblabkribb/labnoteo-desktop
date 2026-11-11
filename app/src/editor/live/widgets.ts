@@ -1,6 +1,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { WidgetType, type EditorView } from '@codemirror/view';
 import { t } from '../../i18n/t';
+import { getLang, type Lang } from '../../i18n/lang';
 
 /**
  * 라이브 미리보기의 위젯들(계획 D4). 위젯의 CSS 는 theme.ts 에만 있다.
@@ -49,12 +50,16 @@ export class LabelWidget extends WidgetType {
  * 다르면 새로 그린다. 누름은 inline.ts 의 taskHandlers 가 받아 toggleTaskAt 으로 문서를 고친다.
  */
 export class CheckboxWidget extends WidgetType {
-  constructor(readonly checked: boolean) {
+  /** `lang`: 이름표(aria-label)를 그린 언어. 언어가 바뀌면 다시 그린다(editorLang). */
+  constructor(
+    readonly checked: boolean,
+    readonly lang: Lang = getLang(),
+  ) {
     super();
   }
 
   eq(o: CheckboxWidget): boolean {
-    return this.checked === o.checked;
+    return this.checked === o.checked && this.lang === o.lang;
   }
 
   toDOM(): HTMLElement {
@@ -62,7 +67,6 @@ export class CheckboxWidget extends WidgetType {
     box.type = 'checkbox';
     box.className = 'lno-task';
     box.checked = this.checked;
-    // 글은 그릴 때 읽는다: 언어를 바꾸면 다음 다시 그리기부터 새 언어다
     box.setAttribute('aria-label', t('live.task.toggle'));
     return box;
   }

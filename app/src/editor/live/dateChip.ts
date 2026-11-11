@@ -10,6 +10,8 @@ import {
   type MetaDateFieldMatch,
 } from '@labnoteo/core/lib/dateUtils';
 import { t } from '../../i18n/t';
+import type { Lang } from '../../i18n/lang';
+import { editorLang, langChanged } from './editorLang';
 import { iconElement } from '../../ui/iconElement';
 import { notify } from '../../labnote/host/toastStore';
 import { checkDates } from '../../labnote/port/metaDateChecks';
@@ -41,12 +43,14 @@ class DateChipWidget extends WidgetType {
     readonly value: string,
     /** Icon only: the line shows its source (cursor on it). */
     readonly iconOnly: boolean,
+    /** The language the chip's words were drawn in (a switch redraws it). */
+    readonly lang: Lang,
   ) {
     super();
   }
 
   eq(o: DateChipWidget): boolean {
-    return o.field === this.field && o.value === this.value && o.iconOnly === this.iconOnly;
+    return o.field === this.field && o.value === this.value && o.iconOnly === this.iconOnly && o.lang === this.lang;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -90,6 +94,7 @@ function build(view: EditorView): { decorations: DecorationSet; atomic: Decorati
   const sections = state.field(uoSectionsField);
   if (sections.length === 0) return { decorations: Decoration.none, atomic: Decoration.none };
   const touched = touchedLines(state);
+  const lang = state.facet(editorLang);
   const decos: Range<Decoration>[] = [];
   const atomic: Range<Decoration>[] = [];
   for (const { from, to } of view.visibleRanges) {
@@ -102,10 +107,10 @@ function build(view: EditorView): { decorations: DecorationSet; atomic: Decorati
         const m = findMetaDateFieldInLine(line.text.replace(/\r$/, ''));
         if (!m) continue;
         if (touched.has(n)) {
-          decos.push(Decoration.widget({ widget: new DateChipWidget(m.field, m.value, true), side: 1 }).range(line.to));
+          decos.push(Decoration.widget({ widget: new DateChipWidget(m.field, m.value, true, lang), side: 1 }).range(line.to));
           continue;
         }
-        const widget = new DateChipWidget(m.field, m.value, false);
+        const widget = new DateChipWidget(m.field, m.value, false, lang);
         const a = line.from + m.valueStart - (m.quote ? 1 : 0);
         const b = line.from + m.valueEnd + (m.quote ? 1 : 0);
         if (a === b) {
@@ -135,7 +140,7 @@ class DateChipPlugin {
       }
       return;
     }
-    if (u.docChanged || u.selectionSet || u.viewportChanged) ({ decorations: this.decorations, atomic: this.atomic } = build(u.view));
+    if (u.docChanged || u.selectionSet || u.viewportChanged || langChanged(u)) ({ decorations: this.decorations, atomic: this.atomic } = build(u.view));
   }
 }
 

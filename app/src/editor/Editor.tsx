@@ -8,6 +8,8 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { autocompletion } from '@codemirror/autocomplete';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
+import { getLang } from '../i18n/lang';
+import { editorLang } from './live/editorLang';
 import { editorTheme } from './theme';
 import { labnoteMarkdown } from './markdownSyntax';
 import { tableExtension } from './table/field';
@@ -88,6 +90,8 @@ export interface EditorHandle {
   reveal(at: { line: number; ch?: number }): void;
   /** 버퍼를 링크 색인의 덧씌움으로 지금 낸다(LINKS_MS 를 기다리지 않는다). 한글 조합 중에는 하지 않고, 조합이 끝난 뒤의 갱신에서 낸다. */
   publishLinks(): void;
+  /** 마지막으로 저장했거나 읽은 본문과 다른가(저장 안 된 편집이 있다). */
+  isDirty(): boolean;
 }
 
 interface Props {
@@ -161,7 +165,8 @@ export interface WindowApi {
 type External = { kind: 'changed'; current: string } | { kind: 'gone' };
 
 const LOCKED = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
-const labelAttrs = () => EditorView.contentAttributes.of({ 'aria-label': t('editor.label') });
+/** 언어 칸: 편집 영역의 이름표와 위젯들이 읽는 화면 언어(editorLang). 언어를 바꾸면 이 칸만 갈아 끼운다. */
+const labelAttrs = (): Extension => [EditorView.contentAttributes.of({ 'aria-label': t('editor.label') }), editorLang.of(getLang())];
 
 export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   {
@@ -487,6 +492,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
       return doc && view ? toRaw(doc, view.state.sliceDoc()) : undefined;
     },
     publishLinks: () => publishLinks(),
+    isDirty: () => api.current.isDirty(),
     reveal: ({ line, ch = 0 }) => {
       const view = viewRef.current;
       if (!view) return;
@@ -807,9 +813,12 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
     if (view) scheduleReconfigure(view, samplesSlot.current, sampleEditorConfig.of(next));
   }, [samples]);
 
-  // 언어가 바뀌면 편집 영역의 이름표만 다시 건다. 본문을 바꾸지 않으므로 저장 안 됨 표시도, 자동 저장도 움직이지 않는다.
+  // 언어가 바뀌면 언어 칸(이름표 + editorLang)만 갈아 끼운다. 글을 그리는 위젯(속성 격자, 표 도구, 체크박스, 칩 …)이 이 값을
+  // 보고 제자리에서 다시 그린다. 본문을 바꾸지 않으므로 저장 안 됨 표시, 자동 저장, 되돌리기 기록, 선택은 움직이지 않는다.
+  // 한글 조합 중이면 조합이 끝난 뒤에 바꾼다(조합 중의 다시 그리기는 IME 를 깬다).
   useEffect(() => {
-    viewRef.current?.dispatch({ effects: label.current.reconfigure(labelAttrs()) });
+    const view = viewRef.current;
+    if (view && view.state.facet(editorLang) !== lang) scheduleReconfigure(view, label.current, labelAttrs());
   }, [lang]);
 
   // 대화상자가 열려 있는 동안, 그리고 읽기가 끝나기 전에는 편집을 막는다: 사용자가 결정하는 내용이 바뀌지 않게.
