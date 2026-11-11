@@ -27,12 +27,15 @@ pub const LLM_MAX_REQUEST: usize = 4 * 1024 * 1024;
 /// A connection test answers within this time or fails.
 pub const LLM_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The model list a probe found, and whether the typed model is in it.
+/// The model list a probe found, whether the typed model is in it, and that model's context
+/// limit in tokens when the server says (vLLM's `/v1/models` entries carry `max_model_len`).
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LlmProbe {
     pub models: Vec<String>,
     pub model_found: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_model_len: Option<u64>,
 }
 
 fn endpoint_of(kind: LlmKind, cfg: &ServiceConfig) -> Option<&Url> {
@@ -215,7 +218,20 @@ pub async fn llm_probe_call(
         .unwrap_or_default();
     let model = model.trim();
     let model_found = !model.is_empty() && models.iter().any(|m| matches_model(m, model));
-    Ok(LlmProbe { models, model_found })
+    // The first listed entry for this model that names a positive integer limit.
+    let max_model_len = match provider {
+        LlmKind::Openai if model_found => json
+            .get(list)
+            .and_then(Value::as_array)
+            .and_then(|items| {
+                items
+                    .iter()
+                    .filter(|m| m.get(field).and_then(Value::as_str).is_some_and(|id| matches_model(id, model)))
+                    .find_map(|m| m.get("max_model_len").and_then(Value::as_u64).filter(|n| *n > 0))
+            }),
+        _ => None,
+    };
+    Ok(LlmProbe { models, model_found, max_model_len })
 }
 
 #[tauri::command]
@@ -387,7 +403,7 @@ mod tests {
         let s = serve(vec![Canned::ok(tags), Canned::ok(tags), Canned::ok(tags)]);
         let store = MemoryStore::default();
         let p = probe(None, &store, LlmKind::Ollama, &s.url, "llama3.1", None).unwrap();
-        assert_eq!(p, LlmProbe { models: vec!["llama3.1:latest".into(), "qwen3".into()], model_found: true });
+        assert_eq!(p, LlmProbe { models: vec!["llama3.1:latest".into(), "qwen3".into()], model_found: true, max_model_len: None });
         assert_eq!(s.requests.lock().unwrap()[0].path, "/api/tags");
         assert_eq!(s.requests.lock().unwrap()[0].method, "GET");
         assert!(!probe(None, &store, LlmKind::Ollama, &s.url, "mistral", None).unwrap().model_found);
@@ -398,8 +414,25 @@ mod tests {
     fn openai_probe_reads_data_ids() {
         let s = serve(vec![Canned::ok(r#"{"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]}"#)]);
         let p = probe(None, &MemoryStore::default(), LlmKind::Openai, &format!("{}/openai", s.url), "gpt-4o-mini", None).unwrap();
-        assert_eq!(p, LlmProbe { models: vec!["gpt-4o".into(), "gpt-4o-mini".into()], model_found: true });
+        assert_eq!(p, LlmProbe { models: vec!["gpt-4o".into(), "gpt-4o-mini".into()], model_found: true, max_model_len: None });
         assert_eq!(s.requests.lock().unwrap()[0].path, "/openai/v1/models");
+    }
+
+    #[test]
+    fn openai_probe_reads_the_found_model_max_model_len() {
+        let models = r#"{"data":[{"id":"other","max_model_len":4096},{"id":"qwen3.6-35b-a3b","max_model_len":262144}]}"#;
+        let s = serve(vec![Canned::ok(models), Canned::ok(models), Canned::ok(r#"{"data":[{"id":"m","max_model_len":null}]}"#)]);
+        let store = MemoryStore::default();
+        let p = probe(None, &store, LlmKind::Openai, &s.url, "qwen3.6-35b-a3b", None).unwrap();
+        assert_eq!(p.max_model_len, Some(262144));
+        // No limit for a model that is not listed, or a null limit.
+        assert_eq!(probe(None, &store, LlmKind::Openai, &s.url, "missing", None).unwrap().max_model_len, None);
+        assert_eq!(probe(None, &store, LlmKind::Openai, &s.url, "m", None).unwrap().max_model_len, None);
+        // Absent from the JSON the webview gets when unknown.
+        let json = serde_json::to_value(LlmProbe { models: vec![], model_found: false, max_model_len: None }).unwrap();
+        assert_eq!(json, json!({"models": [], "modelFound": false}));
+        let json = serde_json::to_value(LlmProbe { models: vec![], model_found: true, max_model_len: Some(8) }).unwrap();
+        assert_eq!(json["maxModelLen"], 8);
     }
 
     #[test]
@@ -481,7 +514,7 @@ mod tests {
 
     #[test]
     fn probe_serializes_camel_case() {
-        let p = LlmProbe { models: vec!["a".into()], model_found: true };
+        let p = LlmProbe { models: vec!["a".into()], model_found: true, max_model_len: None };
         assert_eq!(serde_json::to_value(&p).unwrap(), json!({"models": ["a"], "modelFound": true}));
         let i = Incoming { status: 200, text: "x".into() };
         assert_eq!(serde_json::to_value(&i).unwrap(), json!({"status": 200, "text": "x"}));

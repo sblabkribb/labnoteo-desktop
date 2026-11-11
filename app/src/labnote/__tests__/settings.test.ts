@@ -8,6 +8,7 @@ import {
   loadVaultSettings,
   parseTemperatureInput,
   recommendedSampling,
+  suggestContextWindow,
   saveVaultSettings,
   type AppSettings,
 } from '../settings';
@@ -290,6 +291,16 @@ describe('보관함별 설정', () => {
     expect(parseTemperatureInput('  0.6 ')).toBe(0.6);
     expect(parseTemperatureInput('1,5')).toBe(1.5);
     for (const bad of ['3', '-1', 'abc', '0.5.1', '1e0']) expect(parseTemperatureInput(bad)).toBe('invalid');
+  });
+
+  it('suggestContextWindow: an untouched default takes the server limit, a larger value shrinks to it, a chosen smaller one stays', () => {
+    expect(suggestContextWindow(8192, 262144)).toBe(262144);
+    expect(suggestContextWindow(8192, 4096)).toBe(4096);
+    expect(suggestContextWindow(65536, 32768)).toBe(32768);
+    expect(suggestContextWindow(32768, 262144)).toBe(32768);
+    expect(suggestContextWindow(8192, 5_000_000)).toBe(1_000_000);
+    expect(suggestContextWindow(16384, 0)).toBe(16384);
+    expect(suggestContextWindow(16384, 1.5)).toBe(16384);
   });
 
   it('recommendedSampling: the qwen3 family (incl. qwen3.5/3.6 names) gets the non-thinking set by default; other models none', () => {

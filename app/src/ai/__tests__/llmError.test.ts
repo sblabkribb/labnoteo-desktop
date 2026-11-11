@@ -202,6 +202,23 @@ describe('registerLlmProbe', () => {
     }
   });
 
+  it('a found model with a server context limit returns it as contextLimit; junk limits are dropped', async () => {
+    const f = fakeInvoke({ llm_probe: () => ({ models: ['gpt-x'], modelFound: true, maxModelLen: 262144 }) });
+    const off = registerLlmProbe(f.invoke);
+    try {
+      expect(await probeFor('llm')!(fields)).toEqual({ ok: true, message: t('ai.probeOk', 'gpt-x'), contextLimit: 262144 });
+    } finally {
+      off();
+    }
+    const g = fakeInvoke({ llm_probe: () => ({ models: ['gpt-x'], modelFound: true, maxModelLen: -1 }) });
+    const off2 = registerLlmProbe(g.invoke);
+    try {
+      expect(await probeFor('llm')!(fields)).toEqual({ ok: true, message: t('ai.probeOk', 'gpt-x') });
+    } finally {
+      off2();
+    }
+  });
+
   it('the probe reports a missing model with the available ones', async () => {
     const models = ['a', 'b', 'c', 'd', 'e', 'f'];
     const f = fakeInvoke({ llm_probe: () => ({ models, modelFound: false }) });

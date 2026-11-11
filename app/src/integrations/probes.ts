@@ -54,7 +54,14 @@ export type ProbeFn = (fields: {
   model?: string;
   provider?: string;
   connection?: string;
-}) => Promise<{ ok: boolean; message: string }>;
+}) => Promise<ProbeResult>;
+
+/** A probe's answer. `contextLimit` (AI only): the model's context limit in tokens, when the server said. */
+export interface ProbeResult {
+  ok: boolean;
+  message: string;
+  contextLimit?: number;
+}
 
 const probes = new Map<ProbeId, ProbeFn>();
 

@@ -10,6 +10,7 @@ import { ContextWindowField } from '../labnote/context/ContextWindowField';
 import {
   BFW_DEFAULT_URL,
   LLM_CONTEXT_WINDOW_DEFAULT,
+  suggestContextWindow,
   cleanMcpServers,
   fromPluginData,
   isOriginUrl,
@@ -20,7 +21,7 @@ import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
 import { TemperatureField } from './TemperatureField';
 import { ThinkingField } from './ThinkingField';
-import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId } from './probes';
+import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId, type ProbeResult } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
 import { ScanSettingsSection } from '../labnote/scan/ScanSettingsSection';
 import type { RawInvoke } from '../fs/vaultImage';
@@ -322,7 +323,13 @@ function summaryLines(out: ImportOutcome): ImportLine[] {
  * result is for that target only, so it is cleared when the target changes, and an answer for an earlier target is
  * dropped (SP6-B3).
  */
-function ProbeButton(props: { id: ProbeId; target: string; fields: () => Parameters<ProbeFn>[0] }) {
+function ProbeButton(props: {
+  id: ProbeId;
+  target: string;
+  fields: () => Parameters<ProbeFn>[0];
+  /** Runs on a successful answer for the current target; a returned sentence is shown after the probe's own. */
+  after?: (out: ProbeResult) => Promise<string | undefined>;
+}) {
   const [state, setState] = useState<{ ok: boolean; message: string } | 'checking' | undefined>(undefined);
   const runId = useRef(0);
   const target = useRef(props.target);
@@ -336,13 +343,19 @@ function ProbeButton(props: { id: ProbeId; target: string; fields: () => Paramet
   const run = async () => {
     const mine = ++runId.current;
     setState('checking');
-    let out: { ok: boolean; message: string };
+    let out: ProbeResult;
     try {
       out = await probe(props.fields());
     } catch {
       out = { ok: false, message: t('integrations.testFailed') };
     }
-    if (runId.current === mine) setState(out);
+    if (runId.current !== mine) return;
+    if (out.ok && props.after) {
+      const extra = await props.after(out).catch(() => undefined);
+      if (runId.current !== mine) return;
+      if (extra) out = { ...out, message: `${out.message} ${extra}` };
+    }
+    setState({ ok: out.ok, message: out.message });
   };
   return (
     <div className="integration-test">
@@ -903,7 +916,11 @@ export function IntegrationSettingsPage(props: {
                     onBlur={() => void commitModel()}
                   />
                 </div>
-                <ContextWindowField value={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT} commit={async (patch) => { await save(patch); }} />
+                <ContextWindowField
+                  key={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT}
+                  value={val.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT}
+                  commit={async (patch) => { await save(patch); }}
+                />
                 {/* 고급: 비워 두면 지금처럼 요청마다 정한 temperature. 저장된 값이 있으면 펼쳐 둔다(숨은 설정이 되지 않게). */}
                 <details
                   className="integration-advanced"
@@ -939,6 +956,16 @@ export function IntegrationSettingsPage(props: {
                     model: draftRef.current.llmModel.trim(),
                     apiKey: provider === 'openai' ? keyValue(keyRefs.llmOpenai) : undefined,
                   })}
+                  after={async (out) => {
+                    // The server's context limit (vLLM max_model_len): an untouched default takes it, a larger value
+                    // shrinks to it, a value the user chose stays (settings suggestContextWindow).
+                    if (out.contextLimit == null) return undefined;
+                    const current = valRef.current.llmContextWindow ?? LLM_CONTEXT_WINDOW_DEFAULT;
+                    const next = suggestContextWindow(current, out.contextLimit);
+                    if (next === current) return t('ai.probeContextKept', String(out.contextLimit));
+                    await save({ llmContextWindow: next });
+                    return t('ai.probeContext', String(out.contextLimit), String(next));
+                  }}
                 />
               </div>
             )}

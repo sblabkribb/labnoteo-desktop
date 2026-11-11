@@ -431,6 +431,8 @@ export async function llmChatStream(
 export interface LlmProbe {
   models: string[];
   modelFound: boolean;
+  /** The found model's context limit in tokens, when the server lists it (vLLM `max_model_len`). */
+  maxModelLen?: number;
 }
 
 export function llmProbe(

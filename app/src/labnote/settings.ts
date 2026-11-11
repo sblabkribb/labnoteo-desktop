@@ -163,6 +163,16 @@ export function clampContextWindow(v: unknown): number {
   return Math.min(LLM_CONTEXT_WINDOW_MAX, Math.max(LLM_CONTEXT_WINDOW_MIN, v));
 }
 
+/**
+ * 서버가 알려 준 컨텍스트 한도(토큰)에 맞춘 컨텍스트 창. 손대지 않은 기본값(8192)이면 한도를 쓰고, 한도보다 크면 한도로 줄이고,
+ * 그 밖의 값(사용자가 고른 값)은 그대로 둔다. 결과는 언제나 `clampContextWindow` 범위 안이다.
+ */
+export function suggestContextWindow(current: number, limit: number): number {
+  if (!Number.isInteger(limit) || limit <= 0) return current;
+  const cap = clampContextWindow(limit);
+  return current === LLM_CONTEXT_WINDOW_DEFAULT || current > cap ? cap : current;
+}
+
 /** temperature 설정의 범위. */
 export const LLM_TEMPERATURE_MAX = 2;
 

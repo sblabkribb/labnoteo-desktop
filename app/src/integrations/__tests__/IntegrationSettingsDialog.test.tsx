@@ -420,6 +420,23 @@ describe('IntegrationSettingsPage', () => {
     off();
   });
 
+  it('an AI probe that reports the server context limit fits an untouched context window to it; a chosen value stays', async () => {
+    const off = registerProbe('llm', async () => ({ ok: true, message: 'Connected.', contextLimit: 262144 }));
+    const d = fakeDeps({ llmProvider: 'openai', llmModel: 'qwen3.6-35b-a3b', llmContextWindow: 8192 });
+    show(d);
+    await userEvent.click(await screen.findByText(coreT('Test connection')));
+    expect(await screen.findByText(`Connected. ${t('ai.probeContext', '262144', '262144')}`)).toBeTruthy();
+    expect(d.commit).toHaveBeenCalledWith({ llmContextWindow: 262144 });
+    expect((screen.getByLabelText(t('aiCtx.window.label')) as HTMLSelectElement).value).toBe('custom');
+    cleanup();
+    const chosen = fakeDeps({ llmProvider: 'openai', llmModel: 'qwen3.6-35b-a3b', llmContextWindow: 32768 });
+    show(chosen);
+    await userEvent.click(await screen.findByText(coreT('Test connection')));
+    expect(await screen.findByText(`Connected. ${t('ai.probeContextKept', '262144')}`)).toBeTruthy();
+    expect(chosen.commit).not.toHaveBeenCalledWith(expect.objectContaining({ llmContextWindow: expect.anything() }));
+    off();
+  });
+
   // SP6-B3: a result is about the address it was made for; another address has not been tested.
   it('a Test connection result is cleared when the address changes and stays cleared when it is changed back', async () => {
     const off = registerProbe('partbankWeb', async () => ({ ok: true, message: 'Connected as kim.' }));
