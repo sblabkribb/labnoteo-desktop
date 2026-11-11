@@ -6,7 +6,7 @@ import { t } from '../../i18n/t';
  * AI 초안 검토 표시: AI 가 노트에 넣은 줄에 잠깐 옅은 바탕과 끝의 "검토 완료" 단추를 띄운다. 파일에는 아무것도 쓰지 않는다
  * (예전의 `> [!note] AI 초안 (모델, 날짜) — 검토 후 이 줄을 지우세요` 줄 대신, 2026-11-11 사용자 결정). 표시는
  * - 그 구간을 사용자가 고치면(구간에 닿는 변경) 그 구간만,
- * - "검토 완료" 를 누르면 그 구간만,
+ * - "검토 완료" 를 누르면(마우스, 클릭, Enter·Space) 그 구간만,
  * - Esc 를 누르면(키는 먹지 않는다: 다른 Esc 처리도 그대로 돈다) 모두
  * 사라진다. 상태는 편집기 상태에만 있어 노트를 다시 열면 없다.
  */
@@ -67,10 +67,26 @@ class DoneWidget extends WidgetType {
     button.className = 'cm-ai-draft-done';
     button.textContent = t('aiDraft.review.done');
     button.title = t('aiDraft.review.title');
+    button.setAttribute('aria-label', t('aiDraft.review.label'));
+    button.tabIndex = 0;
+    const done = () => view.dispatch({ effects: removeRange.of(this.from) });
     // mousedown: 편집기가 커서를 옮기기 전에 처리하고 초점을 빼앗지 않는다.
     button.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      view.dispatch({ effects: removeRange.of(this.from) });
+      done();
+    });
+    // click: 보조 기술이 보내는 클릭(mousedown 없이 온다). 같은 구간을 두 번 지워도 아무 일 없다.
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      done();
+    });
+    // 키보드: Enter·Space. 편집기가 그 키로 글을 넣거나 줄을 바꾸지 않게 먹고, 초점은 편집기로 돌려준다.
+    button.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+      done();
+      view.focus();
     });
     return button;
   }
@@ -135,7 +151,8 @@ export function clearAiDraftReview(view: EditorView): void {
 export function markAiDraft(view: EditorView, before: string): void {
   if (view.state.field(field, false) === undefined) return;
   const ranges = insertedRanges(before, view.state.doc.toString());
-  if (ranges.length > 0) view.dispatch({ effects: addRanges.of(ranges) });
+  // 화면 낭독기에는 한 번만 조용히(polite, 편집기의 알림 구역) 알린다.
+  if (ranges.length > 0) view.dispatch({ effects: [addRanges.of(ranges), EditorView.announce.of(t('aiDraft.review.announce'))] });
 }
 
 /** 줄 단위 비교를 이만큼(옛 줄 수 × 새 줄 수)까지만 한다. 넘으면 바뀐 가운데 전체를 하나로 본다. */

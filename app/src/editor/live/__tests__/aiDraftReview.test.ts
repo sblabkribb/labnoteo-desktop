@@ -2,6 +2,7 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { setLang } from '../../../i18n/lang';
+import { t } from '../../../i18n/t';
 import {
   aiDraftRanges,
   aiDraftReview,
@@ -62,6 +63,54 @@ describe('aiDraftReview', () => {
     done!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(aiDraftRanges(v.state)).toEqual([]);
     expect(v.dom.querySelector('.cm-ai-draft')).toBeNull();
+  });
+
+  it('the Done button has an aria-label and works by click and by Enter or Space, not only by mousedown (a11y)', () => {
+    const before = 'x\n';
+    const v = view(before);
+    v.dispatch({ changes: { from: 2, insert: 'A\n\nB\n' } });
+    markAiDraft(v, before);
+    const all = () => [...v.dom.querySelectorAll<HTMLButtonElement>('button.cm-ai-draft-done')];
+    expect(all().length).toBe(1);
+    const done = all()[0];
+    expect(done.getAttribute('aria-label')).toBe(t('aiDraft.review.label'));
+    expect(done.tabIndex).toBe(0);
+    done.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(aiDraftRanges(v.state)).toEqual([]);
+
+    for (const key of ['Enter', ' ']) {
+      const b = 'y\n';
+      const w = view(b);
+      w.dispatch({ changes: { from: 2, insert: 'AI\n' } });
+      markAiDraft(w, b);
+      const btn = w.dom.querySelector<HTMLButtonElement>('button.cm-ai-draft-done')!;
+      const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      btn.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(true);
+      expect(aiDraftRanges(w.state)).toEqual([]);
+    }
+  });
+
+  it('announces the highlight politely once when a draft is inserted', () => {
+    const before = 'x\n';
+    const v = view(before);
+    const seen: string[] = [];
+    v.dispatch({ changes: { from: 2, insert: 'AI one\n\nAI two\n' } });
+    const spy = vi.spyOn(v, 'dispatch');
+    markAiDraft(v, before);
+    for (const call of spy.mock.calls) {
+      const spec = call[0] as { effects?: unknown };
+      const effects = ([] as unknown[]).concat(spec.effects ?? []);
+      for (const e of effects as Array<{ is(type: unknown): boolean; value: unknown }>)
+        if (e.is(EditorView.announce)) seen.push(String(e.value));
+    }
+    expect(seen).toEqual([t('aiDraft.review.announce')]);
+    const region = v.dom.querySelector('[aria-live="polite"]');
+    expect(region?.textContent).toBe(t('aiDraft.review.announce'));
+    // Nothing inserted: no announcement
+    spy.mockClear();
+    markAiDraft(v, v.state.doc.toString());
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('follows edits elsewhere and clears a range the user edits', () => {
