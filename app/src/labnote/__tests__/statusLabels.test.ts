@@ -1,5 +1,6 @@
 import { setLang } from '../../i18n/lang';
-import { statusKind, statusLabel, statusShape } from '../statusLabels';
+import { ICON_NAMES } from '../../ui/Icon';
+import { STATUS_SHAPE_ICON, statusKind, statusLabel, statusShape } from '../statusLabels';
 
 afterEach(() => setLang('ko'));
 
@@ -41,8 +42,11 @@ describe('statusLabel / statusShape', () => {
   it('failed and discontinued never look like planned', () => {
     expect(statusShape('failed')).toBe('failed');
     expect(statusShape('discontinued')).toBe('stopped');
-    expect(statusShape('needs-review')).toBe('half');
-    expect(statusShape('needs-repeat')).toBe('half');
+    // 검토·재실험 필요는 진행 중과 다른 모양이다(2026-11-11).
+    expect(statusShape('needs-review')).toBe('review');
+    expect(statusShape('needs-repeat')).toBe('repeat');
+    expect(new Set([STATUS_SHAPE_ICON.half, STATUS_SHAPE_ICON.review, STATUS_SHAPE_ICON.repeat]).size).toBe(3);
+    for (const icon of Object.values(STATUS_SHAPE_ICON)) expect(ICON_NAMES).toContain(icon);
     expect(statusShape('')).toBe('dashed');
   });
 });

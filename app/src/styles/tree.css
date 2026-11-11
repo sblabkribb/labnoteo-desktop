@@ -287,6 +287,9 @@ button.tree-state { cursor: pointer; }
 button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
 .tree-state[data-icon="circle-check"] { color: var(--success); }
 .tree-state[data-icon="circle-half"] { color: var(--accent); }
+/* 검토 필요(물음표)와 재실험 필요(되돌리기)는 진행 중과 모양도 색도 다르다 */
+.tree-state[data-icon="circle-help"] { color: var(--warning); }
+.tree-state[data-icon="rotate-ccw"] { color: var(--warning); }
 /* 실패는 위험 색의 X, 중단은 흐린 멈춤: 모양이 달라 계획(점선 원)과 헷갈리지 않는다 */
 .tree-state[data-icon="circle-x"] { color: var(--danger); }
 /* Workflow 완료 체크박스(README 체크리스트): 체크는 성공 색, 끝나지 않은 UO 가 남았으면 주의 색 */

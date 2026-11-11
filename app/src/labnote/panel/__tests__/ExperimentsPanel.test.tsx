@@ -123,15 +123,29 @@ describe('ExperimentsPanel', () => {
     const plan = await findRow(/004 · /);
     await user.click(plan.querySelector('.tree-state')!);
     const names = screen.getAllByRole('menuitem').map((m) => m.textContent);
-    expect(names).toHaveLength(7);
+    expect(names).toHaveLength(8);
     expect(names[0]).toBe('계획 (현재)');
-    expect(names.slice(1)).toEqual(['진행 중', '검토 필요', '완료', '실패', '중단', '재실험 필요']);
+    expect(names.slice(1)).toEqual(['진행 중', '검토 필요', '완료', '실패', '중단', '재실험 필요', '상태 없음']);
     await user.click(screen.getByRole('menuitem', { name: '진행 중' }));
     await waitFor(async () => expect(await h.vault.mem.read(`${PLAN}/README.labnote.md`)).toMatch(/^status: in-progress$/m));
     // 줄을 열지 않는다
     expect(h.opened).toEqual([]);
     expect(h.asked.pick).toEqual([]);
     await waitFor(() => expect(row(/004 · /).querySelector('.tree-state')?.getAttribute('data-icon')).toBe('circle-half'));
+  });
+
+  it('"상태 없음" in the status menu removes the status line; the row then shows no status', async () => {
+    const user = userEvent.setup();
+    mount();
+    const plan = await findRow(/004 · /);
+    await user.click(plan.querySelector('.tree-state')!);
+    await user.click(screen.getByRole('menuitem', { name: '상태 없음' }));
+    await waitFor(async () => expect(await h.vault.mem.read(`${PLAN}/README.labnote.md`)).not.toMatch(/^status:/m));
+    expect(await h.vault.mem.read(`${PLAN}/README.labnote.md`)).toMatch(/^title: 계획만$/m);
+    expect(h.asked.pick).toEqual([]);
+    await waitFor(() => expect(row(/004 · /).querySelector('.tree-state')?.getAttribute('data-icon')).toBe('circle-dashed'));
+    await user.click(row(/004 · /).querySelector('.tree-state')!);
+    expect(await screen.findByRole('menuitem', { name: '상태 없음 (현재)' })).toBeTruthy();
   });
 
   it('Space on a focused experiment row opens the status menu; Enter still opens the README', async () => {

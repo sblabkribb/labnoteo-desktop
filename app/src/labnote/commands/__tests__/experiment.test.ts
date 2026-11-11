@@ -10,7 +10,7 @@ import { createTestHost, type TestHost } from '../../__tests__/testHost';
 import { clearCommandsForTest, commandById } from '../registry';
 import { registerAllCommands } from '../registerAll';
 import { runCommand } from '../runCommand';
-import { changeExperimentStatus, createExperiment, retryFromActive, toggleDiscussionFlag } from '../experiment';
+import { changeExperimentStatus, clearExperimentStatus, createExperiment, retryFromActive, toggleDiscussionFlag } from '../experiment';
 
 const DIR = 'labnote/001_실험_1차';
 const README_PATH = `${DIR}/README.labnote.md`;
@@ -146,6 +146,21 @@ describe('change-experiment-status', () => {
     );
     expect(h.notes).toHaveLength(1);
     expect(h.notes[0].kind).toBe('info');
+  });
+
+  it('clearExperimentStatus removes only the status line (plus last_updated_date) and does nothing without a status', async () => {
+    const before = readme('needs-repeat', '# 손으로 적은 주석\n');
+    h = createTestHost({ [README_PATH]: before });
+    await clearExperimentStatus(h.ctx, DIR);
+    expect(h.vault.files()[README_PATH]).toBe(
+      before.replace('status: needs-repeat\n', '').replace('last_updated_date: 2026-01-01', `last_updated_date: ${TODAY}`),
+    );
+    expect(h.notes).toHaveLength(1);
+    expect(h.notes[0].kind).toBe('info');
+    const after = h.vault.files()[README_PATH];
+    await clearExperimentStatus(h.ctx, DIR);
+    expect(h.vault.files()[README_PATH]).toBe(after);
+    expect(h.notes).toHaveLength(1);
   });
 
   it('without autoUpdateLastUpdated only the status line changes', async () => {

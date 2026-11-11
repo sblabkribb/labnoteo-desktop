@@ -12,6 +12,7 @@
  * - (UI 재설계 Task 19) 제목 하나 묻는 입력 대신 새 실험 대화상자가 제목과 실험자를 묻는다. 실험자는 README 의 author 가 되고
  *   설정 defaultExperimenter 로 기억한다. 앱이 새로 쓰는 README 에서는 Ctrl+P/Cmd+P 안내 인용을 지운다
  *   (stripInstructionCallouts, 플러그인과 일부러 다른 점). 이미 있는 파일은 건드리지 않는다.
+ * - (2026-11-11) 실험 탭의 상태 메뉴는 "상태 없음"으로 status 줄을 지울 수 있다(clearExperimentStatus, 앱에만 있다).
  */
 import type { ExperimentStatus } from '@labnoteo/core';
 import { DISCUSS_FLAG_KEY, EXPERIMENT_STATUSES, copyFrontMatterKeys, isDiscussFlagged, isValidStatus, parseFrontMatterYaml, setFrontMatterKeys } from '@labnoteo/core';
@@ -286,6 +287,30 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
     }
   }
   host.notify('info', message);
+}
+
+/**
+ * 실험의 상태를 지운다(README 의 `status:` 줄을 뺀다, 실험 탭 상태 메뉴의 "상태 없음"). 상태가 없으면 아무것도 쓰지 않는다.
+ * 쓰기는 changeExperimentStatus 와 같다: processNote 변환과 last_updated_date(설정에 따라), 알림 한 줄.
+ */
+export async function clearExperimentStatus(ctx: CommandContext, experimentDir: string): Promise<void> {
+  const { host } = ctx;
+  const stamp = readmeStamp(ctx.settings);
+  const readmePath = await resolveReadmePath(host.fs, experimentDir);
+  if (!(await host.fs.exists(readmePath))) {
+    host.notify('warn', host.t('This experiment has no README.labnote.md.'));
+    return;
+  }
+  const parsed = await readNoteForFrontMatterEdit(host, readmePath);
+  if (!parsed) return;
+  const raw = parsed.frontMatter.status;
+  if (raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '')) return;
+  const current = String(raw);
+  await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(text, { status: undefined })));
+  host.notify(
+    'info',
+    host.t('Experiment status changed ({0}): {1} → {2}.', posix.basename(experimentDir), current, host.t('(none)')),
+  );
 }
 
 /** 실험 README 의 `discuss` 표시를 켜거나 끈다. */

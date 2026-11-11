@@ -9,7 +9,7 @@ import { editorStatus, subscribeEditorStatus, useEditorText } from '../../editor
 import { Icon } from '../../ui/Icon';
 import { SelectMenu } from '../../ui/SelectMenu';
 import { vaultRefresh, type CommandContext } from '../commands/context';
-import { changeExperimentStatus, createExperiment, retryExperiment, toggleDiscussionFlag } from '../commands/experiment';
+import { changeExperimentStatus, clearExperimentStatus, createExperiment, retryExperiment, toggleDiscussionFlag } from '../commands/experiment';
 import { commandById } from '../commands/registry';
 import { runCommand } from '../commands/runCommand';
 import { insertUnitOp } from '../commands/unitOp';
@@ -426,6 +426,7 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
   /**
    * 실험 상태 메뉴(상태 아이콘, 그 줄의 Space): 플러그인의 상태들, 지금 것에 "(현재)". 고르면 머리줄의 상태 칩·명령과 같은
    * changeExperimentStatus 가 쓴다(완료면 같은 확인, last_updated_date, 알림). 같은 값은 아무것도 쓰지 않는다.
+   * 맨 아래의 "상태 없음"은 status 줄을 지운다(clearExperimentStatus, 2026-11-11).
    */
   const openStatusMenu = (exp: ExpNode, el: HTMLElement) => {
     const folded = exp.status.trim().toLowerCase().replace(/_/g, '-');
@@ -433,11 +434,20 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
     openMenu(
       ctx,
       { element: el },
-      EXPERIMENT_STATUSES.map((s) => ({
-        label: s === current ? t('experiments.status.current', statusLabel(s)) : statusLabel(s),
-        icon: SHAPE_ICON[statusShape(s)],
-        run: changed(exp.dir, () => changeExperimentStatus(ctx, exp.dir, s)),
-      })),
+      [
+        ...EXPERIMENT_STATUSES.map(
+          (s): MenuItem => ({
+            label: s === current ? t('experiments.status.current', statusLabel(s)) : statusLabel(s),
+            icon: SHAPE_ICON[statusShape(s)],
+            run: changed(exp.dir, () => changeExperimentStatus(ctx, exp.dir, s)),
+          }),
+        ),
+        {
+          label: folded === '' ? t('experiments.status.current', t('experiments.noStatus')) : t('experiments.noStatus'),
+          icon: 'circle-off',
+          run: changed(exp.dir, () => clearExperimentStatus(ctx, exp.dir)),
+        },
+      ],
     );
   };
 

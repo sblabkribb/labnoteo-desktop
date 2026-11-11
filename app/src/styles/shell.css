@@ -159,6 +159,7 @@ button.chip.status { min-height: 20px; padding: 0 var(--space-3); background: va
 button.chip.status:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--border-strong); }
 .chip.status[data-shape="check"] .icon { color: var(--success); }
 .chip.status[data-shape="half"] .icon { color: var(--accent); }
+.chip.status[data-shape="review"] .icon, .chip.status[data-shape="repeat"] .icon { color: var(--warning); }
 .chip.status[data-shape="failed"] .icon { color: var(--danger); }
 .chip.code { background: var(--bg-hover); color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-label); font-variant-numeric: tabular-nums; }
 .chip.date { background: var(--bg); border-color: var(--border); color: var(--text); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
