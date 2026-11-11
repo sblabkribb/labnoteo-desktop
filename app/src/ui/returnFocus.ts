@@ -25,6 +25,8 @@ export function captureFocus(): () => void {
 /**
  * 초점을 el 로 돌려준다(문서에 붙어 있을 때만). 키보드로 일하던 중이면 el 에 data-focus-ring 을 달아 고리를 보이고
  * (CSS `[data-focus-ring]:focus`), 초점이 떠나면 뗀다. 마우스로 닫았으면 고리를 달지 않는다.
+ * 스크롤은 건드리지 않는다: 편집기의 contentDOM 은 문서 전체만큼 길어서, 그냥 focus() 하면 브라우저가 그 머리로
+ * 끌어올려 본문이 맨 위로 가고 캐럿만 제자리에 남는다. 초점을 가져갈 때 요소는 보이던 자리였다.
  */
 export function restoreFocusTo(el: HTMLElement | null | undefined): void {
   if (!el?.isConnected) return;
@@ -32,5 +34,5 @@ export function restoreFocusTo(el: HTMLElement | null | undefined): void {
     el.setAttribute('data-focus-ring', '');
     el.addEventListener('blur', () => el.removeAttribute('data-focus-ring'), { once: true });
   }
-  el.focus();
+  el.focus({ preventScroll: true });
 }

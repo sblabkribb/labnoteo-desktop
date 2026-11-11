@@ -95,4 +95,20 @@ describe('returned focus ring', () => {
     expect(gone.hasAttribute('data-focus-ring')).toBe(false);
     restoreFocusTo(null);
   });
+
+  it('restoreFocusTo does not scroll: the editor keeps the place the user was reading', () => {
+    // 편집기의 contentDOM 은 문서 전체만큼 길다. 스크롤을 막지 않으면 focus() 가 그 머리로 끌어올려 본문이 맨 위로 간다.
+    const editor = document.createElement('div');
+    editor.tabIndex = 0;
+    document.body.append(editor);
+    const calls: (FocusOptions | undefined)[] = [];
+    const focus = editor.focus.bind(editor);
+    editor.focus = (options?: FocusOptions) => {
+      calls.push(options);
+      focus(options);
+    };
+    restoreFocusTo(editor);
+    expect(document.activeElement).toBe(editor);
+    expect(calls).toEqual([{ preventScroll: true }]);
+  });
 });
