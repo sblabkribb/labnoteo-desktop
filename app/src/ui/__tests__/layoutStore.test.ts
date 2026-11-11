@@ -6,6 +6,7 @@ import {
   LAYOUT_KEY,
   normalizePrefs,
   PET_DEFAULT,
+  BUBBLE_MIN,
   PET_OFFSET_MAX,
   WRITE_DEBOUNCE_MS,
   type UiPrefs,
@@ -202,14 +203,16 @@ describe('layout store', () => {
 
 describe('pet prefs (floating assistant, assistant spec §4.1/§4.3)', () => {
   it('normalizePrefs applies the Rust rules to pet: clamped offsets, scale 2|3, skin id pattern, junk gives defaults', () => {
-    expect(DEFAULT_PREFS.pet).toEqual({ x: PET_DEFAULT.x, y: PET_DEFAULT.y, hidden: false, scale: 2, skin: 'flasko' });
-    expect(PET_DEFAULT).toEqual({ x: 24, y: 40, hidden: false, scale: 2, skin: 'flasko' });
+    expect(DEFAULT_PREFS.pet).toEqual({ x: PET_DEFAULT.x, y: PET_DEFAULT.y, hidden: false, scale: 2, skin: 'flasko', bubbleW: 0, bubbleH: 0 });
+    expect(PET_DEFAULT).toEqual({ x: 24, y: 40, hidden: false, scale: 2, skin: 'flasko', bubbleW: 0, bubbleH: 0 });
     expect(normalizePrefs({ pet: { x: -5, y: 1e9, hidden: true, scale: 7, skin: '../evil' } }).pet).toEqual({
       x: 0,
       y: PET_OFFSET_MAX,
       hidden: true,
       scale: 2,
       skin: 'flasko',
+      bubbleW: 0,
+      bubbleH: 0,
     });
     expect(normalizePrefs({ pet: { x: 33.6, y: 'far', scale: 3, skin: 'my-skin-2', extra: 1 } }).pet).toEqual({
       x: 34,
@@ -217,6 +220,8 @@ describe('pet prefs (floating assistant, assistant spec §4.1/§4.3)', () => {
       hidden: false,
       scale: 3,
       skin: 'my-skin-2',
+      bubbleW: 0,
+      bubbleH: 0,
     });
     for (const bad of ['ab', 'Flasko', 'a_b_c', 'x'.repeat(33), '', '가나다'])
       expect(normalizePrefs({ pet: { skin: bad } }).pet.skin, bad).toBe('flasko');
@@ -225,6 +230,18 @@ describe('pet prefs (floating assistant, assistant spec §4.1/§4.3)', () => {
       expect(p.pet).toEqual(PET_DEFAULT);
       expect(p.leftWidth).toBe(300);
     }
+  });
+
+  it('the assistant window size: 0 is the default size, a set size is clamped to 280×240 … 4096 (same rules as ui_prefs.rs)', () => {
+    expect([BUBBLE_MIN.w, BUBBLE_MIN.h]).toEqual([280, 240]);
+    const pet = (o: Record<string, unknown>) => normalizePrefs({ pet: o }).pet;
+    expect(pet({ bubbleW: 500.4, bubbleH: 420 })).toMatchObject({ bubbleW: 500, bubbleH: 420 });
+    expect(pet({ bubbleW: 100, bubbleH: 1 })).toMatchObject({ bubbleW: 280, bubbleH: 240 });
+    expect(pet({ bubbleW: 1e9, bubbleH: 99999 })).toMatchObject({ bubbleW: PET_OFFSET_MAX, bubbleH: PET_OFFSET_MAX });
+    for (const junk of [0, -5, 'wide', null, true, Number.NaN])
+      expect(pet({ bubbleW: junk, bubbleH: junk }), String(junk)).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+    // one side alone is not a size: both go back to the default
+    expect(pet({ bubbleW: 500 })).toMatchObject({ bubbleW: 0, bubbleH: 0 });
   });
 
   it('setPet merges into pet, and a pet write and a sidebar-width change in quick succession both reach Rust (single writer)', () => {

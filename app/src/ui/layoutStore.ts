@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 /**
- * 앱 전체의 화면 배치(왼쪽·오른쪽 사이드바 너비와 열림, 탭, 행 밀도, 시스템 파일 표시, 떠 있는 도우미의 자리·크기·숨김·스킨).
+ * 앱 전체의 화면 배치(왼쪽·오른쪽 사이드바 너비와 열림, 탭, 행 밀도, 시스템 파일 표시, 떠 있는 도우미의 자리·크기·숨김·스킨과 말풍선 크기).
  * 기준은 Rust 의 `ui.json`(app config 의 settings.json 옆, src-tauri/src/ui_prefs.rs)이고,
  * `localStorage['labnoteo.ui.layout']` 은 첫 프레임용 거울일 뿐이다(public/theme-boot.js 가 건다).
  * 창은 숨긴 채 뜨고, useTheme 은 `ready()` 가 끝난 뒤에 창을 보인다: 첫 프레임에 너비가 튀지 않는다.
@@ -24,6 +24,12 @@ export interface PetPrefs {
   scale: 2 | 3;
   /** 스킨 id(`[a-z0-9-]{3,32}`). 설치되지 않은 id 면 그리는 쪽이 기본 스킨을 쓴다. */
   skin: string;
+  /**
+   * 말풍선(대화 창)의 너비·높이(CSS px). 0 은 기본 크기(내용에 맞춘 높이). 정한 크기는 BUBBLE_MIN … PET_OFFSET_MAX 이고,
+   * 창에 맞춰 자르는 것은 petStore 다. 한쪽만 있으면 크기가 아니다: 둘 다 0 이 된다.
+   */
+  bubbleW: number;
+  bubbleH: number;
 }
 
 export interface UiPrefs {
@@ -44,7 +50,9 @@ export const LEFT_RANGE = { min: 200, max: 480, default: 272 } as const;
 export const RIGHT_RANGE = { min: 220, max: 480, default: 280 } as const;
 /** ui_prefs.rs 의 PET_OFFSET_MAX 와 같다. */
 export const PET_OFFSET_MAX = 4096;
-export const PET_DEFAULT: Readonly<PetPrefs> = Object.freeze({ x: 24, y: 40, hidden: false, scale: 2, skin: 'flasko' });
+export const PET_DEFAULT: Readonly<PetPrefs> = Object.freeze({ x: 24, y: 40, hidden: false, scale: 2, skin: 'flasko', bubbleW: 0, bubbleH: 0 });
+/** 말풍선의 가장 작은 크기(px). ui_prefs.rs 의 BUBBLE_MIN_W·BUBBLE_MIN_H 와 같다. */
+export const BUBBLE_MIN = Object.freeze({ w: 280, h: 240 });
 const SKIN_ID = /^[a-z0-9-]{3,32}$/;
 
 export const DEFAULT_PREFS: Readonly<UiPrefs> = Object.freeze({
@@ -75,16 +83,27 @@ function offset(v: unknown, d: number): number {
   return Math.min(PET_OFFSET_MAX, Math.max(0, Math.round(v)));
 }
 
+/** 말풍선 크기 한 변: 0 이하·숫자 아님은 0(기본), 그 밖은 [min, PET_OFFSET_MAX]. */
+function bubbleSide(v: unknown, min: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(PET_OFFSET_MAX, Math.max(min, Math.round(v)));
+}
+
 /** 도우미 값: 객체가 아니면 기본값, 나쁜 칸은 그 칸의 기본값(ui_prefs.rs 의 PetPrefs 와 같은 규칙). */
 export function normalizePet(raw: unknown): PetPrefs {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...PET_DEFAULT };
   const o = raw as Record<string, unknown>;
+  const bw = bubbleSide(o.bubbleW, BUBBLE_MIN.w);
+  const bh = bubbleSide(o.bubbleH, BUBBLE_MIN.h);
+  const sized = bw > 0 && bh > 0;
   return {
     x: offset(o.x, PET_DEFAULT.x),
     y: offset(o.y, PET_DEFAULT.y),
     hidden: flag(o.hidden, PET_DEFAULT.hidden),
     scale: o.scale === 3 ? 3 : 2,
     skin: typeof o.skin === 'string' && SKIN_ID.test(o.skin) ? o.skin : PET_DEFAULT.skin,
+    bubbleW: sized ? bw : 0,
+    bubbleH: sized ? bh : 0,
   };
 }
 

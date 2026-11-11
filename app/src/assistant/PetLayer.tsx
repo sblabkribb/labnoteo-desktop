@@ -16,10 +16,16 @@ import {
   MOVE_STEP_BIG,
   petArea,
   petStore as defaultStore,
+  RESIZE_STEP,
+  RESIZE_STEP_BIG,
   snapScale,
+  type BubbleSize,
   type PetPos,
   type PetStore,
 } from './petStore';
+
+type Side = 'above' | 'below';
+type GrowX = 'left' | 'right';
 
 /** 자리 안내 글("오른쪽 아래"). 번역 키는 글자 그대로 둔다(카탈로그 검사가 키를 찾는다). */
 function areaLabel(pos: PetPos, store: PetStore): string {
@@ -42,6 +48,9 @@ const ARROW: Readonly<Record<string, [number, number]>> = {
  * DialogLayer 가 그 층에 inert 를 건다). 자리·크기·스프라이트 값은 CSSOM 변수로만 건다(CSP style-src 'self').
  * - 누르기(4px 이하로 움직이고 놓기)는 말풍선을 열고 닫는다. 그보다 멀리 끌면 옮기고, 놓을 때 저장한다(PC 마다, Rust ui.json).
  * - Alt+화살표 8px, Alt+Shift+화살표 32px, Alt+Home 처음 자리. 기본 동작을 막는다(WebView2 에서 Alt+←/→ 는 뒤로·앞으로 가기).
+ * - 말풍선 크기: 그림에서 먼 모서리(위로 열면 위, 아래로 열면 아래; 보통 왼쪽, 창 왼쪽에 밀려 붙었으면 오른쪽)의 손잡이를
+ *   끌면 바뀌고 놓을 때 저장한다(PC 마다). 손잡이에서 화살표 16px, Shift+화살표 64px, Home·두 번 누르기는 기본 크기.
+ *   크기를 바꾸는 동안은 말풍선이 위·아래로 뒤집히지 않는다. 높이는 고른 쪽에 남은 높이까지다.
  * - 숨기면 아무것도 그리지 않는다. 리본 단추와 assistant.toggleVisible 이 다시 보인다.
  * - 대화 갈래(useAssistantSession)는 숨겨도, 말풍선을 닫아도 열린 노트의 실험 폴더를 따른다(폴더가 바뀌면 멈추고 바꾼다).
  */
@@ -68,6 +77,12 @@ export function PetLayer(props: {
   const [frame, setFrame] = useState(0);
   const drag = useRef<{ id: number; x0: number; y0: number; pos: PetPos; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
+  const grip = useRef<HTMLButtonElement>(null);
+  const gripHint = useId();
+  // 마지막으로 잡은 말풍선 자리(손잡이 방향과 그쪽에 남은 높이)와, 크기를 바꾸는 동안 붙들어 둘 쪽
+  const placed = useRef<{ side: Side; growX: GrowX; maxH: number }>({ side: 'above', growX: 'left', maxH: Infinity });
+  const lockSide = useRef<Side | undefined>(undefined);
+  const resize = useRef<{ id: number; x0: number; y0: number; from: BubbleSize; growX: GrowX; side: Side } | null>(null);
 
   // 창 크기에 맞춰 자른다: 처음 그릴 때와 창 크기가 바뀔 때
   useEffect(() => {
@@ -96,20 +111,33 @@ export function PetLayer(props: {
     el.style.setProperty('--pet-scale', String(snapScale(snap.scale, window.devicePixelRatio || 1)));
   }, [snap.pos.x, snap.pos.y, snap.scale, snap.hidden, frame]);
 
-  // 말풍선을 창 안에: 그림 위(자리가 모자라면 아래)로, 가로는 창 틀 안으로 민다. 높이는 고른 쪽에 남은 만큼(CSSOM 변수)
+  // 말풍선을 창 안에: 그림 위(자리가 모자라면 아래)로, 가로는 창 틀 안으로 민다. 높이는 고른 쪽에 남은 만큼(CSSOM 변수).
+  // 정한 크기는 --bubble-w·--bubble-h 와 data-sized 로 건다. 손잡이 모서리는 data-side·data-grow-x 를 따른다.
   useLayoutEffect(() => {
     const bubble = wrap.current?.querySelector<HTMLElement>('.pet-bubble');
     const pet = button.current;
     if (!snap.open || !bubble || !pet) return;
+    if (snap.bubble) {
+      bubble.dataset.sized = 'true';
+      bubble.style.setProperty('--bubble-w', `${snap.bubble.w}px`);
+      bubble.style.setProperty('--bubble-h', `${snap.bubble.h}px`);
+    } else {
+      delete bubble.dataset.sized;
+      bubble.style.removeProperty('--bubble-w');
+      bubble.style.removeProperty('--bubble-h');
+    }
     bubble.style.removeProperty('--bubble-max-h');
     const r = pet.getBoundingClientRect();
-    const place = bubblePlace(r, { w: bubble.offsetWidth, h: bubble.offsetHeight }, { ...store.viewport(), w: window.innerWidth, h: window.innerHeight });
+    const size = snap.bubble ?? { w: bubble.offsetWidth, h: bubble.offsetHeight };
+    const place = bubblePlace(r, size, { ...store.viewport(), w: window.innerWidth, h: window.innerHeight }, lockSide.current);
+    placed.current = { side: place.side, growX: place.growX, maxH: place.maxH };
     bubble.dataset.side = place.side;
+    bubble.dataset.growX = place.growX;
     bubble.style.setProperty('--bubble-left', `${place.left}px`);
     bubble.style.setProperty('--bubble-top', `${place.top}px`);
     bubble.style.setProperty('--bubble-bottom', `${place.bottom}px`);
     bubble.style.setProperty('--bubble-max-h', `${place.maxH}px`);
-  }, [snap.open, snap.pos.x, snap.pos.y, snap.scale, skin, frame, store]);
+  }, [snap.open, snap.pos.x, snap.pos.y, snap.scale, snap.bubble, skin, frame, store]);
 
   // 설치한 스킨은 기본 스킨보다 클 수 있다: 그 틀 크기로 자리를 다시 자른다(창 틀 밖으로 나가지 않게)
   useLayoutEffect(() => {
@@ -187,12 +215,111 @@ export function PetLayer(props: {
     setHint(t('pet.moved', areaLabel(store.get().pos, store)));
   };
 
+  // 말풍선 크기: 지금 그린 크기(기본 크기면 잰 값)에서 시작한다
+  const bubbleNow = (): BubbleSize => {
+    const cur = store.get().bubble;
+    if (cur) return cur;
+    const el = wrap.current?.querySelector<HTMLElement>('.pet-bubble');
+    return { w: el?.offsetWidth ?? 0, h: el?.offsetHeight ?? 0 };
+  };
+  // 손잡이를 dx·dy 만큼 옮긴 크기. 높이를 바꾸면 고른 쪽에 남은 높이까지다(그 너머는 그려지지 않는다: 보이는 높이에서
+  // 시작해 끌 때 헛도는 구간이 없다). 너비만 바꾸면 높이는 그대로 둔다(저장된 높이를 깎지 않는다).
+  const grown = (from: BubbleSize, dx: number, dy: number, growX: GrowX, side: Side): BubbleSize => {
+    const cap = Math.max(placed.current.maxH, 0);
+    return {
+      w: from.w + (growX === 'left' ? -dx : dx),
+      h: dy === 0 ? from.h : Math.min(Math.min(from.h, cap) + (side === 'above' ? -dy : dy), cap),
+    };
+  };
+  const announceSize = () => {
+    const b = store.get().bubble;
+    setHint(b ? t('pet.resized', String(b.w), String(b.h)) : t('pet.sizeReset'));
+  };
+  const resetSize = () => {
+    store.resetBubbleSize();
+    announceSize();
+  };
+  const onGripDown = (e: PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const { side, growX } = placed.current;
+    resize.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, from: bubbleNow(), growX, side };
+    lockSide.current = side;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onGripMove = (e: PointerEvent<HTMLButtonElement>) => {
+    const r = resize.current;
+    if (!r || r.id !== e.pointerId) return;
+    const next = grown(r.from, e.clientX - r.x0, e.clientY - r.y0, r.growX, r.side);
+    store.resizeBubbleTo(next.w, next.h);
+  };
+  const onGripUp = (e: PointerEvent<HTMLButtonElement>) => {
+    const r = resize.current;
+    if (!r || r.id !== e.pointerId) return;
+    resize.current = null;
+    lockSide.current = undefined;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    store.commitBubble();
+    // 놓은 뒤에는 다시 자리를 잡는다(이제 뒤집을 수 있다)
+    setFrame((n) => n + 1);
+  };
+  const onGripKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === 'Home') {
+      e.preventDefault();
+      resetSize();
+      return;
+    }
+    const dir = Object.hasOwn(ARROW, e.key) ? ARROW[e.key] : undefined;
+    if (!dir) return;
+    e.preventDefault();
+    const step = e.shiftKey ? RESIZE_STEP_BIG : RESIZE_STEP;
+    const { side, growX } = placed.current;
+    const next = grown(bubbleNow(), dir[0] * step, dir[1] * step, growX, side);
+    store.setBubbleSize(next.w, next.h);
+    announceSize();
+  };
+  const gripNode = (
+    <>
+      <button
+        ref={grip}
+        type="button"
+        className="pet-bubble-grip"
+        aria-label={t('pet.resize')}
+        aria-describedby={gripHint}
+        title={t('pet.resizeHint')}
+        onPointerDown={onGripDown}
+        onPointerMove={onGripMove}
+        onPointerUp={onGripUp}
+        onPointerCancel={onGripUp}
+        onDoubleClick={resetSize}
+        onKeyDown={onGripKey}
+      />
+      <span id={gripHint} className="pet-sr">
+        {t('pet.resizeHint')}
+      </span>
+    </>
+  );
+
   // 누르면 할 일을 이름으로: 말풍선이 열려 있으면 "어시스턴트 닫기"
   const label = snap.open ? t('pet.closeAssistant') : t('pet.open');
   return (
     <div ref={wrap} className="pet-wrap" data-open={snap.open}>
       {snap.open && (
-        <Bubble id={bubbleId} onClose={close} onHide={hide} chat={chat} activePath={props.activePath} actions={props.actions} />
+        <Bubble
+          id={bubbleId}
+          onClose={close}
+          onHide={hide}
+          chat={chat}
+          activePath={props.activePath}
+          actions={props.actions}
+          grip={gripNode}
+          sized={snap.bubble !== null}
+          onResetSize={() => {
+            resetSize();
+            grip.current?.focus();
+          }}
+        />
       )}
       <button
         ref={button}

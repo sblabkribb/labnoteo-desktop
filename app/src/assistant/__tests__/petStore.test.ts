@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createLayoutStore, PET_DEFAULT, type UiPrefs } from '../../ui/layoutStore';
 import { BUILTIN_SKIN } from '../skins/builtin';
-import { applySkinVars, BUBBLE_GAP, bubblePlace, createPetStore, DONE_MS, MOVE_STEP, MOVE_STEP_BIG, petArea, petSize, snapScale, windowViewport, type Viewport } from '../petStore';
+import { applySkinVars, BUBBLE_GAP, bubbleBounds, bubblePlace, createPetStore, RESIZE_STEP, RESIZE_STEP_BIG, DONE_MS, MOVE_STEP, MOVE_STEP_BIG, petArea, petSize, snapScale, windowViewport, type Viewport } from '../petStore';
 
 function memoryStorage(): Storage {
   const m = new Map<string, string>();
@@ -264,5 +264,84 @@ describe('bubblePlace', () => {
     const q = bubblePlace(petAt(600, 500), { w: 352, h: 600 }, vp);
     expect(q.side).toBe('above');
     expect(q.maxH).toBe(500 - BUBBLE_GAP - (36 + BUBBLE_GAP));
+  });
+
+  it('says which way the bubble grows: toward the window from the pet (top-left above, bottom-left below, right when pushed)', () => {
+    expect(bubblePlace(petAt(1112, 696), bubble, vp)).toMatchObject({ side: 'above', growX: 'left' });
+    expect(bubblePlace(petAt(1112, 36), bubble, vp)).toMatchObject({ side: 'below', growX: 'left' });
+    // pushed right of the ribbon: the left edge is pinned, so it grows to the right
+    expect(bubblePlace(petAt(44, 710), bubble, vp)).toMatchObject({ side: 'above', growX: 'right' });
+  });
+
+  it('a side asked for (while resizing) is kept even when the other side has more room', () => {
+    const p = bubblePlace(petAt(600, 200), { w: 352, h: 600 }, vp, 'above');
+    expect(p.side).toBe('above');
+    expect(p.maxH).toBe(200 - BUBBLE_GAP - (36 + BUBBLE_GAP));
+  });
+});
+
+describe('the assistant window size (resizable bubble)', () => {
+  it('bubbleBounds: at least 280×240, at most the window minus the frame and the gaps', () => {
+    const vp: Viewport = { w: 1200, h: 800, top: 36, left: 44, bottom: 26, right: 0 };
+    expect(bubbleBounds(vp)).toEqual({ minW: 280, minH: 240, maxW: 1200 - 44 - 2 * BUBBLE_GAP, maxH: 800 - 36 - 26 - 2 * BUBBLE_GAP });
+    // a window too small for the minimum: the maximum wins, nothing overflows the window
+    expect(bubbleBounds({ w: 250, h: 200 })).toEqual({ minW: 250 - 2 * BUBBLE_GAP, minH: 200 - 2 * BUBBLE_GAP, maxW: 250 - 2 * BUBBLE_GAP, maxH: 200 - 2 * BUBBLE_GAP });
+  });
+
+  it('starts at the default size (null); setBubbleSize clamps and saves per PC through the layout store', () => {
+    const { store, layout } = setup({ w: 1200, h: 800 });
+    expect(store.get().bubble).toBeNull();
+    expect([RESIZE_STEP, RESIZE_STEP_BIG]).toEqual([16, 64]);
+    store.setBubbleSize(500, 400);
+    expect(store.get().bubble).toEqual({ w: 500, h: 400 });
+    expect(layout.get().pet).toMatchObject({ bubbleW: 500, bubbleH: 400 });
+    store.setBubbleSize(10, 10);
+    expect(store.get().bubble).toEqual({ w: 280, h: 240 });
+    store.setBubbleSize(9999, 9999);
+    expect(store.get().bubble).toEqual({ w: 1200 - 16, h: 800 - 16 });
+    expect(layout.get().pet).toMatchObject({ bubbleW: 1184, bubbleH: 784 });
+  });
+
+  it('resizeBubbleTo (dragging) clamps without saving; commitBubble saves', () => {
+    const { store, layout } = setup();
+    store.resizeBubbleTo(600, 100);
+    expect(store.get().bubble).toEqual({ w: 600, h: 240 });
+    expect(layout.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+    store.commitBubble();
+    expect(layout.get().pet).toMatchObject({ bubbleW: 600, bubbleH: 240 });
+  });
+
+  it('resetBubbleSize goes back to the default size and saves', () => {
+    const { store, layout } = setup();
+    store.setBubbleSize(500, 400);
+    store.resetBubbleSize();
+    expect(store.get().bubble).toBeNull();
+    expect(layout.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+  });
+
+  it('is restored from the saved size, and follows the layout store (Settings reset, Rust load)', () => {
+    const invoke = vi.fn(async (_c: string, a?: Record<string, unknown>) => (a?.prefs as UiPrefs | undefined) ?? null);
+    const layout = createLayoutStore({ storage: () => memoryStorage(), invoke });
+    layout.setPet({ bubbleW: 520, bubbleH: 410 });
+    const store = createPetStore({ layout, viewport: () => ({ w: 1200, h: 800 }) });
+    expect(store.get().bubble).toEqual({ w: 520, h: 410 });
+    layout.setPet({ bubbleW: 0, bubbleH: 0 });
+    expect(store.get().bubble).toBeNull();
+    layout.setPet({ bubbleW: 3000, bubbleH: 300 });
+    expect(store.get().bubble).toEqual({ w: 1184, h: 300 });
+  });
+
+  it('clampTo re-clamps a set size to a smaller window without saving; a bigger window brings the saved size back', () => {
+    const { store, layout, viewport } = setup({ w: 1200, h: 800 });
+    store.setBubbleSize(900, 700);
+    viewport.w = 600;
+    viewport.h = 500;
+    store.clampTo(600, 500);
+    expect(store.get().bubble).toEqual({ w: 584, h: 484 });
+    expect(layout.get().pet).toMatchObject({ bubbleW: 900, bubbleH: 700 });
+    viewport.w = 1200;
+    viewport.h = 800;
+    store.clampTo(1200, 800);
+    expect(store.get().bubble).toEqual({ w: 900, h: 700 });
   });
 });

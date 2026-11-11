@@ -1,6 +1,6 @@
 //! App-wide UI layout preferences (sidebar widths, which sidebars are open,
 //! the active tabs, row density, and the floating assistant's place, size,
-//! visibility and skin), kept in `ui.json` next to `settings.json` in the app
+//! visibility, skin and chat window size), kept in `ui.json` next to `settings.json` in the app
 //! config dir. Per PC, not per vault and not a secret.
 //!
 //! Every field is validated on read and on write: a width out of range is
@@ -30,6 +30,11 @@ pub const PET_OFFSET_MAX: u16 = 4096;
 pub const PET_X_DEFAULT: u16 = 24;
 pub const PET_Y_DEFAULT: u16 = 40;
 pub const PET_SKIN_DEFAULT: &str = "flasko";
+/// The assistant's chat window ("bubble") size in CSS px: 0 means the default
+/// size, a set size is at least this and at most `PET_OFFSET_MAX`. The webview
+/// clamps it to the window. One side alone is not a size: both become 0.
+pub const BUBBLE_MIN_W: u16 = 280;
+pub const BUBBLE_MIN_H: u16 = 240;
 
 /// The floating assistant ("pet"). Integer display scale 2 or 3 only. `skin`
 /// is only checked against the id pattern `[a-z0-9-]{3,32}`: Rust does not
@@ -42,11 +47,21 @@ pub struct PetPrefs {
     pub hidden: bool,
     pub scale: u8,
     pub skin: String,
+    pub bubble_w: u16,
+    pub bubble_h: u16,
 }
 
 impl Default for PetPrefs {
     fn default() -> Self {
-        PetPrefs { x: PET_X_DEFAULT, y: PET_Y_DEFAULT, hidden: false, scale: 2, skin: PET_SKIN_DEFAULT.into() }
+        PetPrefs {
+            x: PET_X_DEFAULT,
+            y: PET_Y_DEFAULT,
+            hidden: false,
+            scale: 2,
+            skin: PET_SKIN_DEFAULT.into(),
+            bubble_w: 0,
+            bubble_h: 0,
+        }
     }
 }
 
@@ -55,14 +70,28 @@ pub fn valid_skin_id(id: &str) -> bool {
     (3..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// One side of the bubble size: 0 stays 0 (default), anything else into `[min, PET_OFFSET_MAX]`.
+fn bubble_side(v: u16, min: u16) -> u16 {
+    if v == 0 {
+        0
+    } else {
+        v.clamp(min, PET_OFFSET_MAX)
+    }
+}
+
 impl PetPrefs {
     pub fn clamp(self) -> Self {
+        let w = bubble_side(self.bubble_w, BUBBLE_MIN_W);
+        let h = bubble_side(self.bubble_h, BUBBLE_MIN_H);
+        let sized = w > 0 && h > 0;
         PetPrefs {
             x: self.x.min(PET_OFFSET_MAX),
             y: self.y.min(PET_OFFSET_MAX),
             hidden: self.hidden,
             scale: if self.scale == 3 { 3 } else { 2 },
             skin: if valid_skin_id(&self.skin) { self.skin } else { PET_SKIN_DEFAULT.into() },
+            bubble_w: if sized { w } else { 0 },
+            bubble_h: if sized { h } else { 0 },
         }
     }
 }
@@ -81,6 +110,8 @@ impl From<Option<&Value>> for PetPrefs {
                 _ => 2,
             },
             skin: o.get("skin").and_then(Value::as_str).map(str::to_owned).unwrap_or(d.skin),
+            bubble_w: width(o.get("bubbleW"), d.bubble_w),
+            bubble_h: width(o.get("bubbleH"), d.bubble_h),
         }
         .clamp()
     }
@@ -333,7 +364,7 @@ mod tests {
             right_tab: RightTab::Links,
             density: Density::Compact,
             show_system_files: true,
-            pet: PetPrefs { x: 120, y: 64, hidden: true, scale: 3, skin: "flasko-blue".into() },
+            pet: PetPrefs { x: 120, y: 64, hidden: true, scale: 3, skin: "flasko-blue".into(), bubble_w: 480, bubble_h: 360 },
         };
         assert_eq!(write_at(&s.settings(), prefs.clone()).unwrap(), prefs);
         assert_eq!(read_at(&s.settings()), prefs);
@@ -342,7 +373,8 @@ mod tests {
             raw,
             json!({ "leftWidth": 350, "leftHidden": true, "leftTab": "experiments", "rightWidth": 300,
                     "rightOpen": true, "rightTab": "links", "density": "compact", "showSystemFiles": true,
-                    "pet": { "x": 120, "y": 64, "hidden": true, "scale": 3, "skin": "flasko-blue" } })
+                    "pet": { "x": 120, "y": 64, "hidden": true, "scale": 3, "skin": "flasko-blue",
+                             "bubbleW": 480, "bubbleH": 360 } })
         );
     }
 
@@ -366,7 +398,10 @@ mod tests {
     #[test]
     fn ui_prefs_pet_defaults() {
         let p = UiPrefs::default().pet;
-        assert_eq!(p, PetPrefs { x: PET_X_DEFAULT, y: PET_Y_DEFAULT, hidden: false, scale: 2, skin: "flasko".into() });
+        assert_eq!(
+            p,
+            PetPrefs { x: PET_X_DEFAULT, y: PET_Y_DEFAULT, hidden: false, scale: 2, skin: "flasko".into(), bubble_w: 0, bubble_h: 0 }
+        );
         assert_eq!(UiPrefs::from(json!({})).pet, p);
     }
 
@@ -381,8 +416,30 @@ mod tests {
         }
         assert_eq!(UiPrefs::from(json!({ "pet": { "skin": "a".repeat(32) } })).pet.skin, "a".repeat(32));
         // clamp() (the write path) applies the same rules to a struct built in Rust
-        let p = UiPrefs { pet: PetPrefs { x: 60000, y: 1, hidden: false, scale: 9, skin: "BAD".into() }, ..UiPrefs::default() }.clamp().pet;
+        let p = UiPrefs {
+            pet: PetPrefs { x: 60000, y: 1, hidden: false, scale: 9, skin: "BAD".into(), bubble_w: 0, bubble_h: 0 },
+            ..UiPrefs::default()
+        }
+        .clamp()
+        .pet;
         assert_eq!((p.x, p.scale, p.skin.as_str()), (PET_OFFSET_MAX, 2, "flasko"));
+    }
+
+    #[test]
+    fn ui_prefs_bubble_size_is_parsed_leniently_and_clamped() {
+        let size = |v: Value| {
+            let p = UiPrefs::from(json!({ "pet": v })).pet;
+            (p.bubble_w, p.bubble_h)
+        };
+        assert_eq!(size(json!({ "bubbleW": 500.4, "bubbleH": 420 })), (500, 420));
+        assert_eq!(size(json!({ "bubbleW": 100, "bubbleH": 1 })), (BUBBLE_MIN_W, BUBBLE_MIN_H));
+        assert_eq!(size(json!({ "bubbleW": 1e9, "bubbleH": 99999 })), (PET_OFFSET_MAX, PET_OFFSET_MAX));
+        assert_eq!(size(json!({ "bubbleW": -5, "bubbleH": "tall" })), (0, 0));
+        // one side alone is not a size
+        assert_eq!(size(json!({ "bubbleW": 500 })), (0, 0));
+        assert_eq!(size(json!({})), (0, 0));
+        let p = PetPrefs { bubble_w: 9000, bubble_h: 10, ..PetPrefs::default() }.clamp();
+        assert_eq!((p.bubble_w, p.bubble_h), (PET_OFFSET_MAX, BUBBLE_MIN_H));
     }
 
     #[test]
@@ -397,7 +454,7 @@ mod tests {
         let out = serde_json::to_value(UiPrefs::from(json!({ "pet": { "x": 10, "evil": "<script>" } }))).unwrap();
         let mut keys: Vec<&String> = out["pet"].as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["hidden", "scale", "skin", "x", "y"]);
+        assert_eq!(keys, ["bubbleH", "bubbleW", "hidden", "scale", "skin", "x", "y"]);
         assert_eq!(out["pet"]["x"], 10);
     }
 }

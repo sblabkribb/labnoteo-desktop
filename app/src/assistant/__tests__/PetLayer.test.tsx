@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { setLang } from '../../i18n/lang';
 import { createLayoutStore, PET_DEFAULT, type UiPrefs } from '../../ui/layoutStore';
 import { PetLayer } from '../PetLayer';
@@ -339,5 +340,186 @@ describe('PetLayer skins', () => {
     view.unmount();
     expect(live.size).toBe(0);
     warn.mockRestore();
+  });
+});
+
+describe('PetLayer: resizing the assistant window (the bubble)', () => {
+  const rect = (left: number, top: number) => ({ left, top, right: left + 64, bottom: top + 64, width: 64, height: 64, x: left, y: top, toJSON: () => ({}) });
+  let petRect = rect(940, 680);
+  let spies: { mockRestore(): void }[] = [];
+  beforeEach(() => {
+    petRect = rect(940, 680);
+    spies = [
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        return (this.classList.contains('pet') ? petRect : rect(0, 0)) as DOMRect;
+      }),
+      // the default size as drawn: 22rem × its content
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(352),
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300),
+    ];
+  });
+  afterEach(() => {
+    for (const s of spies) s.mockRestore();
+  });
+
+  const bubble = () => screen.getByRole('dialog') as HTMLElement;
+  const grip = () => screen.getByRole('button', { name: '어시스턴트 창 크기 조절' });
+  const w = () => bubble().style.getPropertyValue('--bubble-w');
+  const h = () => bubble().style.getPropertyValue('--bubble-h');
+  const drag = (dx: number, dy: number, up = true) => {
+    const g = grip();
+    fireEvent.pointerDown(g, { pointerId: 7, button: 0, clientX: 600, clientY: 400 });
+    fireEvent.pointerMove(g, { pointerId: 7, clientX: 600 + dx, clientY: 400 + dy });
+    if (up) fireEvent.pointerUp(g, { pointerId: 7, clientX: 600 + dx, clientY: 400 + dy });
+  };
+
+  it('the grip is a named, focusable button inside the bubble that says how to use it; the bubble starts at the default size', () => {
+    setup();
+    fireEvent.click(pet());
+    const g = grip();
+    expect(bubble().contains(g)).toBe(true);
+    expect(g.tagName).toBe('BUTTON');
+    expect(g.getAttribute('type')).toBe('button');
+    expect(g.tabIndex).toBe(0);
+    expect(g.getAttribute('title')).toContain('Home');
+    expect(g.getAttribute('aria-describedby')).toBeTruthy();
+    expect(document.getElementById(g.getAttribute('aria-describedby')!)?.textContent).toContain('화살표');
+    expect(bubble().dataset.sized).toBeUndefined();
+    expect(w()).toBe('');
+    // anchored above the right edge of the pet: the grip is on the top-left corner
+    expect(bubble().dataset.side).toBe('above');
+    expect(bubble().dataset.growX).toBe('left');
+    // the reset button only shows once a size is set
+    expect(screen.queryByRole('button', { name: '기본 크기로' })).toBeNull();
+  });
+
+  it('dragging the top-left grip resizes the bubble; nothing is saved until the pointer is let go, and the bubble stays open', () => {
+    const { layout } = setup();
+    fireEvent.click(pet());
+    drag(-50, -30, false);
+    expect(bubble().dataset.sized).toBe('true');
+    expect([w(), h()]).toEqual([px(402), px(330)]);
+    expect(layout.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+    fireEvent.pointerUp(grip(), { pointerId: 7, clientX: 550, clientY: 370 });
+    expect(layout.get().pet).toMatchObject({ bubbleW: 402, bubbleH: 330 });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(pet().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('a drag is clamped to 280×240 and to the room in the window (width: the window frame, height: the room above the pet)', () => {
+    const { layout } = setup();
+    fireEvent.click(pet());
+    drag(500, 500);
+    expect([w(), h()]).toEqual([px(280), px(240)]);
+    drag(-5000, -5000);
+    // 1024 − 2 × 8 wide; above the pet at 680 there is 680 − 8 − 8 high
+    expect([w(), h()]).toEqual([px(1008), px(664)]);
+    expect(layout.get().pet).toMatchObject({ bubbleW: 1008, bubbleH: 664 });
+  });
+
+  it('follows the flip: below the pet the grip is on the bottom edge, pushed right of the window edge it is on the right', () => {
+    petRect = rect(940, 0);
+    const { store } = setup();
+    fireEvent.click(pet());
+    expect(bubble().dataset.side).toBe('below');
+    expect(bubble().dataset.growX).toBe('left');
+    drag(-20, 40);
+    expect([w(), h()]).toEqual([px(372), px(340)]);
+    // the pet moves to the bottom-left corner: above it, pushed right of the window edge
+    petRect = rect(0, 680);
+    act(() => store.moveBy(-8, 0));
+    expect(bubble().dataset.side).toBe('above');
+    expect(bubble().dataset.growX).toBe('right');
+    drag(40, -20);
+    expect([w(), h()]).toEqual([px(412), px(360)]);
+  });
+
+  it('keyboard: arrows move the grip by 16 px (Shift 64 px) and save; Home and a double-click go back to the default size; each is announced', () => {
+    const { layout } = setup();
+    fireEvent.click(pet());
+    const g = grip();
+    g.focus();
+    expect(fireEvent.keyDown(g, { key: 'ArrowLeft' })).toBe(false);
+    expect([w(), h()]).toEqual([px(368), px(300)]);
+    expect(layout.get().pet).toMatchObject({ bubbleW: 368, bubbleH: 300 });
+    expect(document.querySelector('.pet-live')?.textContent).toBe('어시스턴트 창 크기: 368×300');
+    fireEvent.keyDown(g, { key: 'ArrowUp', shiftKey: true });
+    expect(h()).toBe(px(364));
+    fireEvent.keyDown(g, { key: 'ArrowRight' });
+    fireEvent.keyDown(g, { key: 'ArrowDown' });
+    expect([w(), h()]).toEqual([px(352), px(348)]);
+    expect(layout.get().pet).toMatchObject({ bubbleW: 352, bubbleH: 348 });
+    expect(fireEvent.keyDown(g, { key: 'Home' })).toBe(false);
+    expect(bubble().dataset.sized).toBeUndefined();
+    expect(w()).toBe('');
+    expect(layout.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+    expect(document.querySelector('.pet-live')?.textContent).toBe('어시스턴트 창을 기본 크기로 되돌렸어요');
+    // the focus stays on the grip
+    expect(document.activeElement).toBe(grip());
+    fireEvent.keyDown(grip(), { key: 'ArrowLeft', shiftKey: true });
+    expect(w()).toBe(px(416));
+    fireEvent.doubleClick(grip());
+    expect(layout.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+    // Alt+arrow belongs to moving the pet, not to the grip
+    fireEvent.keyDown(grip(), { key: 'ArrowLeft', altKey: true });
+    expect(w()).toBe('');
+  });
+
+  it('the bubble menu resets a set size and moves the focus to the grip', () => {
+    const { layout } = setup();
+    fireEvent.click(pet());
+    drag(-40, -40);
+    fireEvent.click(screen.getByRole('button', { name: '기본 크기로' }));
+    expect(layout.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+    expect(w()).toBe('');
+    expect(screen.queryByRole('button', { name: '기본 크기로' })).toBeNull();
+    expect(document.activeElement).toBe(grip());
+  });
+
+  it('a size saved on this PC comes back when the bubble opens', () => {
+    const invoke = vi.fn(async (_c: string, a?: Record<string, unknown>) => (a?.prefs as UiPrefs | undefined) ?? null);
+    const layout = createLayoutStore({ storage: () => memoryStorage(), invoke });
+    layout.setPet({ bubbleW: 500, bubbleH: 400 });
+    const store = createPetStore({ layout });
+    render(<PetLayer store={store} />);
+    fireEvent.click(pet());
+    expect(bubble().dataset.sized).toBe('true');
+    expect([w(), h()]).toEqual([px(500), px(400)]);
+  });
+
+  it('a smaller window clamps the size (not saved); the saved size comes back when the window grows again', () => {
+    const { layout } = setup();
+    fireEvent.click(pet());
+    drag(-300, -200);
+    expect([w(), h()]).toEqual([px(652), px(500)]);
+    act(() => {
+      setViewport(500, 768);
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(w()).toBe(px(500 - 16));
+    expect(layout.get().pet).toMatchObject({ bubbleW: 652, bubbleH: 500 });
+    act(() => {
+      setViewport(1024, 768);
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(w()).toBe(px(652));
+  });
+
+  it('the height is capped to the room on the side the bubble is on when the pet moves', () => {
+    const { store } = setup();
+    fireEvent.click(pet());
+    drag(0, -300);
+    expect(h()).toBe(px(600));
+    // the pet moved up: only 400 − 16 px above it now, still more than below, so it stays above and is capped there
+    petRect = rect(940, 400);
+    act(() => store.moveBy(0, -8));
+    expect(bubble().dataset.side).toBe('above');
+    expect(bubble().style.getPropertyValue('--bubble-max-h')).toBe(px(400 - 16));
+  });
+
+  it('sets its size through CSSOM only: no style attribute in the markup of the assistant components', () => {
+    for (const f of ['src/assistant/PetLayer.tsx', 'src/assistant/Bubble.tsx']) {
+      expect(readFileSync(f, 'utf-8'), f).not.toMatch(/style=\{|style="/);
+    }
   });
 });

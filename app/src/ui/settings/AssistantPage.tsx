@@ -63,6 +63,7 @@ export function AssistantPage(
           />
         }
       />
+      <ChatWindowRow />
       <SkinRow leave={props.leave} />
       <WebSearchRow onSaved={() => setSearchRev((n) => n + 1)} />
       <WebSearchKeyRow key={searchRev} llmEndpoint={props.llmEndpoint} />
@@ -70,6 +71,38 @@ export function AssistantPage(
       <HistoryRow />
       <ExternalAssistantsRow showPage={props.showPage} />
     </>
+  );
+}
+
+/**
+ * 대화 창(말풍선) 크기 줄: 말풍선 모서리의 손잡이로 바꾼 크기는 이 PC 의 ui.json(pet.bubbleW·bubbleH)에 산다.
+ * 정한 크기를 보이고 "기본 크기로" 되돌린다. 기본 크기면 단추는 꺼진다(aria-disabled, 초점은 남는다).
+ */
+export function ChatWindowRow(props: { size?: { w: number; h: number } | null; reset?: () => void } = {}) {
+  useLang();
+  const { pet } = useLayout();
+  const size = props.size !== undefined ? props.size : pet.bubbleW > 0 && pet.bubbleH > 0 ? { w: pet.bubbleW, h: pet.bubbleH } : null;
+  const reset = props.reset ?? (() => layoutStore.setPet({ bubbleW: 0, bubbleH: 0 }));
+  const desc = t('settings.assistant.window.desc');
+  return (
+    <SettingRow
+      label={t('settings.assistant.window')}
+      description={
+        size ? (
+          <>
+            <span className="setting-desc-line">{desc}</span>{' '}
+            <span className="setting-desc-line">{t('settings.assistant.window.custom', String(size.w), String(size.h))}</span>
+          </>
+        ) : (
+          desc
+        )
+      }
+      control={
+        <button type="button" className="btn" {...softOff(size === null, reset)}>
+          {t('pet.resetSize')}
+        </button>
+      }
+    />
   );
 }
 

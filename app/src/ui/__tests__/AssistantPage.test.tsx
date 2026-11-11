@@ -3,7 +3,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setLang } from '../../i18n/lang';
-import { ExternalAssistantsRow, HistoryRow, SkinRow, WebSearchKeyRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
+import { ChatWindowRow, ExternalAssistantsRow, HistoryRow, SkinRow, WebSearchKeyRow, WebSearchRow, type WebSearchRowDeps } from '../settings/AssistantPage';
 import { secretStatusOf } from '../../integrations/__tests__/fakeNet';
 import type { SkinManifest } from '../../assistant/skins/types';
 import type { StagedSkin } from '../../assistant/skins/store';
@@ -584,5 +584,44 @@ describe('Assistant pane: external assistants row (Task 21, spec §10.1)', () =>
     button.focus();
     await userEvent.keyboard('{Enter}');
     expect(showPage).toHaveBeenCalledWith('integrations');
+  });
+});
+
+describe('Assistant pane: chat window size row', () => {
+  it('says the size is kept on this PC; at the default size the reset is off (aria-disabled, keeps focus)', async () => {
+    const reset = vi.fn();
+    render(<ChatWindowRow size={null} reset={reset} />);
+    const row = screen.getByRole('group', { name: '대화 창 크기' });
+    expect(row.textContent).toContain('이 PC 에 저장돼요');
+    const button = screen.getByRole('button', { name: '기본 크기로' });
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    await userEvent.click(button);
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it('a set size is shown and the button goes back to the default size', async () => {
+    const reset = vi.fn();
+    render(<ChatWindowRow size={{ w: 480, h: 360 }} reset={reset} />);
+    expect(screen.getByRole('group', { name: '대화 창 크기' }).textContent).toContain('정한 크기: 480×360');
+    const button = screen.getByRole('button', { name: '기본 크기로' });
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    await userEvent.click(button);
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('by default reads and resets the size in the layout store (ui.json, per PC)', async () => {
+    const { layoutStore } = await import('../layoutStore');
+    layoutStore.setPet({ bubbleW: 400, bubbleH: 300 });
+    render(<ChatWindowRow />);
+    expect(screen.getByRole('group', { name: '대화 창 크기' }).textContent).toContain('400×300');
+    await userEvent.click(screen.getByRole('button', { name: '기본 크기로' }));
+    expect(layoutStore.get().pet).toMatchObject({ bubbleW: 0, bubbleH: 0 });
+  });
+
+  it('follows the language', () => {
+    setLang('en');
+    render(<ChatWindowRow size={null} reset={() => undefined} />);
+    expect(screen.getByRole('group', { name: 'Chat window size' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Default size' })).toBeTruthy();
   });
 });

@@ -82,6 +82,65 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   top: var(--bubble-top, auto);
   bottom: auto;
 }
+/* 정한 크기(손잡이로 바꾼 크기, PC 마다): PetLayer 가 --bubble-w·--bubble-h 를 건다(범위는 petStore 가 자른다).
+   높이는 고른 쪽에 남은 높이(--bubble-max-h)까지이고, 대화 칸이 남은 높이를 채운다. 크기는 전환 없이 바로 바뀐다(줄인 움직임) */
+.pet-bubble[data-sized="true"] {
+  width: var(--bubble-w);
+  height: var(--bubble-h);
+  max-height: var(--bubble-max-h, calc(100vh - 8rem));
+}
+.pet-bubble > * { min-width: 0; }
+
+/* 크기 조절 손잡이: 그림에서 먼 모서리(위로 열면 위, 아래로 열면 아래; 보통 왼쪽, 창 왼쪽에 밀려 붙었으면 오른쪽).
+   두 줄 빗금이 모서리를 가리킨다. 초점 고리는 전역 :focus-visible 을 따른다 */
+.pet-bubble-grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  min-width: 0;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-element);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+}
+.pet-bubble-grip:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.pet-bubble-grip::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-top: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  border-top-left-radius: 2px;
+}
+.pet-bubble[data-side="below"] .pet-bubble-grip {
+  top: auto;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+.pet-bubble[data-side="below"] .pet-bubble-grip::before {
+  border-top: 0;
+  border-bottom: 2px solid currentColor;
+  border-radius: 0 0 0 2px;
+}
+.pet-bubble[data-grow-x="right"] .pet-bubble-grip {
+  left: auto;
+  right: 0;
+  cursor: nesw-resize;
+}
+.pet-bubble[data-grow-x="right"] .pet-bubble-grip::before {
+  border-left: 0;
+  border-right: 2px solid currentColor;
+  border-radius: 0 2px 0 0;
+}
+.pet-bubble[data-side="below"][data-grow-x="right"] .pet-bubble-grip { cursor: nwse-resize; }
+.pet-bubble[data-side="below"][data-grow-x="right"] .pet-bubble-grip::before { border-radius: 0 0 2px 0; }
 .pet-bubble-head {
   display: flex;
   align-items: center;
@@ -120,7 +179,9 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
 .pet-bubble-greeting { margin: var(--space-2) 0; }
 .pet-bubble-foot {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 /* 대화: 글 그대로(pre-wrap, 모델의 글은 HTML 이 되지 않는다), 내 글은 오른쪽, 답은 왼쪽 */
@@ -131,6 +192,7 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   gap: var(--space-3);
   min-height: 3rem;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
 }
 .pet-divider {
@@ -353,6 +415,7 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
 @media (forced-colors: active) {
   .pet:focus-visible { outline: 2px solid Highlight; }
   .pet-bubble { border: 1px solid CanvasText; }
+  .pet-bubble-grip { color: CanvasText; }
   .pet-msg { border: 1px solid CanvasText; }
   .pet-cite, .pet-source-link { color: LinkText; }
   .pet-chip[aria-pressed="true"] { border: 2px solid Highlight; }
