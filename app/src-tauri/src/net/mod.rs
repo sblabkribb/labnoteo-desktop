@@ -41,6 +41,9 @@ pub struct NetState {
     pending: Mutex<HashMap<String, Arc<Notify>>>,
     cancelled_early: Mutex<VecDeque<String>>,
     web_gate: tokio::sync::Mutex<Option<Instant>>,
+    /// The bfworkflow server pacing gate (`bfw::BFW_SERVER_GAP`), apart from
+    /// the PartBank one so the two services never wait on each other.
+    bfw_gate: tokio::sync::Mutex<Option<Instant>>,
     /// The connection file last imported (`import::integration_import_pick`):
     /// the only file `integration_import_delete` may delete.
     pub(crate) last_import: Mutex<Option<std::path::PathBuf>>,
@@ -94,15 +97,26 @@ impl NetState {
     /// Waits until `gap` has passed since the previous slot. One shared gate,
     /// so concurrent callers queue up behind each other.
     pub async fn web_slot(&self, gap: Duration) {
-        let mut last = self.web_gate.lock().await;
-        if let Some(prev) = *last {
-            let since = prev.elapsed();
-            if since < gap {
-                tokio::time::sleep(gap - since).await;
-            }
-        }
-        *last = Some(Instant::now());
+        wait_slot(&self.web_gate, gap).await;
     }
+
+    /// `web_slot` for the bfworkflow server, on its own gate.
+    pub async fn bfw_slot(&self, gap: Duration) {
+        wait_slot(&self.bfw_gate, gap).await;
+    }
+}
+
+/// Waits until `gap` has passed since the gate's previous slot, then takes
+/// one. Concurrent callers queue up on the gate's lock.
+async fn wait_slot(gate: &tokio::sync::Mutex<Option<Instant>>, gap: Duration) {
+    let mut last = gate.lock().await;
+    if let Some(prev) = *last {
+        let since = prev.elapsed();
+        if since < gap {
+            tokio::time::sleep(gap - since).await;
+        }
+    }
+    *last = Some(Instant::now());
 }
 
 /// Cancels the request the webview started with `requestId` (D11). `true` when

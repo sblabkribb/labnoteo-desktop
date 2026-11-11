@@ -33,9 +33,13 @@ use super::sse::{SseFrame, SseParser, SSE_IDLE, SSE_MAX_FRAME, SSE_TOTAL};
 use super::NetState;
 use crate::vault::{SettingsFile, VaultState};
 
-/// The only query keys a request may carry.
-pub const BFW_QUERY_KEYS: [&str; 1] = ["include_archived"];
+/// The only query keys a request may carry (each value is checked by
+/// `bfw_query_ok`).
+pub const BFW_QUERY_KEYS: [&str; 3] = ["include_archived", "domain", "run_id"];
 pub const BFW_TIMEOUT: Duration = Duration::from_secs(30);
+/// The gap between two calls to the bfworkflow server (its default limit is
+/// 60 calls a minute). The desktop app is not paced.
+pub const BFW_SERVER_GAP: Duration = Duration::from_millis(300);
 
 const NOT_RUNNING: &str = "bfworkflow desktop app is not running";
 
@@ -56,9 +60,11 @@ fn is_id(s: &str) -> bool {
     (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// `true` for exactly the GET paths the app reads (see the SP6 plan, Task 7).
-/// The path must start with a single `/` and hold no `..`, `//`, `?`, `#`,
-/// `%` or `\`.
+/// `true` for exactly the GET paths the app reads (see the SP6 plan, Task 7,
+/// and the assistant's read-only lab tools, design §5.2). The path must start
+/// with a single `/` and hold no `..`, `//`, `?`, `#`, `%` or `\`. Note
+/// versions, drafts, publishing and every `/api/ai/*` path but
+/// `llm-thinking-status` stay out.
 pub fn bfw_path_allowed(path: &str) -> bool {
     if !path.starts_with('/') || path.contains("..") || path.contains("//") {
         return false;
@@ -79,8 +85,38 @@ pub fn bfw_path_allowed(path: &str) -> bool {
         ["api", "services", id] => is_id(id),
         ["api", "services", id, "current-design"] => is_id(id),
         ["api", "service-workflows", id, "current-design"] => is_id(id),
+        ["api", "services", id, "workflows"] => is_id(id),
+        ["api", "service-workflows", id] => is_id(id),
+        ["api", "service-workflows", id, "notes"] => is_id(id),
+        ["api", "notes", id] => is_id(id),
+        ["api", "workflows", wf] => is_id(wf),
+        ["api", "workflows", wf, "uo", uo] => is_id(wf) && is_id(uo),
+        ["api", "workflows", wf, "papers"] => is_id(wf),
+        ["api", "workflows", wf, "resources"] => is_id(wf),
         _ => false,
     }
+}
+
+/// `true` when every query pair is allowed: each key at most once and on
+/// `BFW_QUERY_KEYS`; `include_archived` is `true|false`, `domain` and
+/// `run_id` are `is_id` (at most 64 chars of `[A-Za-z0-9_-]`).
+pub fn bfw_query_ok(pairs: &[(String, String)]) -> bool {
+    let mut seen: Vec<&str> = Vec::new();
+    for (k, v) in pairs {
+        if seen.contains(&k.as_str()) {
+            return false;
+        }
+        seen.push(k);
+        let ok = match k.as_str() {
+            "include_archived" => v == "true" || v == "false",
+            "domain" | "run_id" => is_id(v),
+            _ => false,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
 }
 
 /// The base URL and key slot of the saved connection. `Server` gives the
@@ -108,7 +144,7 @@ fn desktop_target(runtime: Option<&Path>) -> Result<(Url, Slot), NetError> {
 /// One keyed GET to `url`, parsed as JSON (an empty 2xx body reads as
 /// `null`). For the desktop app a refused connection means the app is not
 /// running (`runtime.json` survives a crash), so `offline` becomes
-/// `notConfigured`.
+/// `notConfigured`. Calls to the server are `BFW_SERVER_GAP` apart.
 async fn keyed_get(net: &NetState, allow_http: bool, slot: Slot, url: Url, key: String) -> Result<Value, NetError> {
     let out = Outgoing {
         method: reqwest::Method::GET,
@@ -120,6 +156,9 @@ async fn keyed_get(net: &NetState, allow_http: bool, slot: Slot, url: Url, key: 
         secret: Some(key.clone()),
         allow_http,
     };
+    if slot == Slot::BfwServer {
+        net.bfw_slot(BFW_SERVER_GAP).await;
+    }
     let incoming = match send(net, None, out).await {
         Err(e) if slot == Slot::BfwDesktop && e.kind == NetErrorKind::Offline => return Err(not_running()),
         other => other?,
@@ -147,6 +186,9 @@ pub async fn bfw_call(
     let query = query.unwrap_or_default();
     if let Some((k, _)) = query.iter().find(|(k, _)| !BFW_QUERY_KEYS.contains(&k.as_str())) {
         return Err(NetError::new(NetErrorKind::BadInput, format!("query key {k:?} is not allowed")));
+    }
+    if !bfw_query_ok(&query) {
+        return Err(NetError::new(NetErrorKind::BadInput, "a query value is not allowed"));
     }
     let (base, slot) = bfw_target(cfg, runtime)?;
     let key = key_for(store, slot, cfg)?.ok_or_else(key_missing)?;
@@ -591,7 +633,7 @@ mod tests {
             "/api/services\\x",
             "/api/auth/me/",
             "api/auth/me",
-            "/api/service-workflows/x",
+            "/api/service-workflows/x/y",
             "/api/ai/workflow-assistant/json-to-notes-stream",
             "/api/services/x/current-design/x",
         ] {
@@ -795,6 +837,138 @@ mod tests {
         let p = block_on(bfw_probe_call(&NetState::default(), Some(&c), &store, Some(&runtime), BfwConnection::Desktop, Some("https://elsewhere.example".into()), None)).unwrap();
         assert_eq!(p.user, "desk");
         assert_eq!(s.requests.lock().unwrap()[0].header("x-api-key"), Some("bf_desk"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- the assistant's read-only lab tools (design §5.2, §8 Rust test 5) ----
+
+    #[test]
+    fn lab_tool_paths_are_allowed() {
+        for p in [
+            "/api/services/svc_1/workflows",
+            "/api/service-workflows/swf-9",
+            "/api/service-workflows/swf-9/notes",
+            "/api/notes/n_01",
+            "/api/workflows/WD001",
+            "/api/workflows/WD001/uo/UHW100",
+            "/api/workflows/WD001/papers",
+            "/api/workflows/WD001/resources",
+        ] {
+            assert!(bfw_path_allowed(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn writes_versions_and_ai_paths_stay_refused() {
+        let long = format!("/api/workflows/{}", "W".repeat(65));
+        for p in [
+            "/api/notes/n_01/publish",
+            "/api/notes/n_01/versions",
+            "/api/notes/n_01/draft",
+            "/api/notes/n_01/revert",
+            "/api/services/svc_1/draft",
+            "/api/services/svc_1/workflows/x",
+            "/api/service-workflows/swf-9/notes/n_01",
+            "/api/ai/workflow/design-chat",
+            "/api/ai/equipment-profiles",
+            "/api/workflows/WD001/extractions/e1/reassign-uo",
+            "/api/workflows/WD001/uo",
+            "/api/workflows/WD001/uo/UHW100/x",
+            "/api/workflows/WD001/uo/U HW",
+            "/api/workflows/WD001/runs",
+            "/api/workflows",
+            "/api/workflows/",
+            "/api/notes",
+            "/api/notes/",
+            "/api/workflows/WD001/papers/",
+            "/api/workflows/W%44001",
+            "/api/workflows/WD001?domain=x",
+            "/api/workflows/../api-keys",
+            long.as_str(),
+        ] {
+            assert!(!bfw_path_allowed(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn query_values_are_checked() {
+        let q = |list: &[(&str, &str)]| list.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
+        assert!(bfw_query_ok(&[]));
+        assert!(bfw_query_ok(&q(&[("include_archived", "true"), ("domain", "synthetic_bio"), ("run_id", "r-01")])));
+        assert!(bfw_query_ok(&q(&[("include_archived", "false")])));
+        let long = "a".repeat(65);
+        for bad in [
+            vec![("include_archived", "1")],
+            vec![("include_archived", "TRUE")],
+            vec![("domain", "")],
+            vec![("domain", "a b")],
+            vec![("domain", "a&x=1")],
+            vec![("run_id", long.as_str())],
+            vec![("run_id", "../x")],
+            vec![("domain", "a"), ("domain", "b")],
+            vec![("name", "x")],
+        ] {
+            assert!(!bfw_query_ok(&q(&bad)), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_bad_query_value_sends_nothing() {
+        let s = serve(vec![Canned::ok("[]")]);
+        let c = cfg(json!({"bfwUrl": s.url}));
+        let store = store_with(Slot::BfwServer, &c, "bf_live_k");
+        let net = NetState::default();
+        let q = |k: &str, v: &str| Some(vec![(k.to_string(), v.to_string())]);
+        for (k, v) in [("include_archived", "yes"), ("domain", "a b"), ("run_id", "")] {
+            let e = block_on(bfw_call(&net, &c, &store, None, "/api/workflows/WD001", q(k, v))).unwrap_err();
+            assert_eq!(e.kind, NetErrorKind::BadInput, "{k}={v}");
+        }
+        settle();
+        assert_eq!(s.requests.lock().unwrap().len(), 0);
+        block_on(bfw_call(&net, &c, &store, None, "/api/workflows/WD001/papers", q("run_id", "run_7"))).unwrap();
+        let reqs = s.requests.lock().unwrap();
+        assert_eq!(reqs[0].path, "/api/workflows/WD001/papers?run_id=run_7");
+        assert_eq!(reqs[0].method, "GET");
+        assert_eq!(reqs[0].header("x-api-key"), Some("bf_live_k"));
+    }
+
+    #[test]
+    fn lab_tool_reads_redact_the_key() {
+        let s = serve(vec![
+            Canned::status(404).body(r#"{"detail":"note n_01 not found for bf_live_secret"}"#),
+            Canned::status(302).header("Location", "https://other.example/api/notes/n_01"),
+        ]);
+        let c = cfg(json!({"bfwUrl": s.url}));
+        let store = store_with(Slot::BfwServer, &c, "bf_live_secret");
+        let net = NetState::default();
+        let e = block_on(bfw_call(&net, &c, &store, None, "/api/notes/n_01", None)).unwrap_err();
+        assert_eq!((e.kind, e.status), (NetErrorKind::Status, Some(404)));
+        assert!(!serde_json::to_string(&e).unwrap().contains("bf_live_secret"));
+        let e = block_on(bfw_call(&net, &c, &store, None, "/api/notes/n_01", None)).unwrap_err();
+        assert_eq!((e.kind, e.location.as_deref()), (NetErrorKind::Redirect, Some("https://other.example")));
+    }
+
+    #[test]
+    fn server_calls_are_paced_desktop_calls_are_not() {
+        let s = serve(vec![Canned::ok("{}"), Canned::ok("{}"), Canned::ok("{}")]);
+        let c = cfg(json!({"bfwUrl": s.url}));
+        let store = store_with(Slot::BfwServer, &c, "bf_live_k");
+        let net = NetState::default();
+        let t = Instant::now();
+        for _ in 0..3 {
+            block_on(bfw_call(&net, &c, &store, None, "/api/workflows/WD001", None)).unwrap();
+        }
+        assert!(t.elapsed() >= Duration::from_millis(600), "{:?}", t.elapsed());
+
+        let d = serve((0..5).map(|_| Canned::ok("{}")).collect());
+        let (dir, runtime) = runtime_file(&d.url);
+        let c = cfg(json!({"bfwConnection": "desktop"}));
+        let store = store_with(Slot::BfwDesktop, &c, "bf_desk");
+        let t = Instant::now();
+        for _ in 0..5 {
+            block_on(bfw_call(&net, &c, &store, Some(&runtime), "/api/workflows/WD001", None)).unwrap();
+        }
+        assert!(t.elapsed() < Duration::from_millis(1000), "{:?}", t.elapsed());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
