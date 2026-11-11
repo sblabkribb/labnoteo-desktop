@@ -28,6 +28,8 @@ describe('settings rows', () => {
   it('the skin buttons form an even grid of three columns (3+3), not ragged wrapped rows (visual QA)', () => {
     expect(decl('.setting-skin-actions', 'display')).toEqual(['grid']);
     expect(decl('.setting-skin-actions', 'grid-template-columns')).toEqual(['repeat(3, auto)']);
+    // a button label never breaks mid-word ('갤러리에 올리 / 기'), so both rows keep one height
+    expect(decl('.setting-skin-actions > button', 'white-space')).toEqual(['nowrap']);
   });
 
   it('a text field shrinks with its control instead of pushing the row out of the pane (ko-dark web search, ~13px)', () => {

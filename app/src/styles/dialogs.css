@@ -303,6 +303,7 @@ fieldset.mcp-client-auth legend { padding: 0; }
 .setting-text { width: 14rem; max-width: 100%; }
 /* 스킨 단추 여섯은 고르기 아래에 3+3 으로 고르게 놓인다(들쭉날쭉 접히지 않게) */
 .setting-skin-actions { flex-basis: 100%; display: grid; grid-template-columns: repeat(3, auto); justify-content: end; gap: var(--space-3); }
+.setting-skin-actions > button { white-space: nowrap; }
 .setting-status { max-width: 16rem; color: var(--text-muted); font-size: var(--font-size-sm); line-height: 1.45; }
 /* an empty status stays mounted for screen readers but takes no row or gap in the wrapped control */
 .setting-status:empty { position: absolute; }
