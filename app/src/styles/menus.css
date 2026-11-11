@@ -42,13 +42,13 @@
   pointer-events: auto;
 }
 /* 왼쪽 띠: 종류마다 한 색 */
-.toast-info { border-left-color: var(--accent); }
+.toast-info { border-left-color: var(--info); }
 .toast-success { border-left-color: var(--success); }
 .toast-warn { border-left-color: var(--warning); }
 .toast-error { border-left-color: var(--danger); }
 /* 상태 아이콘: 띠와 같은 색, 제목 첫 줄 높이에 맞춘다 */
 .toast-icon { margin-top: 2px; }
-.toast-info .toast-icon { color: var(--accent); }
+.toast-info .toast-icon { color: var(--info); }
 .toast-success .toast-icon { color: var(--success); }
 .toast-warn .toast-icon { color: var(--warning); }
 .toast-error .toast-icon { color: var(--danger); }

@@ -5,7 +5,8 @@
   max-width: 36rem;
   margin: var(--space-8) auto;
   padding: var(--space-7);
-  background: var(--bg-elevated);
+  /* 위쪽 3px 의 CI 그라데이션 띠: 겹친 배경이라 border-radius 가 그대로 자른다 */
+  background: var(--brand-gradient) top / 100% 3px no-repeat, var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
@@ -425,7 +426,7 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-copied { color: var(--success); font-size: var(--font-size-sm); }
 .github-signin-done { color: var(--success); font-weight: 600; }
 .github-link { padding: 0; min-height: 0; color: var(--accent); background: none; border: 0; box-shadow: none; text-decoration: underline; cursor: pointer; }
-.github-link:hover:not(:disabled) { background: none; color: var(--accent-fill-hover); }
+.github-link:hover:not(:disabled) { background: none; color: var(--accent); }
 .github-note { margin: 0 0 var(--space-4); }
 .github-revoke { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 0 var(--space-5); }
 .github-revoke p { margin: 0; }
@@ -499,6 +500,8 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 /* About */
 .settings-about p { margin: 0 0 var(--space-4); }
 .settings-about-name { font-size: var(--font-size-lg); font-weight: 600; }
+/* 앱 이름 아래의 작은 CI 그라데이션 띠(글자 뒤에는 깔지 않는다) */
+.settings-about-name::after { content: ""; display: block; width: 48px; height: 3px; margin-top: var(--space-2); border-radius: var(--radius-full); background: var(--brand-gradient); }
 .settings-about-version { color: var(--text-muted); }
 .settings-about h4 { margin: var(--space-6) 0 var(--space-3); font-size: 1em; }
 .settings-about ul { margin: 0 0 var(--space-4); padding-left: var(--space-7); }

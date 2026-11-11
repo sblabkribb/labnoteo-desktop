@@ -133,7 +133,7 @@ const themes = {
   darkSystem: { ...statics, ...props(blocks.darkSystem.body) },
 };
 
-const TEXT = ['--text', '--text-muted', '--accent', '--danger', '--warning', '--success'];
+const TEXT = ['--text', '--text-muted', '--accent', '--danger', '--warning', '--success', '--info'];
 const SURFACES = ['--bg', '--bg-side', '--bg-hover', '--bg-selected', '--menu-bg'];
 
 /** 표 전체를 재고 모자란 쌍을 `테마 fg on bg = 비` 로 돌려준다. */
@@ -160,6 +160,9 @@ function contrastFailures(t: Record<string, string>, name: string): string[] {
   need('--text', '--search-hit', 4.5);
   // 포커스 링(강조색)은 바탕 대비 3:1 이상
   for (const bg of SURFACES) need('--accent', bg, 3);
+  // 켬/끔 단추와 체크 상자의 채움(--accent-fill)은 페이지와 대화상자 바탕에서 3:1 이상으로 보인다
+  need('--accent-fill', '--bg', 3);
+  need('--accent-fill', '--menu-bg', 3);
   return out;
 }
 
@@ -174,7 +177,7 @@ const ASTRYX_TOKENS = [
 const REQUIRED = [
   '--bg', '--bg-side', '--bg-ribbon', '--bg-elevated', '--menu-bg', '--bg-hover', '--bg-selected', '--bg-selection', '--border',
   '--border-strong', '--guide', '--text', '--text-muted', '--text-faint', '--accent', '--accent-fill', '--accent-fill-hover', '--accent-text',
-  '--accent-soft', '--search-hit', '--danger', '--warning', '--success', '--shadow', '--shadow-menu', '--scrim', '--checker-a', '--checker-b',
+  '--accent-soft', '--search-hit', '--danger', '--warning', '--success', '--info', '--brand-gradient', '--shadow', '--shadow-menu', '--scrim', '--checker-a', '--checker-b',
   '--radius', '--radius-s', '--radius-m', '--radius-l', '--radius-xl',
   '--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6', '--space-7', '--space-8',
   '--row-h', '--ribbon-w', '--side-w', '--right-w', '--viewheader-h', '--statusbar-h',
@@ -235,6 +238,26 @@ describe('디자인 토큰', () => {
 
   it('대비 표: 두 테마 모두 글자 4.5:1, 흐린 표시 3:1, 강조 채움 위 글자 4.5:1 이상이다', () => {
     for (const [name, t] of Object.entries(themes)) expect(contrastFailures(t, name)).toEqual([]);
+  });
+
+  it('강조색은 국가바이오파운드리사업단 전용 색상 규정(CI)의 색이다', () => {
+    const light = props(blocks.light.body);
+    const dark = props(blocks.dark.body);
+    // 라이트: 메인 Royal Purple 이 강조색과 채움, 서브 Purple 이 채움 hover
+    expect(light['--accent']).toBe('#472c7b');
+    expect(light['--accent-fill']).toBe('#472c7b');
+    expect(light['--accent-fill-hover']).toBe('#7d4698');
+    expect(light['--accent-soft']).toBe('rgba(71, 44, 123, 0.1)');
+    // 다크: 채움 hover 가 서브 Purple, 정보색이 서브 Baby Blue
+    expect(dark['--accent-fill-hover']).toBe('#7d4698');
+    expect(dark['--info']).toBe('#83ccd2');
+    // 찾기 칠은 확장색 Yellow(255, 241, 0)
+    expect(light['--search-hit']).toMatch(/^rgba\(255, 241, 0, /);
+    expect(dark['--search-hit']).toMatch(/^rgba\(255, 241, 0, /);
+    // CI 그라데이션: Baby Blue(0%) → Purple(100%), 중간점 35%. 모든 테마에서 같다
+    for (const t of [light, dark]) expect(t['--brand-gradient']).toBe('linear-gradient(90deg, #83ccd2, 35%, #7d4698)');
+    // 예전 보라는 남지 않는다
+    for (const old of ['#6741d9', '#b09afb', '#6d4ae0', '103, 65, 217', '176, 154, 251']) expect(all, old).not.toContain(old);
   });
 
   it('대비 표 자기 점검: 값을 낮추면 실제로 걸린다', () => {
