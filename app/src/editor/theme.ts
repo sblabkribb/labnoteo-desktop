@@ -238,7 +238,7 @@ export const editorThemeSpec = {
   // `[WB150]` 은 마크다운 링크 참조로 읽혀 안쪽 span 에 강조색(링크 색)이 붙는다: 칩 안에서는 칩과 같은 흐린 색(--text-muted)이다.
   '.lno-uo-code span': { color: 'var(--text-muted)' },
   // AI 초안 검토 표시(live/aiDraftReview.ts): 넣은 줄의 왼쪽 강조색 선과 옅은 바탕, 끝의 작은 "검토 완료" 단추. 파일에는 없다.
-  '.cm-line.cm-ai-draft': { backgroundColor: 'var(--accent-soft)', boxShadow: 'inset 2px 0 0 var(--accent)' },
+  '.cm-line.cm-ai-draft': { backgroundColor: 'var(--accent-soft)', borderLeft: '2px solid var(--accent)' },
   '.cm-ai-draft-done': {
     marginLeft: 'var(--space-3)',
     padding: '0 var(--space-3)',
@@ -246,7 +246,7 @@ export const editorThemeSpec = {
     lineHeight: '1.6',
     verticalAlign: 'middle',
     color: 'var(--accent-text)',
-    backgroundColor: 'transparent',
+    backgroundColor: 'var(--bg-elevated)',
     border: '1px solid var(--accent)',
     borderRadius: 'var(--radius-s)',
     cursor: 'pointer',
