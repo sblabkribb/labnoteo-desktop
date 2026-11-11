@@ -30,6 +30,7 @@ import {
 import { experimentMarkerSpots, formatMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerIndex';
 import { coreLocale, overrideOr } from '../i18n';
 import { processNote } from '../openNotes';
+import { statusLabel } from '../statusLabels';
 import { frontMatterText, liftFrontMatter } from '../frontMatterText';
 import { README, resolveReadmePath, VAULT_ROOT, samePath } from '../paths';
 import {
@@ -182,7 +183,7 @@ export async function retryFromActive(ctx: CommandContext): Promise<void> {
         '"{0}" is for a failed or needs-repeat experiment, and {1} is {2}. Change its status first.',
         host.t('Retry this experiment'),
         posix.basename(folder),
-        status || host.t('(none)'),
+        status ? statusLabel(status) : host.t('(none)'),
       ),
     );
     return;
@@ -246,7 +247,8 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
 
   // 플러그인: writeNoteThroughVault(app, host, readmePath, stamp(setFrontMatterKeys(parsed.text, changes)))
   await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(liftFrontMatter(text), changes)));
-  let message = host.t('Experiment status changed ({0}): {1} → {2}.', folderName, current ?? host.t('(none)'), chosen);
+  // 알림의 상태는 메뉴·칩과 같은 이름(진행 중 → 검토 필요)이다. 파일에 적힌 값(in-progress)은 그대로 둔다.
+  let message = host.t('Experiment status changed ({0}): {1} → {2}.', folderName, current ? statusLabel(current) : host.t('(none)'), statusLabel(chosen));
   if (cleared) {
     message += ` ${host.t('Discussion flag cleared.')}`;
     const spots = await experimentMarkerSpots(host.fs, labnoteDir);
@@ -269,10 +271,14 @@ export async function changeExperimentStatus(ctx: CommandContext, experimentDir?
     const fromView = experimentDir !== undefined && !sameExperiment;
     if (!fromView) message += ` ${host.t("Changed {0}'s README, not this note.", folderName)}`;
     if (current) {
+      const shown = statusLabel(current);
       message += ` ${
-        fromView
-          ? host.t('To undo, right-click this experiment in the workflow view again and pick {0}.', current)
-          : host.t('To undo, run "{0}" again and pick {1}.', host.t('Change experiment status'), current)
+        !fromView
+          ? host.t('To undo, run "{0}" again and pick {1}.', host.t('Change experiment status'), shown)
+          : preset !== undefined
+            ? // 실험 탭의 상태 아이콘 메뉴에서 골랐다: 되돌리는 손짓도 그 아이콘이다(우클릭이 아니다)
+              overrideOr('experiments.status.undoFromIcon', shown)
+            : host.t('To undo, right-click this experiment in the workflow view again and pick {0}.', shown)
       }`;
       if (cleared) message += ` ${host.t('Turn the discussion flag back on with "{0}".', host.t('Toggle discussion flag'))}`;
     }
@@ -309,7 +315,7 @@ export async function clearExperimentStatus(ctx: CommandContext, experimentDir: 
   await processNote(host.fs, readmePath, (text) => stamp(setFrontMatterKeys(liftFrontMatter(text), { status: undefined })));
   host.notify(
     'info',
-    host.t('Experiment status changed ({0}): {1} → {2}.', posix.basename(experimentDir), current, host.t('(none)')),
+    host.t('Experiment status changed ({0}): {1} → {2}.', posix.basename(experimentDir), statusLabel(current), host.t('(none)')),
   );
 }
 

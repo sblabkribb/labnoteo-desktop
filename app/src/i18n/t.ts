@@ -41,6 +41,8 @@ const ko: Record<string, string> = {
   'experiments.noStatus': '상태 없음',
   'experiments.status.tip': '실험 상태: {0} (눌러서 바꾸기)',
   'experiments.status.current': '{0} (현재)',
+  // 실험 탭의 상태 아이콘 메뉴로 바꾼 뒤의 되돌리기 안내(플러그인 문장은 우클릭을 말한다)
+  'experiments.status.undoFromIcon': '되돌리려면 실험 탭에서 이 실험의 상태 아이콘을 다시 눌러 {0}을(를) 고르세요.',
   'experiments.wfProgress': 'Workflow {0}/{1}',
   'experiments.wfProgress.tip': 'README 체크리스트에서 Workflow {1}개 중 {0}개를 완료로 표시함',
   'experiments.noProject': '(프로젝트 없음)',
@@ -1674,6 +1676,7 @@ const en: Record<string, string> = {
   'experiments.noStatus': 'No status',
   'experiments.status.tip': 'Experiment status: {0} (click to change)',
   'experiments.status.current': '{0} (current)',
+  'experiments.status.undoFromIcon': "To undo, click this experiment's status icon in the Experiments tab again and pick {0}.",
   'experiments.wfProgress': 'Workflow {0}/{1}',
   'experiments.wfProgress.tip': '{0} of {1} Workflows marked done in the README checklist',
   'experiments.noProject': '(no project)',

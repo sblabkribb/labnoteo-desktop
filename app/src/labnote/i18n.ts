@@ -93,7 +93,9 @@ export type OverrideKey =
   | 'scan.slackTokenHelp'
   // MCP 설정(SP7 Part C): 플러그인 문장은 "allow them in Obsidian", "when Obsidian or the server restarts" 라고 쓴다.
   | 'mcp.enableDesc'
-  | 'mcp.tokenDesc';
+  | 'mcp.tokenDesc'
+  // 실험 탭 상태 아이콘 메뉴로 바꾼 뒤의 되돌리기 안내: 플러그인 문장은 "workflow view 에서 우클릭" 이라 쓴다(누르는 것은 아이콘이다)
+  | 'experiments.status.undoFromIcon';
 
 /** 앱 번역 함수로 번역한 대체 문장. */
 export function overrideOr(key: OverrideKey, ...args: unknown[]): string {

@@ -303,7 +303,7 @@ describe('하루의 흐름(앱 전체)', () => {
       for (const m of messages) expect(m).toMatch(/[가-힣]/);
       expect(messages).toContain(coreT('Experiment created: {0}', '001_형질전환_1차'));
       expect(messages).toContain(coreT('Workflow created: {0}', WF_FILE));
-      expect(messages.some((m) => m.includes('001_형질전환_1차') && m.includes('→ failed'))).toBe(true);
+      expect(messages.some((m) => m.includes('001_형질전환_1차') && m.includes('→ 실패'))).toBe(true);
       expect(messages).toContain(coreT('Experiment created: {0}', '002_형질전환_2차'));
       expect(toasts.all.filter((x) => x.kind === 'error')).toEqual([]);
 

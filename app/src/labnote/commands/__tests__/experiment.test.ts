@@ -121,7 +121,7 @@ describe('retry-experiment', () => {
     expect(writes()).toEqual([]);
     expect(h.notes).toHaveLength(1);
     expect(h.notes[0].message).toContain('001_실험_1차');
-    expect(h.notes[0].message).toContain('in-progress');
+    expect(h.notes[0].message).toContain('진행 중');
   });
 
   it('with no lab note open it says to open one', async () => {
@@ -241,6 +241,42 @@ describe('change-experiment-status', () => {
       before.replace('status: planned', 'status: failed').replace('last_updated_date: 2026-01-01', `last_updated_date: ${TODAY}`),
     );
     expect(h.notes).toHaveLength(1);
+  });
+
+  it('the status toast names both statuses as the menu does, not their stored ids (ko and en)', async () => {
+    h = createTestHost({ [README_PATH]: readme('in-progress') });
+    h.setActive(README_PATH);
+    await changeExperimentStatus(h.ctx, DIR, 'needs-review');
+    expect(h.notes[0].message).toContain('진행 중 → 검토 필요.');
+    expect(h.notes[0].message).not.toMatch(/in-progress|needs-review/);
+    await clearExperimentStatus(h.ctx, DIR);
+    expect(h.notes[1].message).toContain('검토 필요 → ');
+    expect(h.notes[1].message).not.toContain('needs-review');
+    h.cleanup();
+    setLang('en');
+    h = createTestHost({ [README_PATH]: readme('in-progress') });
+    h.setActive(README_PATH);
+    await changeExperimentStatus(h.ctx, DIR, 'needs-review');
+    const en = h.notes[0].message;
+    h.notes.length = 0; // the afterEach Korean check is for the ko screen
+    expect(en).toContain('In progress → Needs review.');
+  });
+
+  it('from the status icon menu with another note open, the undo hint says to click the status icon, not right-click', async () => {
+    h = createTestHost({ [README_PATH]: readme('in-progress'), 'labnote/002_b/README.labnote.md': readme('planned') });
+    h.setActive('labnote/002_b/README.labnote.md');
+    await changeExperimentStatus(h.ctx, DIR, 'needs-review');
+    const message = h.notes[0].message;
+    expect(message).not.toContain('우클릭');
+    expect(message).toContain('상태 아이콘');
+    expect(message).toContain('진행 중');
+    expect(message).not.toContain('in-progress');
+    // the tree's right-click menu (no preset) still says right-click, with the localized status
+    h.answer.pick('in-progress');
+    await changeExperimentStatus(h.ctx, DIR);
+    expect(h.notes[1].message).toContain('우클릭');
+    expect(h.notes[1].message).toContain('검토 필요');
+    expect(h.notes[1].message).not.toContain('needs-review');
   });
 
   it('a chosen completed still asks the completed questions; the same status writes nothing', async () => {
@@ -395,7 +431,7 @@ describe('README with a BOM and CRLF line endings', () => {
     });
     await changeExperimentStatus(h.ctx);
     expect(h.vault.files()[README_PATH]).toBe(windows(readme('failed')));
-    expect(h.notes[0].message).toContain('in-progress → failed');
+    expect(h.notes[0].message).toContain('진행 중 → 실패');
   });
 });
 
