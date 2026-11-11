@@ -96,26 +96,27 @@ export function readSkin(id: string, invoke: InvokeFn = tauriInvoke): Promise<Sk
 }
 
 /**
- * 설치한 스킨 파일이 바뀐 횟수. 쓰고 있는 스킨을 같은 id 로 바꿔 설치하면 `pet.skin` 은 그대로라 useSkin 이 이 값으로 다시 읽는다.
+ * 스킨 id 마다 설치한 파일이 바뀐 횟수. 쓰고 있는 스킨을 같은 id 로 바꿔 설치하면 `pet.skin` 은 그대로라 useSkin 이 이 값으로
+ * 다시 읽는다. 다른 id 를 설치해도 그 id 의 값만 바뀐다: 떠 있는 도우미처럼 늘 그려진 useSkin 이 괜히 다시 읽지 않는다.
  */
-let skinRevision = 0;
+const skinRevisions = new Map<string, number>();
 const revisionSubs = new Set<() => void>();
-export function getSkinRevision(): number {
-  return skinRevision;
+export function getSkinRevision(id: string): number {
+  return skinRevisions.get(id) ?? 0;
 }
 export function subscribeSkinRevision(fn: () => void): () => void {
   revisionSubs.add(fn);
   return () => void revisionSubs.delete(fn);
 }
-function bumpSkinRevision(): void {
-  skinRevision += 1;
+function bumpSkinRevision(id: string): void {
+  skinRevisions.set(id, getSkinRevision(id) + 1);
   for (const fn of [...revisionSubs]) fn();
 }
 
 /** 임시 보관한 팩을 설치한다. 같은 id 의 다른 스킨이 있으면 `replace` 없이는 `exists`. */
 export async function installSkin(stagingId: string, replace: boolean, invoke: InvokeFn = tauriInvoke): Promise<SkinManifest> {
   const m = await call<SkinManifest>(invoke, 'skin_install', { stagingId, replace });
-  bumpSkinRevision();
+  bumpSkinRevision(m.id);
   return m;
 }
 

@@ -214,6 +214,49 @@ describe('loadSkin / useSkin', () => {
     for (const url of first) expect(u.revoked).toContain(url);
   });
 
+  it('installing a different skin leaves a mounted skin alone: no reload, no flash of the built-in skin (review)', async () => {
+    const { invoke, calls } = fakeInvoke((cmd) => (cmd === 'skin_install' ? { ...blue, id: 'skin-two' } : data));
+    const u = fakeUrls();
+    const seen: string[] = [];
+    const { result } = renderHook(() => {
+      const s = useSkin('flasko-blue', { invoke, urls: u.urls });
+      seen.push(s.id);
+      return s;
+    });
+    await waitFor(() => expect(result.current.id).toBe('flasko-blue'));
+    const reads = calls.filter((c) => c[0] === 'skin_read').length;
+    seen.length = 0;
+    await act(async () => void (await installSkin('stage-2', false, invoke)));
+    expect(calls.filter((c) => c[0] === 'skin_read')).toHaveLength(reads);
+    expect(seen).not.toContain(BUILTIN_SKIN_ID);
+    expect(result.current.id).toBe('flasko-blue');
+    expect(u.revoked).toEqual([]);
+  });
+
+  it('reinstalling the active skin swaps to the new sheets without showing the built-in skin in between', async () => {
+    let version = 1;
+    const { invoke } = fakeInvoke((cmd) =>
+      cmd === 'skin_install' ? blue : { ...data, manifest: { ...blue, frame: { width: 32 * version, height: 32 * version } } },
+    );
+    const u = fakeUrls();
+    const seen: string[] = [];
+    const { result, unmount } = renderHook(() => {
+      const s = useSkin('flasko-blue', { invoke, urls: u.urls });
+      seen.push(s.id);
+      return s;
+    });
+    await waitFor(() => expect(result.current.manifest.frame.width).toBe(32));
+    seen.length = 0;
+    version = 2;
+    await act(async () => void (await installSkin('stage-3', true, invoke)));
+    await waitFor(() => expect(result.current.manifest.frame.width).toBe(64));
+    expect(seen).not.toContain(BUILTIN_SKIN_ID);
+    // the old sheets are revoked only after the new ones are shown; unmount revokes the rest
+    expect(u.live.size).toBe(4);
+    act(() => unmount());
+    expect(u.live.size).toBe(0);
+  });
+
   it('drops a read that finishes after the id changed', async () => {
     let release: (v: SkinData) => void = () => undefined;
     const invoke = ((cmd: string) =>

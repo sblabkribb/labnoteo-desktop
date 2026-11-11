@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { InvokeFn } from '../../integrations/netIpc';
 import { BUILTIN_SKIN, BUILTIN_SKIN_ID, builtinSheetUrl } from './builtin';
 import { getSkinRevision, readSkin, subscribeSkinRevision } from './store';
@@ -72,29 +72,43 @@ export async function loadSkin(id: string, deps: SkinDeps = {}): Promise<ActiveS
   return { id, manifest, sheetUrl: (st) => made[st] ?? '', dispose };
 }
 
-/** 스킨 id 를 따라 스킨을 읽는다. 읽는 동안과 실패하면 기본 스킨이다. 스킨을 (같은 id 로 바꿔) 설치하면 다시 읽는다. */
+/**
+ * 스킨 id 를 따라 스킨을 읽는다. 다른 id 로 바꾸는 동안과 실패하면 기본 스킨이다. 쓰고 있는 스킨을 같은 id 로 바꿔 설치하면
+ * 다시 읽되, 새 그림이 올 때까지 앞 그림을 그대로 보인다(기본 스킨이 번쩍 보이지 않게). 다른 id 의 설치는 상관하지 않는다.
+ */
 export function useSkin(id: string, deps: SkinDeps = {}): ActiveSkin {
   const [skin, setSkin] = useState<ActiveSkin>(BUILTIN_ACTIVE);
   const { invoke, urls } = deps;
-  const revision = useSyncExternalStore(subscribeSkinRevision, getSkinRevision);
+  const revision = useSyncExternalStore(subscribeSkinRevision, () => getSkinRevision(id));
+  // 지금 보이는 스킨과 그 id: 새 스킨을 보인 뒤에야 앞 스킨의 blob 주소를 거둔다
+  const shown = useRef<ActiveSkin>(BUILTIN_ACTIVE);
+  const shownFor = useRef(id);
+  const swap = (next: ActiveSkin) => {
+    const prev = shown.current;
+    shown.current = next;
+    setSkin(next);
+    if (prev !== next) prev.dispose();
+  };
   useEffect(() => {
     let live = true;
-    let loaded: ActiveSkin | undefined;
-    // 바꾸는 동안은 기본 스킨(앞 스킨의 blob 주소는 아래 정리에서 거둔다)
-    setSkin(BUILTIN_ACTIVE);
+    // 다른 id 로 바꾸면 읽는 동안 기본 스킨. 같은 id 를 다시 읽으면(바꿔 설치) 앞 그림을 둔다
+    if (shownFor.current !== id || id === BUILTIN_SKIN_ID) swap(BUILTIN_ACTIVE);
+    shownFor.current = id;
     if (id !== BUILTIN_SKIN_ID)
       void loadSkin(id, { invoke, urls }).then((s) => {
         if (!live) {
           s.dispose();
           return;
         }
-        loaded = s;
-        setSkin(s);
+        swap(s);
       });
     return () => {
       live = false;
-      loaded?.dispose();
     };
+    // swap only touches refs and the state setter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, invoke, urls, revision]);
+  // 화면에서 빠지면 보이던 스킨의 주소를 거둔다
+  useEffect(() => () => shown.current.dispose(), []);
   return skin;
 }
