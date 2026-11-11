@@ -13,12 +13,19 @@ export interface ProgressHandle {
   readonly signal: AbortSignal;
   line(text: string): void;
   done(): void;
+  /**
+   * 취소할 수 있는지 바꾼다(GitHub 올리기, spec §5.5). false 면 취소 단추가 사라지고, 취소 단추·닫기 단추·Escape 가 더는
+   * 신호를 끊지 않는다(보관함을 바꾸면 여전히 끊긴다). true 면 다시 취소 단추가 보인다.
+   */
+  setCancellable(cancellable: boolean): void;
 }
 
 export interface ProgressState {
   readonly title: string;
   readonly lines: readonly string[];
   readonly cancellable: boolean;
+  /** `setCancellable(false)` 뒤: 닫기 단추와 Escape 도 아무것도 하지 않는다. */
+  readonly locked?: boolean;
 }
 
 interface Entry {
@@ -85,6 +92,12 @@ export function openProgress(title: string, opts: { cancellable?: boolean } = {}
     },
     done() {
       finish(id, false);
+    },
+    setCancellable(cancellable: boolean) {
+      const current = entries.get(id);
+      if (!current) return;
+      current.state = { ...current.state, cancellable, locked: !cancellable };
+      emit();
     },
   };
 }

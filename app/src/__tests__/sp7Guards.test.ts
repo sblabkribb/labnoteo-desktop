@@ -143,7 +143,9 @@ function deferredBlock(): string {
 
 // ── Token leaks ──────────────────────────────────────────────────
 
-const TOKEN_LIKE = /xox[abpr]-|[0-9a-f]{48}/;
+const TOKEN_LIKE = /xox[abpr]-|[0-9a-f]{48}|gh[opusr]_|github_pat_/;
+/** GitHub state fixtures (Rust-only `GithubDoc` shapes): link records and the account card hold no token. */
+const GITHUB_FIXTURES = 'src/__tests__/data/github';
 /** What Rust holds as the MCP token in this test; it never crosses the fake IPC. */
 const RUST_MCP_TOKEN = 'ab'.repeat(24);
 const SLACK_TOKEN = 'xoxb-1234-5678-leakysecret';
@@ -323,6 +325,18 @@ describe('SP7 guards', () => {
     // the detector itself sees both token shapes
     expect(SLACK_TOKEN).toMatch(TOKEN_LIKE);
     expect(RUST_MCP_TOKEN).toMatch(TOKEN_LIKE);
+  });
+
+  it('no token-like value is in the GitHub state fixtures (links.json, account.json)', () => {
+    const files = readdirSync(GITHUB_FIXTURES).filter((f) => f.endsWith('.json')).sort();
+    expect(files).toEqual(['account.json', 'links.json']);
+    for (const f of files) {
+      const text = readFileSync(`${GITHUB_FIXTURES}/${f}`, 'utf-8');
+      expect(() => JSON.parse(text), f).not.toThrow();
+      expect(text, f).not.toMatch(TOKEN_LIKE);
+    }
+    // the detector sees every GitHub token shape
+    for (const shape of ['ghp_x', 'gho_x', 'ghu_x', 'ghs_x', 'ghr_x', 'github_pat_x']) expect(shape).toMatch(TOKEN_LIKE);
   });
 
   it('every SP7 npm dependency has a permissive licence', () => {

@@ -18,6 +18,12 @@ import type { StagedSkin } from '../../assistant/skins/store';
 import type { SkinUrls } from '../../assistant/skins/useSkin';
 import type { SkinEditorDeps } from '../../assistant/skins/SkinEditor';
 import type { GalleryDialogDeps } from '../../assistant/skins/gallery';
+import type { SignInResult, SignInSpec } from '../../github/SignInDialog';
+import type { Destination, DestinationDeps, DestinationInit, DestinationSpec } from '../../github/UploadDialog';
+import type { PreviewDeps, PreviewSpec, QuickAnswer, QuickSpec } from '../../github/PreviewDialog';
+import type { DivergedSpec } from '../../github/DivergedDialog';
+import type { DivergedAnswer, PreviewHead, ReadyPlan } from '../../github/githubFlow';
+import type { DivergedFile, UploadChoices } from '../../integrations/githubIpc';
 
 // 초점 찾기는 ui/returnFocus 의 것을 쓴다(편집기의 충돌 대화상자와 같은 규칙). 예전 경로로 부르는 쪽을 위해 다시 내보낸다.
 export { deepActiveElement };
@@ -59,7 +65,7 @@ export type DialogSpec =
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'progress'; id: number }
   // 설정 창(UI 재설계 Task 8): 일반·편집기·실험·샘플·연동·단축키·정보. 닫힌 뒤 할 일(설정 창 뒤에 줄 서면 안 되는 질문)이 있으면 그 함수
-  | { kind: 'settings'; page: SettingsPage; deps: SettingsDeps }
+  | { kind: 'settings'; page: SettingsPage; deps: SettingsDeps; focus?: 'githubToken' }
   | { kind: 'partbankSearch'; opts: PartbankSearchOpts }
   | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> }
   | { kind: 'worksheet'; unitOps: readonly WorksheetUnitOp[]; paper: WorksheetPaperSize }
@@ -80,7 +86,14 @@ export type DialogSpec =
   /** 내 스킨 만들기(assistant Task 18). */
   | { kind: 'skinEditor'; deps: SkinEditorDeps }
   /** 스킨 갤러리(assistant Task 19): 끝나면 설치하려고 고른 미리 보기, 닫으면 undefined. */
-  | { kind: 'skinGallery'; deps: GalleryDialogDeps };
+  | { kind: 'skinGallery'; deps: GalleryDialogDeps }
+  // GitHub 올리기(spec §5): 로그인(화면 A), 올릴 곳(화면 B), 파일 확인(화면 C), 짧은 확인, GitHub 에서 바뀐 내용.
+  // 흐름이 하나씩 차례로 연다(겹치지 않는다). 끝 화면은 단추 셋의 choice 다.
+  | SignInSpec
+  | DestinationSpec
+  | PreviewSpec
+  | QuickSpec
+  | DivergedSpec;
 
 
 /**
@@ -323,4 +336,29 @@ export function openSampleDefinitionDialog(model: SampleDefinitionModel, usages:
 /** 실험 워크시트 창(SP7 Task 8): 찍을 유닛 오퍼레이션, 용지, 출력 또는 브라우저. 닫으면 undefined. */
 export function worksheetDialog(unitOps: readonly WorksheetUnitOp[], paper: WorksheetPaperSize): Promise<WorksheetChoice | undefined> {
   return openDialog<WorksheetChoice | undefined>({ kind: 'worksheet', unitOps, paper }, undefined);
+}
+
+/** GitHub 로그인 대화상자(spec §5.2). 닫으면 'cancel'. */
+export function githubSignInDialog(deps: SignInSpec['deps'], opts: { doneDelayMs?: number } = {}): Promise<SignInResult> {
+  return openDialog<SignInResult>({ kind: 'githubSignIn', deps, ...opts }, 'cancel');
+}
+
+/** GitHub 올릴 곳 대화상자(spec §5.3). 닫으면 'cancel'. */
+export function githubDestinationDialog(init: DestinationInit, deps: DestinationDeps): Promise<Destination | 'cancel'> {
+  return openDialog<Destination | 'cancel'>({ kind: 'githubDestination', init, deps }, 'cancel');
+}
+
+/** GitHub 파일 확인(spec §5.4). 닫으면 'cancel'. */
+export function githubPreviewDialog(plan: ReadyPlan, head: PreviewHead, deps: PreviewDeps): Promise<UploadChoices | 'cancel'> {
+  return openDialog<UploadChoices | 'cancel'>({ kind: 'githubPreview', plan, head, deps }, 'cancel');
+}
+
+/** 다시 올리기의 짧은 확인(spec §5.4). 닫으면 'cancel'. */
+export function githubQuickDialog(plan: ReadyPlan): Promise<QuickAnswer> {
+  return openDialog<QuickAnswer>({ kind: 'githubQuick', plan }, 'cancel');
+}
+
+/** GitHub 에서 바뀐 내용(spec §8.3). 닫으면 'cancel'. */
+export function githubDivergedDialog(files: DivergedFile[]): Promise<DivergedAnswer | 'cancel'> {
+  return openDialog<DivergedAnswer | 'cancel'>({ kind: 'githubDiverged', files }, 'cancel');
 }

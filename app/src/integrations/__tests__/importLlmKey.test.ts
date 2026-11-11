@@ -34,8 +34,8 @@ function fakeHost(opts: { confirm: boolean }) {
 }
 
 const STATUS: SecretStatus = {
-  set: { partbankDesktop: false, partbankWeb: false, llmOpenai: true, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false },
-  epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 1, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0 },
+  set: { partbankDesktop: false, partbankWeb: false, llmOpenai: true, bfwServer: false, bfwDesktop: false, slackBot: false, ncbiEutils: false, github: false, githubRefresh: false },
+  epoch: { partbankDesktop: 0, partbankWeb: 0, llmOpenai: 1, bfwServer: 0, bfwDesktop: 0, slackBot: 0, ncbiEutils: 0, github: 0, githubRefresh: 0 },
 };
 
 describe('offerPluginLlmKey (D9)', () => {

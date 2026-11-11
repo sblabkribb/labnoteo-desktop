@@ -149,7 +149,7 @@ fn ms(t: std::io::Result<std::time::SystemTime>) -> Option<f64> {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-enum Reparse {
+pub(crate) enum Reparse {
     None,
     /// A symlink, junction or mount point: never followed.
     Link,
@@ -161,7 +161,7 @@ enum Reparse {
 /// reparse point whose tag is a name surrogate" (the tag is read from the
 /// handle with `FileAttributeTagInfo`), so junctions count and cloud
 /// placeholders do not.
-fn classify(attrs: u32, is_symlink: bool) -> Reparse {
+pub(crate) fn classify(attrs: u32, is_symlink: bool) -> Reparse {
     if is_symlink {
         Reparse::Link
     } else if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -171,7 +171,7 @@ fn classify(attrs: u32, is_symlink: bool) -> Reparse {
     }
 }
 
-fn reparse_of(m: &std::fs::Metadata) -> Reparse {
+pub(crate) fn reparse_of(m: &std::fs::Metadata) -> Reparse {
     #[cfg(windows)]
     let attrs = {
         use std::os::windows::fs::MetadataExt;

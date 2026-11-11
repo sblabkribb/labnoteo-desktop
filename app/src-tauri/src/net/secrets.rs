@@ -8,6 +8,9 @@
 //! `slackBot` the fixed origin `https://slack.com` (only a bot token,
 //! `xoxb-…`, is accepted for it), and `ncbiEutils` the fixed origin
 //! `https://eutils.ncbi.nlm.nih.gov` (the optional NCBI E-utilities API key).
+//! `github` and `githubRefresh` use the fixed origin `https://github.com`;
+//! they are written only by the GitHub sign-in (Rust), never through
+//! `secret_set` / `secret_clear`.
 //!
 //! No function here returns a key to the webview, and no error message ever
 //! contains one: the webview learns only a `set` flag and an `epoch` counter,
@@ -34,6 +37,15 @@ const SLACK_ORIGIN: &str = "https://slack.com";
 
 /// The fixed origin the NCBI E-utilities API key is bound to (spec §8.2).
 pub const NCBI_EUTILS_ORIGIN: &str = "https://eutils.ncbi.nlm.nih.gov";
+
+/// The fixed origin the GitHub tokens are bound to.
+pub const GITHUB_ORIGIN: &str = "https://github.com";
+
+/// Appended to the GitHub slots' accounts in a build with the cargo feature
+/// `github-test-endpoints` (P-R15), so a test build driven against the fakes
+/// never reads or overwrites a real GitHub token in the same service. Empty
+/// in every other build.
+pub const GITHUB_ACCOUNT_SUFFIX: &str = if cfg!(feature = "github-test-endpoints") { "|test-build" } else { "" };
 
 /// Where keys are kept. The app uses `KeyringStore`; tests use `MemoryStore`.
 pub trait SecretStore: Send + Sync {
@@ -144,9 +156,18 @@ pub enum Slot {
     BfwDesktop,
     SlackBot,
     NcbiEutils,
+    /// The GitHub access token (device flow or a pasted token).
+    Github,
+    /// The GitHub refresh token, when the OAuth App issues expiring tokens.
+    GithubRefresh,
 }
 
 impl Slot {
+    /// The GitHub slots, which only the GitHub sign-in writes.
+    pub fn is_github(self) -> bool {
+        matches!(self, Slot::Github | Slot::GithubRefresh)
+    }
+
     /// The camelCase name, as the webview spells it.
     pub fn name(self) -> &'static str {
         match self {
@@ -157,30 +178,37 @@ impl Slot {
             Slot::BfwDesktop => "bfwDesktop",
             Slot::SlackBot => "slackBot",
             Slot::NcbiEutils => "ncbiEutils",
+            Slot::Github => "github",
+            Slot::GithubRefresh => "githubRefresh",
         }
     }
 
     /// The URL the slot's key is bound to (`None` for the fixed-origin slots
-    /// `BfwDesktop`, `SlackBot` and `NcbiEutils`).
+    /// `BfwDesktop`, `SlackBot`, `NcbiEutils`, `Github` and `GithubRefresh`).
     fn url(self, cfg: &ServiceConfig) -> Option<&Url> {
         match self {
             Slot::PartbankDesktop => cfg.partbank_desktop.as_ref(),
             Slot::PartbankWeb => cfg.partbank_web.as_ref(),
             Slot::LlmOpenai => cfg.llm_openai.as_ref(),
             Slot::BfwServer => cfg.bfw_url.as_ref(),
-            Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils => None,
+            Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils | Slot::Github | Slot::GithubRefresh => None,
         }
     }
 }
 
-/// `"<slotName>|<origin>"`, `"bfwDesktop|loopback"` or
-/// `"slackBot|https://slack.com"` (whatever the config is). A slot whose URL is
+/// `"<slotName>|<origin>"`, `"bfwDesktop|loopback"`,
+/// `"slackBot|https://slack.com"`, `"github|https://github.com"` or
+/// `"githubRefresh|https://github.com"` (whatever the config is; a build with
+/// `github-test-endpoints` appends `|test-build` to the GitHub ones). A slot whose URL is
 /// missing or invalid is `notConfigured`.
 pub fn account(slot: Slot, cfg: &ServiceConfig) -> Result<String, NetError> {
     match slot {
         Slot::BfwDesktop => return Ok(format!("{}|loopback", slot.name())),
         Slot::SlackBot => return Ok(format!("{}|{SLACK_ORIGIN}", slot.name())),
         Slot::NcbiEutils => return Ok(format!("{}|{NCBI_EUTILS_ORIGIN}", slot.name())),
+        Slot::Github | Slot::GithubRefresh => {
+            return Ok(format!("{}|{GITHUB_ORIGIN}{GITHUB_ACCOUNT_SUFFIX}", slot.name()))
+        }
         _ => {}
     }
     let url = slot.url(cfg).ok_or_else(|| {
@@ -208,25 +236,32 @@ pub fn validate_secret(value: &str) -> Result<String, NetError> {
     Ok(trimmed.to_string())
 }
 
+/// The token prefixes the GitHub access-token slot takes: classic and
+/// fine-grained personal tokens, OAuth and GitHub App user tokens.
+const GITHUB_TOKEN_PREFIXES: [&str; 4] = ["ghp_", "github_pat_", "gho_", "ghu_"];
+
 /// `validate_secret`, plus the slot's own rule: the Slack bot slot only takes a
-/// bot token (`xoxb-…`), and the NCBI slot only 8 to 64 ASCII letters and
+/// bot token (`xoxb-…`), the NCBI slot only 8 to 64 ASCII letters and
 /// digits (the key goes in a query string, so it must need no escaping and be
-/// found verbatim by the redaction). The error message never includes the value.
+/// found verbatim by the redaction), the GitHub slot a `ghp_` / `github_pat_` /
+/// `gho_` / `ghu_` token and the GitHub refresh slot a `ghr_` token. The error
+/// message never includes the value.
 pub fn validate_secret_for(slot: Slot, value: &str) -> Result<String, NetError> {
     let key = validate_secret(value)?;
-    if slot == Slot::NcbiEutils && (!(8..=64).contains(&key.len()) || !key.bytes().all(|b| b.is_ascii_alphanumeric())) {
-        return Err(NetError::new(
-            NetErrorKind::BadInput,
-            "the NCBI API key must be 8 to 64 letters and digits",
-        ));
+    let refused = |msg: &str| Err(NetError::new(NetErrorKind::BadInput, msg));
+    match slot {
+        Slot::NcbiEutils if !(8..=64).contains(&key.len()) || !key.bytes().all(|b| b.is_ascii_alphanumeric()) => {
+            refused("the NCBI API key must be 8 to 64 letters and digits")
+        }
+        Slot::SlackBot if !key.starts_with("xoxb-") => {
+            refused("the Slack token must be a bot token starting with xoxb-")
+        }
+        Slot::Github if !GITHUB_TOKEN_PREFIXES.iter().any(|p| key.starts_with(p)) => {
+            refused("this is not a GitHub token (it starts with ghp_, github_pat_, gho_ or ghu_)")
+        }
+        Slot::GithubRefresh if !key.starts_with("ghr_") => refused("this is not a GitHub refresh token"),
+        _ => Ok(key),
     }
-    if slot == Slot::SlackBot && !key.starts_with("xoxb-") {
-        return Err(NetError::new(
-            NetErrorKind::BadInput,
-            "the Slack token must be a bot token starting with xoxb-",
-        ));
-    }
-    Ok(key)
 }
 
 /// The slot's key for the configured origin, if one is stored.
@@ -266,7 +301,7 @@ pub fn store_at_account(store: &dyn SecretStore, account: &str, value: &str) -> 
 /// together. Only for slots bound to a URL; the fixed-origin slots are
 /// `badInput`. A refused key stores nothing, and no error names the value.
 pub fn store_secret_at_url(store: &dyn SecretStore, slot: Slot, url: &Url, value: &str) -> Result<(), NetError> {
-    if matches!(slot, Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils) {
+    if matches!(slot, Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils | Slot::Github | Slot::GithubRefresh) {
         return Err(NetError::new(NetErrorKind::BadInput, "this slot is not bound to a URL"));
     }
     let key = validate_secret_for(slot, value)?;
@@ -297,6 +332,8 @@ pub struct SlotValues<T> {
     pub bfw_desktop: T,
     pub slack_bot: T,
     pub ncbi_eutils: T,
+    pub github: T,
+    pub github_refresh: T,
 }
 
 impl<T> SlotValues<T> {
@@ -309,6 +346,8 @@ impl<T> SlotValues<T> {
             bfw_desktop: f(Slot::BfwDesktop),
             slack_bot: f(Slot::SlackBot),
             ncbi_eutils: f(Slot::NcbiEutils),
+            github: f(Slot::Github),
+            github_refresh: f(Slot::GithubRefresh),
         }
     }
 }
@@ -433,6 +472,15 @@ fn current_config(vault: &VaultState, settings: &SettingsFile) -> Result<Service
     ServiceConfig::load(&settings.0, vault.root().ok().as_deref())
 }
 
+/// The webview's key commands never write the GitHub slots: only the GitHub
+/// sign-in (Rust) does, after checking the token with GitHub.
+fn refuse_github(slot: Slot) -> Result<(), NetError> {
+    if slot.is_github() {
+        return Err(NetError::new(NetErrorKind::BadInput, "GitHub keys are managed by the GitHub settings"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn secret_set(
     vault: State<'_, VaultState>,
@@ -441,6 +489,7 @@ pub fn secret_set(
     slot: Slot,
     value: String,
 ) -> Result<(), NetError> {
+    refuse_github(slot)?;
     let cfg = current_config(&vault, &settings)?;
     store_secret(secrets.0.as_ref(), slot, &cfg, &value)
 }
@@ -452,6 +501,7 @@ pub fn secret_clear(
     secrets: State<'_, Secrets>,
     slot: Slot,
 ) -> Result<(), NetError> {
+    refuse_github(slot)?;
     let cfg = current_config(&vault, &settings)?;
     clear_secret(secrets.0.as_ref(), slot, &cfg)
 }
@@ -496,8 +546,8 @@ mod tests {
     #[test] fn status_serializes_flags_and_epochs_only() {
         let v = serde_json::to_value(status_of(&MemoryStore::default(), &cfg("{}"))).unwrap();
         assert_eq!(v, serde_json::json!({
-            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false,"ncbiEutils":false},
-            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0,"ncbiEutils":0}}));
+            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false,"ncbiEutils":false,"github":false,"githubRefresh":false},
+            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0,"ncbiEutils":0,"github":0,"githubRefresh":0}}));
     }
     #[test] fn slack_slot_has_fixed_origin() {
         assert_eq!(account(Slot::SlackBot, &cfg("{}")).unwrap(), "slackBot|https://slack.com");
@@ -631,6 +681,74 @@ mod tests {
             }
         }
         assert_eq!(epoch_of(&s, ACC), 1, "a refused token stores nothing");
+    }
+    /// The account of a GitHub slot in this build.
+    fn gh(slot: &str) -> String {
+        format!("{slot}|https://github.com{GITHUB_ACCOUNT_SUFFIX}")
+    }
+    #[test] fn github_accounts_end_in_test_build_only_with_the_test_feature() {
+        let c = cfg("{}");
+        if cfg!(feature = "github-test-endpoints") {
+            assert_eq!(account(Slot::Github, &c).unwrap(), "github|https://github.com|test-build");
+            assert_eq!(account(Slot::GithubRefresh, &c).unwrap(), "githubRefresh|https://github.com|test-build");
+            assert_eq!(epoch_account(Slot::Github, &c).unwrap(), "epoch|github|https://github.com|test-build");
+        } else {
+            assert_eq!(account(Slot::Github, &c).unwrap(), "github|https://github.com");
+            assert_eq!(account(Slot::GithubRefresh, &c).unwrap(), "githubRefresh|https://github.com");
+            assert_eq!(epoch_account(Slot::Github, &c).unwrap(), "epoch|github|https://github.com");
+        }
+        // The suffix never touches another slot.
+        assert_eq!(account(Slot::SlackBot, &c).unwrap(), "slackBot|https://slack.com");
+    }
+    #[test] fn github_slots_have_the_fixed_github_origin() {
+        // Even with no vault URL configured, and whatever the vault names.
+        assert_eq!(account(Slot::Github, &cfg("{}")).unwrap(), gh("github"));
+        assert_eq!(account(Slot::GithubRefresh, &cfg("{}")).unwrap(), gh("githubRefresh"));
+        let c = cfg(r#"{"partbankWebUrl":"https://a.example","llmEndpointOpenai":"bogus"}"#);
+        assert_eq!(account(Slot::Github, &c).unwrap(), gh("github"));
+        assert_eq!(Slot::Github.name(), "github");
+        assert_eq!(Slot::GithubRefresh.name(), "githubRefresh");
+        assert!(Slot::Github.url(&c).is_none() && Slot::GithubRefresh.url(&c).is_none());
+        assert_eq!(serde_json::from_str::<Slot>("\"github\"").unwrap(), Slot::Github);
+        assert_eq!(serde_json::from_str::<Slot>("\"githubRefresh\"").unwrap(), Slot::GithubRefresh);
+        assert!(Slot::Github.is_github() && Slot::GithubRefresh.is_github() && !Slot::SlackBot.is_github());
+    }
+    #[test] fn github_token_prefixes() {
+        for ok in ["ghp_x", "github_pat_x", "gho_x", "ghu_x"] {
+            assert_eq!(validate_secret_for(Slot::Github, ok).unwrap(), ok);
+        }
+        for bad in ["abc", "ghr_x", "ghs_x", "xoxb-1", ""] {
+            assert_eq!(validate_secret_for(Slot::Github, bad).unwrap_err().kind, NetErrorKind::BadInput, "{bad}");
+        }
+        assert_eq!(validate_secret_for(Slot::GithubRefresh, "ghr_x").unwrap(), "ghr_x");
+        assert_eq!(validate_secret_for(Slot::GithubRefresh, "ghp_x").unwrap_err().kind, NetErrorKind::BadInput);
+        let e = validate_secret_for(Slot::Github, "secretvalue123").unwrap_err();
+        assert!(!e.message.contains("secretvalue123"));
+    }
+    #[test] fn store_secret_keeps_a_github_token_and_bumps_its_epoch() {
+        let store = MemoryStore::default();
+        store_secret(&store, Slot::Github, &cfg("{}"), " ghp_xFAKE ").unwrap();
+        assert_eq!(store.get(&gh("github")).unwrap().as_deref(), Some("ghp_xFAKE"));
+        let st = status_of(&store, &cfg("{}"));
+        assert_eq!((st.set.github, st.epoch.github, st.set.github_refresh), (true, 1, false));
+        assert_eq!(store_secret(&store, Slot::GithubRefresh, &cfg("{}"), "ghp_x").unwrap_err().kind, NetErrorKind::BadInput);
+        assert_eq!(store.get(&gh("githubRefresh")).unwrap(), None);
+    }
+    #[test] fn store_secret_at_url_refuses_the_github_slots() {
+        let store = MemoryStore::default();
+        let url = super::super::config::parse_origin_url("https://github.com").unwrap();
+        for slot in [Slot::Github, Slot::GithubRefresh] {
+            assert_eq!(store_secret_at_url(&store, slot, &url, "ghp_x").unwrap_err().kind, NetErrorKind::BadInput);
+        }
+        assert_eq!(store.get(&gh("github")).unwrap(), None);
+    }
+    #[test] fn webview_secret_commands_refuse_the_github_slots() {
+        for slot in [Slot::Github, Slot::GithubRefresh] {
+            let e = refuse_github(slot).unwrap_err();
+            assert_eq!(e.kind, NetErrorKind::BadInput);
+            assert_eq!(e.message, "GitHub keys are managed by the GitHub settings");
+        }
+        assert!(refuse_github(Slot::SlackBot).is_ok());
     }
     #[test] #[ignore = "touches the real Credential Manager; run by hand"] fn keyring_roundtrip() {
         let s = KeyringStore; let acc = "test|labnoteo-sp6";

@@ -18,6 +18,12 @@
       "fields": { "requestId": "requestId", "data": "data" }
     }
   },
+  "githubProgress": {
+    "name": "github://progress",
+    "payload": {
+      "fields": { "requestId": "requestId", "stage": "stage", "done": "done", "total": "total" }
+    }
+  },
   "scanFolderChanged": {
     "name": "scan://folder-changed",
     "payload": { "fields": {} }

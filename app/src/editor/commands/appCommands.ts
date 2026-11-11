@@ -28,6 +28,7 @@ import { insertBlock, type BlockKind } from './insertBlocks';
 import { isNotePath } from '../../labnote/panel/treeIcons';
 import { contextAppCommands } from '../../ai/contextCommands';
 import { assistantCommands } from '../../assistant/commands';
+import { githubAppCommands } from '../../github/commands';
 
 /**
  * 앱 자체의 명령(플러그인에 없는 편집기 명령). 플러그인과 같은 명령은 labnote/commands/registry 에 있고, 이것들은 따로 둔다:
@@ -371,7 +372,7 @@ const insertBlockCommands: AppCommand[] = [
 ];
 
 function allAppCommands(): AppCommand[] {
-  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, palette, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, appearance, switchVault, showSystemFiles, revealInTree, insertTableCommand, ...insertBlockCommands, ...themeCommands, ...langCommands, ...contextAppCommands, ...assistantCommands()];
+  return [toggleSource, outlineShow, linksShow, navBack, navForward, undoRename, ...formatCommands, propsAdd, propsEditYaml, sampleSettings, convertLegacyNotes, integrationSettings, bfwSyncCatalogs, bfwNotesFromDesign, bfwOpenDesign, bfwDesignUsage, openLabnoteoLink, checkForUpdates, palette, toggleLeft, toggleRight, newNote, quickSwitcher, openSettingsCommand, appearance, switchVault, showSystemFiles, revealInTree, insertTableCommand, ...insertBlockCommands, ...themeCommands, ...langCommands, ...contextAppCommands, ...assistantCommands(), ...githubAppCommands];
 }
 
 export function appCommandById(id: string): AppCommand | undefined {

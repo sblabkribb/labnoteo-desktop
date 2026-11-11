@@ -127,6 +127,7 @@ beforeEach(() => {
       signal: new AbortController().signal,
       line: (s: string) => void progressLines.push(s),
       done: () => {},
+      setCancellable: () => {},
     }),
   );
 });

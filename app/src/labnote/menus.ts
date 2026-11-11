@@ -33,6 +33,7 @@ import { isNotePath } from './panel/treeIcons';
 import { README } from './paths';
 import { markerExperimentDir } from '../../vendor/labnoteo/src/issueMarkerIndex';
 import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
+import { githubMenuItems } from '../github/commands';
 
 /** 폴더가 실험 폴더이거나 그 안에 있으면 그 실험 폴더. */
 function experimentOf(dir: string): string | undefined {
@@ -45,6 +46,7 @@ function experimentOf(dir: string): string | undefined {
  * - 파일: 열기, (첨부: 기본 앱으로 열기, 폴더에서 보기), 위키링크 복사(노트) 또는 임베드 링크 복사(첨부), 경로 복사.
  *   실험 README 면 실험 상태 변경과 논의 표시 전환을 더한다. 그다음 이름 바꾸기, 삭제.
  * - 폴더: 여기에 새 노트, 새 폴더, 경로 복사, 이름 바꾸기, 삭제. 실험 안의 폴더면 워크플로 생성(그 실험에)을 더한다.
+ *   실험 폴더 자체면 GitHub 구역(올리기 등, github/commands.ts)을 삭제 앞에 더한다.
  * - CSV 내보내기(플러그인 main.ts registerFileMenu): 실험 폴더 자체와 실험 README 에는 "이 실험의 모든 표", .md 파일에는
  *   "이 노트의 표". 열린 노트가 아니라 누른 노트나 폴더를 내보낸다.
  */
@@ -64,6 +66,7 @@ export function noteTreeMenu(ctx: CommandContext, entry: TreeEntry, entries: rea
       ...(experiment ? [{ label: coreT('Create workflow'), icon: 'workflow' as const, run: () => createWorkflowIn(ctx, experiment) }] : []),
       copyPath,
       ...csvItems(ctx, getExperimentDir(path) === path ? path : undefined),
+      ...githubMenuItems(ctx, path),
       ...tail,
     ];
   }
@@ -254,7 +257,7 @@ const MORE_COMMANDS = ['print-whole-note', 'print-experiment-worksheet', 'export
 
 /**
  * 보기 머리의 ⋯ 메뉴(`path` 는 열린 노트): 경로 복사, 링크 복사, 인쇄·CSV 내보내기 명령(열린 노트에 맞는 것만),
- * 그리고 실험 README 면 체크리스트 맞추기·상태 변경·논의 표시 전환.
+ * 그리고 실험 README 면 체크리스트 맞추기·상태 변경·논의 표시 전환과 그 실험의 GitHub 구역.
  */
 export function viewMoreMenu(ctx: CommandContext, path: string): MenuItem[] {
   const commands = MORE_COMMANDS.map((id) => commandById(id)).filter(
@@ -271,6 +274,7 @@ export function viewMoreMenu(ctx: CommandContext, path: string): MenuItem[] {
           { label: coreT('Sync workflow checklist with folder'), run: () => syncWorkflowChecklist(ctx) },
           { label: coreT('Change experiment status'), run: () => changeExperimentStatus(ctx) },
           { label: coreT('Toggle discussion flag'), run: () => toggleDiscussionFlag(ctx) },
+          ...githubMenuItems(ctx, posix.dirname(path)),
         ]
       : []),
   ];

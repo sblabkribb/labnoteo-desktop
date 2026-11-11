@@ -13,6 +13,7 @@ import { notifySecretsChange } from './secretsEvents';
  */
 export function KeyField(props: {
   deps: Pick<IntegrationDeps, 'setSecret' | 'clearSecret' | 'status'>;
+  /** `github` 은 GitHub 묶음의 어댑터(`github_set_token`)로만 간다. `secret_set` 은 GitHub 자리를 거절한다. */
   slot: Slot;
   label: string;
   hints?: readonly string[];

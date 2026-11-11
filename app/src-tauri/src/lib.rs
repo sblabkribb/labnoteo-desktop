@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 pub mod assistant;
+pub mod gitsync;
 pub mod index;
 pub mod mcp;
 pub mod net;
@@ -159,6 +160,29 @@ macro_rules! register_commands {
             $crate::skins::gallery::skin_gallery_index,
             $crate::skins::gallery::skin_gallery_fetch,
             $crate::skins::gallery::skin_submit_open,
+            // GitHub upload: app-wide settings (offline and Rust-only state).
+            $crate::gitsync::state::github_app_settings_get,
+            $crate::gitsync::state::github_app_settings_set,
+            // GitHub sign-in (device flow and pasted token) plus account and sign-out.
+            $crate::net::github::auth::github_sign_in_start,
+            $crate::net::github::auth::github_sign_in_wait,
+            $crate::net::github::auth::github_account,
+            $crate::net::github::auth::github_sign_out,
+            $crate::net::github::auth::github_set_token,
+            // GitHub destination: owner list and repo-name check and linking an existing repo.
+            $crate::net::github::repos::github_owners,
+            $crate::net::github::repos::github_name_check,
+            $crate::net::github::repos::github_resolve_repo,
+            // GitHub upload plan (walk and scan and compare; local only and no network).
+            $crate::gitsync::plan::github_plan,
+            // GitHub upload and status and default owner and disconnect (all but the upload offline).
+            $crate::gitsync::upload::github_upload,
+            $crate::gitsync::upload::github_retry,
+            $crate::gitsync::upload::github_folder_status,
+            $crate::gitsync::upload::github_statuses,
+            $crate::gitsync::upload::github_default_owner_get,
+            $crate::gitsync::upload::github_default_owner_set,
+            $crate::gitsync::upload::github_unlink,
         ])
     };
 }
@@ -193,6 +217,8 @@ pub fn run() {
         .manage(net::NetState::default())
         // Open MCP client sessions, by server id (ended on vault switch and exit).
         .manage(net::mcp_client::McpClients::default())
+        // The GitHub sign-in: the device session and the forget-on-exit token.
+        .manage(net::github::GithubState::default())
         // The scan folder's watcher (SP7 B4); started by `scan_folder_watch` / `scan_folder_choose`.
         .manage(scan::ScanFolderState::default())
         // SP7 Part C: the MCP server's state (the in-memory token copy) and
@@ -239,7 +265,11 @@ pub fn run() {
             // The assistant's chat history and installed skins, never in a vault.
             app.manage(assistant::AssistantDirs(data.join("assistant")));
             // Integration keys: Windows Credential Manager only, never a file (D6).
-            app.manage(net::secrets::Secrets::keyring());
+            let secrets = net::secrets::Secrets::keyring();
+            // "Sign out when the app closes" (GitHub): no sign-in survives a
+            // start, even one a crash left in the keychain.
+            gitsync::state::sweep_forgotten_sign_in(&data.join("integrations"), secrets.0.as_ref());
+            app.manage(secrets);
             // Save as... for SKILL.md: Rust's own save dialog, modal to the main window.
             app.manage(skill::SkillPicker::dialog(app.handle().clone()));
             // Open and save dialogs for .labnoteo-skin files (the path never comes from JS).
@@ -263,14 +293,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building labnoteO")
         .run(|app, event| {
-            // End every MCP client session, best effort and briefly.
             if let tauri::RunEvent::Exit = event {
+                // End every MCP client session, best effort and briefly.
                 let clients = app.state::<net::mcp_client::McpClients>();
                 tauri::async_runtime::block_on(async {
                     let _ = tokio::time::timeout(MCP_CLOSE_ON_EXIT, clients.close_all()).await;
                 });
+                on_exit(app);
             }
         });
+}
+
+/// The exit hook: zeroizes the GitHub memory token ("sign out when the app
+/// closes"; the account record is forgotten too when that setting is on).
+fn on_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(github) = app.try_state::<net::github::GithubState>() {
+        let dirs = app.try_state::<net::IntegrationDirs>();
+        github.on_exit(dirs.as_ref().map(|d| d.0.as_path()));
+    }
 }
 
 #[cfg(test)]

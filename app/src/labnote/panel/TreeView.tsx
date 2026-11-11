@@ -44,6 +44,8 @@ export interface TreeViewProps {
   code?(node: TreeNode): ReactNode | undefined;
   /** 아이콘 뒤의 상태 모양. onClick 이 있으면 단추(줄을 열지 않는다), 없으면 이름이 붙은 그림이다. */
   state?(node: TreeNode): TreeState | undefined;
+  /** 이름(과 코드) 뒤의 작은 표시: 이름이 붙은 그림(role=img, aria-label, title). 실험 줄의 GitHub 상태. */
+  badge?(node: TreeNode): TreeBadge | undefined;
   /** 줄에 커서를 올리면 보이는 작은 단추들(마우스용: 탭 정지가 아니다. 같은 일은 줄과 메뉴로도 한다). */
   actions?(node: TreeNode): TreeAction[] | undefined;
   /** 이 id 의 줄로 초점을 옮기고 보이게 스크롤한다. seq 마다 한 번, 그 줄이 그려진 뒤에(조상이 펼쳐지길 기다린다). */
@@ -54,6 +56,12 @@ export interface TreeState {
   icon: IconName;
   label: string;
   onClick?: () => void;
+}
+
+/** 줄 이름 뒤의 표시. 색만으로 뜻을 전하지 않는다: 그림 모양과 글(label)이 함께다. */
+export interface TreeBadge {
+  icon: IconName;
+  label: string;
 }
 
 export interface TreeAction {
@@ -113,7 +121,7 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
  *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
  * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, actions, focusRequest }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, badge, actions, focusRequest }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -199,6 +207,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
         const note = meta?.(row.node);
         const codeText = code?.(row.node);
         const shape = state?.(row.node);
+        const mark2 = badge?.(row.node);
         const buttons = actions?.(row.node) ?? [];
         return (
           <li
@@ -250,6 +259,11 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
               ))}
             <span className="wf-tree-label">{renderLabel ? renderLabel(row.node) : row.node.label}</span>
             {codeText !== undefined && codeText !== '' && <span className="meta code">{codeText}</span>}
+            {mark2 && (
+              <span className="tree-badge" data-icon={mark2.icon} role="img" aria-label={mark2.label} title={mark2.label}>
+                <Icon name={mark2.icon} size={14} />
+              </span>
+            )}
             {note && <span className="tree-meta">{note}</span>}
             {buttons.length > 0 && (
               <span className="tree-actions">
