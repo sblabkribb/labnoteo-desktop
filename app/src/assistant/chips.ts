@@ -80,6 +80,47 @@ export function chipTools(chip: ChipId, scope: Scope | undefined, opts: { allowe
   return allowed.map((name) => all.find((x) => x.name === name)).filter((x): x is ToolDef => !!x);
 }
 
+const headingKey = (s: string): string =>
+  s
+    .replace(/^#+\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .normalize('NFC')
+    .toLowerCase();
+
+/** 새 섹션 칩에서 `read_section` 이 그 제목을 읽으려 할 때 돌려주는 안내(모델에게만 간다). */
+export const NEW_SECTION_NOTE =
+  'This section does not exist yet: it is the new section you are drafting. Do not read it again and do not ask the ' +
+  'researcher; write the draft now with add_section.';
+
+/**
+ * 섹션 만들기 칩이 새 제목일 때(`existing !== 'yes'`) `read_section` 을 감싼다(real-app check, 2026-11-11: 새 제목을
+ * read_section 으로 읽다 "없음"을 받고 사람에게 되물었다). 그 제목을 읽으면 노트를 읽지 않고 "아직 없으니 add_section 으로
+ * 쓰라"는 결과를 돌려주고, 다른 제목이 "찾을 수 없음"으로 끝나면 같은 안내를 덧붙인다. 다른 도구와 다른 칩은 그대로다.
+ */
+export function guardNewSection(tools: readonly ToolDef[], chip: ChipId, params: ChipParams): ToolDef[] {
+  if (chip !== 'section' || params.existing === 'yes' || !params.heading) return [...tools];
+  const want = headingKey(params.heading);
+  return tools.map((tool) =>
+    tool.name !== 'read_section'
+      ? tool
+      : {
+          ...tool,
+          async handler(ctx, args) {
+            const heading = typeof args.heading === 'string' ? args.heading : '';
+            if (heading && headingKey(heading) === want) {
+              return { ok: true, data: { heading: params.heading, exists: false, note: NEW_SECTION_NOTE } };
+            }
+            const res = await tool.handler(ctx, args);
+            if (!res.ok && heading && res.code === 'section_not_found') {
+              return { ...res, error: `${res.error ?? ''} ${NEW_SECTION_NOTE}`.trim() };
+            }
+            return res;
+          },
+        }
+  );
+}
+
 /** 폴더 기록과 대화 칸에 남는 칩 실행의 짧은 줄: "[섹션 만들기] 결과 섹션". */
 export function chipUserLine(chip: ChipId, summary: string): string {
   const s = summary.replace(/\s+/g, ' ').trim();
@@ -110,7 +151,7 @@ export function chipRequest(chip: ChipId, params: ChipParams, text: string): str
       const how =
         params.existing === 'yes'
           ? `The section exists: read it with read_section, then write it with update_section${params.parentHeading ? ` (parentHeading ${quoted(params.parentHeading)})` : ''}.`
-          : `The section is new: add it with add_section${params.after ? ` (after ${quoted(params.after)})` : ''}.`;
+          : `The section is new and not in the note yet, so there is nothing to read: draft it now and add it with add_section${params.after ? ` (after ${quoted(params.after)})` : ''}. Do not ask the researcher first.`;
       return `Draft the section ${quoted(params.heading ?? '')}${where} of the note ${quoted(params.documentPath ?? '')}. ${how}${tail}`;
     }
     case 'unitOp':
@@ -131,6 +172,7 @@ export function chipSystemPrompt(chip: ChipId): string {
         'You are running the "Create section" chip: draft exactly one section of the given note, then stop.',
         'Read only what the section needs: read_section for an existing section, and get_experiment_context, get_unit_operation_context or read_note only when the section needs that background. Read each at most once.',
         'Then write in one call: update_section for an existing section, add_section for a new one; the researcher confirms every write after a preview.',
+        'A new section does not exist yet: never call read_section for it and never ask the researcher what to write; propose the section directly with add_section (the preview is where the researcher decides).',
         'Decide and call the tool; do not plan the same steps again.',
         "Keep any text the researcher already wrote: extend it, don't replace it.",
         'Never write Results & Discussions, QC Metrics, Discussion or Meta: the researcher writes those. Do not invent measured values.',

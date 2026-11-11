@@ -28,6 +28,7 @@ import {
   chipTools,
   chipUserLine,
   isWorkflowNotePath,
+  NEW_SECTION_NOTE,
 } from '../chips';
 import { emptyHistory, type HistoryDoc } from '../history';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, ChipId } from '../runtime';
@@ -81,6 +82,9 @@ describe('chip ids, labels and lines', () => {
     expect(s).toContain('희석 비율 포함');
     const n = chipRequest('section', { documentPath: NOTE, heading: '배양 조건', existing: 'no' }, '');
     expect(n).toContain('add_section');
+    expect(n).toContain('nothing to read');
+    expect(n).toContain('Do not ask the researcher');
+    expect(n).not.toContain('read_section');
     expect(chipRequest('unitOp', { documentPath: NOTE }, 'PCR 산물 정제 추가')).toContain('PCR 산물 정제 추가');
     expect(chipRequest('workflow', { documentPath: README }, '클로닝')).toContain(README);
   });
@@ -234,6 +238,38 @@ describe('builtinRuntime in chip mode', () => {
     expect(r.executed[0].error).toMatch(/not available|Unknown tool/i);
     const toolMsg = p.seen[1].find((m) => m.role === 'tool');
     expect(toolMsg?.content).toMatch(/update_section/);
+  });
+
+  it('a new section is proposed at once: read_section of its heading reads nothing and says to write it with add_section', async () => {
+    expect(chipSystemPrompt('section')).toContain('never call read_section for it and never ask the researcher');
+    const args = { documentPath: NOTE, heading: '배양 조건', body: '- 37 °C' };
+    const p = new Script([
+      toolTurn('read_section', { documentPath: NOTE, heading: ' 배양  조건 ' }),
+      toolTurn('read_section', { documentPath: NOTE, heading: '없는 제목' }),
+      toolTurn('add_section', args),
+      answer('추가했어요'),
+    ]);
+    const { rt, th } = await setupRt(p);
+    th.answer.confirm(true);
+    const r = await rt.run(chipTurn('section', { documentPath: NOTE, heading: '배양 조건', existing: 'no' }, ''), sink(), go());
+    const toolMsgs = p.seen.flatMap((m) => m.filter((x) => x.role === 'tool').map((x) => x.content));
+    expect(toolMsgs[0]).toContain(NEW_SECTION_NOTE);
+    expect(toolMsgs[0]).toContain('"exists":false');
+    expect(toolMsgs[1]).toContain(NEW_SECTION_NOTE);
+    expect(r.executed.map((e) => [e.call.name, e.outcome])).toEqual([
+      ['read_section', 'done'],
+      ['read_section', 'failed'],
+      ['add_section', 'done'],
+    ]);
+    expect(docOf(NOTE)).toContain('배양 조건');
+
+    // An existing section still reads the note.
+    const q = new Script([toolTurn('read_section', { documentPath: NOTE, heading: 'Notes' }), answer('')]);
+    const b = await setupRt(q);
+    await b.rt.run(chipTurn('section', { documentPath: NOTE, heading: 'Notes', existing: 'yes' }, ''), sink(), go());
+    const read = q.seen[1].find((m) => m.role === 'tool')!.content;
+    expect(read).toContain('memo');
+    expect(read).not.toContain(NEW_SECTION_NOTE);
   });
 
   it('a section write shows the preview confirm; denied, the note is unchanged', async () => {

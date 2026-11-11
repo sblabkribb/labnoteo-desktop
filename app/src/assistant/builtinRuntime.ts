@@ -49,7 +49,7 @@ import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llm
 import { describeLlmError, outputCutMessage } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
 import { answeredTurns, historyBudget, toPromptMessages, type PromptMessages } from './compact';
-import { chipNeedsScope, chipSystemPrompt, chipTools } from './chips';
+import { chipNeedsScope, chipSystemPrompt, chipTools, guardNewSection } from './chips';
 import { addSectionText, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
 import { cleanLabel, SourceLedger, type Source } from './sources';
@@ -555,7 +555,11 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
     const allowedFolders = scopeGate(turn.userText, experiments);
     // Chat: the app tools plus the assistant-only add_section and search_catalog (Task 11A, R8), and external tools.
     // A making chip: only its own narrow set, no external tools (Task 11B); a call outside it runs nothing.
-    const coreTools: ToolDef[] = chipTools(chip ?? 'chat', scope, { allowedFolders });
+    // A new section's heading is not read (and the researcher is not asked about it): guardNewSection.
+    const coreTools: ToolDef[] =
+      turn.mode.kind === 'chip'
+        ? guardNewSection(chipTools(turn.mode.chip, scope, { allowedFolders }), turn.mode.chip, turn.mode.params)
+        : chipTools('chat', scope, { allowedFolders });
     const external =
       chip && chip !== 'chat'
         ? { tools: [] as ToolDef[], meta: new Map<string, ExternalToolMeta>() }
