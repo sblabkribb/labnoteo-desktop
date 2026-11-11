@@ -18,7 +18,15 @@ import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost'
 import { openNote } from '../../labnote/openNotes';
 import { askAgentCommand } from '../../labnote/port/aiAskAgent';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
-import { builtinRuntime, EARLIER_UNTRUSTED_RULES, noticeTranslator, STATUS_TITLE_MAX, statusLabel, toolLabel } from '../builtinRuntime';
+import {
+  builtinRuntime,
+  EARLIER_UNTRUSTED_RULES,
+  noticeTranslator,
+  PARTBANK_UNAVAILABLE_RULES,
+  STATUS_TITLE_MAX,
+  statusLabel,
+  toolLabel,
+} from '../builtinRuntime';
 import { fakeRuntime } from '../fakeRuntime';
 import {
   getRuntime,
@@ -551,6 +559,29 @@ describe('builtinRuntime', () => {
     expect(r.error).toBeTruthy();
     expect(r.error).not.toContain('raw-rust-text');
     expect(th.notes).toEqual([]);
+  });
+
+  it('without a partbank tool the system prompt says partbank cannot be searched; with the RAPID tool it does not', async () => {
+    // real-app check: with only the local sample tools the model said "partbank has no GFP parts".
+    const p1 = new Script([answer('끝')]);
+    const a = await setup(p1);
+    await a.rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
+    expect(p1.seen[0][0].content).toContain(PARTBANK_UNAVAILABLE_RULES);
+
+    const meta = new Map<string, ExternalToolMeta>([
+      ['mcp_rapid_search_parts', { kind: 'mcp', serverId: 'rapid', serverName: 'RAPID', toolTitle: 'search_parts', readOnly: true }],
+    ]);
+    const ext: ToolDef = {
+      name: 'mcp_rapid_search_parts',
+      description: 'search parts',
+      inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+      handler: async () => ({ ok: true, data: '[]' }),
+    };
+    vi.mocked(externalAgentTools).mockResolvedValueOnce({ tools: [ext], meta });
+    const p2 = new Script([answer('끝')]);
+    const b = await setup(p2);
+    await b.rt.run(turnOf('partbank에서 GFP 부품을 찾아 줘'), recordSink().sink, go());
+    expect(p2.seen[0][0].content).not.toContain(PARTBANK_UNAVAILABLE_RULES);
   });
 
   it('an external write is asked with the external text, and the untrusted rules are sent', async () => {
