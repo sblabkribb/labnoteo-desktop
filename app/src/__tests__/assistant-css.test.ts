@@ -14,6 +14,12 @@ const decl = (pred: (r: (typeof rules)[number]) => boolean, selector: string, pr
 const top = (r: (typeof rules)[number]) => !r.atRule;
 
 describe('styles/assistant.css', () => {
+  it('a resized bubble clips instead of spilling, and the grip has a 24px hit area (review)', () => {
+    expect(decl(top, '.pet-bubble[data-sized="true"]', 'overflow')).toEqual(['hidden']);
+    expect(decl(top, '.pet-bubble-grip', 'width')).toEqual(['24px']);
+    expect(decl(top, '.pet-bubble-grip', 'height')).toEqual(['24px']);
+  });
+
   it('is the last style file', () => {
     expect(STYLE_FILES[STYLE_FILES.length - 1]).toBe('assistant');
   });

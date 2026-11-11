@@ -173,9 +173,9 @@ fn ipc_argument_names_match_the_typescript_side() {
         ),
     );
     assert_eq!(stored["leftWidth"], 480);
-    // The pet (assistant) prefs: clamped, skin id checked, unknown fields dropped; the layout survives.
-    assert_eq!(stored["pet"], json!({"x": 4096, "y": 40, "hidden": true, "scale": 3, "skin": "flasko"}));
-    assert_eq!(defaults["pet"], json!({"x": 24, "y": 40, "hidden": false, "scale": 2, "skin": "flasko"}));
+    // The pet (assistant) prefs: clamped, skin id checked, unknown fields dropped; the chat window size defaults to 0 (= default size); the layout survives.
+    assert_eq!(stored["pet"], json!({"x": 4096, "y": 40, "hidden": true, "scale": 3, "skin": "flasko", "bubbleW": 0, "bubbleH": 0}));
+    assert_eq!(defaults["pet"], json!({"x": 24, "y": 40, "hidden": false, "scale": 2, "skin": "flasko", "bubbleW": 0, "bubbleH": 0}));
     assert!(stored.get("junk").is_none(), "{stored}");
     assert_eq!(ok("ui_prefs_read", args("ui_prefs_read", vec![])), stored);
     assert!(dir.join("config").join("ui.json").is_file());

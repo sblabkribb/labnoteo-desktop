@@ -88,6 +88,8 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   width: var(--bubble-w);
   height: var(--bubble-h);
   max-height: var(--bubble-max-h, calc(100vh - 8rem));
+  /* at the smallest size the chips/composer must not spill past the edge: the log scrolls, the rest is clipped */
+  overflow: hidden;
 }
 .pet-bubble > * { min-width: 0; }
 
@@ -97,9 +99,10 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
   position: absolute;
   top: 0;
   left: 0;
-  width: 16px;
+  /* 24px hit area (WCAG 2.5.8); the glyph stays 10px through ::before inset */
+  width: 24px;
   min-width: 0;
-  height: 16px;
+  height: 24px;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -114,7 +117,7 @@ html[data-reduced-motion] .pet-sprite { animation: none; }
 .pet-bubble-grip::before {
   content: "";
   position: absolute;
-  inset: 3px;
+  inset: 7px;
   border-top: 2px solid currentColor;
   border-left: 2px solid currentColor;
   border-top-left-radius: 2px;

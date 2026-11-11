@@ -25,6 +25,10 @@ describe('settings rows', () => {
     expect(decl('.setting-control', 'justify-content')).toEqual(['flex-end']);
   });
 
+  it('a group jump keeps the focused heading clear of the pane top (scroll margin on the heading itself)', () => {
+    expect(decl('.integration-category-title', 'scroll-margin-top')).toEqual(['var(--space-5)']);
+  });
+
   it('the skin buttons form an even grid of three columns (3+3), not ragged wrapped rows (visual QA)', () => {
     expect(decl('.setting-skin-actions', 'display')).toEqual(['grid']);
     expect(decl('.setting-skin-actions', 'grid-template-columns')).toEqual(['repeat(3, auto)']);

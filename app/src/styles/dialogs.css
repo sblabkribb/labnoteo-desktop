@@ -98,8 +98,7 @@
 .integration-toc { margin: 0 0 var(--space-5); }
 .integration-toc ul { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
 .integration-toc button { min-height: 26px; padding: 0 var(--space-4); font-size: var(--font-size-sm); }
-.integration-category { scroll-margin-top: var(--space-5); }
-.integration-category-title { margin: var(--space-6) 0 var(--space-1); font-size: var(--font-size-lg); font-weight: 600; line-height: 1.3; }
+.integration-category-title { scroll-margin-top: var(--space-5); margin: var(--space-6) 0 var(--space-1); font-size: var(--font-size-lg); font-weight: 600; line-height: 1.3; }
 .integration-category-lead { margin: 0 0 var(--space-3); }
 .integration-group { display: flex; flex-direction: column; gap: var(--space-4); }
 .integration-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
