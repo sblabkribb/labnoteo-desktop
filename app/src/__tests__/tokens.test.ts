@@ -156,13 +156,21 @@ function contrastFailures(t: Record<string, string>, name: string): string[] {
   need('--text', '--btn-bg', 4.5);
   need('--text', '--btn-bg-hover', 4.5);
   need('--text-muted', '--accent-soft', 4.5);
-  // 찾기에 맞은 글자(<mark>)는 그 칠 위에서도 읽힌다
+  // 찾기에 맞은 글자(<mark>)는 그 칠 위에서도 읽힌다. 선택된 행(--bg-selected) 위에 겹쳐도 읽힌다
   need('--text', '--search-hit', 4.5);
+  {
+    const sel = parseColour(t['--bg-selected']);
+    const surface = composite(parseColour(t['--search-hit']), [sel[0], sel[1], sel[2]]);
+    const r = ratioRgb(composite(parseColour(t['--text']), surface), surface);
+    if (r < 4.5) out.push(`${name} --text on --search-hit over --bg-selected = ${r.toFixed(2)} < 4.5`);
+  }
   // 포커스 링(강조색)은 바탕 대비 3:1 이상
   for (const bg of SURFACES) need('--accent', bg, 3);
   // 켬/끔 단추와 체크 상자의 채움(--accent-fill)은 페이지와 대화상자 바탕에서 3:1 이상으로 보인다
   need('--accent-fill', '--bg', 3);
   need('--accent-fill', '--menu-bg', 3);
+  // hover 한 채움 단추도 페이지 바탕에 묻히지 않는다
+  need('--accent-fill-hover', '--bg', 3);
   return out;
 }
 
@@ -243,13 +251,12 @@ describe('디자인 토큰', () => {
   it('강조색은 국가바이오파운드리사업단 전용 색상 규정(CI)의 색이다', () => {
     const light = props(blocks.light.body);
     const dark = props(blocks.dark.body);
-    // 라이트: 메인 Royal Purple 이 강조색과 채움, 서브 Purple 이 채움 hover
-    expect(light['--accent']).toBe('#472c7b');
+    // 라이트: 메인 Royal Purple 이 채움, 서브 Purple 이 글자 강조색과 채움 hover(Royal Purple 글자는 본문과 구별되지 않는다)
+    expect(light['--accent']).toBe('#7d4698');
     expect(light['--accent-fill']).toBe('#472c7b');
     expect(light['--accent-fill-hover']).toBe('#7d4698');
     expect(light['--accent-soft']).toBe('rgba(71, 44, 123, 0.1)');
-    // 다크: 채움 hover 가 서브 Purple, 정보색이 서브 Baby Blue
-    expect(dark['--accent-fill-hover']).toBe('#7d4698');
+    // 다크: 정보색이 서브 Baby Blue
     expect(dark['--info']).toBe('#83ccd2');
     // 찾기 칠은 확장색 Yellow(255, 241, 0)
     expect(light['--search-hit']).toMatch(/^rgba\(255, 241, 0, /);

@@ -426,7 +426,7 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 .github-copied { color: var(--success); font-size: var(--font-size-sm); }
 .github-signin-done { color: var(--success); font-weight: 600; }
 .github-link { padding: 0; min-height: 0; color: var(--accent); background: none; border: 0; box-shadow: none; text-decoration: underline; cursor: pointer; }
-.github-link:hover:not(:disabled) { background: none; color: var(--accent); }
+.github-link:hover:not(:disabled) { background: none; color: var(--accent); text-decoration-thickness: 2px; }
 .github-note { margin: 0 0 var(--space-4); }
 .github-revoke { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 0 var(--space-5); }
 .github-revoke p { margin: 0; }
