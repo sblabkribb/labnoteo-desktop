@@ -4,6 +4,9 @@ import { useLang } from '../i18n/useLang';
 import { rovingStop } from '../ui/roving';
 import { CHIP_IDS, chipLabel, type ChipId } from './chips';
 
+/** 칩 다섯을 3 + 2 로 고르게 놓는다(줄바꿈에 맡기면 4 + 1 로 접혔다, visual QA). 화살표 순서는 그대로 CHIP_IDS 다. */
+const CHIP_ROWS: readonly (readonly ChipId[])[] = [CHIP_IDS.slice(0, 3), CHIP_IDS.slice(3)];
+
 const STEP: Readonly<Record<string, number>> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 
 /**
@@ -32,23 +35,27 @@ export function ChipBar(props: { active: ChipId; onSelect(chip: ChipId): void })
 
   return (
     <div className="pet-chips" role="toolbar" aria-label={t('pet.chips')} onKeyDown={onKeyDown}>
-      {CHIP_IDS.map((chip) => (
-        <button
-          key={chip}
-          ref={(el) => {
-            if (el) buttons.current.set(chip, el);
-            else buttons.current.delete(chip);
-          }}
-          type="button"
-          className="pet-chip"
-          data-chip={chip}
-          aria-pressed={chip === props.active}
-          tabIndex={chip === stop ? 0 : -1}
-          onFocus={() => setFocusChip(chip)}
-          onClick={() => props.onSelect(chip)}
-        >
-          {chipLabel(chip)}
-        </button>
+      {CHIP_ROWS.map((row) => (
+        <div key={row.join()} className="pet-chips-row">
+          {row.map((chip) => (
+            <button
+              key={chip}
+              ref={(el) => {
+                if (el) buttons.current.set(chip, el);
+                else buttons.current.delete(chip);
+              }}
+              type="button"
+              className="pet-chip"
+              data-chip={chip}
+              aria-pressed={chip === props.active}
+              tabIndex={chip === stop ? 0 : -1}
+              onFocus={() => setFocusChip(chip)}
+              onClick={() => props.onSelect(chip)}
+            >
+              {chipLabel(chip)}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   );

@@ -32,6 +32,30 @@ describe('styles/assistant.css', () => {
     ]);
   });
 
+  it('dark themes give the sprite a light, unblurred rim so its dark outline shows on near-black (visual QA)', () => {
+    const [filter] = decl(top, '.pet-sprite', 'filter');
+    const shadows = filter.match(/drop-shadow\((?:[^()]|\([^()]*\))*\)/g) ?? [];
+    expect(shadows).toHaveLength(4);
+    // no blur radius: the pixel art stays crisp
+    for (const sh of shadows) expect(sh).toMatch(/^drop-shadow\(-?\d+(?:px)? -?\d+(?:px)? 0 var\(--pet-rim\)\)$/);
+    const tokens = parseRules(readFileSync('src/styles/tokens.css', 'utf-8'));
+    const rim = (sel: string, at?: string) =>
+      tokens
+        .filter((r) => r.selectors.includes(sel) && r.atRule === at)
+        .flatMap((r) => declarations(r.body))
+        .filter((d) => d.prop === '--pet-rim')
+        .map((d) => d.value);
+    expect(rim(':root')).toEqual(['rgba(255, 255, 255, 0)']);
+    expect(rim(':root[data-theme="dark"]')).toEqual(['rgba(255, 255, 255, 0.72)']);
+    expect(rim(':root:not([data-theme])', '@media (prefers-color-scheme: dark)')).toEqual(['rgba(255, 255, 255, 0.72)']);
+  });
+
+  it('the chips sit in rows that they fill evenly (3 + 2, visual QA)', () => {
+    expect(decl(top, '.pet-chips', 'flex-direction')).toEqual(['column']);
+    expect(decl(top, '.pet-chips-row', 'display')).toEqual(['flex']);
+    expect(decl(top, '.pet-chip', 'flex')).toEqual(['1 1 auto']);
+  });
+
   it('the pet sits at the CSSOM offsets from the right and bottom edges', () => {
     expect(decl(top, '.pet-wrap', 'position')).toEqual(['fixed']);
     expect(decl(top, '.pet-wrap', 'right')).toEqual(['var(--pet-x)']);

@@ -112,6 +112,13 @@ describe('chip toolbar', () => {
     expect(chip('사용법').getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('lays the five chips out as an even 3 + 2, not 4 + 1 (visual QA)', async () => {
+    const { store } = setup();
+    await open(store);
+    const rows = [...toolbar().querySelectorAll('.pet-chips-row')];
+    expect(rows.map((r) => r.querySelectorAll('button').length)).toEqual([3, 2]);
+  });
+
   it('arrows, Home and End move focus and the tab stop (roving tabindex), wrapping at the ends', async () => {
     const { store } = setup();
     await open(store);
