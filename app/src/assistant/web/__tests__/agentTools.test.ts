@@ -233,6 +233,44 @@ describe('webAgentTools', () => {
     });
     await expect(c.run('web_search', { query: 'q' })).rejects.toMatchObject({ kind: 'cancelled' });
   });
+
+  it('a refused search key (unauthorized) tells the model to ask for the key and the person once per run', async () => {
+    const f = fakeIpc({
+      search: async () => {
+        throw new NetError('unauthorized', 'raw-rust-text');
+      },
+    });
+    const notify = vi.fn();
+    const web = webAgentTools(f.ipc, { allowedUrls: new UrlAllowlist(), ledger: new SourceLedger(), newRequestId: () => 'rid', notify });
+    const search = web.tools.find((x) => x.name === 'web_search')!;
+    const ctx = { fs: new MemFileSystem(), workspaceRoot: '.' } as ToolContext;
+    const a = await search.handler(ctx, { query: 'q' });
+    expect(a.ok).toBe(false);
+    const text = JSON.stringify(a);
+    expect(text).not.toContain('raw-rust-text');
+    expect(text).toMatch(/key/i);
+    expect(text).toMatch(/Settings > Assistant/);
+    await search.handler(ctx, { query: 'q2' });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(t('web.unauthorized'));
+    // A 403 with JSON turned off is a different message, and no key notice.
+    const g = fakeIpc({
+      search: async () => {
+        throw new NetError('jsonDisabled', 'raw-rust-text');
+      },
+    });
+    const notify2 = vi.fn();
+    const web2 = webAgentTools(g.ipc, { allowedUrls: new UrlAllowlist(), ledger: new SourceLedger(), notify: notify2 });
+    const b = await web2.tools.find((x) => x.name === 'web_search')!.handler(ctx, { query: 'q' });
+    expect(JSON.stringify(b)).toMatch(/JSON/);
+    expect(notify2).not.toHaveBeenCalled();
+  });
+
+  it('the key notice reads in Korean too', () => {
+    setLang('ko');
+    expect(t('web.unauthorized')).toContain('검색 서버 키');
+    setLang('en');
+  });
 });
 
 describe('web content cannot steer a write', () => {

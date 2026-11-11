@@ -215,7 +215,8 @@ async function webToolsFor(
   const allowedUrls = new UrlAllowlist();
   for (const m of turn.history) if (m.role === 'user') allowedUrls.addFromText(m.text);
   allowedUrls.addFromText(turn.userText);
-  return { ...webAgentTools(webIpcFor(env.invoke, signal), { allowedUrls, ledger: { add: cite } }), allowedUrls };
+  const notify = (message: string) => env.host.notify('warn', message);
+  return { ...webAgentTools(webIpcFor(env.invoke, signal), { allowedUrls, ledger: { add: cite }, notify }), allowedUrls };
 }
 
 /** `makeEnv` 는 실행마다 새 `createAiEnv(ctx)`: 설정과 제공자가 늘 지금 것이다. */

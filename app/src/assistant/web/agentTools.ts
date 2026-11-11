@@ -11,6 +11,7 @@
  *   목록에 없으면 IPC 없이 거절한다. Rust 에는 정리한 주소를 보낸다.
  * - 한 실행에 검색 3번, 페이지 5개까지. 검색어는 200자까지(넘으면 IPC 없이 거절).
  * - 오류는 모델에게 짧은 영어로만 준다(Rust·서비스가 보낸 글은 넣지 않는다). 취소는 그대로 던져 실행을 끝낸다.
+ * - 검색 서버가 키를 거절하면(`unauthorized`: API 게이트웨이 뒤의 검색 서버) 사람에게도 실행마다 한 번 알린다(`notify`).
  * 이 파일은 네트워크를 쓰지 않는다: 부르는 일은 `ipc` 가 한다.
  */
 import type { JsonSchema, ToolDef, ToolResult } from '@labnoteo/core';
@@ -112,6 +113,8 @@ export interface WebAgentToolOpts {
   caps?: { searches?: number; fetches?: number };
   /** 부를 때마다 새 요청 id(취소가 이 id 로 Rust 에 닿는다). */
   newRequestId?: () => string;
+  /** 검색 서버가 키를 거절했을 때 사람에게 보일 알림(실행마다 한 번). */
+  notify?: (message: string) => void;
 }
 
 /** 한 줄 안의 칸: 줄바꿈과 `|` 를 빈칸으로. */
@@ -135,6 +138,8 @@ function errorForModel(err: NetError, what: 'search' | 'page'): string {
       return 'Web search is not set up on this computer.';
     case 'badInput':
       return what === 'search' ? 'The search was refused: check the query.' : 'The page address was refused.';
+    case 'unauthorized':
+      return 'The web search service refused the request: its key is missing or wrong. Ask the user to enter the search server key (or the LLM key, when it is the same server) in Settings > Assistant.';
     case 'jsonDisabled':
       return 'The web search service does not allow JSON results.';
     case 'rateLimited':
@@ -203,6 +208,7 @@ export function webAgentTools(ipc: WebIpc, opts: WebAgentToolOpts): { tools: Too
   const { allowedUrls, ledger } = opts;
   let searches = 0;
   let fetches = 0;
+  let keyNoticeShown = false;
 
   const argsOf = (raw: unknown): Args => (raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Args) : {});
 
@@ -230,6 +236,10 @@ export function webAgentTools(ipc: WebIpc, opts: WebAgentToolOpts): { tools: Too
       } catch (e) {
         const err = toNetError(e);
         if (err.kind === 'cancelled') throw err;
+        if (err.kind === 'unauthorized' && !keyNoticeShown) {
+          keyNoticeShown = true;
+          opts.notify?.(t('web.unauthorized'));
+        }
         return { ok: false, error: errorForModel(err, 'search') };
       }
       allowedUrls.addFromHits(result.hits);
