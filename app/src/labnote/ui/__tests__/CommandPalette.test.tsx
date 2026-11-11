@@ -103,7 +103,7 @@ describe('명령 팔레트', () => {
     const e = ctrlPInShadow();
     expect(e.defaultPrevented).toBe(true);
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(optionLabels()).toEqual(['실험 생성', 'Workflow 생성']);
+    expect(optionLabels()).toEqual(['실험 만들기', 'Workflow 만들기']);
     // 열려 있는 동안 다시 눌러도 둘째 팔레트를 열지 않는다. 인쇄 대화상자는 여전히 막는다
     const again = ctrlPInShadow();
     expect(again.defaultPrevented).toBe(true);
@@ -122,25 +122,25 @@ describe('명령 팔레트', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy();
   });
 
-  it("the palette lists Korean names in ko and finds create-workflow by its name 'Workflow 생성', by the plugin name '워크플로 생성' (README hints) and by 'Create workflow'", async () => {
+  it("the palette lists Korean names in ko and finds create-workflow by its name 'Workflow 만들기', its old name 'Workflow 생성', by the plugin name '워크플로 생성' (README hints) and by 'Create workflow'", async () => {
     const user = userEvent.setup();
     const ctx = makeCtx();
     render(<Harness ctx={ctx} />);
     ctrlPInShadow();
     await user.type(await screen.findByRole('combobox'), '워크플로 생성');
-    expect(optionLabels()[0]).toBe('Workflow 생성');
+    expect(optionLabels()[0]).toBe('Workflow 만들기');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(run).toHaveBeenCalledWith(ctx));
 
     ctrlPInShadow();
     await user.type(await screen.findByRole('combobox'), 'Create workflow');
-    expect(optionLabels()[0]).toBe('Workflow 생성');
+    expect(optionLabels()[0]).toBe('Workflow 만들기');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
 
     ctrlPInShadow();
     await user.type(await screen.findByRole('combobox'), 'Workflow 생성');
-    expect(optionLabels()[0]).toBe('Workflow 생성');
+    expect(optionLabels()[0]).toBe('Workflow 만들기');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
 
@@ -148,7 +148,7 @@ describe('명령 팔레트', () => {
     act(() => setLang('en'));
     ctrlPInShadow();
     await screen.findByRole('dialog');
-    expect(optionLabels()).toEqual(['Create workflow', 'Create experiment']);
+    expect(optionLabels()).toEqual(['Create Workflow', 'Create experiment']);
   });
 
   it('palette lists editor-toggle-source with its shortcut and runs it', async () => {
@@ -157,16 +157,20 @@ describe('명령 팔레트', () => {
     render(<Harness ctx={makeCtx()} />);
     ctrlPInShadow();
     await screen.findByRole('dialog');
-    // app commands (with their shortcut chips) come before the lab-note commands
+    // 목적별 묶음: 노트·편집(소스 보기)이 실험·Workflow·Unit Operation(실험 만들기)보다 먼저
     const labels = optionLabels();
-    expect(labels).toEqual(expect.arrayContaining(['실험 생성', 'Workflow 생성', '소스 보기 전환']));
-    expect(labels.indexOf('소스 보기 전환')).toBeLessThan(labels.indexOf('실험 생성'));
+    expect(labels).toEqual(expect.arrayContaining(['실험 만들기', 'Workflow 만들기', '소스 보기 켜기/끄기']));
+    expect(labels.indexOf('소스 보기 켜기/끄기')).toBeLessThan(labels.indexOf('실험 만들기'));
     // 단축키는 이름 뒤가 아니라 줄 오른쪽 끝의 kbd 칩이다(UI 재설계 Task 12)
     const kbdOf = (label: string) => screen.queryAllByRole('option').find((o) => o.querySelector('.picker-label')?.textContent === label)?.querySelector('kbd')?.textContent;
-    expect(kbdOf('소스 보기 전환')).toBe('Ctrl+E');
-    expect(kbdOf('굵게')).toBe('Ctrl+B'); // 서식 명령도 앱 명령으로 이어진다(formatCommands.test.tsx)
+    expect(kbdOf('소스 보기 켜기/끄기')).toBe('Ctrl+E');
+    expect(kbdOf('굵게 하기')).toBe('Ctrl+B'); // 서식 명령도 앱 명령으로 이어진다(formatCommands.test.tsx)
+    // 열린 노트가 없으면 서식 명령은 흐리게, 이유와 함께 보인다(고르면 이유만 알린다: paletteCatalog.test.ts)
+    const bold = screen.queryAllByRole('option').find((o) => o.querySelector('.picker-label')?.textContent === '굵게 하기')!;
+    expect(bold.className).toContain('dimmed');
+    expect(bold.querySelector('.picker-desc')?.textContent).toBe('노트를 열면 쓸 수 있습니다');
     await user.type(screen.getByRole('combobox'), 'editor-toggle-source');
-    expect(optionLabels()[0]).toBe('소스 보기 전환');
+    expect(optionLabels()[0]).toBe('소스 보기 켜기/끄기');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(getMode()).toBe('source'));
 

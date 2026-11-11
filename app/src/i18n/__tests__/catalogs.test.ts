@@ -75,6 +75,7 @@ describe('소스가 부르는 번역 키', () => {
     // MenuItem.labelKey·section·disabledReason: 메뉴를 여는 쪽(menus.ts 등)이 적은 키 글자
     'src/labnote/ui/ContextMenu.tsx': ['item.labelKey', 'item.section', 'item.disabledReason'],
     'src/labnote/commands/fileOps.ts': ['GUARD_MESSAGE[guard]'], // GUARD_MESSAGE 의 'fileOps.renameGuarded.*' 글자
+    'src/labnote/ui/paletteCatalog.ts': ['key', 'GROUP_KEY[group]', 'NEED_KEY[need]'], // 'palette.cmd.' + 차림표의 id, GROUP_KEY·NEED_KEY 의 글자(paletteCatalog.test.ts 가 ko·en 을 본다)
     'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'], // AppCommand.nameKey: appCommands.ts 에 적은 'cmd.*' 글자(appCommands.test.ts 가 ko·en 을 본다)
     'src/ui/EmptyState.tsx': ['a.labelKey'], // ACTIONS 의 'empty.*' 글자
     'src/ui/Ribbon.tsx': ['item.labelKey'], // TOP/MIDDLE/BOTTOM 의 'ribbon.*'·'palette.open' 글자

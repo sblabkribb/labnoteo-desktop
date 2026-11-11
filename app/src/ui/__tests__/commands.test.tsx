@@ -234,23 +234,23 @@ describe('everything is a command (Task 12)', () => {
     const ctx = makeCtx();
     act(() => void openPalette(ctx));
     await user.type(await screen.findByRole('combobox'), 'app.showSystemFiles');
-    expect(labelOf(options()[0])).toBe(catalogs.ko['cmd.showSystemFiles']);
+    expect(labelOf(options()[0])).toBe(catalogs.ko['palette.cmd.app.showSystemFiles']);
     await user.keyboard('{Enter}');
     await waitFor(() => expect(currentDialog()).toBeNull());
     act(() => void openPalette(ctx));
     await screen.findByRole('dialog');
-    expect(labelOf(options()[0])).toBe(catalogs.ko['cmd.showSystemFiles']);
-    expect(screen.getByText('최근')).toBeTruthy();
-    // 최근 다음의 나머지 줄에도 머리가 있다: 경계가 보인다
+    expect(labelOf(options()[0])).toBe(catalogs.ko['palette.cmd.app.showSystemFiles']);
+    expect(screen.getByText('최근 사용')).toBeTruthy();
+    // 최근 다음은 목적별 묶음이 머리와 함께 차례대로 온다
     const groups = screen.getAllByRole('group');
-    expect(groups.map((g) => g.querySelector('.picker-group')?.textContent)).toEqual(['최근', '모든 명령']);
+    expect(groups.map((g) => g.querySelector('.picker-group')?.textContent)).toEqual(['최근 사용', '노트·편집', '실험·Workflow·Unit Operation', '샘플', 'AI·어시스턴트', '연결 서비스', '보기·창', '설정·도움말']);
     expect(within(groups[1]).getAllByRole('option').length).toBeGreaterThan(5);
     // 언어를 바꿔도 같은 명령이 맨 위다(이름이 아니라 id 로 기억한다)
     act(() => closeAllDialogs());
     act(() => setLang('en'));
     act(() => void openPalette(ctx));
     await screen.findByRole('dialog');
-    expect(labelOf(options()[0])).toBe(catalogs.en['cmd.showSystemFiles']);
+    expect(labelOf(options()[0])).toBe(catalogs.en['palette.cmd.app.showSystemFiles']);
   });
 });
 

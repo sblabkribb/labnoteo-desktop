@@ -20,7 +20,7 @@ import { stripInstructionCallouts } from '../commands/experiment';
 import { clearCommandsForTest } from '../commands/registry';
 import { closeAllDialogs, currentDialog, deepActiveElement, settleDialog, type DialogEntry, type DialogSpec } from '../host/dialogStore';
 import { clearToasts, subscribeToasts, currentToasts, type Toast } from '../host/toastStore';
-import { coreT, paletteName } from '../i18n';
+import { coreT } from '../i18n';
 import { fromPluginData } from '../settings';
 import { closeMenu } from '../ui/menuStore';
 
@@ -124,12 +124,21 @@ const itemStarting =
     return item!.value;
   };
 
-/** Ctrl+P 로 팔레트를 열고 `nameKey` 명령을 고른다. */
-async function palette(nameKey: string) {
+/** 팔레트에서 명령 id 가 `id` 인 줄의 값. */
+const commandRow =
+  (id: string) =>
+  (spec: Extract<DialogSpec, { kind: 'pick' }>): unknown => {
+    const item = spec.items.find((i) => (i.value as { command: { id: string } }).command.id === id);
+    expect(item, `no palette row for ${id}: ${spec.items.map((i) => i.label).join(', ')}`).toBeTruthy();
+    return item!.value;
+  };
+
+/** Ctrl+P 로 팔레트를 열고 명령 `id` 를 고른다. */
+async function palette(id: string) {
   await act(async () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'p', code: 'KeyP', ctrlKey: true });
   });
-  await answer('pick', itemStarting(paletteName(nameKey)));
+  await answer('pick', commandRow(id));
 }
 
 /** 띄운 알림을 모두 적는다(알림은 몇 초 뒤 사라지고 5개까지만 보인다). */
@@ -174,8 +183,8 @@ describe('하루의 흐름(앱 전체)', () => {
       const paletteButton = within(screen.getByRole('toolbar', { name: '리본' })).getByRole('button', { name: '명령 팔레트' }) as HTMLButtonElement;
       await waitFor(() => expect(paletteButton.disabled).toBe(false));
 
-      // 1. Ctrl+P → "실험 생성" → 제목
-      await palette('Create experiment');
+      // 1. Ctrl+P → "실험 만들기" → 제목
+      await palette('create-experiment');
       await answer('newExperiment', () => ({ title: TITLE, experimenter: '' }));
 
       // 2. README 가 열린다
@@ -247,16 +256,16 @@ describe('하루의 흐름(앱 전체)', () => {
       const endDate = afterOp.indexOf("- End_date: ''", afterOp.indexOf(heading));
       expect(endDate).toBeGreaterThan(0);
       act(() => currentView().dispatch({ selection: { anchor: endDate + "- End_date: ''".length } }));
-      await palette('Insert date and time');
+      await palette('insert-datetime');
       await waitFor(() => expect(currentView().state.doc.toString()).toMatch(FILLED_END_DATE));
 
       // 8. 상태를 failed 로(Workflow 노트에서: 그 실험의 README 를 바꾼다)
-      await palette('Change experiment status');
+      await palette('change-experiment-status');
       await answer('pick', () => 'failed');
       await waitFor(() => expect(vault.files()[README_PATH]).toMatch(/^status: failed$/m));
 
       // 9. 다시 하기: 제목은 다음 차수, README 의 retry_of 는 원래 실험
-      await palette('Retry this experiment');
+      await palette('retry-experiment');
       const retryPrompt = await answer('newExperiment', (spec) => ({ title: spec.opts.value, experimenter: spec.opts.experimenter }));
       expect(retryPrompt.opts.value).toBe('형질전환 2차');
       await editorReady(RETRY_README, 'retry_of');
@@ -336,7 +345,7 @@ describe('하루의 흐름(앱 전체)', () => {
     });
     await waitFor(() => expect(document.activeElement?.closest('.dialog-layer')).toBeTruthy());
     expect(activeCellView(outer)).toBe(cell);
-    await answer('pick', itemStarting(paletteName('Insert date')));
+    await answer('pick', commandRow('insert-date'));
 
     await waitFor(() => expect(outer.state.doc.toString()).toMatch(/\| A \| 12\d{4}-\d{2}-\d{2}34 \|/));
     expect(activeCellView(outer)).toBe(cell);

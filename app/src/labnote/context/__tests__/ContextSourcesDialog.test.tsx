@@ -238,12 +238,12 @@ describe('ai-draft-planning command', () => {
     act(() => setLang('ko'));
     ctrlP();
     await screen.findByRole('dialog');
-    expect(optionLabels()).toContain(catalogs.ko[c!.nameKey]);
+    expect(optionLabels()).toContain('AI: Unit Operation 계획 초안 쓰기');
     act(() => closeAllDialogs());
 
     act(() => setLang('en'));
     ctrlP();
     await screen.findByRole('dialog');
-    expect(optionLabels()).toContain(catalogs.en[c!.nameKey]);
+    expect(optionLabels()).toContain('AI: Draft Unit Operation planning');
   });
 });
