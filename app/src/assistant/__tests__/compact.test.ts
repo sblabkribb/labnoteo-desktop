@@ -6,13 +6,17 @@ import { describe, expect, it } from 'vitest';
 import { estimateTokens } from '../../labnote/context/tokens';
 import { KOREAN_TERMS_INSTRUCTION } from '../../labnote/port/aiCommon';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
+import { catalogs } from '../../i18n/t';
+import { vendorKo } from '../../labnote/i18n';
 import {
+  answeredTurns,
   COMPACT_KEEP,
   COMPACT_MAX_MESSAGES,
   compact,
   CompactionError,
   HISTORY_TAINT,
   historyTokens,
+  isNoticeOnly,
   needsCompaction,
   prepareHistory,
   SUMMARY_MAX_TOKENS,
@@ -331,5 +335,32 @@ describe('toPromptMessages', () => {
     expect(r.messages[0]!.content.startsWith('Summary of the earlier conversation')).toBe(true);
     expect(r.messages.at(-1)).toEqual({ role: 'user', content: 'q' });
     expect(estimateTokens(allText(r.messages))).toBeLessThanOrEqual(260);
+  });
+});
+
+describe('answeredTurns (real-server check: failed turns are not sent again)', () => {
+  it('knows the end notices in both languages, and leaves real answers alone', () => {
+    const ko = vendorKo('The assistant gave no answer.')!;
+    expect(isNoticeOnly(msg('assistant', ko))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', catalogs.ko['pet.tools.summary'].replace('{0}', '2번 읽음')))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', catalogs.en['pet.tools.summary'].replace('{0}', '1 lookup')))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', 'AI stopped after too many steps. AI tools used: 12 lookups.'))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', ''))).toBe(true);
+    expect(isNoticeOnly(msg('assistant', 'PCR 조건은 95도 30초입니다.'))).toBe(false);
+    expect(isNoticeOnly(msg('user', 'The assistant gave no answer.'))).toBe(false);
+  });
+
+  it('drops a notice-only reply with its question, keeps the rest in order, and does not change the input', () => {
+    const input = [
+      msg('user', 'q1'),
+      msg('assistant', 'a1'),
+      msg('user', 'q2'),
+      msg('assistant', 'The model gave no answer. Try again or choose another model.'),
+      msg('user', 'q3'),
+      msg('assistant', 'a3'),
+    ];
+    const copy = JSON.parse(JSON.stringify(input));
+    expect(answeredTurns(input).map((m) => m.text)).toEqual(['q1', 'a1', 'q3', 'a3']);
+    expect(input).toEqual(copy);
   });
 });

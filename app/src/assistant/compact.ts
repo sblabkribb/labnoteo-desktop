@@ -8,10 +8,15 @@
  *   입력 문서는 바꾸지 않는다. 문서는 한 폴더의 것 하나만 받으므로 다른 폴더의 기록은 읽을 수 없다.
  * - 실패하면(`CompactionError`) 기록은 그대로이고, `toPromptMessages` 가 예산에 맞는 최근 메시지만 보낸다
  *   (`truncateToTokens`).
+ * - `answeredTurns`(real-server check, 2026-11-11): 대화가 보낼 기록에서 답이 없던 차례(모델 글 없이 끝 알림만 남은 답:
+ *   "답을 주지 않았습니다", "너무 많은 단계", 도구 사용 요약)를 그 사용자 글과 함께 뺀다. 오류·고리·취소로 끝난 차례는
+ *   처음부터 저장되지 않는다(useAssistantSession). 저장된 기록 파일은 그대로다: 보낼 때만 거른다.
  * - `toPromptMessages`: 오염된 요약과 메시지는 울타리에 싸서 보내고, 그런 것이 하나라도 가면 실행을 오염된 채로
  *   시작하게 `initialTaint` 를 준다(R11). 요약은 시스템 메시지가 아니라 기록 앞의 사용자 메시지다.
  */
 import { fenceUntrusted } from '../ai/untrusted';
+import { catalogs } from '../i18n/t';
+import { koTerms, vendorKo } from '../labnote/i18n';
 import { estimateTokens, truncateToTokens } from '../labnote/context/tokens';
 import { KOREAN_TERMS_INSTRUCTION } from '../labnote/port/aiCommon';
 import { OUTPUT_TOKENS_COMPACT, type ChatMessage, type LlmProvider } from '../labnote/port/llmProvider';
@@ -156,6 +161,62 @@ export async function prepareHistory(
     console.warn('[labnoteo] assistant history compaction failed:', err.cause ?? err);
     return { doc, compacted: false, failed: true };
   }
+}
+
+/** 끝 알림(builtinRuntime noticeParts)이 시작하는 플러그인 문장들. 키가 영어 원문이다. */
+const NOTICE_KEYS = [
+  'AI stopped after too many steps.',
+  'The assistant gave no answer.',
+  'The assistant gave no answer. What you asked may be outside the tools it can use.',
+  'The model gave no answer (it only thought). Try again or choose another model.',
+  'The model gave no answer. Try again or choose another model.',
+  'The AI used no tools; nothing in the vault changed.',
+];
+
+let noticeStarts: string[] | undefined;
+
+/** 끝 알림의 첫머리: 두 언어 모두(언어를 바꾼 뒤에도 앞서 저장된 알림을 알아본다). */
+function noticePrefixes(): string[] {
+  if (noticeStarts) return noticeStarts;
+  const out = new Set<string>();
+  for (const key of NOTICE_KEYS) {
+    out.add(key);
+    const ko = vendorKo(key);
+    if (ko) {
+      out.add(ko);
+      out.add(koTerms(ko));
+    }
+  }
+  for (const cat of Object.values(catalogs)) {
+    const summary = cat['pet.tools.summary'];
+    const head = summary?.split('{0}')[0]?.trim();
+    if (head) out.add(head);
+  }
+  noticeStarts = [...out];
+  return noticeStarts;
+}
+
+/** 저장된 답이 모델의 글 없이 끝 알림만 남은 것인지(답이 없던 차례). */
+export function isNoticeOnly(m: StoredMessage): boolean {
+  if (m.role !== 'assistant') return false;
+  const text = m.text.trim();
+  return text === '' || noticePrefixes().some((p) => text.startsWith(p));
+}
+
+/**
+ * 대화 차례에 보낼 기록: 답이 없던 차례(`isNoticeOnly`)를 그 앞의 사용자 글과 함께 뺀다. 실패한 도구 이야기(끝 알림의
+ * "실패: …")가 다음 차례의 모델에게 가지 않는다. 입력은 바꾸지 않는다.
+ */
+export function answeredTurns(messages: readonly StoredMessage[]): StoredMessage[] {
+  const out: StoredMessage[] = [];
+  for (const m of messages) {
+    if (isNoticeOnly(m)) {
+      if (out.at(-1)?.role === 'user') out.pop();
+      continue;
+    }
+    out.push(m);
+  }
+  return out;
 }
 
 export interface PromptMessages {

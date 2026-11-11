@@ -562,6 +562,56 @@ describe('builtinRuntime', () => {
     expect(p.seen[1][0].content).toContain(`"${OTHER_DIR}"`);
   });
 
+  it('a making chip is one-shot: no saved history, no summary and no history taint reach the model', async () => {
+    // real-server check: 섹션 만들기 looped 4/4 in an experiment with saved chat history, not in one without.
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p);
+    const history = [
+      msg('user', '앞 질문'),
+      msg('assistant', '웹 답', { tainted: true, sources: [{ kind: 'web', label: 'x', target: 'https://example.test/' }] }),
+    ];
+    await rt.run(
+      turnOf('Workflow 만들기', {
+        history,
+        summary: '요약: 웹 결과',
+        summaryTainted: true,
+        mode: { kind: 'chip', chip: 'workflow', params: { documentPath: DIR } },
+      }),
+      recordSink().sink,
+      go()
+    );
+    const sent = p.seen[0];
+    expect(sent).toHaveLength(2);
+    expect(sent[0].role).toBe('system');
+    expect(sent[1]).toEqual({ role: 'user', content: 'Workflow 만들기' });
+    expect(JSON.stringify(sent)).not.toContain('앞 질문');
+    expect(JSON.stringify(sent)).not.toContain('요약: 웹 결과');
+    expect(sent[0].content).not.toContain(EARLIER_UNTRUSTED_RULES);
+  });
+
+  it('chat keeps answered turns but drops a turn whose reply was only the end notice (no answer, failed tools)', async () => {
+    const p = new Script([answer('끝')]);
+    const { rt } = await setup(p);
+    const history = [
+      msg('user', '첫 질문'),
+      msg('assistant', '첫 답'),
+      msg('user', '섹션 만들어 줘'),
+      msg('assistant', `${'The assistant gave no answer.'} ${t('pet.tools.summary', t('pet.tools.failed', 2))} Failed: add_section — x.`),
+      msg('user', '도구 해 봐'),
+      msg('assistant', t('pet.tools.summary', t('pet.tools.read', 3))),
+      msg('user', '둘째 질문'),
+      msg('assistant', '둘째 답'),
+    ];
+    await rt.run(turnOf('셋째', { history }), recordSink().sink, go());
+    expect(p.seen[0].slice(1)).toEqual([
+      { role: 'user', content: '첫 질문' },
+      { role: 'assistant', content: '첫 답' },
+      { role: 'user', content: '둘째 질문' },
+      { role: 'assistant', content: '둘째 답' },
+      { role: 'user', content: '셋째' },
+    ]);
+  });
+
   it('a model error becomes a localised error, not a throw', async () => {
     const p = new Script([
       () => {

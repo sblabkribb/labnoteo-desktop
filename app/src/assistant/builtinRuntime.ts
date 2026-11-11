@@ -14,6 +14,9 @@
  *   더한다. 사용법 칩은 모델을 부르지 않고, 만들기 칩은 실험 폴더가 없으면 아무것도 부르지 않는다.
  * - 오염된 기록·요약은 울타리에 싸서 보내고 실행을 오염된 채로 시작한다(`initialTaint`, R11). 기록은 `compact.ts` 의
  *   `toPromptMessages` 로 만들고, 문맥 창의 0.4 에 들어가는 최근 것만 보낸다(압축이 실패했을 때의 대비).
+ * - 만들기 칩(섹션·Unit Operation·Workflow)은 한 번에 끝나는 일이라 저장된 기록도 요약도 보내지 않는다(real-server check,
+ *   2026-11-11: 기록이 있는 실험에서 섹션 만들기가 4번 모두 생각 고리에 빠졌고, 기록이 없는 실험에서는 25초에 미리보기까지
+ *   갔다). 대화는 기록을 보내되 답이 없던 차례는 뺀다(`answeredTurns`). 저장된 기록 파일은 그대로다.
  * - 웹 도구(Task 14): 대화 칩에서, 이 PC 의 `assistant.json` 에 검색 주소가 있을 때만 `web_search`/`fetch_page` 를 준다.
  *   `fetch_page` 의 허용 목록은 이번 차례의 사용자 글과 이 폴더 기록의 사용자 글, 검색 결과, 문헌 검색 결과의 링크다.
  *   검색 중 상태 줄은 보낼 검색어를 그대로 보인다(`web.queryShown`). 한도(검색 3번, 페이지 5개)는 실행마다 새로 센다.
@@ -34,7 +37,7 @@ import { experimentReadmes } from '../labnote/port/experiments';
 import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llmAgent';
 import { describeLlmError } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
-import { historyBudget, toPromptMessages } from './compact';
+import { answeredTurns, historyBudget, toPromptMessages, type PromptMessages } from './compact';
 import { chipNeedsScope, chipSystemPrompt, chipTools } from './chips';
 import { addSectionText, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
@@ -492,14 +495,17 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
         : {}),
     };
     // Summary first (as a user message, never in the system prompt), then the most recent history that fits;
-    // tainted items go fenced and seed the run's taint (spec §6.3, R11).
-    const earlier = toPromptMessages(
-      {
-        ...(turn.summary !== undefined ? { summary: { text: turn.summary, tainted: !!turn.summaryTainted } } : {}),
-        messages: turn.history,
-      },
-      { budgetTokens: historyBudget(env.settings().llmContextWindow) }
-    );
+    // tainted items go fenced and seed the run's taint (spec §6.3, R11). A making chip is one-shot: no history at all.
+    const earlier: PromptMessages =
+      chip && chip !== 'chat'
+        ? { messages: [], initialTaint: [], fenced: false }
+        : toPromptMessages(
+            {
+              ...(turn.summary !== undefined ? { summary: { text: turn.summary, tainted: !!turn.summaryTainted } } : {}),
+              messages: answeredTurns(turn.history),
+            },
+            { budgetTokens: historyBudget(env.settings().llmContextWindow) }
+          );
     const activePath = env.ctx.host.editTarget()?.path;
     const messages: ChatMessage[] = [
       {
