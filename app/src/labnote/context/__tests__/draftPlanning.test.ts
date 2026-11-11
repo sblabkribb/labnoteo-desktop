@@ -11,6 +11,7 @@ import { closeAllDialogs } from '../../host/dialogStore';
 import { cleanupDialogs } from '../../host/__tests__/harness';
 import { createTestHost, type TestHost } from '../../__tests__/testHost';
 import { openNote } from '../../openNotes';
+import { aiDraftRanges } from '../../../editor/live/aiDraftReview';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../port/llmProvider';
 import { toggleSource } from '../budget';
 import type { BuiltContext } from '../contextBuilder';
@@ -275,6 +276,29 @@ describe('draftPlanningCommand', () => {
     expect(doc).not.toContain('Strong band');
     expect(doc).not.toContain('yield 5 mg/L');
     expect(th.notes).toContainEqual({ kind: 'info', message: t('aiCtx.draftInserted', '002_WB030_Express.labnote.md') });
+  });
+
+  it('writes the draft as plain section content and highlights it in the editor only (2026-11-11)', async () => {
+    const { th } = await setup(vault(), WF2, IN_TARGET);
+    const p = fakeProvider('#### Method\n- Add IPTG (assumed)');
+    const d = deps(envWith(th, p), (m, w) => ({ sources: toggleSource(m.sources, 'target:input-prefill', false), window: w }));
+    await draftPlanningCommand(d);
+    await expect(d.shown[0].insert()).resolves.toBe(true);
+    const doc = docOf(WF2);
+    expect(doc).toContain('- Add IPTG (assumed)');
+    expect(doc).not.toContain('[!note]');
+    expect(doc).not.toContain('AI draft');
+    const state = openNote(WF2)!.view()!.state;
+    expect(aiDraftRanges(state).map(r => state.sliceDoc(r.from, r.to))).toEqual(['- Add IPTG (assumed)']);
+  });
+
+  it('with "Keep an AI-draft note in the file" on, writes the old marker line over the draft', async () => {
+    const { th } = await setup(vault(), WF2, IN_TARGET, { ...SETTINGS, aiDraftNoteInFile: true });
+    const p = fakeProvider('#### Method\n- Add IPTG (assumed)');
+    const d = deps(envWith(th, p));
+    await draftPlanningCommand(d);
+    await expect(d.shown[0].insert()).resolves.toBe(true);
+    expect(docOf(WF2)).toMatch(/> \[!note\] AI draft \([^)]*\) — review it, then delete this line\n\n- Add IPTG \(assumed\)/);
   });
 
   it('writes nothing when Insert comes after the note changed at that unit op', async () => {

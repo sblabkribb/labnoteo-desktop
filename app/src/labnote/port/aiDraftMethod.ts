@@ -1,7 +1,7 @@
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:366-486 sha256:b4ab1d6e9c256aee
 // Ported from app/vendor/labnoteo/src/llm/commands.ts:740-749 sha256:f38a6737dcd7e8bd
 // labnoteO 0.140.2, Apache-2.0.
-// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); the Notices → env.host.notify ('info' for "Open a note…", "This workflow note has no unit operation yet…" (an 8 s Notice) and "The cursor was above…"); getSeoulDateString comes from core (@labnoteo/core/lib/dateUtils); 'Configure an AI provider in settings first.' (createLlmProvider(plugin.settings) is null) → env.provider is null → notify('info', overrideOr('ai.configureFirst')) (D21), before any question; noteRef(plugin, path) → noteRef(env, path), whose rename subscription is released on every early return (a closed pick, a declined confirm, no reply) and otherwise by deliverToNote; complete returns a ChatResult, so its content is read off it; complete, deliverToNote, writeMethodDraft and unitOpContext come from port/aiCommon.ts (Task 31). The prompts, the 6000 / 2000 / 4000 caps and the callout header are the vendor's; the free-note user message is joined with '\n' instead of one template (src/__tests__/escapes.test.ts reads "Context:" followed by an escape as a drive path); the string is the same; for the same reason the unit operation's heading is read into a constant before the template. toNoteCallout (vendor :744) is copied here as well, exported for the summary commands (Task 33).
+// Changes: LabnotePlugin → AiEnv (ai/aiEnv.ts); plugin.host.editTarget() → env.ctx.host.editTarget() (the app EditTarget over the open editor); plugin.t → env.host.t (coreT, the plugin keys); the Notices → env.host.notify ('info' for "Open a note…", "This workflow note has no unit operation yet…" (an 8 s Notice) and "The cursor was above…"); getSeoulDateString comes from core (@labnoteo/core/lib/dateUtils); 'Configure an AI provider in settings first.' (createLlmProvider(plugin.settings) is null) → env.provider is null → notify('info', overrideOr('ai.configureFirst')) (D21), before any question; noteRef(plugin, path) → noteRef(env, path), whose rename subscription is released on every early return (a closed pick, a declined confirm, no reply) and otherwise by deliverToNote; complete returns a ChatResult, so its content is read off it; complete, deliverToNote, writeMethodDraft and unitOpContext come from port/aiCommon.ts (Task 31). The prompts, the 6000 / 2000 / 4000 caps and the callout header are the vendor's; the free-note user message is joined with '\n' instead of one template (src/__tests__/escapes.test.ts reads "Context:" followed by an escape as a drive path); the string is the same; for the same reason the unit operation's heading is read into a constant before the template. toNoteCallout (vendor :744) is copied here as well, exported for the summary commands (Task 33). 2026-11-11 (user decision): the callout header goes into the note only when the vault setting aiDraftNoteInFile is on (keepDraftNote); by default the draft goes in as plain content (neutralised) and the open editor highlights the inserted lines until they are reviewed (withAiDraftReview, editor/live/aiDraftReview.ts), which is never written to the file.
 import {
   cleanMethodDraft,
   extractMethodBody,
@@ -14,7 +14,9 @@ import {
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
 import { diagnoseWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import type { AiEnv } from '../../ai/aiEnv';
+import { markAiDraft } from '../../editor/live/aiDraftReview';
 import { overrideOr } from '../i18n';
+import { openNote } from '../openNotes';
 import { complete, deliverToNote, noteRef, replyLanguageInstruction, unitOpContext, writeMethodDraft } from './aiCommon';
 
 /**
@@ -86,9 +88,14 @@ export async function draftMethodCommand(env: AiEnv): Promise<void> {
         { role: 'user', content: ['Draft a Method subsection for this note.', '', 'Context:', text.slice(0, 6000)].join('\n') },
       ]);
       const cleaned = out ? cleanMethodDraft(out.content) : '';
-      // No Method section to hold it: the whole draft stays in the AI callout,
-      // so result summaries do not read it as the researcher's (#392).
-      const draft = cleaned ? toNoteCallout(cleaned, draftHeader(env)) : '';
+      // No Method section to hold it: with the marker setting on, the whole draft
+      // stays in the AI callout, so result summaries do not read it as the
+      // researcher's (#392); otherwise it goes in as a plain block.
+      const draft = !cleaned
+        ? ''
+        : keepDraftNote(env)
+          ? toNoteCallout(cleaned, draftHeader(env))
+          : neutralizeIssueMarkers(cleaned.trim());
       if (draft) {
         handedOver = true;
         await deliverToNote(
@@ -96,7 +103,8 @@ export async function draftMethodCommand(env: AiEnv): Promise<void> {
           note,
           draft,
           async t => {
-            if (await writeMethodDraft(env, t, null, draft)) {
+            const toEnd = await withAiDraftReview(t.path, () => writeMethodDraft(env, t, null, draft));
+            if (toEnd) {
               env.host.notify('info', env.host.t('The cursor was above the note body, so the draft went to the end of the note.'));
             }
           },
@@ -128,7 +136,7 @@ export async function draftMethodCommand(env: AiEnv): Promise<void> {
       note,
       body,
       async t => {
-        await writeMethodDraft(env, t, chosenLoc, body);
+        await withAiDraftReview(t.path, () => writeMethodDraft(env, t, chosenLoc, body));
       },
       'Inserted the Method draft into {0}.'
     );
@@ -147,12 +155,37 @@ export function draftHeader(env: AiEnv): string {
 }
 
 /**
- * `draft` under a one-line `> [!note] AI draft (model, date)` callout (#280),
- * so a Method the model wrote reads as unchecked until someone removes it.
- * Summaries and the worksheet leave the line out.
+ * Whether AI drafts carry the `> [!note] AI draft (model, date)` line in the
+ * note (vault setting aiDraftNoteInFile, default off — 2026-11-11 user decision).
+ */
+export function keepDraftNote(env: AiEnv): boolean {
+  return env.settings().aiDraftNoteInFile === true;
+}
+
+/**
+ * The Method draft as it goes into the note. With the setting on, `draft`
+ * under a one-line `> [!note] AI draft (model, date)` callout (#280), so a
+ * Method the model wrote reads as unchecked until someone removes it
+ * (summaries and the worksheet leave the line out, also in notes written
+ * before the setting existed). Off (default): the draft alone; the editor
+ * highlights it instead (withAiDraftReview).
  */
 export function withDraftHeader(env: AiEnv, draft: string): string {
+  if (!keepDraftNote(env)) return neutralizeIssueMarkers(draft);
   return `> [!note] ${draftHeader(env)}\n\n${neutralizeIssueMarkers(draft)}`;
+}
+
+/**
+ * Runs `write` (an AI draft going into the note at `path`) and, when that note
+ * is open in an editor, highlights the lines it inserted for review. The
+ * highlight is editor state only: it is never written to the file.
+ */
+export async function withAiDraftReview<R>(path: string, write: () => Promise<R>): Promise<R> {
+  const view = openNote(path)?.view();
+  const before = view?.state.doc.toString();
+  const result = await write();
+  if (view && before !== undefined && openNote(path)?.view() === view) markAiDraft(view, before);
+  return result;
 }
 
 /**

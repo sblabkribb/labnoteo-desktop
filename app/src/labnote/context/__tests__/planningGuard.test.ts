@@ -437,3 +437,42 @@ describe('applyPlanningDraft', () => {
     expect(md).toBe(note);
   });
 });
+
+// 2026-11-11 user decision: without the "Keep an AI-draft note in the file" setting the
+// header is null and the draft goes in as plain section content, with no marker line.
+describe('applyPlanningDraft without a header (default)', () => {
+  const draft = new Map([
+    ['Input', '- PRT-1 — expression culture'],
+    ['Reagent', '- LB medium (assumed)'],
+    ['Parameters', '- Temperature: 18 °C'],
+    ['Method', '1. Add IPTG\n2. Shake overnight'],
+    ['Results & Discussions', 'INVENTED'],
+    ['QC Metrics', 'INVENTED'],
+    ['Meta', 'INVENTED'],
+  ]);
+
+  it('fills placeholders and appends after researcher text as plain content, still dropping Results, QC and Meta', () => {
+    const md = applyPlanningDraft(NOTE, TARGET, draft, null) as string;
+    expect(md).not.toContain('[!note]');
+    expect(md).not.toContain('INVENTED');
+    expect(sectionBody(md, 1, 'Input')).toBe('- PRT-1 — expression culture');
+    expect(sectionBody(md, 1, 'Reagent')).toBe('- IPTG 1 M stock (researcher)\n\n- LB medium (assumed)');
+    expect(sectionBody(md, 1, 'Method')).toBe('1. Add IPTG\n2. Shake overnight');
+    expect(md).toContain('- Shaker\n\n#### Parameters\n- Temperature: 18 °C\n\n#### Method\n');
+    for (const name of ['Meta', 'Results & Discussions', 'Equipment']) expect(sectionSpan(md, 1, name)).toBe(sectionSpan(NOTE, 1, name));
+    expect(outside(md, 1)).toEqual(outside(NOTE, 1));
+  });
+
+  it('keeps CRLF line endings', () => {
+    const crlf = NOTE.replace(/\n/g, '\r\n');
+    const md = applyPlanningDraft(crlf, TARGET, draft, null) as string;
+    expect(md.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(md.replace(/\r\n/g, '\n')).toBe(applyPlanningDraft(NOTE, TARGET, draft, null));
+  });
+
+  it('a section that already holds an old marker-line draft counts as filled: the new draft is appended, the old one kept', () => {
+    const old = applyPlanningDraft(NOTE, TARGET, new Map([['Method', '- old step']]), HEADER) as string;
+    const md = applyPlanningDraft(old, TARGET, new Map([['Method', '- new step']]), null) as string;
+    expect(sectionBody(md, 1, 'Method')).toBe(`> [!note] ${HEADER}\n\n- old step\n\n- new step`);
+  });
+});

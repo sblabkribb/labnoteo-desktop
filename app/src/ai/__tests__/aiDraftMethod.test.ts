@@ -12,6 +12,7 @@ import { closeAllDialogs, currentDialog } from '../../labnote/host/dialogStore';
 import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
 import { openNote } from '../../labnote/openNotes';
+import { aiDraftRanges } from '../../editor/live/aiDraftReview';
 import { draftMethodCommand, toNoteCallout } from '../../labnote/port/aiDraftMethod';
 import { createAiEnv } from '../aiEnv';
 
@@ -37,7 +38,9 @@ const BODY = [
 const IN_METHOD = BODY.indexOf('#### Method') + 2;
 const LLM = { llmProvider: 'openai', llmEndpointOpenai: 'https://llm.example.test', llmModel: 'llama3.1' } as const;
 const HEADER = String.raw`> \[!note\] AI draft \(llama3\.1, \d{4}-\d{2}-\d{2}\) — review it, then delete this line`;
-const IN_FILLED_METHOD = (doc: string) => new RegExp(String.raw`#### Method\n\n${HEADER}\n\n1\. 원심분리`).test(doc);
+/** 2026-11-11: by default the draft goes in as plain Method content, with no marker line in the file. */
+const IN_FILLED_METHOD = (doc: string) => doc.includes('#### Method\n\n1. 원심분리') && !doc.includes('[!note]');
+const IN_MARKED_METHOD = (doc: string) => new RegExp(String.raw`#### Method\n\n${HEADER}\n\n1\. 원심분리`).test(doc);
 
 /** OpenAI 모양의 2xx 답. */
 const reply = (content: string) => ({ status: 200, text: JSON.stringify({ choices: [{ message: { content } }] }) });
@@ -74,6 +77,11 @@ const sent = (f: ReturnType<typeof fakeInvoke>): Message[][] =>
   f.calls.filter(([c]) => c === 'llm_chat').map(([, a]) => (a.body as { messages: Message[] }).messages);
 
 const docOf = (path: string) => openNote(path)!.view()!.state.doc.toString();
+/** The text under the editor's AI-draft review highlight (never written to the file). */
+const reviewed = (path: string) => {
+  const state = openNote(path)!.view()!.state;
+  return aiDraftRanges(state).map((r) => state.sliceDoc(r.from, r.to));
+};
 
 /** 그 노트를 진짜 편집기로 열고 커서를 `caret` 에 둔다. */
 async function mountAt(th: TestHost, path: string, caret: number) {
@@ -96,8 +104,9 @@ describe('draftMethodCommand (#112)', () => {
     await mountAt(th, NOTE, IN_METHOD);
     const { env } = aiEnv(th, () => reply('1. 원심분리'));
     await draftMethodCommand(env);
-    // #280: the draft is marked as the model's until someone removes the line.
+    // 2026-11-11: no marker line in the file; the editor highlights the draft until it is reviewed.
     expect(IN_FILLED_METHOD(docOf(NOTE))).toBe(true);
+    expect(reviewed(NOTE)).toEqual(['1. 원심분리']);
     expect(th.notes).toContainEqual({ kind: 'info', message: 'Inserted the Method draft into 001_WD010_A.labnote.md.' });
     expect(currentDialog()).toBeNull();
   });
@@ -125,12 +134,13 @@ describe('draftMethodCommand (#112)', () => {
     expect(docOf(NOTE)).toBe(BODY);
     const spec = currentDialog()?.spec as { kind: string; content: string; onInsert: () => Promise<boolean> };
     expect(spec.kind).toBe('aiAnswer');
-    expect(spec.content).toMatch(/^> \[!note\] AI draft .*\n\n1\. 원심분리$/);
+    expect(spec.content).toBe('1. 원심분리');
 
     // writes into the Method from the dialog after returning
     th.setActive(NOTE);
     await expect(spec.onInsert()).resolves.toBe(true);
     expect(IN_FILLED_METHOD(docOf(NOTE))).toBe(true);
+    expect(reviewed(NOTE)).toEqual(['1. 원심분리']);
     expect(docOf(OTHER)).toBe(BODY);
   });
 
@@ -203,7 +213,7 @@ describe('draftMethodCommand (#112)', () => {
     expect(th.asked.confirm).toEqual([]); // the chosen Method was empty
     expect(sent(f)[0][1].content).toContain('Draft the Method body for the unit operation "[UHW010 Spin]".');
     const doc = docOf(NOTE);
-    expect(new RegExp(String.raw`### \[UHW010 Spin\]\n\n#### Method\n\n${HEADER}\n\n1\. 원심분리`).test(doc)).toBe(true);
+    expect(doc).toContain('### [UHW010 Spin]\n\n#### Method\n\n1. 원심분리');
     expect(doc).toContain('1. 이미 씀');
   });
 
@@ -242,15 +252,14 @@ describe('draftMethodCommand (#112)', () => {
     expect(IN_FILLED_METHOD(doc)).toBe(true);
   });
 
-  it('keeps the whole draft inside the AI callout in a note without a Method, and says when it went to the end', async () => {
+  it('puts the draft in as a plain block in a note without a Method, and says when it went to the end', async () => {
     const FREE = 'notes/free.md';
     const th = host({ [FREE]: '# Free\n\nabc\n' });
     await mountAt(th, FREE, 0);
     const { env } = aiEnv(th, () => reply('1. 원심분리\n\n2. 세척'));
     await draftMethodCommand(env);
-    expect(docOf(FREE)).toMatch(
-      /^# Free\n\nabc\n\n> \[!note\] AI draft \(llama3\.1, [\d-]+\) — review it, then delete this line\n> 1\. 원심분리\n>\n> 2\. 세척\n$/,
-    );
+    expect(docOf(FREE)).toBe('# Free\n\nabc\n\n1. 원심분리\n\n2. 세척\n');
+    expect(reviewed(FREE)).toEqual(['1. 원심분리\n\n2. 세척']);
     const messages = th.notes.map((n) => n.message);
     expect(messages).toContain('The cursor was above the note body, so the draft went to the end of the note.');
     expect(messages).toContain('Inserted the Method draft into free.md.');
@@ -303,9 +312,9 @@ describe('draftMethodCommand (#112)', () => {
     expect(user.content.slice(at + marker.length).length).toBe(4000);
   });
 
-  it('asks for Korean in a Korean UI and writes the header in Korean', async () => {
+  it('asks for Korean in a Korean UI and, with the setting on, writes the header in Korean', async () => {
     setLang('ko');
-    const th = host({ [NOTE]: BODY });
+    const th = host({ [NOTE]: BODY }, { ...LLM, aiDraftNoteInFile: true });
     await mountAt(th, NOTE, IN_METHOD);
     const { f, env } = aiEnv(th, () => reply('1. 원심분리'));
     await draftMethodCommand(env);
@@ -335,6 +344,29 @@ describe('draftMethodCommand (#112)', () => {
     await draftMethodCommand(env);
     expect(docOf(NOTE)).toContain('1. Spin');
     expect(docOf(NOTE)).not.toContain('@issue;');
+  });
+});
+
+describe('draftMethodCommand with "Keep an AI-draft note in the file" on', () => {
+  const KEEP = { ...LLM, aiDraftNoteInFile: true };
+
+  it('writes the old marker line over the Method draft (#280)', async () => {
+    const th = host({ [NOTE]: BODY }, KEEP);
+    await mountAt(th, NOTE, IN_METHOD);
+    const { env } = aiEnv(th, () => reply('1. 원심분리'));
+    await draftMethodCommand(env);
+    expect(IN_MARKED_METHOD(docOf(NOTE))).toBe(true);
+  });
+
+  it('keeps the whole draft inside the AI callout in a note without a Method (#392)', async () => {
+    const FREE = 'notes/free.md';
+    const th = host({ [FREE]: '# Free\n\nabc\n' }, KEEP);
+    await mountAt(th, FREE, 0);
+    const { env } = aiEnv(th, () => reply('1. 원심분리\n\n2. 세척'));
+    await draftMethodCommand(env);
+    expect(docOf(FREE)).toMatch(
+      /^# Free\n\nabc\n\n> \[!note\] AI draft \(llama3\.1, [\d-]+\) — review it, then delete this line\n> 1\. 원심분리\n>\n> 2\. 세척\n$/,
+    );
   });
 });
 

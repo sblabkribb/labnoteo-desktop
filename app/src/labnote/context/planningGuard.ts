@@ -223,16 +223,21 @@ interface Edit {
  * `md` with the draft written into the planning sections of the unit op at
  * the 0-based `unitOpIndex`, or null when the heading there changed (the note
  * moved while the model answered). An empty or placeholder-only section is
- * replaced by the draft under the AI header; after researcher text the draft
- * is appended as an AI callout; a missing planning heading is inserted in
- * template order. Researcher-only sections, sections the kind does not draft,
- * and every byte outside the touched sections are kept as they are.
+ * replaced by the draft; after researcher text the draft is appended after a
+ * blank line; a missing planning heading is inserted in template order.
+ * With a `header` (the "Keep an AI-draft note in the file" setting) a replaced
+ * or new section starts with a `> [!note] header` line and an appended draft
+ * is an AI callout; with `header` null (the default, 2026-11-11) the draft
+ * goes in as plain content and the editor highlights it instead. Nothing here
+ * reads the marker: a section holding an old marker-line draft is simply
+ * filled. Researcher-only sections, sections the kind does not draft, and
+ * every byte outside the touched sections are kept as they are.
  */
 export function applyPlanningDraft(
   md: string,
   target: { unitOpIndex: number; heading: string; kind: UnitOpKind },
   sections: Map<string, string>,
-  header: string
+  header: string | null
 ): string | null {
   const block = listUnitOpBlocks(md)[target.unitOpIndex];
   const lines = linesOf(md);
@@ -267,7 +272,10 @@ export function applyPlanningDraft(
   };
   const lineEnd = (i: number): number => lines[i].start + lines[i].text.length;
   const toEol = (text: string): string => text.split(/\r?\n/).join(eol);
-  const drafted = (body: string): string => toEol(`> [!note] ${header}\n\n${neutralizeIssueMarkers(body.trim())}`);
+  const drafted = (body: string): string =>
+    toEol(header === null ? neutralizeIssueMarkers(body.trim()) : `> [!note] ${header}\n\n${neutralizeIssueMarkers(body.trim())}`);
+  /** A draft appended after researcher text. */
+  const appended = (body: string): string => (header === null ? drafted(body) : toEol(toNoteCallout(body, header)));
 
   const edits: Edit[] = [];
   for (const [rawName, rawBody] of sections) {
@@ -308,7 +316,7 @@ export function applyPlanningDraft(
         edits.push({
           start: lineEnd(last),
           end: lineEnd(last),
-          text: eol + eol + toEol(toNoteCallout(body, header)),
+          text: eol + eol + appended(body),
           rank,
         });
       }

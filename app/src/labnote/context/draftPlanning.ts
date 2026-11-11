@@ -14,7 +14,7 @@ import { NoteBusyError, processNote } from '../openNotes';
 import { pathKey } from '../paths';
 import { complete, toolContext } from '../port/aiCommon';
 import { aiAnswerDialog } from '../port/aiAnswerDialog';
-import { draftHeader } from '../port/aiDraftMethod';
+import { draftHeader, keepDraftNote, withAiDraftReview } from '../port/aiDraftMethod';
 import { overrideOr } from '../i18n';
 import { LLM_CONTEXT_WINDOW_DEFAULT } from '../settings';
 import { contextBudget } from './budget';
@@ -219,13 +219,17 @@ export async function draftPlanningCommand(deps: DraftDeps): Promise<void> {
   const path = at.path;
 
   const insert = async (): Promise<boolean> => {
-    const header = draftHeader(env);
+    // The marker line goes into the note only with the setting on; otherwise the
+    // open editor highlights what was inserted, without writing anything (2026-11-11).
+    const header = keepDraftNote(env) ? draftHeader(env) : null;
     let outcome: WriteOutcome;
     try {
-      outcome = await writeNote(env, path, md => {
-        const base = withPrefill ? (applyPrefill(md, where, prefill) ?? md) : md;
-        return applyPlanningDraft(base, where, draft.sections, header);
-      });
+      outcome = await withAiDraftReview(path, () =>
+        writeNote(env, path, md => {
+          const base = withPrefill ? (applyPrefill(md, where, prefill) ?? md) : md;
+          return applyPlanningDraft(base, where, draft.sections, header);
+        })
+      );
     } catch (err) {
       if (!(err instanceof NoteBusyError)) throw err;
       info(env, t('aiCtx.noteBusy'));
