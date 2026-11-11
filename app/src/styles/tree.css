@@ -265,6 +265,8 @@ button.links-target:focus-visible { outline-offset: -2px; }
 .tree-icon.ti-beaker,
 .tree-icon.ti-experiment,
 .tree-icon.ti-readme { color: var(--accent); }
+.tree-icon.ti-uo-done,
+.tree-icon.ti-wf-done { color: var(--success); }
 
 /* 실험 탭(UI 재설계 Task 10): 묶음 줄, 상태 모양, 고정폭 코드, 줄 위의 + 단추, 추가 줄, 찾기 칠하기, 커서가 든 UO */
 .wf-tree-row.tree-group { color: var(--text-muted); font-size: var(--font-size-label); font-weight: 600; }
@@ -285,6 +287,9 @@ button.tree-state { cursor: pointer; }
 button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
 .tree-state[data-icon="circle-check"] { color: var(--success); }
 .tree-state[data-icon="circle-half"] { color: var(--accent); }
+/* Workflow 완료 체크박스(README 체크리스트): 체크는 성공 색, 끝나지 않은 UO 가 남았으면 주의 색 */
+.tree-state[data-icon="square-check"] { color: var(--success); }
+.tree-state[data-tone="warning"] { color: var(--warning); }
 /* 실험 이름 뒤의 GitHub 상태 표시(올라감·안 올린 변경·끝나지 않음). 모양이 상태마다 달라 색만으로 뜻을 전하지 않는다 */
 .tree-badge {
   flex: none;

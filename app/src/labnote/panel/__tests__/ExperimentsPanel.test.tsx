@@ -113,11 +113,13 @@ describe('ExperimentsPanel', () => {
     expect(parts.indexOf('wf-tree-label')).toBeLessThan(parts.indexOf('meta code'));
     expect(wf.querySelector('.meta.code')?.textContent).toBe('WT020');
     expect(wf.querySelector('.tree-meta')?.textContent).toBe('1/2');
-    expect([row(/Gibson run/), wf, row(/^.*Design/)].map((li) => li.querySelector('.tree-state')?.getAttribute('data-icon'))).toEqual([
-      'circle-check',
-      'circle-half',
-      'circle-dashed',
-    ]);
+    // Workflow 완료 체크박스(README 체크리스트): 체크한 Gibson run 만 체크됨, UO 진행은 옆의 n/m 이 보인다
+    const rows = [row(/Gibson run/), wf, row(/^.*Design/)];
+    expect(rows.map((li) => li.querySelector('.tree-state')?.getAttribute('data-icon'))).toEqual(['square-check', 'square', 'square']);
+    expect(rows.map((li) => li.querySelector('.tree-state')?.getAttribute('role'))).toEqual(['checkbox', 'checkbox', 'checkbox']);
+    expect(rows.map((li) => li.querySelector('.tree-state')?.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+    // UO 처럼 완료면 줄의 아이콘 자체가 바뀐다
+    expect(rows.map((li) => li.querySelector('.tree-icon')?.classList.contains('ti-wf-done'))).toEqual([true, false, false]);
   });
 
   it('the add-workflow row targets its own experiment while another note is open', async () => {
@@ -169,15 +171,19 @@ describe('ExperimentsPanel', () => {
     await waitFor(() => expect(openFile).toHaveBeenCalledWith(WF2, { line }));
   });
 
-  it('clicking the state icon of a workflow ticks it in the README checklist', async () => {
+  it('clicking the done checkbox of a workflow ticks it in the README checklist', async () => {
     const user = userEvent.setup();
     mount();
     await expandExperiment();
-    await user.click(within(row(/GFP/)).getByRole('button', { name: /README/ }));
+    await user.click(within(row(/GFP/)).getByRole('checkbox', { name: /Workflow 완료/ }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
-    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^README 에서 완료로 체크했지만 UO/));
+    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^Workflow 완료로 표시했지만 Unit Operation 은 1\/2/));
+    // 끝나지 않은 UO 가 남았으면 체크박스는 주의 색, 줄의 아이콘은 완료
+    expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('data-tone')).toBe('warning');
+    expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-checked')).toBe('true');
+    expect(row(/GFP/).querySelector('.tree-icon')?.classList.contains('ti-wf-done')).toBe(true);
     // 다시 누르면 푼다
-    await user.click(within(row(/Gibson run/)).getByRole('button', { name: /README/ }));
+    await user.click(within(row(/Gibson run/)).getByRole('checkbox', { name: /Workflow 완료/ }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[ \] \[WB030 DNA Assembly Gibson run\]/));
     expect(h.opened).toEqual([]);
   });
@@ -187,12 +193,31 @@ describe('ExperimentsPanel', () => {
     mount();
     await expandExperiment();
     fireEvent.keyDown(row(/GFP/), { key: 'F10', shiftKey: true });
-    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Unit Operation 추가', 'README 에서 완료로 체크']);
-    await user.click(screen.getByRole('menuitem', { name: 'README 에서 완료로 체크' }));
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Unit Operation 추가', 'Workflow 완료로 표시']);
+    await user.click(screen.getByRole('menuitem', { name: 'Workflow 완료로 표시' }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
-    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^README 에서 완료로 체크했지만 UO/));
+    await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^Workflow 완료로 표시했지만/));
     fireEvent.contextMenu(row(/GFP/));
-    expect(screen.getByRole('menuitem', { name: 'README 에서 체크 해제' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Workflow 완료 표시 해제' })).toBeTruthy();
+  });
+
+  it('a legacy checklist line without "- " (and CRLF) reads as done and toggles in place', async () => {
+    const user = userEvent.setup();
+    const files = experimentVault();
+    const readmePath = `${EXP}/README.labnote.md`;
+    files[readmePath] = files[readmePath]
+      .replace('- [x] [WB030', '[X] [WB030')
+      .replace('- [ ] [WT020', '[ ] [WT020')
+      .replace(/\n/g, '\r\n');
+    mount({ files });
+    await expandExperiment();
+    expect(row(/Gibson run/).querySelector('.tree-state')?.getAttribute('aria-checked')).toBe('true');
+    expect(row(/Gibson run/).querySelector('.tree-icon')?.classList.contains('ti-wf-done')).toBe(true);
+    await user.click(within(row(/GFP/)).getByRole('checkbox', { name: /Workflow 완료/ }));
+    await waitFor(async () => expect(await h.vault.mem.read(readmePath)).toContain('\r\n[x] [WT020 Protein Expression Measurement GFP]'));
+    const text = await h.vault.mem.read(readmePath);
+    expect(text).toContain('\r\n[X] [WB030 DNA Assembly Gibson run]');
+    expect(text.replace(/\r\n/g, '')).not.toContain('\n');
   });
 
   it('clicking images/ reveals that folder in the Files tab', async () => {

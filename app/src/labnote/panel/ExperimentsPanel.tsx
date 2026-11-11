@@ -75,7 +75,8 @@ type Item =
 const GROUPS: readonly GroupBy[] = ['status', 'experimenter', 'project', 'updated', 'discuss'];
 
 const SHAPE_ICON = { dashed: 'circle-dashed', half: 'circle-half', check: 'circle-check' } as const;
-const WF_ICON = { ticked: 'circle-check', tickedOpen: 'circle-half', partial: 'circle-half', none: 'circle-dashed' } as const;
+/** Workflow 줄의 완료 체크박스(README 체크리스트의 [ ] / [x]). UO 진행은 옆의 `n/m` 이 보인다. */
+const WF_ICON = { ticked: 'square-check', tickedOpen: 'square-check', partial: 'square', none: 'square' } as const;
 
 /** 카탈로그를 보관함에 채우고(없는 것만) 읽는다. 루트는 늘 VAULT_ROOT('.')다. */
 async function loadCatalog(ctx: CommandContext): Promise<Catalog> {
@@ -337,7 +338,8 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
       ...(partial ? [] : [put({ id: `add-uo:${wf.path}`, label: t('experiments.addUo'), kind: 'unitOperation', icon: 'add' }, { kind: 'addUo', wf })]),
     ];
     return put(
-      { id: wf.id, label: wf.alias, kind: 'workflow', icon: 'symbol-class', tooltip: `${posix.basename(wf.path)}`, children },
+      // UO 처럼 완료(README 에서 체크)면 줄의 아이콘 자체가 바뀐다. 체크는 찾기로 줄이 걸러져도 전체 노드의 것을 본다
+      { id: wf.id, label: wf.alias, kind: 'workflow', icon: (fullWorkflows.get(wf.id) ?? wf).ticked ? 'wf-done' : 'symbol-class', tooltip: `${posix.basename(wf.path)}`, children },
       { kind: 'workflow', exp, wf },
     );
   };
@@ -510,6 +512,8 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
       const { exp, wf } = item;
       return {
         icon: WF_ICON[s],
+        checked: full.ticked,
+        ...(s === 'tickedOpen' ? { tone: 'warning' as const } : {}),
         label:
           s === 'ticked'
             ? t('experiments.wf.ticked')

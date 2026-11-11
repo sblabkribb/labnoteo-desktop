@@ -21,8 +21,9 @@ export const TREE_ICONS: Readonly<Record<string, IconName>> = Object.freeze({
   'symbol-class': 'workflow',
   'symbol-method': 'circle-dot',
   'symbol-function': 'code',
-  // 실험 탭(experimentTree): 끝난 UO, 추가 줄
+  // 실험 탭(experimentTree): 끝난 UO, 완료로 표시한 Workflow(README 체크리스트), 추가 줄
   'uo-done': 'circle-check',
+  'wf-done': 'circle-check',
   add: 'plus',
   // 샘플 탭(samples/SamplesPanel.tsx): 종류 줄과 샘플 줄
   'test-tube': 'test-tube',

@@ -56,6 +56,10 @@ export interface TreeState {
   icon: IconName;
   label: string;
   onClick?: () => void;
+  /** 있으면 단추는 체크박스다(role=checkbox, aria-checked): Workflow 완료 표시. */
+  checked?: boolean;
+  /** 'warning': 주의 색(완료로 표시했지만 끝나지 않은 Unit Operation 이 있다). 모양과 글이 따로 뜻을 전한다. */
+  tone?: 'warning';
 }
 
 /** 줄 이름 뒤의 표시. 색만으로 뜻을 전하지 않는다: 그림 모양과 글(label)이 함께다. */
@@ -242,6 +246,8 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
                   type="button"
                   className="tree-state"
                   data-icon={shape.icon}
+                  data-tone={shape.tone}
+                  {...(shape.checked === undefined ? {} : { role: 'checkbox', 'aria-checked': shape.checked })}
                   tabIndex={-1}
                   aria-label={shape.label}
                   title={shape.label}
