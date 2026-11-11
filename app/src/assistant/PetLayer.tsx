@@ -103,6 +103,11 @@ export function PetLayer(props: {
     bubble.style.setProperty('--bubble-max-h', `${place.maxH}px`);
   }, [snap.open, snap.pos.x, snap.pos.y, snap.scale, skin, frame, store]);
 
+  // 설치한 스킨은 기본 스킨보다 클 수 있다: 그 틀 크기로 자리를 다시 자른다(창 틀 밖으로 나가지 않게)
+  useLayoutEffect(() => {
+    store.setSkinManifest(skin.manifest);
+  }, [skin, store]);
+
   useLayoutEffect(() => {
     if (sprite.current) applySkinVars(sprite.current, skin.manifest, snap.state, skin.sheetUrl);
   }, [snap.state, snap.hidden, skin]);

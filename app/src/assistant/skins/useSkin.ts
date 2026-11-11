@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { InvokeFn } from '../../integrations/netIpc';
 import { BUILTIN_SKIN, BUILTIN_SKIN_ID, builtinSheetUrl } from './builtin';
-import { readSkin } from './store';
+import { getSkinRevision, readSkin, subscribeSkinRevision } from './store';
 import { SKIN_STATES, type SkinManifest, type SkinState } from './types';
 
 /**
@@ -72,10 +72,11 @@ export async function loadSkin(id: string, deps: SkinDeps = {}): Promise<ActiveS
   return { id, manifest, sheetUrl: (st) => made[st] ?? '', dispose };
 }
 
-/** 스킨 id 를 따라 스킨을 읽는다. 읽는 동안과 실패하면 기본 스킨이다. */
+/** 스킨 id 를 따라 스킨을 읽는다. 읽는 동안과 실패하면 기본 스킨이다. 스킨을 (같은 id 로 바꿔) 설치하면 다시 읽는다. */
 export function useSkin(id: string, deps: SkinDeps = {}): ActiveSkin {
   const [skin, setSkin] = useState<ActiveSkin>(BUILTIN_ACTIVE);
   const { invoke, urls } = deps;
+  const revision = useSyncExternalStore(subscribeSkinRevision, getSkinRevision);
   useEffect(() => {
     let live = true;
     let loaded: ActiveSkin | undefined;
@@ -94,6 +95,6 @@ export function useSkin(id: string, deps: SkinDeps = {}): ActiveSkin {
       live = false;
       loaded?.dispose();
     };
-  }, [id, invoke, urls]);
+  }, [id, invoke, urls, revision]);
   return skin;
 }

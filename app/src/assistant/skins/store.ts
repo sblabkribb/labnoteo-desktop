@@ -95,9 +95,28 @@ export function readSkin(id: string, invoke: InvokeFn = tauriInvoke): Promise<Sk
   return call<SkinData>(invoke, 'skin_read', { id });
 }
 
+/**
+ * 설치한 스킨 파일이 바뀐 횟수. 쓰고 있는 스킨을 같은 id 로 바꿔 설치하면 `pet.skin` 은 그대로라 useSkin 이 이 값으로 다시 읽는다.
+ */
+let skinRevision = 0;
+const revisionSubs = new Set<() => void>();
+export function getSkinRevision(): number {
+  return skinRevision;
+}
+export function subscribeSkinRevision(fn: () => void): () => void {
+  revisionSubs.add(fn);
+  return () => void revisionSubs.delete(fn);
+}
+function bumpSkinRevision(): void {
+  skinRevision += 1;
+  for (const fn of [...revisionSubs]) fn();
+}
+
 /** 임시 보관한 팩을 설치한다. 같은 id 의 다른 스킨이 있으면 `replace` 없이는 `exists`. */
-export function installSkin(stagingId: string, replace: boolean, invoke: InvokeFn = tauriInvoke): Promise<SkinManifest> {
-  return call<SkinManifest>(invoke, 'skin_install', { stagingId, replace });
+export async function installSkin(stagingId: string, replace: boolean, invoke: InvokeFn = tauriInvoke): Promise<SkinManifest> {
+  const m = await call<SkinManifest>(invoke, 'skin_install', { stagingId, replace });
+  bumpSkinRevision();
+  return m;
 }
 
 export async function removeSkin(id: string, invoke: InvokeFn = tauriInvoke): Promise<void> {

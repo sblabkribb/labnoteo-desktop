@@ -75,6 +75,39 @@ export function toolLabel(name: string): string {
 }
 
 /**
+ * 앱 도구의 상태 줄(쉬운 말). 노트를 읽고 고치는 도구는 파일 이름을 넣어 따로 적는다. 모르는 도구도 snake_case 이름을 보이지
+ * 않고 "작업하는 중"이다. 각 `appT` 는 글자로 적는다(번역 목록 검사).
+ */
+export function statusLabel(name: string): string {
+  switch (name) {
+    case 'list_experiment':
+      return appT('assistant.status.listExperiment');
+    case 'search_experiment':
+      return appT('assistant.status.searchExperiment');
+    case 'get_experiment_context':
+      return appT('assistant.status.experimentContext');
+    case 'get_unit_operation_context':
+      return appT('assistant.status.unitOpContext');
+    case 'search_catalog':
+      return appT('assistant.status.searchCatalog');
+    case 'get_unit_operation':
+      return appT('assistant.status.getUnitOp');
+    case 'list_samples':
+      return appT('assistant.status.listSamples');
+    case 'search_samples':
+      return appT('assistant.status.searchSamples');
+    case 'get_sample':
+      return appT('assistant.status.getSample');
+    case 'create_sample':
+      return appT('assistant.status.createSample');
+    case 'create_workflow':
+      return appT('assistant.status.createWorkflow');
+    default:
+      return appT('assistant.status.working');
+  }
+}
+
+/**
  * 끝 알림(`toolRunNotice`)의 수 세기 낱말을 앱 문장으로 바꾸는 번역기: 영어는 "3 lookup(s)" 대신 "3 lookups"·"1 lookup",
  * 한국어는 쉬운 말. 실패 까닭 같은 다른 문장은 원래 번역기(플러그인 목록)를 그대로 쓴다. 부를 때의 언어를 따른다.
  */
@@ -195,7 +228,9 @@ function instrument(
             ? appT('assistant.status.read', basename(notePath))
             : tool.mutates && docPath && !meta
               ? appT('assistant.status.write', basename(docPath))
-              : appT('assistant.status.tool', cleanLabel(meta?.toolTitle ?? tool.name, tool.name, STATUS_TITLE_MAX)))
+              : meta
+                ? appT('assistant.status.tool', cleanLabel(meta.toolTitle ?? tool.name, tool.name, STATUS_TITLE_MAX))
+                : statusLabel(tool.name))
       );
       const res = await tool.handler(ctx, args);
       if (res.ok && meta?.kind === 'scholar' && typeof res.data === 'string') hooks.scholarLinks?.(res.data);

@@ -157,6 +157,31 @@ describe('pet stays out of the window frame (Visual QA)', () => {
   });
 });
 
+describe('pet clamp follows the active skin frame (review)', () => {
+  const frame: Viewport = { w: 1200, h: 800, top: 36, left: 44, bottom: 26, right: 0 };
+  const big = { ...BUILTIN_SKIN, id: 'big-cat', frame: { width: 96, height: 96 } };
+
+  it('moveBy, dragTo, reset and clampTo use the installed skin size, not the built-in 32 px', () => {
+    const { store } = setup({ ...frame });
+    store.setSkinManifest(big);
+    store.moveBy(-5000, -5000);
+    // 96 px × scale 2 = 192 px: the sprite's left/top edge stays right of the ribbon and below the view header
+    expect(store.get().pos).toEqual({ x: 1200 - 44 - 192, y: 800 - 36 - 192 });
+    store.dragTo(5000, 5000);
+    expect(store.get().pos).toEqual({ x: 1200 - 44 - 192, y: 800 - 36 - 192 });
+    store.clampTo(600, 400);
+    expect(store.get().pos).toEqual({ x: 600 - 44 - 192, y: 400 - 36 - 192 });
+  });
+
+  it('re-clamps when a bigger skin becomes active', () => {
+    const { store } = setup({ ...frame });
+    store.moveBy(-5000, -5000);
+    expect(store.get().pos).toEqual({ x: 1200 - 44 - 64, y: 800 - 36 - 64 });
+    store.setSkinManifest(big);
+    expect(store.get().pos).toEqual({ x: 1200 - 44 - 192, y: 800 - 36 - 192 });
+  });
+});
+
 describe('snapScale (150% screens)', () => {
   it('keeps whole device pixels per art pixel', () => {
     expect(snapScale(2, 1)).toBe(2);

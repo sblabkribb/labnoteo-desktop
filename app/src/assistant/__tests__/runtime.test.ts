@@ -18,7 +18,7 @@ import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost'
 import { openNote } from '../../labnote/openNotes';
 import { askAgentCommand } from '../../labnote/port/aiAskAgent';
 import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../labnote/port/llmProvider';
-import { builtinRuntime, EARLIER_UNTRUSTED_RULES, noticeTranslator, STATUS_TITLE_MAX, toolLabel } from '../builtinRuntime';
+import { builtinRuntime, EARLIER_UNTRUSTED_RULES, noticeTranslator, STATUS_TITLE_MAX, statusLabel, toolLabel } from '../builtinRuntime';
 import { fakeRuntime } from '../fakeRuntime';
 import {
   getRuntime,
@@ -203,6 +203,34 @@ describe('builtinRuntime', () => {
     const toolMsg = p.seen[1].find((m) => m.role === 'tool')!;
     expect(JSON.parse(toolMsg.content)).toMatchObject({ cite: 1 });
     expect(p.seen[0][0].content).toContain('[n]');
+  });
+
+  it('names read tools in plain words on the status line, never the snake_case id (review)', async () => {
+    const p = new Script([toolTurn('search_experiment', { query: 'PCR' }), answer('끝')]);
+    const { rt } = await setup(p);
+    const { rec, sink } = recordSink();
+    await rt.run(turnOf('PCR 찾아 줘'), sink, go());
+    expect(rec.status).toContain(t('assistant.status.searchExperiment'));
+    expect(rec.status.join(' ')).not.toContain('search_experiment');
+  });
+
+  it('statusLabel covers every core read tool and falls back to plain words', () => {
+    for (const name of [
+      'list_experiment',
+      'search_experiment',
+      'get_experiment_context',
+      'get_unit_operation_context',
+      'search_catalog',
+      'get_unit_operation',
+      'list_samples',
+      'search_samples',
+      'get_sample',
+      'create_sample',
+      'create_workflow',
+      'mystery_tool',
+    ])
+      expect(statusLabel(name)).not.toMatch(/[a-z]+_[a-z]+/);
+    expect(statusLabel('mystery_tool')).toBe(t('assistant.status.working'));
   });
 
   it('opens no progress dialog for a model turn', async () => {

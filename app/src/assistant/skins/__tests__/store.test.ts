@@ -199,6 +199,21 @@ describe('loadSkin / useSkin', () => {
     expect(u.live.size).toBe(0);
   });
 
+  it('reloads the active skin after it is replaced by an install with the same id (review)', async () => {
+    let version = 1;
+    const { invoke } = fakeInvoke((cmd) =>
+      cmd === 'skin_install' ? blue : { ...data, manifest: { ...blue, frame: { width: 32 * version, height: 32 * version } } },
+    );
+    const u = fakeUrls();
+    const { result } = renderHook(() => useSkin('flasko-blue', { invoke, urls: u.urls }));
+    await waitFor(() => expect(result.current.manifest.frame.width).toBe(32));
+    const first = [...u.live];
+    version = 2;
+    await act(async () => void (await installSkin('stage-1', true, invoke)));
+    await waitFor(() => expect(result.current.manifest.frame.width).toBe(64));
+    for (const url of first) expect(u.revoked).toContain(url);
+  });
+
   it('drops a read that finishes after the id changed', async () => {
     let release: (v: SkinData) => void = () => undefined;
     const invoke = ((cmd: string) =>

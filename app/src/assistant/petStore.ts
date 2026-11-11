@@ -108,6 +108,8 @@ export interface PetStore {
   reset(): void;
   /** 창 크기가 바뀌었다: 그 안(창 틀 밖)으로 자른다(저장하지 않는다). */
   clampTo(w: number, h: number): void;
+  /** 지금 그리는 스킨(설치한 스킨은 틀이 96px 까지 크다): 자리 자르기에 그 크기를 쓰고, 바로 다시 자른다(저장하지 않는다). */
+  setSkinManifest(skin: SkinManifest): void;
   setHidden(hidden: boolean): void;
   toggleVisible(): void;
   /** 지금 뷰포트(자리 안내에 쓴다). */
@@ -115,7 +117,7 @@ export interface PetStore {
   resetForTest(): void;
 }
 
-/** 스프라이트 한 변(px): 지금은 기본 스킨의 틀 크기 × 배율. */
+/** 스프라이트 크기(px): 스킨의 틀 크기 × 배율. */
 export function petSize(scale: number, skin: SkinManifest = BUILTIN_SKIN, dpr: number = screenDpr()): { w: number; h: number } {
   const s = snapScale(scale, dpr);
   return { w: Math.ceil(skin.frame.width * s), h: Math.ceil(skin.frame.height * s) };
@@ -187,6 +189,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
   let doneTimer: ReturnType<typeof setTimeout> | undefined;
   let restore: (() => void) | undefined;
   let dragging = false;
+  let manifest: SkinManifest = BUILTIN_SKIN;
 
   const fromLayout = (p: PetPrefs) => ({ pos: { x: p.x, y: p.y }, hidden: p.hidden, scale: p.scale, skin: p.skin });
   let snap: PetSnapshot = { state: 'idle', open: false, ...fromLayout(layout.get().pet) };
@@ -196,7 +199,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
     for (const fn of [...subs]) fn();
   };
 
-  const clamp = (pos: PetPos, scale = snap.scale): PetPos => clampIn(pos, viewport(), petSize(scale));
+  const clamp = (pos: PetPos, scale = snap.scale): PetPos => clampIn(pos, viewport(), petSize(scale, manifest));
 
   // 설정 창, Rust 읽기, 다른 창에서 바뀐 값을 따른다(끄는 동안의 자리는 덮지 않는다)
   layout.subscribe((prefs) => {
@@ -258,7 +261,17 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
       save(clamp({ x: PET_DEFAULT.x, y: PET_DEFAULT.y }));
     },
     clampTo(w, h) {
-      const pos = clampIn(snap.pos, { ...viewport(), w, h }, petSize(snap.scale));
+      const pos = clampIn(snap.pos, { ...viewport(), w, h }, petSize(snap.scale, manifest));
+      if (pos.x !== snap.pos.x || pos.y !== snap.pos.y) emit({ pos });
+    },
+    setSkinManifest(skin) {
+      if (skin.frame.width === manifest.frame.width && skin.frame.height === manifest.frame.height) {
+        manifest = skin;
+        return;
+      }
+      manifest = skin;
+      if (dragging) return;
+      const pos = clamp(snap.pos);
       if (pos.x !== snap.pos.x || pos.y !== snap.pos.y) emit({ pos });
     },
     setHidden(hidden) {
@@ -274,6 +287,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
       doneTimer = undefined;
       restore = undefined;
       dragging = false;
+      manifest = BUILTIN_SKIN;
       snap = { state: 'idle', open: false, ...fromLayout(layout.get().pet) };
       for (const fn of [...subs]) fn();
     },
