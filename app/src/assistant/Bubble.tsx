@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { Icon } from '../ui/Icon';
@@ -59,11 +59,17 @@ function placeholderOf(chip: ChipId): string {
  *   섹션을 고른 뒤에만, 단위 공정·워크플로 칩은 글이 있어야 보낸다.
  * - 열리면 초점은 입력 칸(없으면 칩 칸의 첫 칸, 그것도 없으면 고른 칩)에, 칩을 바꾸면 그 칩 칸의 첫 칸으로 간다.
  *   Esc 는 닫고 초점을 돌려준다(PetLayer 가 정한다).
+ * - 크기 조절 손잡이(`grip`)는 PetLayer 가 만든다(끌기·키보드·자리). 크기를 정했으면(`sized`) 바닥에 "기본 크기로" 가 있다.
  */
 export function Bubble(props: {
   id: string;
   onClose: () => void;
   onHide: () => void;
+  /** 크기 조절 손잡이(말풍선 모서리에 뜬다). */
+  grip?: ReactNode;
+  /** 크기를 정했는지(기본 크기가 아닌지). */
+  sized?: boolean;
+  onResetSize?: () => void;
   chat: UseAssistantSession;
   activePath?: string;
   actions?: BubbleActions;
@@ -415,11 +421,18 @@ export function Bubble(props: {
         )}
       </div>
       <div className="pet-bubble-foot">
+        {props.sized && props.onResetSize ? (
+          <button type="button" className="btn pet-bubble-resetsize" onClick={props.onResetSize}>
+            <Icon name="refresh-cw" size={14} />
+            <span>{t('pet.resetSize')}</span>
+          </button>
+        ) : null}
         <button type="button" className="btn pet-bubble-hide" onClick={props.onHide}>
           <Icon name="eye-off" size={14} />
           <span>{t('pet.hide')}</span>
         </button>
       </div>
+      {props.grip}
     </div>
   );
 }

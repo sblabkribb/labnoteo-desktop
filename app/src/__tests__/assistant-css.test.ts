@@ -71,6 +71,29 @@ describe('styles/assistant.css', () => {
     expect(decl(top, '.pet-bubble', 'max-height')).toEqual(['min(32rem, var(--bubble-max-h, calc(100vh - 8rem)))']);
   });
 
+  it('a set size comes from the CSSOM variables, capped to the room left; the log fills the height and never scrolls sideways', () => {
+    const sized = '.pet-bubble[data-sized="true"]';
+    expect(decl(top, sized, 'width')).toEqual(['var(--bubble-w)']);
+    expect(decl(top, sized, 'height')).toEqual(['var(--bubble-h)']);
+    expect(decl(top, sized, 'max-height')).toEqual(['var(--bubble-max-h, calc(100vh - 8rem))']);
+    expect(decl(top, '.pet-log', 'flex')).toEqual(['1 1 auto']);
+    expect(decl(top, '.pet-log', 'overflow-x')).toEqual(['hidden']);
+    expect(decl(top, '.pet-bubble > *', 'min-width')).toEqual(['0']);
+    // no transition on the size: nothing to stop for reduced motion
+    for (const sel of ['.pet-bubble', sized, '.pet-bubble-grip']) expect(decl(top, sel, 'transition'), sel).toEqual([]);
+  });
+
+  it('the resize grip sits on the corner away from the pet and follows the flip and the push to the right', () => {
+    expect(decl(top, '.pet-bubble-grip', 'position')).toEqual(['absolute']);
+    expect(decl(top, '.pet-bubble-grip', 'top')).toEqual(['0']);
+    expect(decl(top, '.pet-bubble-grip', 'left')).toEqual(['0']);
+    expect(decl(top, '.pet-bubble-grip', 'touch-action')).toEqual(['none']);
+    expect(decl(top, '.pet-bubble-grip', 'cursor')).toEqual(['nwse-resize']);
+    expect(decl(top, '.pet-bubble[data-side="below"] .pet-bubble-grip', 'bottom')).toEqual(['0']);
+    expect(decl(top, '.pet-bubble[data-grow-x="right"] .pet-bubble-grip', 'right')).toEqual(['0']);
+    expect(decl(top, '.pet-bubble[data-side="below"][data-grow-x="right"] .pet-bubble-grip', 'cursor')).toEqual(['nwse-resize']);
+  });
+
   it('Korean text in the bubble does not break inside words', () => {
     expect(decl(top, '.pet-bubble', 'word-break')).toEqual(['keep-all']);
   });
