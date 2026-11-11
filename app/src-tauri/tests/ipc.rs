@@ -419,11 +419,11 @@ fn ipc_argument_names_match_the_typescript_side() {
     // App-wide GitHub settings: no vault needed, offline, Rust-only files.
     assert_eq!(
         ok("github_app_settings_get", args("github_app_settings_get", vec![])),
-        json!({"clientIdDefault": true, "forgetOnExit": false})
+        json!({"clientIdDefault": true, "builtinAvailable": false, "forgetOnExit": false})
     );
     assert_eq!(
         ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": "Iv1.lab", "forgetOnExit": true})])),
-        json!({"clientId": "Iv1.lab", "clientIdDefault": false, "forgetOnExit": true})
+        json!({"clientId": "Iv1.lab", "clientIdDefault": false, "builtinAvailable": false, "forgetOnExit": true})
     );
     assert_eq!(
         call("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": "no/way"})])).unwrap_err()["kind"],
@@ -432,7 +432,7 @@ fn ipc_argument_names_match_the_typescript_side() {
     assert!(call("github_app_settings_set", json!({"patch": {"token": FAKE_GITHUB_TOKEN}})).is_err());
     assert_eq!(
         ok("github_app_settings_set", args("github_app_settings_set", vec![json!({"clientId": null, "forgetOnExit": false})])),
-        json!({"clientIdDefault": true, "forgetOnExit": false})
+        json!({"clientIdDefault": true, "builtinAvailable": false, "forgetOnExit": false})
     );
     assert!(dir.join("data").join("integrations").join("github").join("app.json").is_file());
     // GitHub sign-in, offline paths only (the device flow itself is tested
@@ -1092,7 +1092,7 @@ title: 실험
     assert_eq!(status["set"]["github"], true);
     assert_eq!(
         ok("github_app_settings_get", args("github_app_settings_get", vec![])),
-        json!({"clientId": "Iv1.import", "clientIdDefault": false, "forgetOnExit": false})
+        json!({"clientId": "Iv1.import", "clientIdDefault": false, "builtinAvailable": false, "forgetOnExit": false})
     );
     let bad = raw_call("integration_import_bytes", vec!["conn.json"], br#"{"github":{"token":"abc"}}"#.to_vec()).unwrap();
     assert_eq!(bad["invalid"], json!([{"part": "github", "field": "token", "reason": "badToken"}]));
