@@ -816,9 +816,14 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   // 언어가 바뀌면 언어 칸(이름표 + editorLang)만 갈아 끼운다. 글을 그리는 위젯(속성 격자, 표 도구, 체크박스, 칩 …)이 이 값을
   // 보고 제자리에서 다시 그린다. 본문을 바꾸지 않으므로 저장 안 됨 표시, 자동 저장, 되돌리기 기록, 선택은 움직이지 않는다.
   // 한글 조합 중이면 조합이 끝난 뒤에 바꾼다(조합 중의 다시 그리기는 IME 를 깬다).
+  // 비교는 마지막으로 요청한 언어와 한다(편집기 값이 아니다): 조합 중에 ko→en→ko 로 바뀌면 미뤄 둔 en 을 ko 가 덮어써야 한다.
+  const requestedLang = useRef(lang);
   useEffect(() => {
     const view = viewRef.current;
-    if (view && view.state.facet(editorLang) !== lang) scheduleReconfigure(view, label.current, labelAttrs());
+    if (requestedLang.current === lang) return;
+    requestedLang.current = lang;
+    // 편집기가 아직 없으면 새로 만들 때 지금 언어(labelAttrs)로 만든다.
+    if (view) scheduleReconfigure(view, label.current, labelAttrs());
   }, [lang]);
 
   // 대화상자가 열려 있는 동안, 그리고 읽기가 끝나기 전에는 편집을 막는다: 사용자가 결정하는 내용이 바뀌지 않게.
