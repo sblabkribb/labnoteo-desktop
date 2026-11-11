@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { probeFor } from '../../integrations/probes';
 import { fakeInvoke, netError } from '../../integrations/__tests__/fakeNet';
 import { NET_ERROR_KINDS } from '../../integrations/netIpc';
+import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import { coreT } from '../../labnote/i18n';
 import { describeLlmError, LlmHttpError } from '../../labnote/port/llmError';
@@ -30,38 +31,36 @@ const settings = settingsOf();
 const openai = settingsOf({ llmProvider: 'openai' });
 
 /** 앱의 설정 경로: 앱 키 '연동 설정' 뒤에 코어 키 두 개. */
-const path = (label: string) => [t('cmd.integrationSettings'), 'AI provider', label].join(' → ');
+const path = (label: string) => [t('cmd.integrationSettings'), t('integrations.aiProvider'), label].join(' → ');
 
 describe('describeLlmError', () => {
-  it('offline and tls give the connection sentence with the endpoint', () => {
-    expect(describeLlmError(netError('offline'), settings, id)).toBe(
-      `Cannot connect to Ollama (http://localhost:11434). Check that it is running and that ${path('Ollama endpoint')} is right.`,
-    );
-    expect(describeLlmError(netError('tls'), settings, id)).toContain('Cannot connect to Ollama');
+  it('offline and tls say the AI server cannot be reached and name the address row, never the address (real-server check)', () => {
+    expect(describeLlmError(netError('offline'), settings, id)).toBe(t('ai.err.offline', path('Ollama endpoint')));
+    expect(describeLlmError(netError('tls'), openai, id)).toBe(t('ai.err.offline', path('OpenAI endpoint')));
   });
 
   it('a timeout says the answer did not finish in time, not that the server cannot be reached (real-app check)', () => {
     // A thinking model streamed reasoning for the whole LLM_TIMEOUT; "Cannot connect" sent the user to the network.
     const msg = describeLlmError(netError('timeout'), openai, id);
-    expect(msg).toBe(t('ai.timeout', 'OpenAI', 'https://api.openai.com'));
+    expect(msg).toBe(t('ai.timeout'));
     expect(msg).not.toContain('Cannot connect');
   });
 
   it('a reasoning loop the stream stopped gets its own sentence', () => {
-    expect(describeLlmError(new ReasoningLoopError(), openai, id)).toBe(t('ai.reasoningLoop', 'OpenAI'));
+    expect(describeLlmError(new ReasoningLoopError(), openai, id)).toBe(t('ai.reasoningLoop'));
   });
 
   it('says to enter an address when the endpoint is empty', () => {
     expect(describeLlmError(netError('invalidUrl'), settingsOf({ llmEndpointOllama: '' }), id)).toBe(
-      `The endpoint is empty. Enter the server address in ${path('Ollama endpoint')}, e.g. http://localhost:11434.`,
+      t('ai.err.emptyEndpoint', path('Ollama endpoint')),
     );
   });
 
   it('invalidUrl and notConfigured say how to write the endpoint', () => {
     expect(describeLlmError(netError('invalidUrl'), settingsOf({ llmEndpointOllama: 'htp://localhost:11434' }), id)).toBe(
-      `htp://localhost:11434 is not an http:// or https:// address. Check ${path('Ollama endpoint')}: write it like http://localhost:11434.`,
+      t('ai.err.badScheme', path('Ollama endpoint')),
     );
-    expect(describeLlmError(netError('notConfigured'), openai, id)).toContain('write it like https://api.openai.com.');
+    expect(describeLlmError(netError('notConfigured'), openai, id)).toBe(t('ai.err.badScheme', path('OpenAI endpoint')));
   });
 
   it('401 and 403 point at the API key row', () => {
@@ -81,22 +80,20 @@ describe('describeLlmError', () => {
   it('other OpenAI 404 says the address works with or without /v1 (app key, C-R3)', () => {
     const s = settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://gw.lab.kr/openai/v1/chat/completions' });
     const msg = describeLlmError(new LlmHttpError('OpenAI', 404, '404 page not found'), s, id);
-    expect(msg).toBe(t('ai.notFoundOpenai', 'https://gw.lab.kr/openai/v1/chat/completions', path('OpenAI endpoint')));
+    expect(msg).toBe(t('ai.notFoundOpenai', path('OpenAI endpoint')));
     expect(msg).toContain('https://host/v1');
-    expect(msg).not.toContain('without a path such as /v1');
+    expect(msg).not.toContain('gw.lab.kr');
   });
 
   it('a NetError status 404 for OpenAI gives the same app sentence', () => {
     const s = settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://gw.example/x' });
-    expect(describeLlmError(netError('status', { status: 404, body: 'nope' }), s, id)).toBe(
-      t('ai.notFoundOpenai', 'https://gw.example/x', path('OpenAI endpoint')),
-    );
+    expect(describeLlmError(netError('status', { status: 404, body: 'nope' }), s, id)).toBe(t('ai.notFoundOpenai', path('OpenAI endpoint')));
   });
 
-  it('other Ollama 404 keeps the vendor sentence', () => {
+  it('other Ollama 404 says to enter only the server address', () => {
     const s = settingsOf({ llmEndpointOllama: 'http://localhost:11434/api' });
     expect(describeLlmError(new LlmHttpError('Ollama', 404, '404 page not found'), s, id)).toBe(
-      `http://localhost:11434/api has no such address (404). Check ${path('Ollama endpoint')}: enter only the server address, without a path such as /v1 or /api.`,
+      t('ai.err.notFoundOllama', path('Ollama endpoint')),
     );
   });
 
@@ -127,6 +124,32 @@ describe('describeLlmError', () => {
     );
   });
 
+  it('no sentence prints the address or host, calls the server "OpenAI", or uses a settings label the screen does not show (ko)', () => {
+    const s = settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://gw.secret-lab.kr/openai/v1' });
+    const o = settingsOf({ llmEndpointOllama: 'http://10.1.2.3:11434' });
+    setLang('ko');
+    try {
+      const errors: unknown[] = [
+        ...NET_ERROR_KINDS.map((kind) => netError(kind, { location: 'https://gw.secret-lab.kr/elsewhere' })),
+        new LlmHttpError('OpenAI', 404, 'nope'),
+        new LlmHttpError('OpenAI', 401, '{}'),
+        new ReasoningLoopError(),
+      ];
+      for (const err of errors) {
+        for (const conf of [s, o]) {
+          const m = describeLlmError(err, conf, coreT);
+          expect(m).not.toMatch(/secret-lab|10\.1\.2\.3|11434/);
+          expect(m).not.toMatch(/OpenAI(?![- ]?(?:엔드포인트|endpoint|호환|compatible))/);
+          expect(m).not.toContain('프로바이더');
+        }
+      }
+      expect(describeLlmError(netError('offline'), s, coreT)).toContain('AI 서버');
+      expect(describeLlmError(netError('offline'), s, coreT)).toContain('연동 설정 → AI 제공자 → OpenAI 엔드포인트');
+    } finally {
+      setLang('en');
+    }
+  });
+
   it('keeps the status in the error message itself', () => {
     expect(new LlmHttpError('Ollama', 500, 'x').message).toBe('Ollama request failed (500): x');
   });
@@ -137,9 +160,9 @@ describe('describeLlmError', () => {
     if (kind !== 'cancelled') expect(m).not.toBe('');
   });
 
-  it('a redirect names the target origin', () => {
+  it('a redirect says so without naming the target', () => {
     expect(describeLlmError(netError('redirect', { location: 'https://gw.example' }), settings, coreT)).toBe(
-      t('integrations.redirected', 'https://gw.example'),
+      t('ai.err.redirected', [t('cmd.integrationSettings'), t('integrations.aiProvider'), coreT('Ollama endpoint')].join(' → ')),
     );
   });
 
@@ -205,7 +228,7 @@ describe('registerLlmProbe', () => {
       const r = await probeFor('llm')!(fields);
       expect(r.ok).toBe(false);
       expect(r.message).toBe(describeLlmError(netError('offline'), settingsOf({ llmProvider: 'openai', llmEndpointOpenai: 'https://gw.example', llmModel: 'gpt-x' }), coreT));
-      expect(r.message).toContain('https://gw.example');
+      expect(r.message).not.toContain('gw.example');
       expect(r.message).not.toContain('raw-rust-text');
     } finally {
       off();
