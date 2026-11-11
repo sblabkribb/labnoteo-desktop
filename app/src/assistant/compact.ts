@@ -14,7 +14,7 @@
 import { fenceUntrusted } from '../ai/untrusted';
 import { estimateTokens, truncateToTokens } from '../labnote/context/tokens';
 import { KOREAN_TERMS_INSTRUCTION } from '../labnote/port/aiCommon';
-import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
+import { OUTPUT_TOKENS_COMPACT, type ChatMessage, type LlmProvider } from '../labnote/port/llmProvider';
 import { LLM_CONTEXT_WINDOW_DEFAULT } from '../labnote/settings';
 import { historyBytes, HISTORY_MAX_BYTES, type HistoryDoc, type HistorySummary } from './history';
 import type { StoredMessage } from './runtime';
@@ -116,7 +116,7 @@ export async function compact(doc: HistoryDoc, provider: LlmProvider, signal: Ab
   const folded = doc.messages.slice(0, cut);
   let content: string;
   try {
-    const res = await provider.chat(summaryPrompt(doc.summary, folded), { temperature: 0.2, signal });
+    const res = await provider.chat(summaryPrompt(doc.summary, folded), { temperature: 0.2, signal, maxTokens: OUTPUT_TOKENS_COMPACT });
     content = res.content.trim();
   } catch (err) {
     if (signal.aborted) throw err;

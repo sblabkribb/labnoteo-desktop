@@ -160,8 +160,9 @@ describe('draftMethodCommand (#112)', () => {
       closeAllDialogs();
     }
     expect(bodies).toEqual({
-      openai: { keys: ['messages', 'model', 'temperature'], options: undefined, temperature: 0.2 },
-      ollama: { keys: ['messages', 'model', 'options', 'stream'], options: { temperature: 0.2 }, temperature: undefined },
+      // The output cap is the one field every request now carries (Draft Method: the text task's 8192, bounded by the window).
+      openai: { keys: ['max_tokens', 'messages', 'model', 'temperature'], options: undefined, temperature: 0.2 },
+      ollama: { keys: ['messages', 'model', 'options', 'stream'], options: { temperature: 0.2, num_predict: 8192 }, temperature: undefined },
     });
   });
 

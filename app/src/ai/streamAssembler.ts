@@ -10,6 +10,7 @@
  * - 생각 글이 같은 대목을 되풀이하면(생각 고리) {@link ReasoningLoopError} 를 던진다: `llmChatStream` 이 요청을 멈추고
  *   그 오류로 거절한다. 고리에 빠진 모델은 LLM_TIMEOUT(300초) 내내 생각만 흘리다 "연결할 수 없다"로 끝났다(real-app check).
  * - `reasoningOnly()` 는 생각 글만 왔는지 알려 준다: 그때의 시간 초과는 llmProvider 가 생각을 끄고 한 번 더 보낸다.
+ * - `finish_reason`(OpenAI) 이나 `done_reason`(Ollama) 이 'length' 면 결과에 `truncated` 를 단다(출력 한도에서 멈춘 답).
  * - `[DONE]` 과 JSON 이 아닌 프레임은 건너뛴다. `error` 가 든 프레임은 `NetError('remote')`(글은 500자까지).
  *
  * labnote/port/ 밖에 둔다: provenance 가드는 그 폴더의 모든 파일에 `// Ported from` 머리를 요구한다.
@@ -83,9 +84,9 @@ class Thinking {
   }
 }
 
-function finish(content: string, toolCalls: ToolCall[], thinking: string): ChatResult {
+function finish(content: string, toolCalls: ToolCall[], thinking: string, truncated: boolean): ChatResult {
   const thinkingOnly = toolCalls.length === 0 && !content.trim() && thinking.trim() !== '';
-  return { content, toolCalls, ...(thinkingOnly ? { thinkingOnly: true } : {}) };
+  return { content, toolCalls, ...(thinkingOnly ? { thinkingOnly: true } : {}), ...(truncated ? { truncated: true } : {}) };
 }
 
 interface PartialCall {
@@ -100,12 +101,14 @@ export class OpenAiAssembler implements StreamAssembler {
   private content = '';
   private readonly thinking = new Thinking();
   private readonly calls = new Map<number, PartialCall>();
+  private truncated = false;
 
   push(data: string): string {
     const frame = parseFrame(data);
     if (!frame) return '';
     throwIfError(frame);
     const choices = Array.isArray(frame.choices) ? frame.choices : [];
+    if (asObject(choices[0])?.finish_reason === 'length') this.truncated = true;
     const delta = asObject(asObject(choices[0])?.delta);
     if (!delta) return '';
     if (typeof delta.reasoning_content === 'string') this.thinking.add(delta.reasoning_content);
@@ -138,7 +141,7 @@ export class OpenAiAssembler implements StreamAssembler {
         arguments: p.argsObject ?? parseToolArguments(p.args),
       }))
       .filter((c) => c.name !== '');
-    return finish(this.content, toolCalls, this.thinking.text);
+    return finish(this.content, toolCalls, this.thinking.text, this.truncated);
   }
 
   reasoningOnly(): boolean {
@@ -150,11 +153,13 @@ export class OllamaAssembler implements StreamAssembler {
   private content = '';
   private readonly thinking = new Thinking();
   private readonly calls: ToolCall[] = [];
+  private truncated = false;
 
   push(data: string): string {
     const frame = parseFrame(data);
     if (!frame) return '';
     throwIfError(frame);
+    if (frame.done_reason === 'length') this.truncated = true;
     const message = asObject(frame.message);
     if (!message) return '';
     if (typeof message.thinking === 'string') this.thinking.add(message.thinking);
@@ -176,7 +181,7 @@ export class OllamaAssembler implements StreamAssembler {
   }
 
   result(): ChatResult {
-    return finish(this.content, [...this.calls], this.thinking.text);
+    return finish(this.content, [...this.calls], this.thinking.text, this.truncated);
   }
 
   reasoningOnly(): boolean {

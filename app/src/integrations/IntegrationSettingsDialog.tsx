@@ -20,6 +20,7 @@ import { KeyField } from './KeyField';
 import { notifySecretsChange } from './secretsEvents';
 import { clearSecret, secretStatus, setSecret, type InvokeFn, type SecretStatus, type Slot } from './netIpc';
 import { TemperatureField } from './TemperatureField';
+import { MaxOutputField } from './MaxOutputField';
 import { ThinkingField } from './ThinkingField';
 import { probeFor, runIntegrationChangeHooks, type IntegrationSettingsValue, type ProbeFn, type ProbeId, type ProbeResult } from './probes';
 import { AllowHttpBox, cleartextOrigin, resolveEndpoint, UrlField } from './UrlField';
@@ -100,6 +101,7 @@ function pickIntegration(s: AppSettings): IntegrationSettingsValue {
     llmContextWindow: s.llmContextWindow,
     llmTemperature: s.llmTemperature,
     llmThinking: s.llmThinking,
+    llmMaxOutputTokens: s.llmMaxOutputTokens,
     bfwUrl: s.bfwUrl,
     bfwConnection: s.bfwConnection,
     allowHttpOrigins: [...s.allowHttpOrigins],
@@ -924,7 +926,9 @@ export function IntegrationSettingsPage(props: {
                 {/* 고급: 비워 두면 지금처럼 요청마다 정한 temperature. 저장된 값이 있으면 펼쳐 둔다(숨은 설정이 되지 않게). */}
                 <details
                   className="integration-advanced"
-                  open={val.llmTemperature != null || (val.llmThinking ?? 'auto') !== 'auto' || undefined}
+                  open={
+                    val.llmTemperature != null || (val.llmThinking ?? 'auto') !== 'auto' || val.llmMaxOutputTokens != null || undefined
+                  }
                 >
                   <summary>{t('integrations.ai.advanced')}</summary>
                   <ThinkingField value={val.llmThinking} commit={async (patch) => { await save(patch); }} />
@@ -934,6 +938,7 @@ export function IntegrationSettingsPage(props: {
                     thinking={val.llmThinking}
                     commit={async (patch) => { await save(patch); }}
                   />
+                  <MaxOutputField value={val.llmMaxOutputTokens} commit={async (patch) => { await save(patch); }} />
                 </details>
                 {provider === 'openai' ? (
                   <KeyField

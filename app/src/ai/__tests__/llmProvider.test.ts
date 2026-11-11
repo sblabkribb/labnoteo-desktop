@@ -139,7 +139,7 @@ describe('provider.chat', () => {
     expect(body).toEqual({
       model: 'llama3.1',
       stream: false,
-      options: { temperature: 0.2 },
+      options: { temperature: 0.2, num_predict: expect.any(Number) },
       messages: [
         { role: 'user', content: 'look it up' },
         { role: 'assistant', content: '', tool_calls: [{ function: { name: 'get_sample', arguments: { id: 'DNA-1' } } }] },
@@ -148,10 +148,10 @@ describe('provider.chat', () => {
     });
   });
 
-  it('ollama body omits options without a temperature', async () => {
+  it('ollama body without a temperature has only the output cap in options', async () => {
     const f = replying({ message: { content: 'x' } });
     await createLlmProvider(withProvider('ollama'), f.invoke)!.chat([{ role: 'user', content: 'x' }]);
-    expect(chatBody(f.calls).options).toBeUndefined();
+    expect(chatBody(f.calls).options).toEqual({ num_predict: expect.any(Number) });
   });
 
   it('ollama body gets options.num_ctx only when contextWindow is passed, beside temperature', async () => {
@@ -162,10 +162,11 @@ describe('provider.chat', () => {
     await p.chat(msgs, { contextWindow: 16384 });
     await p.chat(msgs, { temperature: 0.2 });
     await p.chat(msgs);
-    expect(chatBody(f.calls, 0).options).toEqual({ temperature: 0.2, num_ctx: 4096 });
-    expect(chatBody(f.calls, 1).options).toEqual({ num_ctx: 16384 });
-    expect(chatBody(f.calls, 2).options).toEqual({ temperature: 0.2 });
-    expect(chatBody(f.calls, 3).options).toBeUndefined();
+    const np = { num_predict: expect.any(Number) };
+    expect(chatBody(f.calls, 0).options).toEqual({ temperature: 0.2, num_ctx: 4096, ...np });
+    expect(chatBody(f.calls, 1).options).toEqual({ num_ctx: 16384, ...np });
+    expect(chatBody(f.calls, 2).options).toEqual({ temperature: 0.2, ...np });
+    expect(chatBody(f.calls, 3).options).toEqual(np);
   });
 
   it('the vault temperature setting replaces the caller temperature for both providers; blank keeps it (real-server check)', async () => {
@@ -179,7 +180,7 @@ describe('provider.chat', () => {
     const l = replying({ message: { content: 'x' } });
     const ollama = createLlmProvider(withProvider('ollama', { llmTemperature: 0 }), l.invoke)!;
     await ollama.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
-    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0, num_ctx: 4096 });
+    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0, num_ctx: 4096, num_predict: expect.any(Number) });
     const b = replying({ choices: [{ message: { content: 'x' } }] });
     const blank = createLlmProvider(withProvider('openai', { llmModel: 'm', llmTemperature: null }), b.invoke)!;
     await blank.chat(msgs, { temperature: 0.2 });
@@ -197,7 +198,7 @@ describe('provider.chat', () => {
     const l = replying({ message: { content: 'x' } });
     const ollama = createLlmProvider(withProvider('ollama', { llmModel: 'qwen3:8b', llmTemperature: null }), l.invoke)!;
     await ollama.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
-    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, num_ctx: 4096 });
+    expect(chatBody(l.calls, 0).options).toEqual({ temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, num_ctx: 4096, num_predict: expect.any(Number) });
     // A typed value always wins for the temperature; the rest of the set stays
     const ty = replying({ choices: [{ message: { content: 'x' } }] });
     const typed = createLlmProvider(withProvider('openai', { llmModel: 'qwen3:8b', llmTemperature: 0.3 }), ty.invoke)!;
@@ -207,22 +208,23 @@ describe('provider.chat', () => {
     const tl = replying({ message: { content: 'x' } });
     const typedOllama = createLlmProvider(withProvider('ollama', { llmModel: 'qwen3:8b', llmTemperature: 1 }), tl.invoke)!;
     await typedOllama.chat(msgs);
-    expect(chatBody(tl.calls, 0).options).toEqual({ temperature: 1, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5 });
+    expect(chatBody(tl.calls, 0).options).toEqual({ temperature: 1, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, num_predict: expect.any(Number) });
     // Other models keep today's behaviour
     const n = replying({ message: { content: 'x' } });
     const other = createLlmProvider(withProvider('ollama', { llmModel: 'llama3.1:8b', llmTemperature: null }), n.invoke)!;
     await other.chat(msgs, { temperature: 0.2 });
-    expect(chatBody(n.calls, 0).options).toEqual({ temperature: 0.2 });
+    expect(chatBody(n.calls, 0).options).toEqual({ temperature: 0.2, num_predict: expect.any(Number) });
   });
 
-  it('openai body is identical with and without contextWindow', async () => {
+  it('openai body is identical with and without contextWindow, but for the output cap it bounds', async () => {
     const f = replying({ choices: [{ message: { content: 'x' } }] });
     const p = createLlmProvider(withProvider('openai', { llmModel: 'm' }), f.invoke)!;
     const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }];
     await p.chat(msgs, { temperature: 0.2 });
     await p.chat(msgs, { temperature: 0.2, contextWindow: 4096 });
-    expect(chatBody(f.calls, 1)).toEqual(chatBody(f.calls, 0));
-    expect(chatBody(f.calls, 0)).toEqual({ model: 'm', messages: [{ role: 'user', content: 'x' }], temperature: 0.2 });
+    expect({ ...chatBody(f.calls, 1), max_tokens: 0 }).toEqual({ ...chatBody(f.calls, 0), max_tokens: 0 });
+    expect(chatBody(f.calls, 1).max_tokens).toBeLessThanOrEqual(4096);
+    expect(chatBody(f.calls, 0)).toEqual({ model: 'm', messages: [{ role: 'user', content: 'x' }], temperature: 0.2, max_tokens: expect.any(Number) });
   });
 
   it('openai body: tool_call_id and arguments as JSON strings; never a key in the body', async () => {
@@ -239,6 +241,7 @@ describe('provider.chat', () => {
     expect(body).toEqual({
       model: 'gpt-4o-mini',
       temperature: 0.2,
+      max_tokens: expect.any(Number),
       messages: [
         { role: 'user', content: 'look it up' },
         {

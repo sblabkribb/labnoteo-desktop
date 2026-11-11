@@ -220,6 +220,28 @@ describe('ExperimentsPanel', () => {
     expect(text.replace(/\r\n/g, '')).not.toContain('\n');
   });
 
+  it('Space on a focused Workflow row toggles its done checkbox; Enter still opens it; the row keeps the tab stop', async () => {
+    mount();
+    await expandExperiment();
+    const wf = row(/GFP/);
+    wf.focus();
+    expect(wf.getAttribute('aria-checked')).toBe('false');
+    fireEvent.keyDown(wf, { key: ' ' });
+    await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
+    await waitFor(() => expect(row(/GFP/).getAttribute('aria-checked')).toBe('true'));
+    // Space 는 노트를 열지 않는다. 초점과 탭 정지는 그 줄에 남는다(roving tabindex)
+    expect(h.opened).toEqual([]);
+    expect(row(/GFP/).getAttribute('tabindex')).toBe('0');
+    expect(items().filter((li) => li.getAttribute('tabindex') === '0')).toHaveLength(1);
+    fireEvent.keyDown(row(/GFP/), { key: ' ' });
+    await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[ \] \[WT020 Protein Expression Measurement GFP\]/));
+    fireEvent.keyDown(row(/GFP/), { key: 'Enter' });
+    await waitFor(() => expect(h.opened).toEqual([WF2]));
+    // UO 줄의 Space 는 그대로 연다(체크박스가 없다)
+    expect(row(/Gibson run/).getAttribute('aria-checked')).toBe('true');
+    expect(row(/^README/).getAttribute('aria-checked')).toBeNull();
+  });
+
   it('clicking images/ reveals that folder in the Files tab', async () => {
     const user = userEvent.setup();
     mount();

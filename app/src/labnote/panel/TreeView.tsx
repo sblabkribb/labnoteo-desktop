@@ -20,7 +20,10 @@ export interface TreeViewProps {
   /** 펼친 노드의 id. */
   expanded: ReadonlySet<string>;
   onToggle(id: string, open: boolean): void;
-  /** 클릭, Enter, Space. 묶음 노드는 그 전에 접히거나 펼쳐진다. `row` 는 그 줄의 요소(작은 창을 그 옆에 띄울 때). */
+  /**
+   * 클릭, Enter, Space. 묶음 노드는 그 전에 접히거나 펼쳐진다. `row` 는 그 줄의 요소(작은 창을 그 옆에 띄울 때).
+   * 상태가 체크박스(TreeState.checked 와 onClick)인 줄의 Space 는 여는 대신 그 체크박스를 누른다.
+   */
   onActivate(node: TreeNode, row?: HTMLElement): void;
   /** 우클릭, 메뉴 키, Shift+F10. */
   onContext?(node: TreeNode, anchor: MenuAnchor): void;
@@ -170,6 +173,18 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     // Alt/Ctrl/Meta+arrow belongs to the app (Alt+←/→ is back and forward): never take it as tree movement.
     if ((e.altKey || e.ctrlKey || e.metaKey) && /^(Arrow|Home$|End$)/.test(e.key)) return;
     const row = rows[index];
+    // 체크박스가 있는 줄(Workflow 완료): Space 는 체크박스를 누른다. 체크박스는 탭 정지가 아니라서(줄 하나만 탭 정지) 키보드로는 이 길이다.
+    // Enter 는 그대로 연다. 초점은 줄에 남는다.
+    if (e.key === ' ' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const shape = state?.(row.node);
+      if (shape?.onClick && shape.checked !== undefined) {
+        e.preventDefault();
+        e.stopPropagation();
+        setFocusKey(row.key);
+        shape.onClick();
+        return;
+      }
+    }
     const action = treeKeyAction(rows, index, { key: e.key, shiftKey: e.shiftKey });
     if (!action) return;
     e.preventDefault();
@@ -223,6 +238,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             role="treeitem"
             aria-level={row.depth + 1}
             aria-expanded={row.hasChildren ? row.expanded : undefined}
+            aria-checked={shape?.onClick && shape.checked !== undefined ? shape.checked : undefined}
             aria-current={(scrollCurrent ? row.key === currentKey : isCurrent?.(row.node)) ? 'true' : undefined}
             {...depth}
             tabIndex={row.key === tabStop ? 0 : -1}

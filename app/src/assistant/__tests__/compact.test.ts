@@ -125,6 +125,8 @@ describe('compact', () => {
     expect(sys.content).toContain(String(SUMMARY_MAX_TOKENS));
     expect(p.opts[0]?.tools).toBeUndefined();
     expect(p.opts[0]?.signal).toBe(ac.signal);
+    // The summary is at most SUMMARY_MAX_TOKENS: its request asks for the compaction output cap, not a text task's.
+    expect(p.opts[0]?.maxTokens).toBe(2048);
   });
 
   it('caps the summary at 400 tokens', async () => {

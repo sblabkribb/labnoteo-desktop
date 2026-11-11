@@ -70,6 +70,12 @@ export type AppSettings = Pick<
    */
   llmThinking: ThinkingSetting;
   /**
+   * 앱에만 있는 키(real-server check, 2026-11-11): 요청마다 보낼 출력 토큰 한도. null(빈칸)이면 작업마다 정한 값(도구 차례 4096,
+   * 글 8192, 기록 요약 2048, llmProvider outputTokens)이고, 수를 넣으면 모든 요청이 그 값이다. 어느 쪽이든 컨텍스트 창에서
+   * 프롬프트를 뺀 만큼을 넘지 않는다. `OUTPUT_TOKENS_SETTING_MIN`-`LLM_CONTEXT_WINDOW_MAX` 정수만 살린다.
+   */
+  llmMaxOutputTokens: number | null;
+  /**
    * 앱에만 있는 키(MCP 클라이언트, spec §5.1): AI 가 쓸 외부 MCP 서버. 기본 []. 토큰은 여기 없다(자격 증명 관리자).
    * 틀린 항목은 버린다(`cleanMcpServers`, Rust `config::parse_mcp_servers` 와 같은 규칙).
    */
@@ -189,6 +195,22 @@ export function parseTemperatureInput(raw: string): number | null | 'invalid' {
   if (s === '') return null;
   if (!/^\d+(?:\.\d+)?$|^\.\d+$/.test(s)) return 'invalid';
   return cleanTemperature(Number(s)) ?? 'invalid';
+}
+
+/** 출력 토큰 한도 설정의 가장 작은 값. */
+export const OUTPUT_TOKENS_SETTING_MIN = 256;
+
+/** 저장된 출력 토큰 한도: 범위 안의 정수면 그대로, 아니면 null(빈칸, 작업마다 정한 값). */
+export function cleanMaxOutputTokens(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= OUTPUT_TOKENS_SETTING_MIN && v <= LLM_CONTEXT_WINDOW_MAX ? v : null;
+}
+
+/** 설정 칸에 친 출력 토큰 한도: 빈칸은 null, 범위 안의 정수(천 단위 쉼표·빈칸은 무시)는 그 수, 나머지는 'invalid'. */
+export function parseMaxOutputTokensInput(raw: string): number | null | 'invalid' {
+  const s = raw.trim().replace(/[,\s_]/g, '');
+  if (s === '') return null;
+  if (!/^\d+$/.test(s)) return 'invalid';
+  return cleanMaxOutputTokens(Number(s)) ?? 'invalid';
 }
 
 /** 생각 모드 설정: 자동(모델에 맞춰), 켬, 끔. */
@@ -407,6 +429,8 @@ const KEYS = [
   'llmTemperature',
   // 생각 모드(2026-11-11). 앱 키다.
   'llmThinking',
+  // 출력 토큰 한도(2026-11-11). 앱 키다. null 이면 작업마다 정한 값.
+  'llmMaxOutputTokens',
   // MCP 클라이언트(Task 5b): 외부 MCP 서버. 앱 키다.
   'mcpClientServers',
   // 문헌 검색(Task 11): 출처 스위치와 연락처 이메일. 앱 키다.
@@ -430,6 +454,7 @@ const APP_DEFAULTS = {
   llmContextWindow: LLM_CONTEXT_WINDOW_DEFAULT,
   llmTemperature: null,
   llmThinking: 'auto',
+  llmMaxOutputTokens: null,
   ncbiEmail: '',
   crossrefMailto: '',
   githubReadmeOverlay: true,
@@ -487,6 +512,7 @@ export function fromStored(raw: unknown): AppSettings {
     // temperature(2026-11-11): 0-2 의 수만 살리고, 아니면 빈칸(null).
     settings.llmTemperature = cleanTemperature((raw as { llmTemperature?: unknown }).llmTemperature);
     settings.llmThinking = cleanThinking((raw as { llmThinking?: unknown }).llmThinking);
+    settings.llmMaxOutputTokens = cleanMaxOutputTokens((raw as { llmMaxOutputTokens?: unknown }).llmMaxOutputTokens);
     // MCP 클라이언트(Task 5b): 칸마다 검사하고 틀린 항목은 버린다. 평문 http 허락은 위에서 읽은 목록을 쓴다.
     settings.mcpClientServers = cleanMcpServers((raw as { mcpClientServers?: unknown }).mcpClientServers, settings.allowHttpOrigins);
     // 문헌 검색(Task 11): 출처는 꼭 false 인 것만 끄고, 이메일은 모양이 맞을 때만 살린다.

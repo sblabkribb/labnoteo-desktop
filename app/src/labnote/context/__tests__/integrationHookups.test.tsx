@@ -107,6 +107,37 @@ describe('Integration settings hook-ups (Task 17)', () => {
     expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(true);
   });
 
+  it('the max output tokens field under Advanced is blank (automatic) by default, saves whole numbers from 256 and clears to blank', async () => {
+    const { d, commit } = deps({ llmProvider: 'openai' });
+    render(<IntegrationSettingsPage deps={d} onLeave={async () => {}} />);
+    await flush();
+    const input = screen.getByLabelText(t('integrations.ai.maxOutput')) as HTMLInputElement;
+    expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.contains(input)).toBe(true);
+    expect(input.value).toBe('');
+    expect(input.placeholder).toBe(t('integrations.ai.maxOutputPlaceholder'));
+    fireEvent.change(input, { target: { value: '16,384' } });
+    fireEvent.blur(input);
+    await flush();
+    expect(commit).toHaveBeenLastCalledWith({ llmMaxOutputTokens: 16384 });
+    expect(input.value).toBe('16384');
+    fireEvent.change(input, { target: { value: '100' } });
+    fireEvent.blur(input);
+    await flush();
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(t('integrations.ai.maxOutputInvalid'))).toBeTruthy();
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    await flush();
+    expect(commit).toHaveBeenLastCalledWith({ llmMaxOutputTokens: null });
+    cleanup();
+    // A saved value opens Advanced so it is not hidden
+    const saved = deps({ llmProvider: 'openai', llmMaxOutputTokens: 32768 });
+    render(<IntegrationSettingsPage deps={saved.d} onLeave={async () => {}} />);
+    await flush();
+    expect((screen.getByLabelText(t('integrations.ai.maxOutput')) as HTMLInputElement).value).toBe('32768');
+    expect(screen.getByText(t('integrations.ai.advanced')).closest('details')!.open).toBe(true);
+  });
+
   it('the blank temperature placeholder shows the model recommended value for qwen3, else the plain default', async () => {
     const q = deps({ llmProvider: 'ollama', llmModel: 'qwen3:8b' });
     render(<IntegrationSettingsPage deps={q.d} onLeave={async () => {}} />);

@@ -126,6 +126,7 @@ const ko: Record<string, string> = {
   'ai.reasoningLoop':
     'AI 모델이 같은 생각을 되풀이해서 멈췄습니다(생각을 끄고 한 번 더 해 봤지만 같았습니다). 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꿔 보세요. 요청을 더 짧고 분명하게 바꿔도 됩니다.',
   'ai.retrying': '생각을 끄고 다시 시도하는 중…',
+  'ai.outputLimit': '출력 한도에 닿아 답을 끝내지 못했어요. 요청을 더 짧게 나누거나, {0} 값을 늘리거나 비워 두세요(생각 모드를 끄면 한도가 답에 더 많이 쓰여요).',
   'ai.err.emptyEndpoint': 'AI 서버 주소가 비어 있습니다. {0} 에 주소를 넣어 주세요.',
   'ai.err.badScheme': 'AI 서버 주소가 http:// 나 https:// 주소가 아닙니다. {0} 을(를) 확인해 주세요.',
   'ai.err.offline': 'AI 서버에 연결할 수 없습니다. 서버가 켜져 있는지, {0} 이(가) 맞는지 확인해 주세요.',
@@ -140,6 +141,11 @@ const ko: Record<string, string> = {
   'integrations.ai.temperatureHint':
     '0에서 2 사이의 수입니다. 비워 두면 권장값이 알려진 모델(qwen3 계열: 생각 끔 0.7, 생각 켬 0.6)은 그 값을, 그 밖의 모델은 지금처럼 요청마다 정한 값을 보냅니다. 값을 넣으면 temperature 는 언제나 그 값이 쓰입니다.',
   'integrations.ai.temperatureInvalid': '0에서 2 사이의 수를 넣거나 비워 두세요.',
+  'integrations.ai.maxOutput': '최대 출력 토큰',
+  'integrations.ai.maxOutputPlaceholder': '비우면 자동(작업마다)',
+  'integrations.ai.maxOutputHint':
+    '모델이 한 번에 쓸 수 있는 답의 길이(토큰)입니다. 비워 두면 작업마다 정합니다: 도우미·에이전트 4096, 초안·요약 8192, 대화 기록 요약 2048. 수를 넣으면 모든 요청에 그 값을 씁니다. 어느 쪽이든 컨텍스트 창에서 보낼 글을 뺀 만큼을 넘지 않습니다.',
+  'integrations.ai.maxOutputInvalid': '256 이상의 정수를 넣거나 비워 두세요.',
   'integrations.ai.thinking': '생각 모드',
   'integrations.ai.thinking.auto': '자동',
   'integrations.ai.thinking.on': '켬',
@@ -1681,6 +1687,7 @@ const en: Record<string, string> = {
   'ai.reasoningLoop':
     'The AI model kept repeating the same reasoning, so it was stopped (one more try with thinking off did the same). Set Thinking to Off in Integration settings → AI provider → Advanced, or make the request shorter and clearer.',
   'ai.retrying': 'Trying again with thinking off…',
+  'ai.outputLimit': 'The answer hit the output limit before it was finished. Split the request into smaller parts, or raise or clear {0} (with thinking off more of the limit goes to the answer).',
   'ai.err.emptyEndpoint': 'The AI server address is empty. Enter it in {0}.',
   'ai.err.badScheme': 'The AI server address is not an http:// or https:// address. Check {0}.',
   'ai.err.offline': 'Cannot connect to the AI server. Check that it is running and that {0} is right.',
@@ -1695,6 +1702,11 @@ const en: Record<string, string> = {
   'integrations.ai.temperatureHint':
     'A number from 0 to 2. Left blank, a model with a known recommendation (the qwen3 family: 0.7 with thinking off, 0.6 with thinking on) gets it, and any other model gets the value each request asks for as before. A typed value always wins for the temperature.',
   'integrations.ai.temperatureInvalid': 'Enter a number from 0 to 2, or leave it blank.',
+  'integrations.ai.maxOutput': 'Max output tokens',
+  'integrations.ai.maxOutputPlaceholder': 'Blank: automatic per task',
+  'integrations.ai.maxOutputHint':
+    'How long one answer of the model may be, in tokens. Left blank, each task sets it: assistant and agent 4096, drafts and summaries 8192, chat history summary 2048. A number is used for every request. Either way it never exceeds the context window minus the text being sent.',
+  'integrations.ai.maxOutputInvalid': 'Enter a whole number of 256 or more, or leave it blank.',
   'integrations.ai.thinking': 'Thinking',
   'integrations.ai.thinking.auto': 'Auto',
   'integrations.ai.thinking.on': 'On',

@@ -71,6 +71,7 @@ describe('보관함별 설정', () => {
         'llmContextWindow',
         'llmTemperature',
         'llmThinking',
+        'llmMaxOutputTokens',
         'llmEndpointOpenai',
         'llmModel',
         'llmProvider',

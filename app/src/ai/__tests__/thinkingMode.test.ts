@@ -107,7 +107,7 @@ describe('request bodies', () => {
     const b = bodies(f.calls)[0];
     expect(b.think).toBe(false);
     expect(b.chat_template_kwargs).toBeUndefined();
-    expect(b.options).toEqual({ temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, num_ctx: 4096 });
+    expect(b.options).toEqual({ temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, num_ctx: 4096, num_predict: expect.any(Number) });
   });
 
   it('other models on auto get no new fields', async () => {
@@ -119,7 +119,7 @@ describe('request bodies', () => {
     const o = okOllama();
     await createLlmProvider(s({ llmProvider: 'ollama', llmModel: 'llama3.1:8b' }), o.invoke)!.chat(msgs, { temperature: 0.2 });
     expect(bodies(o.calls)[0].think).toBeUndefined();
-    expect(bodies(o.calls)[0].options).toEqual({ temperature: 0.2 });
+    expect(bodies(o.calls)[0].options).toEqual({ temperature: 0.2, num_predict: expect.any(Number) });
   });
 
   it('a typed temperature replaces only the temperature of the recommended set', async () => {
