@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FirstRun } from '../FirstRun';
 import { useVault, type VaultInfo } from '../../vault/useVault';
+import { getLang, setLang } from '../../i18n/lang';
 
 const dialog = vi.hoisted(() => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock('@tauri-apps/plugin-dialog', () => dialog);
@@ -113,5 +114,22 @@ describe('첫 실행 화면', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('이 폴더를 열 수 없습니다. 폴더가 맞는지 확인해 주세요.');
     expect(screen.getByRole('button', { name: '기존 폴더 열기' })).toBeTruthy();
     expect(calls).toEqual(['vault_current', 'vault_create']);
+  });
+
+  // 첫 화면은 README 의 시작 GIF 에 그대로 찍힌다. README 는 다른 앱 이름을 말하지 않는다(두 언어 모두).
+  it('첫 화면 글은 다른 앱 이름(Obsidian, .obsidian)을 말하지 않는다', async () => {
+    const before = getLang();
+    try {
+      for (const lang of ['ko', 'en'] as const) {
+        setLang(lang);
+        const f = fakeInvoke();
+        const view = render(<Harness invoke={f.invoke} />);
+        await screen.findByRole('heading');
+        expect(view.container.textContent, lang).not.toMatch(/obsidian/i);
+        view.unmount();
+      }
+    } finally {
+      setLang(before);
+    }
   });
 });
