@@ -67,6 +67,10 @@ pub struct ServiceConfig {
     pub ncbi_email: Option<String>,
     /// The contact address sent to Crossref as `mailto=`, only when the user typed one.
     pub crossref_mailto: Option<String>,
+    /// The web search (SearXNG) address of this PC's `assistant.json`, which
+    /// the `webSearch` key is bound to. Never in the vault settings: `None`
+    /// from `from_settings_json`, filled by `load`.
+    pub web_search: Option<Url>,
 }
 
 /// `scholarSources` (spec §8.4): every source is on unless the stored value
@@ -298,6 +302,7 @@ impl ServiceConfig {
             scholar_sources: ScholarSources::from_settings(&settings),
             ncbi_email: email_setting(&settings, "ncbiEmail"),
             crossref_mailto: email_setting(&settings, "crossrefMailto"),
+            web_search: None,
         }
     }
 
@@ -306,7 +311,9 @@ impl ServiceConfig {
     pub fn load(settings_file: &Path, root: Option<&Path>) -> Result<ServiceConfig, NetError> {
         let root = root.ok_or_else(|| NetError::new(NetErrorKind::NotConfigured, "no vault is open"))?;
         let json = crate::vault::settings::read_at(settings_file, root).unwrap_or_else(|| "{}".to_string());
-        Ok(ServiceConfig::from_settings_json(&json))
+        let mut cfg = ServiceConfig::from_settings_json(&json);
+        cfg.web_search = crate::assistant::config::read_at(settings_file).searxng_url.as_deref().and_then(parse_service_url);
+        Ok(cfg)
     }
 }
 
@@ -585,6 +592,19 @@ pub mod tests {
         std::fs::create_dir_all(&other).unwrap();
         let c = ServiceConfig::load(&file, Some(&other)).unwrap();
         assert_eq!(origin(c.partbank_web.as_ref().unwrap()), "https://partbank.kbiofoundry.kr");
+        assert_eq!(c.web_search, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_takes_the_web_search_address_from_this_pcs_assistant_json_only() {
+        let dir = scratch_dir("config-websearch");
+        // The vault settings cannot name it; only assistant.json next to settings.json does.
+        let (file, root) = settings_file(&dir, r#"{"searxngUrl":"https://vault.example","webSearch":"https://vault.example"}"#);
+        assert_eq!(ServiceConfig::load(&file, Some(&root)).unwrap().web_search, None);
+        std::fs::write(file.with_file_name("assistant.json"), r#"{"searxngUrl":"https://llm.example/v1"}"#).unwrap();
+        let c = ServiceConfig::load(&file, Some(&root)).unwrap();
+        assert_eq!(c.web_search.as_ref().map(origin).as_deref(), Some("https://llm.example"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

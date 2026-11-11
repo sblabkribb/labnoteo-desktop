@@ -1123,13 +1123,13 @@ fn error_kinds_match_the_typescript_side() {
 fn net_error_kinds_match_the_fixture() {
     use labnoteo_app_lib::net::NetErrorKind as K;
     let fixture: std::collections::BTreeMap<String, String> = serde_json::from_str(NET_ERRORS).unwrap();
-    assert_eq!(fixture.len(), 27, "ipc-net-errors.json lists every kind");
+    assert_eq!(fixture.len(), 28, "ipc-net-errors.json lists every kind");
     let all = [
         K::NotConfigured, K::KeyMissing, K::InvalidUrl, K::ForbiddenPath, K::Offline, K::Timeout,
         K::Tls, K::Redirect, K::Status, K::NotJson, K::TooLarge, K::Cancelled, K::Keychain,
         K::BadInput, K::Remote, K::NoResult, K::Insecure, K::Io, K::McpAuth, K::McpProtocol,
         K::McpModernOnly, K::McpToolError, K::JsonDisabled, K::RateLimited, K::EnginesDown, K::Blocked,
-        K::UnsupportedType,
+        K::UnsupportedType, K::Unauthorized,
     ];
     // Exhaustive on purpose: a new variant stops compiling here until it is
     // given a name (and an entry in the fixture).
@@ -1161,13 +1161,14 @@ fn net_error_kinds_match_the_fixture() {
         K::EnginesDown => "enginesDown",
         K::Blocked => "blocked",
         K::UnsupportedType => "unsupportedType",
+        K::Unauthorized => "unauthorized",
     };
     for k in &all {
         let expected = fixture.get(name(k)).unwrap_or_else(|| panic!("{} missing from ipc-net-errors.json", name(k)));
         assert_eq!(serde_json::to_value(k).unwrap(), Value::String(expected.clone()), "kind {}", name(k));
     }
     let named: std::collections::BTreeSet<&str> = all.iter().map(name).collect();
-    assert_eq!(named.len(), 27);
+    assert_eq!(named.len(), 28);
 }
 
 /// What `McpError` puts in `kind`, one entry per `McpErrorKind`.

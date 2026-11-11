@@ -25,5 +25,6 @@
   "rateLimited": "rateLimited",
   "enginesDown": "enginesDown",
   "blocked": "blocked",
-  "unsupportedType": "unsupportedType"
+  "unsupportedType": "unsupportedType",
+  "unauthorized": "unauthorized"
 }

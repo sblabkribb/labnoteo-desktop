@@ -8,6 +8,8 @@
 //! `slackBot` the fixed origin `https://slack.com` (only a bot token,
 //! `xoxb-…`, is accepted for it), and `ncbiEutils` the fixed origin
 //! `https://eutils.ncbi.nlm.nih.gov` (the optional NCBI E-utilities API key).
+//! `webSearch` (the optional key of a web search server behind an API
+//! gateway) is bound to the origin of this PC's `assistant.json` search address.
 //!
 //! No function here returns a key to the webview, and no error message ever
 //! contains one: the webview learns only a `set` flag and an `epoch` counter,
@@ -144,6 +146,7 @@ pub enum Slot {
     BfwDesktop,
     SlackBot,
     NcbiEutils,
+    WebSearch,
 }
 
 impl Slot {
@@ -157,6 +160,7 @@ impl Slot {
             Slot::BfwDesktop => "bfwDesktop",
             Slot::SlackBot => "slackBot",
             Slot::NcbiEutils => "ncbiEutils",
+            Slot::WebSearch => "webSearch",
         }
     }
 
@@ -168,6 +172,7 @@ impl Slot {
             Slot::PartbankWeb => cfg.partbank_web.as_ref(),
             Slot::LlmOpenai => cfg.llm_openai.as_ref(),
             Slot::BfwServer => cfg.bfw_url.as_ref(),
+            Slot::WebSearch => cfg.web_search.as_ref(),
             Slot::BfwDesktop | Slot::SlackBot | Slot::NcbiEutils => None,
         }
     }
@@ -297,6 +302,7 @@ pub struct SlotValues<T> {
     pub bfw_desktop: T,
     pub slack_bot: T,
     pub ncbi_eutils: T,
+    pub web_search: T,
 }
 
 impl<T> SlotValues<T> {
@@ -309,6 +315,7 @@ impl<T> SlotValues<T> {
             bfw_desktop: f(Slot::BfwDesktop),
             slack_bot: f(Slot::SlackBot),
             ncbi_eutils: f(Slot::NcbiEutils),
+            web_search: f(Slot::WebSearch),
         }
     }
 }
@@ -496,8 +503,8 @@ mod tests {
     #[test] fn status_serializes_flags_and_epochs_only() {
         let v = serde_json::to_value(status_of(&MemoryStore::default(), &cfg("{}"))).unwrap();
         assert_eq!(v, serde_json::json!({
-            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false,"ncbiEutils":false},
-            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0,"ncbiEutils":0}}));
+            "set": {"partbankDesktop":false,"partbankWeb":false,"llmOpenai":false,"bfwServer":false,"bfwDesktop":false,"slackBot":false,"ncbiEutils":false,"webSearch":false},
+            "epoch": {"partbankDesktop":0,"partbankWeb":0,"llmOpenai":0,"bfwServer":0,"bfwDesktop":0,"slackBot":0,"ncbiEutils":0,"webSearch":0}}));
     }
     #[test] fn slack_slot_has_fixed_origin() {
         assert_eq!(account(Slot::SlackBot, &cfg("{}")).unwrap(), "slackBot|https://slack.com");
@@ -566,6 +573,21 @@ mod tests {
         assert_eq!(store_secret_at_url(&store, Slot::NcbiEutils, &url, "testncbikey123").unwrap_err().kind, NetErrorKind::BadInput);
         clear_secret(&store, Slot::NcbiEutils, &c).unwrap();
         assert!(!status_of(&store, &c).set.ncbi_eutils);
+    }
+    #[test] fn web_search_slot_is_bound_to_the_search_address_origin() {
+        let mut c = cfg(r#"{"llmEndpointOpenai":"https://llm.example/v1"}"#);
+        assert_eq!(account(Slot::WebSearch, &c).unwrap_err().kind, NetErrorKind::NotConfigured);
+        c.web_search = super::super::config::parse_service_url("https://LLM.example/v1/");
+        assert_eq!(account(Slot::WebSearch, &c).unwrap(), "webSearch|https://llm.example");
+        let slot: Slot = serde_json::from_str("\"webSearch\"").unwrap();
+        assert_eq!((slot, slot.name()), (Slot::WebSearch, "webSearch"));
+        let store = MemoryStore::default();
+        store_secret(&store, Slot::WebSearch, &c, " test-search-key ").unwrap();
+        assert_eq!(store.get("webSearch|https://llm.example").unwrap().as_deref(), Some("test-search-key"));
+        let st = status_of(&store, &c);
+        assert_eq!((st.set.web_search, st.epoch.web_search, st.set.llm_openai), (true, 1, false));
+        clear_secret(&store, Slot::WebSearch, &c).unwrap();
+        assert!(!status_of(&store, &c).set.web_search);
     }
     const ACC: &str = "mcpClient:0a1b2c3d|https://rapid.kbiofoundry.kr";
 

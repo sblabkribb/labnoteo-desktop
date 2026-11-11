@@ -11,9 +11,17 @@
 //! - `GET {base}/search?q=…&format=json&language=…&safesearch=1&pageno=1`
 //!   with `User-Agent: labnoteO/<ver>`, `Accept: application/json,
 //!   text/html;q=0.5`, `Accept-Language: ko,en`. No redirects (a 3xx is
-//!   `redirect`), 1 MiB cap, 15 s timeout, no key ever sent.
+//!   `redirect`, so a key never follows one to another origin), 1 MiB cap,
+//!   15 s timeout.
+//! - Key (a search server behind an API gateway): `Authorization: Bearer`
+//!   with, in order, the `webSearch` key stored for the search URL's origin,
+//!   else the OpenAI-compatible LLM key when the LLM address has exactly the
+//!   same origin (scheme, host, port), else no `Authorization` at all. Keys
+//!   come only from the keychain and are redacted from every answer and error.
 //! - Query: trimmed, 1..=200 chars (longer is `badInput`, nothing is sent).
-//! - Errors: 403 → `jsonDisabled` (the instance does not allow `format=json`),
+//! - Errors: 401, or 403 with a JSON authentication error body (a gateway's
+//!   `{"error":{"type":"authentication_error",…}}`) → `unauthorized`; any
+//!   other 403 → `jsonDisabled` (the instance does not allow `format=json`),
 //!   429 → `rateLimited`, no results with `unresponsive_engines` →
 //!   `enginesDown`; others are the usual `NetError` kinds.
 //! - Result: at most 8 hits, http/https URLs only (fragment dropped), deduped
@@ -28,11 +36,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
 
-use super::config::{is_loopback, join_path, origin, parse_service_url, Url};
+use super::config::{is_loopback, join_path, origin, parse_service_url, ServiceConfig, Url};
 use super::error::{NetError, NetErrorKind};
 use super::http::{parse_json, send, Outgoing};
+use super::secrets::{key_for, SecretStore, Secrets, Slot};
 use super::NetState;
-use crate::assistant::config::{allow_http_of, read_at, MAX_URL};
+use crate::assistant::config::{read_at, MAX_URL};
 use crate::vault::{SettingsFile, VaultState};
 
 /// Longest query sent, in chars.
@@ -252,25 +261,80 @@ pub fn parse_results(text: &str) -> Result<SearchResult, NetError> {
     Ok(SearchResult { hits, engines_down })
 }
 
-/// One search against `base` (already validated).
-pub async fn search_at(net: &NetState, request_id: Option<&str>, base: &Url, query: &str, opts: &SearchOpts) -> Result<SearchResult, NetError> {
+/// The key a search to `search` carries: the `webSearch` key stored for its
+/// origin; else, when the OpenAI-compatible LLM address of `cfg` has exactly
+/// the same origin, the LLM key; else none. A key is never picked for any
+/// other origin. A blank stored value counts as none.
+pub fn search_key(store: &dyn SecretStore, search: &Url, cfg: Option<&ServiceConfig>) -> Result<Option<String>, NetError> {
+    let usable = |k: Option<String>| k.filter(|k| !k.trim().is_empty());
+    let target = origin(search);
+    if let Some(key) = usable(store.get(&format!("{}|{target}", Slot::WebSearch.name()))?) {
+        return Ok(Some(key));
+    }
+    match cfg {
+        Some(cfg) if cfg.llm_openai.as_ref().is_some_and(|llm| origin(llm) == target) => {
+            Ok(usable(key_for(store, Slot::LlmOpenai, cfg)?))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// A 401, or a 403 whose (redacted) body is a JSON authentication error such
+/// as an API gateway's `{"error":{"message":"invalid API key","type":
+/// "authentication_error"}}`. A stock SearXNG 403 (an HTML page) is not.
+fn is_auth_refusal(status: Option<u16>, body: Option<&str>) -> bool {
+    match status {
+        Some(401) => true,
+        Some(403) => {
+            let Some(v) = body.and_then(|b| serde_json::from_str::<Value>(b).ok()) else { return false };
+            let err = v.get("error");
+            let fields = [err, err.and_then(|e| e.get("type")), err.and_then(|e| e.get("code")), err.and_then(|e| e.get("message")), v.get("message"), v.get("detail")];
+            let words: Vec<String> = fields.iter().filter_map(|f| f.and_then(Value::as_str)).map(str::to_ascii_lowercase).collect();
+            words.iter().any(|w| ["auth", "api key", "api_key", "apikey", "token"].iter().any(|needle| w.contains(needle)))
+        }
+        _ => false,
+    }
+}
+
+fn unauthorized() -> NetError {
+    NetError::new(NetErrorKind::Unauthorized, "the search server needs a valid key (the search key or the LLM key)")
+}
+
+/// One search against `base` (already validated), with `key` in
+/// `Authorization: Bearer` when given. `allow_http` is the open vault's
+/// `allowHttpOrigins`: a key goes in clear text only to loopback or there.
+pub async fn search_at(
+    net: &NetState,
+    request_id: Option<&str>,
+    base: &Url,
+    query: &str,
+    opts: &SearchOpts,
+    key: Option<String>,
+    allow_http: &[String],
+) -> Result<SearchResult, NetError> {
     let url = search_url(base, query, opts)?;
+    let mut headers = vec![
+        ("user-agent", concat!("labnoteO/", env!("CARGO_PKG_VERSION")).to_string()),
+        ("accept", "application/json, text/html;q=0.5".to_string()),
+        ("accept-language", "ko,en".to_string()),
+    ];
+    if let Some(k) = &key {
+        headers.push(("authorization", format!("Bearer {k}")));
+    }
+    let allow_http = allow_http.contains(&origin(&url));
     let out = Outgoing {
         method: reqwest::Method::GET,
         url,
-        headers: vec![
-            ("user-agent", concat!("labnoteO/", env!("CARGO_PKG_VERSION")).to_string()),
-            ("accept", "application/json, text/html;q=0.5".to_string()),
-            ("accept-language", "ko,en".to_string()),
-        ],
+        headers,
         json: None,
         timeout: Some(TIMEOUT),
         max_body: MAX_BODY,
-        secret: None,
-        allow_http: false,
+        secret: key,
+        allow_http,
     };
     match send(net, request_id, out).await {
         Ok(incoming) => parse_results(&incoming.text),
+        Err(e) if e.kind == NetErrorKind::Status && is_auth_refusal(e.status, e.body.as_deref()) => Err(unauthorized()),
         Err(e) if e.kind == NetErrorKind::Status && e.status == Some(403) => Err(NetError::new(
             NetErrorKind::JsonDisabled,
             "this SearXNG instance does not allow JSON results (add json to search.formats)",
@@ -292,32 +356,45 @@ pub fn stored_base(stored: Option<&str>, allow_http: &[String]) -> Result<Url, N
     Ok(url)
 }
 
+/// The open vault's service config (the LLM key fallback and
+/// `allowHttpOrigins`); `None` with no vault open.
+fn service_config(vault: &VaultState, settings: &SettingsFile) -> Option<ServiceConfig> {
+    ServiceConfig::load(&settings.0, vault.root().ok().as_deref()).ok()
+}
+
 #[tauri::command]
 pub async fn web_search(
     vault: State<'_, VaultState>,
     settings: State<'_, SettingsFile>,
     net: State<'_, NetState>,
+    secrets: State<'_, Secrets>,
     request_id: Option<String>,
     query: String,
     opts: Option<SearchOpts>,
 ) -> Result<SearchResult, NetError> {
     let cfg = read_at(&settings.0);
-    let allow = allow_http_of(&settings.0, &vault);
+    let svc = service_config(&vault, &settings);
+    let allow = svc.as_ref().map(|c| c.allow_http.clone()).unwrap_or_default();
     let base = stored_base(cfg.searxng_url.as_deref(), &allow)?;
-    search_at(&net, request_id.as_deref(), &base, &query, &opts.unwrap_or_default()).await
+    let key = search_key(secrets.0.as_ref(), &base, svc.as_ref())?;
+    search_at(&net, request_id.as_deref(), &base, &query, &opts.unwrap_or_default(), key, &allow).await
 }
 
-/// A test search against an unsaved URL (the pane's "확인" button).
+/// A test search against an unsaved URL (the pane's "확인" button), with the
+/// key `search_key` picks for that URL's origin.
 #[tauri::command]
 pub async fn web_search_probe(
     vault: State<'_, VaultState>,
     settings: State<'_, SettingsFile>,
     net: State<'_, NetState>,
+    secrets: State<'_, Secrets>,
     url: String,
 ) -> Result<SearchResult, NetError> {
-    let allow = allow_http_of(&settings.0, &vault);
+    let svc = service_config(&vault, &settings);
+    let allow = svc.as_ref().map(|c| c.allow_http.clone()).unwrap_or_default();
     let base = probe_base(&url, &allow)?;
-    search_at(&net, None, &base, PROBE_QUERY, &SearchOpts::default()).await
+    let key = search_key(secrets.0.as_ref(), &base, svc.as_ref())?;
+    search_at(&net, None, &base, PROBE_QUERY, &SearchOpts::default(), key, &allow).await
 }
 
 /// An unsaved URL for the probe: `insecure` for clear text the rule refuses,
@@ -343,7 +420,7 @@ mod tests {
     }
 
     fn search(url: &str, query: &str) -> Result<SearchResult, NetError> {
-        block_on(search_at(&NetState::default(), Some("r1"), &base(url), query, &SearchOpts::default()))
+        block_on(search_at(&NetState::default(), Some("r1"), &base(url), query, &SearchOpts::default(), None, &[]))
     }
 
     fn results(v: Value) -> String {
@@ -569,7 +646,154 @@ mod tests {
         let s = silent();
         let net = NetState::default();
         assert!(!net.cancel("early"));
-        let e = block_on(search_at(&net, Some("early"), &base(&s.url), "pcr", &SearchOpts::default())).unwrap_err();
+        let e = block_on(search_at(&net, Some("early"), &base(&s.url), "pcr", &SearchOpts::default(), None, &[])).unwrap_err();
         assert_eq!(e.kind, NetErrorKind::Cancelled);
+    }
+
+    // ── The search key (a SearXNG behind an API gateway) ──────────────────
+
+    use crate::net::secrets::{account, MemoryStore};
+
+    const SEARCH_KEY: &str = "test-search-key-123";
+    const LLM_KEY: &str = "test-llm-key-456";
+    const GATEWAY_401: &str = r#"{"error":{"message":"invalid API key","type":"authentication_error"}}"#;
+
+    /// Vault settings whose OpenAI-compatible LLM address is `llm`.
+    fn llm_cfg(llm: &str) -> ServiceConfig {
+        ServiceConfig::from_settings_json(&json!({ "llmProvider": "openai", "llmEndpointOpenai": llm }).to_string())
+    }
+
+    /// A store with the LLM key for `cfg`'s LLM origin and, when given, a
+    /// search key for `search_origin`.
+    fn store_with(cfg: &ServiceConfig, search_origin: Option<&str>) -> MemoryStore {
+        let store = MemoryStore::default();
+        store.set(&account(Slot::LlmOpenai, cfg).unwrap(), LLM_KEY).unwrap();
+        if let Some(o) = search_origin {
+            store.set(&format!("webSearch|{o}"), SEARCH_KEY).unwrap();
+        }
+        store
+    }
+
+    /// One search to `base` with the key `search_key` picks; the error, if any.
+    fn keyed_search(base_url: &str, store: &MemoryStore, cfg: &ServiceConfig) -> Result<SearchResult, NetError> {
+        let b = base(base_url);
+        let key = search_key(store, &b, Some(cfg)).unwrap();
+        block_on(search_at(&NetState::default(), None, &b, "pcr", &SearchOpts::default(), key, &cfg.allow_http))
+    }
+
+    fn assert_no_key_in(e: &NetError) {
+        let text = serde_json::to_string(e).unwrap();
+        assert!(!text.contains(SEARCH_KEY) && !text.contains(LLM_KEY), "{text}");
+    }
+
+    #[test]
+    fn web_search_key_own_slot_wins_over_the_llm_key() {
+        let s = serve(vec![Canned::ok(r#"{"results": []}"#)]);
+        let cfg = llm_cfg(&format!("{}/v1", s.url));
+        let store = store_with(&cfg, Some(&s.url));
+        assert_eq!(search_key(&store, &base(&s.url), Some(&cfg)).unwrap().as_deref(), Some(SEARCH_KEY));
+        keyed_search(&format!("{}/v1", s.url), &store, &cfg).unwrap();
+        let bearer = format!("Bearer {SEARCH_KEY}");
+        assert_eq!(s.requests.lock().unwrap()[0].header("authorization"), Some(bearer.as_str()));
+    }
+
+    #[test]
+    fn web_search_key_falls_back_to_the_llm_key_on_the_same_origin() {
+        // The user's case: base https://llm.example/v1 → https://llm.example/v1/search.
+        let s = serve(vec![Canned::ok(r#"{"results": []}"#)]);
+        let cfg = llm_cfg(&format!("{}/v1", s.url));
+        let store = store_with(&cfg, None);
+        keyed_search(&format!("{}/v1", s.url), &store, &cfg).unwrap();
+        let reqs = s.requests.lock().unwrap();
+        assert!(reqs[0].path.starts_with("/v1/search?"), "{}", reqs[0].path);
+        let bearer = format!("Bearer {LLM_KEY}");
+        assert_eq!(reqs[0].header("authorization"), Some(bearer.as_str()));
+        // A different path on the same origin still counts as the same server.
+        let https = llm_cfg("https://llm.example/v1");
+        let store = store_with(&https, None);
+        assert_eq!(search_key(&store, &base("https://LLM.example:443/other"), Some(&https)).unwrap().as_deref(), Some(LLM_KEY));
+    }
+
+    #[test]
+    fn web_search_key_is_never_sent_to_another_origin() {
+        let s = serve(vec![Canned::ok(r#"{"results": []}"#)]);
+        let other = serve(vec![]);
+        // The LLM is on another port; a search key is stored only for another origin.
+        let cfg = llm_cfg(&format!("{}/v1", other.url));
+        let store = store_with(&cfg, Some(&other.url));
+        assert_eq!(search_key(&store, &base(&s.url), Some(&cfg)).unwrap(), None);
+        keyed_search(&s.url, &store, &cfg).unwrap();
+        assert_eq!(s.requests.lock().unwrap()[0].header("authorization"), None);
+        // Another host, scheme or port is another origin.
+        let https = llm_cfg("https://llm.example/v1");
+        let store = store_with(&https, Some("https://llm.example"));
+        for b in ["https://search.llm.example/v1", "http://llm.example:8080/v1", "https://llm.example:8443/v1"] {
+            let url = parse_service_url(b).unwrap();
+            assert_eq!(search_key(&store, &url, Some(&https)).unwrap(), None, "{b}");
+        }
+        // No vault open: only the search slot, never the LLM key.
+        assert_eq!(search_key(&store, &base("https://llm.example/v1"), None).unwrap().as_deref(), Some(SEARCH_KEY));
+        let llm_only = store_with(&https, None);
+        assert_eq!(search_key(&llm_only, &base("https://llm.example/v1"), None).unwrap(), None);
+        // A blank stored value is no key.
+        let blank = MemoryStore::default();
+        blank.set("webSearch|https://llm.example", "  ").unwrap();
+        assert_eq!(search_key(&blank, &base("https://llm.example"), None).unwrap(), None);
+    }
+
+    #[test]
+    fn web_search_key_does_not_follow_a_cross_origin_redirect() {
+        let elsewhere = serve(vec![Canned::ok(r#"{"results": []}"#)]);
+        let s = serve(vec![Canned::status(302).header("Location", format!("{}/search?q=pcr&format=json", elsewhere.url))]);
+        let cfg = llm_cfg(&format!("{}/v1", s.url));
+        let store = store_with(&cfg, Some(&s.url));
+        let e = keyed_search(&format!("{}/v1", s.url), &store, &cfg).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Redirect);
+        assert_eq!(e.location.as_deref(), Some(elsewhere.url.as_str()));
+        assert_eq!(s.request_count(), 1);
+        assert_eq!(elsewhere.request_count(), 0, "the redirect target never gets a request, so never a key");
+        assert_no_key_in(&e);
+    }
+
+    #[test]
+    fn web_search_gateway_401_is_unauthorized_and_names_no_key() {
+        // Without a key: the gateway's 401.
+        let s = serve(vec![Canned::status(401).header("Content-Type", "application/json").body(GATEWAY_401)]);
+        let e = search(&s.url, "pcr").unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Unauthorized);
+        assert_eq!((e.status, e.body.as_deref()), (None, None));
+        // With a wrong key that the server echoes back: still no key in the error.
+        let echo = format!(r#"{{"error":{{"message":"invalid API key {SEARCH_KEY}","type":"authentication_error"}}}}"#);
+        let s = serve(vec![Canned::status(401).header("Content-Type", "application/json").body(echo)]);
+        let cfg = llm_cfg("https://llm.example");
+        let store = store_with(&cfg, Some(&s.url));
+        let e = keyed_search(&s.url, &store, &cfg).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Unauthorized);
+        assert_no_key_in(&e);
+    }
+
+    #[test]
+    fn web_search_403_with_an_auth_error_body_is_unauthorized_not_json_disabled() {
+        let body = r#"{"error":{"message":"forbidden","type":"authentication_error"}}"#;
+        let s = serve(vec![Canned::status(403).header("Content-Type", "application/json").body(body)]);
+        assert_eq!(search(&s.url, "pcr").unwrap_err().kind, NetErrorKind::Unauthorized);
+        let s = serve(vec![Canned::status(403).body(r#"{"error":"invalid api key"}"#)]);
+        assert_eq!(search(&s.url, "pcr").unwrap_err().kind, NetErrorKind::Unauthorized);
+        // A stock SearXNG 403 (HTML, or JSON without an auth error) stays jsonDisabled.
+        let s = serve(vec![Canned::status(403).body(r#"{"error":"format not allowed"}"#)]);
+        assert_eq!(search(&s.url, "pcr").unwrap_err().kind, NetErrorKind::JsonDisabled);
+        assert!(!is_auth_refusal(Some(403), Some("<h1>403 Forbidden</h1>")));
+        assert!(!is_auth_refusal(Some(500), Some(GATEWAY_401)));
+        assert!(is_auth_refusal(Some(401), None));
+    }
+
+    #[test]
+    fn web_search_key_never_goes_over_clear_text_to_another_computer() {
+        let b = parse_searxng_url("http://search.lab", &["http://search.lab".into()]).unwrap();
+        let key = Some(SEARCH_KEY.to_string());
+        // The vault no longer allows the origin: refused before anything is sent.
+        let e = block_on(search_at(&NetState::default(), None, &b, "pcr", &SearchOpts::default(), key, &[])).unwrap_err();
+        assert_eq!(e.kind, NetErrorKind::Insecure);
+        assert_no_key_in(&e);
     }
 }

@@ -12,7 +12,9 @@ export type Slot =
   | 'bfwDesktop'
   | 'slackBot'
   // NCBI E-utilities API 키(문헌 검색, 선택). 주소가 고정이다: https://eutils.ncbi.nlm.nih.gov
-  | 'ncbiEutils';
+  | 'ncbiEutils'
+  // 웹 검색 서버(API 게이트웨이 뒤)의 키(선택). 이 PC 의 assistant.json 검색 주소의 origin 에 묶인다.
+  | 'webSearch';
 
 /** Rust `secret_status` 의 모양. */
 export interface SecretStatus {
