@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import type { TreeNode } from '@labnoteo/core';
 import { treeKeyAction, type KeyRow } from '../../../vendor/labnoteo/src/views/treeKeys';
 import type { MenuAnchor } from '../ui/menuStore';
@@ -53,6 +53,15 @@ export interface TreeViewProps {
   actions?(node: TreeNode): TreeAction[] | undefined;
   /** 이 id 의 줄로 초점을 옮기고 보이게 스크롤한다. seq 마다 한 번, 그 줄이 그려진 뒤에(조상이 펼쳐지길 기다린다). */
   focusRequest?: { id: string; seq: number };
+  /** Alt+Shift+↑/↓: 그 줄을 한 칸 옮긴다(실험 탭의 Workflow·Unit Operation 차례). 옮길 수 없는 줄이면 아무것도 하지 않는다. */
+  onMove?(node: TreeNode, dir: 'up' | 'down'): void;
+  /**
+   * 끌어 옮길 수 있는 줄의 무리(같은 실험의 Workflow 들). 같은 무리의 줄 위에만 놓을 수 있고, 놓을 자리에 선이 보인다.
+   * undefined 면 끌 수 없다.
+   */
+  dragGroup?(node: TreeNode): string | undefined;
+  /** 끈 줄을 `target` 줄의 앞(`before`)이나 뒤(`after`)에 놓았다. */
+  onDrop?(node: TreeNode, target: TreeNode, place: 'before' | 'after'): void;
 }
 
 export interface TreeState {
@@ -128,9 +137,12 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
  *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
  * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
-export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, badge, actions, focusRequest }: TreeViewProps) {
+export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, badge, actions, focusRequest, onMove, dragGroup, onDrop }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
+  /** 끌고 있는 줄과, 놓을 자리(그 줄의 앞이나 뒤). */
+  const [dragKey, setDragKey] = useState<string>();
+  const [drop, setDrop] = useState<{ key: string; place: 'before' | 'after' }>();
   const refs = useRef(new Map<string, HTMLLIElement>());
   /** 키보드로 옮긴 초점: 다시 그린 뒤 그 줄에 초점을 준다. */
   const moveFocus = useRef(false);
@@ -170,6 +182,14 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>, index: number) => {
+    // Alt+Shift+↑/↓ moves the row (Workflow and Unit Operation order) when the tree offers it.
+    if (onMove && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      e.stopPropagation();
+      setFocusKey(rows[index].key);
+      onMove(rows[index].node, e.key === 'ArrowUp' ? 'up' : 'down');
+      return;
+    }
     // Alt/Ctrl/Meta+arrow belongs to the app (Alt+←/→ is back and forward): never take it as tree movement.
     if ((e.altKey || e.ctrlKey || e.metaKey) && /^(Arrow|Home$|End$)/.test(e.key)) return;
     const row = rows[index];
@@ -209,6 +229,33 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     }
   };
 
+  const groupOf = (row: Row | undefined) => (row ? dragGroup?.(row.node) : undefined);
+  const dragRow = dragKey === undefined ? undefined : rows.find((r) => r.key === dragKey);
+  const endDrag = () => {
+    setDragKey(undefined);
+    setDrop(undefined);
+  };
+  const onDragOver = (e: DragEvent<HTMLLIElement>, row: Row) => {
+    const group = groupOf(dragRow);
+    if (!dragRow || group === undefined || row.key === dragRow.key || groupOf(row) !== group) {
+      e.dataTransfer.dropEffect = 'none';
+      if (drop) setDrop(undefined);
+      return;
+    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const r = e.currentTarget.getBoundingClientRect();
+    const place = e.clientY < r.top + r.height / 2 ? 'before' : 'after';
+    if (drop?.key !== row.key || drop.place !== place) setDrop({ key: row.key, place });
+  };
+  const onDropRow = (e: DragEvent<HTMLLIElement>, row: Row) => {
+    e.preventDefault();
+    const from = dragRow;
+    const place = drop?.key === row.key ? drop.place : 'after';
+    endDrag();
+    if (from && groupOf(from) !== undefined && groupOf(from) === groupOf(row) && from.key !== row.key) onDrop?.(from.node, row.node, place);
+  };
+
   const onContextMenu = (e: MouseEvent<HTMLLIElement>, row: Row) => {
     if (!onContext) return;
     e.preventDefault();
@@ -220,7 +267,11 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     <ul role="tree" aria-label={label} className={className}>
       {rows.map((row, i) => {
         const { className: deep, ...depth } = depthAttrs(row.depth);
-        const rowClass = ['wf-tree-row', row.node.dimmed ? 'dimmed' : '', deep ?? '', extraClass?.(row.node) ?? ''].filter(Boolean).join(' ');
+        const dropClass = drop?.key === row.key ? `drop-${drop.place}` : '';
+        const rowClass = ['wf-tree-row', row.node.dimmed ? 'dimmed' : '', deep ?? '', extraClass?.(row.node) ?? '', dropClass, row.key === dragKey ? 'dragging' : '']
+          .filter(Boolean)
+          .join(' ');
+        const draggable = onDrop !== undefined && groupOf(row) !== undefined;
         const mark = nodeClass?.(row.node);
         const icon = treeIcon(row.node.icon, row.expanded);
         const note = meta?.(row.node);
@@ -247,6 +298,22 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             onClick={(e) => activate(row, e.currentTarget)}
             onKeyDown={(e) => onKeyDown(e, i)}
             onContextMenu={(e) => onContextMenu(e, row)}
+            draggable={draggable || undefined}
+            onDragStart={
+              draggable
+                ? (e) => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', row.node.label);
+                    setDragKey(row.key);
+                  }
+                : undefined
+            }
+            onDragOver={dragKey !== undefined ? (e) => onDragOver(e, row) : undefined}
+            onDragLeave={dragKey !== undefined ? (e) => {
+              if (drop?.key === row.key && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(undefined);
+            } : undefined}
+            onDrop={dragKey !== undefined ? (e) => onDropRow(e, row) : undefined}
+            onDragEnd={draggable ? endDrag : undefined}
             onFocus={(e) => {
               if (e.target === e.currentTarget) setFocusKey(row.key);
             }}

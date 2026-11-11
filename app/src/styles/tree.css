@@ -363,3 +363,8 @@ button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
 .catalog-head .catalog-icon { flex: none; }
 .catalog-head .catalog-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .catalog-head .tree-meta { font-weight: 400; }
+
+/* 끌어 옮기기(실험 탭의 Workflow 차례): 놓을 자리에 2px 선. 색만이 아니라 선의 자리(위·아래)가 뜻을 전한다. */
+.wf-tree-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.wf-tree-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.wf-tree-row.dragging { opacity: 0.5; }

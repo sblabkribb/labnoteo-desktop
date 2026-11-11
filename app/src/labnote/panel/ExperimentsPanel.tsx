@@ -14,6 +14,9 @@ import { commandById } from '../commands/registry';
 import { runCommand } from '../commands/runCommand';
 import { insertUnitOp } from '../commands/unitOp';
 import { createWorkflow, toggleWorkflowTick } from '../commands/workflow';
+import { moveWorkflow } from '../commands/workflowOrder';
+import { moveUnitOp } from '../commands/uoOrder';
+import { workflowOrderItems } from '../menus';
 import { coreLocale, coreT } from '../i18n';
 import { samePath, VAULT_ROOT } from '../paths';
 import { catalogDescriptionShown } from '../port/aliasHints';
@@ -21,7 +24,7 @@ import { CATALOG_DIR, ensureVaultCatalogs } from '../port/catalogUpdate';
 import { statusNames } from '../port/status';
 import { discussWords, showMarkers, treeLabels } from '../port/workflowView';
 import { statusLabel, statusShape } from '../statusLabels';
-import { openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
+import { MENU_SEPARATOR, openMenu, type MenuAnchor, type MenuItem } from '../ui/menuStore';
 import { ExperimentEntryCache, type PanelEntry } from './experimentEntries';
 import { publishExperimentTree } from './experimentTreeSnapshot';
 import {
@@ -179,6 +182,9 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
   const [popover, setPopover] = useState<{ entry: CatalogEntry; anchor: HTMLElement }>();
   const [groupBy, setGroupBy] = useState<GroupBy>(groupByFromSetting(ctx.settings.workflowViewGroupBy));
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  /** 옮긴 Workflow·UO 의 줄로 초점을 돌린다(경로와 줄이 바뀌어 id 가 바뀐다). */
+  const [focusRequest, setFocusRequest] = useState<{ id: string; seq: number }>();
+  const focusSeq = useRef(0);
   /** 이 패널에서 바꾼 실험: 찾기에 더는 맞지 않아도 남긴다(다시 우클릭해 되돌릴 수 있게, 플러그인 #356). */
   const kept = useRef(new Set<string>());
   /** 한 번 펼친 묶음: 다시 그려도 사람이 접은 묶음을 다시 펼치지 않는다. */
@@ -420,6 +426,52 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
   /** README 체크리스트에서 그 워크플로를 체크하거나 푼다(상태 아이콘과 맥락 메뉴). */
   const tickWorkflow = (exp: ExpNode, wf: WfNode) => changed(exp.dir, () => toggleWorkflowTick(ctx, exp.dir, posix.basename(wf.path)));
 
+  /** 옮긴 뒤 새 id 의 줄로 초점을 옮기고, 펼쳐 둔 Workflow 는 새 id 로도 펼친다. */
+  const follow = (oldId: string, newId: string) => {
+    setExpanded((prev) => (prev.has(oldId) ? new Set([...prev, newId]) : prev));
+    setFocusRequest({ id: newId, seq: ++focusSeq.current });
+  };
+
+  /** 그 실험의 Workflow 들(찾기로 걸러지지 않은 전체), 번호 차례. */
+  const allWorkflows = (exp: ExpNode) => nodes.find((n) => n.id === exp.id)?.workflows ?? exp.workflows;
+
+  /** Workflow 를 한 칸 위·아래로, 또는 그 실험 안의 k 번째 자리로(번호, 링크, README 체크리스트가 따라간다). */
+  const moveWf = (exp: ExpNode, wf: WfNode, target: 'up' | 'down' | number) =>
+    changed(exp.dir, async () => {
+      const moved = await moveWorkflow(ctx, wf.path, target);
+      if (moved) follow(wf.id, `wf:${moved}`);
+    });
+
+  /** Workflow 노트 안의 Unit Operation 을 한 칸 위·아래로. */
+  const moveUo = (wf: WfNode, uo: UoNode, dir: 'up' | 'down') =>
+    changed(posix.dirname(wf.path), async () => {
+      const line = await moveUnitOp(ctx, wf.path, uo.line, dir);
+      if (line !== undefined) setFocusRequest({ id: `uo:${wf.path}#${line}`, seq: ++focusSeq.current });
+    });
+
+  const onMove = (node: TreeNode, dir: 'up' | 'down') => {
+    const item = items.get(node.id);
+    if (item?.kind === 'workflow') void runCommand(ctx, moveWf(item.exp, item.wf, dir));
+    else if (item?.kind === 'uo') void runCommand(ctx, moveUo(item.wf, item.uo, dir));
+  };
+
+  /** 끌어 옮기기: 같은 실험의 Workflow 줄끼리만(찾는 중에는 자리가 모호해서 끌 수 없다). */
+  const dragGroup = (node: TreeNode): string | undefined => {
+    const item = items.get(node.id);
+    return item?.kind === 'workflow' && !searching ? item.exp.dir : undefined;
+  };
+  const onDrop = (node: TreeNode, target: TreeNode, place: 'before' | 'after') => {
+    const src = items.get(node.id);
+    const dst = items.get(target.id);
+    if (src?.kind !== 'workflow' || dst?.kind !== 'workflow' || src.exp.dir !== dst.exp.dir) return;
+    const list = allWorkflows(src.exp);
+    const from = list.findIndex((w) => w.id === src.wf.id);
+    const at = list.findIndex((w) => w.id === dst.wf.id);
+    if (from < 0 || at < 0) return;
+    const to = place === 'before' ? (at > from ? at - 1 : at) : at > from ? at : at + 1;
+    if (to !== from) void runCommand(ctx, moveWf(src.exp, src.wf, to));
+  };
+
   const addWorkflow = (exp: ExpNode) => void runCommand(ctx, () => createWorkflow(ctx, undefined, { experimentDir: exp.dir }));
   const addUo = (wf: WfNode) => void runCommand(ctx, () => insertUnitOp(ctx, undefined, { workflowPath: wf.path }));
 
@@ -468,12 +520,35 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
     if (item?.kind === 'workflow') {
       const { exp, wf } = item;
       const ticked = (fullWorkflows.get(wf.id) ?? wf).ticked;
+      const list = allWorkflows(exp);
+      const at = list.findIndex((w) => w.id === wf.id);
       return [
         { label: t('experiments.addUo'), run: () => insertUnitOp(ctx, undefined, { workflowPath: wf.path }) },
         // 상태 아이콘은 탭 정지가 아니다: 키보드(메뉴 키, Shift+F10)로는 여기서 체크한다
         { label: ticked ? t('experiments.wf.untick') : t('experiments.wf.tick'), run: tickWorkflow(exp, wf) },
+        MENU_SEPARATOR,
+        ...workflowOrderItems(ctx, wf.path, {
+          first: at <= 0,
+          last: at < 0 || at === list.length - 1,
+          after: (result) => {
+            kept.current.add(exp.dir);
+            forget([exp.dir]);
+            reload();
+            if (typeof result === 'string') follow(wf.id, `wf:${result}`);
+          },
+        }),
       ];
     }
+    if (item?.kind === 'uo') {
+      const { wf, uo } = item;
+      const uos = (fullWorkflows.get(wf.id) ?? wf).uos;
+      const at = uos.findIndex((u) => u.id === uo.id);
+      return [
+        { label: t('wfOrder.moveUp'), shortcut: 'Alt+Shift+↑', disabled: at <= 0, run: moveUo(wf, uo, 'up') },
+        { label: t('wfOrder.moveDown'), shortcut: 'Alt+Shift+↓', disabled: at < 0 || at === uos.length - 1, run: moveUo(wf, uo, 'down') },
+      ];
+    }
+    if (item) return [];
     // 카탈로그 트리
     if (node.kind === 'workflow') {
       const wf = node.payload as WorkflowItem;
@@ -682,6 +757,10 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
             badge={badge}
             actions={actions}
             renderLabel={(node) => marked(node.label, found.marks.get(node.id))}
+            focusRequest={focusRequest}
+            onMove={onMove}
+            dragGroup={dragGroup}
+            onDrop={onDrop}
           />
         </>
       )}

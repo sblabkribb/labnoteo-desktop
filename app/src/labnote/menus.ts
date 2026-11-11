@@ -3,6 +3,7 @@
  * 플러그인 명령 이름은 coreT 로 그 순간의 언어다. 항목은 모두 ContextMenu 가 runCommand 로 돌린다.
  */
 import * as posix from '@labnoteo/core/posix';
+import { t } from '../i18n/t';
 import { diagnoseExperimentPath, getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
 import { getSeoulDateString, getSeoulDateTimeString } from '@labnoteo/core/lib/dateUtils';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
@@ -26,11 +27,12 @@ import { deleteEntry, newFolder, newNoteIn, renameEntry } from './commands/fileO
 import { syncWorkflowChecklist } from './commands/syncChecklist';
 import { insertUnitOp } from './commands/unitOp';
 import { createWorkflowIn, insertWorkflowOnReadme, isExperimentReadme } from './commands/workflow';
+import { deleteWorkflow, insertWorkflowAfter, isNumberedWorkflow, moveWorkflow } from './commands/workflowOrder';
 import { coreT } from './i18n';
 import { exportExperimentTablesToCsv, exportTablesToCsv } from './port/exportCsv';
 import { sampleEditorMenuItems } from './port/sampleCommands';
 import { isNotePath } from './panel/treeIcons';
-import { README } from './paths';
+import { isWorkflowNote, README } from './paths';
 import { markerExperimentDir } from '../../vendor/labnoteo/src/issueMarkerIndex';
 import { MENU_SEPARATOR, type MenuAction, type MenuItem } from './ui/menuStore';
 import { githubMenuItems } from '../github/commands';
@@ -277,6 +279,27 @@ export function viewMoreMenu(ctx: CommandContext, path: string): MenuItem[] {
           ...githubMenuItems(ctx, posix.dirname(path)),
         ]
       : []),
+    ...(isWorkflowNote(path) && isNumberedWorkflow(path) ? [MENU_SEPARATOR, ...workflowOrderItems(ctx, path)] : []),
+  ];
+}
+
+/** Workflow 노트의 차례 바꾸기(보기 머리 ⋯ 메뉴와 실험 탭의 Workflow 줄 메뉴가 같은 항목을 쓴다). */
+export function workflowOrderItems(
+  ctx: CommandContext,
+  path: string,
+  opts: { first?: boolean; last?: boolean; after?: (result: unknown) => void } = {},
+): MenuItem[] {
+  const then = (run: () => Promise<unknown>) => async () => {
+    const result = await run();
+    opts.after?.(result);
+    return result;
+  };
+  return [
+    { label: t('wfOrder.moveUp'), shortcut: 'Alt+Shift+↑', disabled: opts.first, run: then(() => moveWorkflow(ctx, path, 'up')) },
+    { label: t('wfOrder.moveDown'), shortcut: 'Alt+Shift+↓', disabled: opts.last, run: then(() => moveWorkflow(ctx, path, 'down')) },
+    { label: t('wfOrder.insertAfter'), run: then(() => insertWorkflowAfter(ctx, path)) },
+    MENU_SEPARATOR,
+    { label: t('wfOrder.delete'), danger: true, run: then(() => deleteWorkflow(ctx, path)) },
   ];
 }
 

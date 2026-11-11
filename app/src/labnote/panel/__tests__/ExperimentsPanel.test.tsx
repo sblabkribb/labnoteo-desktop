@@ -193,12 +193,71 @@ describe('ExperimentsPanel', () => {
     mount();
     await expandExperiment();
     fireEvent.keyDown(row(/GFP/), { key: 'F10', shiftKey: true });
-    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Unit Operation 추가', 'Workflow 완료로 표시']);
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent).slice(0, 2)).toEqual(['Unit Operation 추가', 'Workflow 완료로 표시']);
     await user.click(screen.getByRole('menuitem', { name: 'Workflow 완료로 표시' }));
     await waitFor(async () => expect(await h.vault.mem.read(`${EXP}/README.labnote.md`)).toMatch(/- \[x\] \[WT020 Protein Expression Measurement GFP\]/));
     await waitFor(() => expect(row(/GFP/).querySelector('.tree-state')?.getAttribute('aria-label')).toMatch(/^Workflow 완료로 표시했지만/));
     fireEvent.contextMenu(row(/GFP/));
     expect(screen.getByRole('menuitem', { name: 'Workflow 완료 표시 해제' })).toBeTruthy();
+  });
+
+  it('the Workflow menu offers move up / down (disabled at the ends), add after and delete', async () => {
+    mount();
+    await expandExperiment();
+    fireEvent.contextMenu(row(/Gibson run/));
+    expect(screen.getByRole('menuitem', { name: /위로 이동/ }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('menuitem', { name: /아래로 이동/ }).getAttribute('aria-disabled')).not.toBe('true');
+    expect(screen.getByRole('menuitem', { name: '여기 뒤에 Workflow 추가' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Workflow 삭제…' })).toBeTruthy();
+    act(() => closeMenu());
+    fireEvent.contextMenu(row(/WD010/));
+    expect(screen.getByRole('menuitem', { name: /아래로 이동/ }).getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('Alt+Shift+Down on a Workflow row swaps its number with the next one, rewrites the README and keeps focus on the moved row', async () => {
+    mount();
+    await expandExperiment();
+    const wf = row(/GFP/);
+    wf.focus();
+    fireEvent.keyDown(wf, { key: 'ArrowDown', altKey: true, shiftKey: true });
+    const moved = `${EXP}/003_WT020_Protein_Expression_Measurement_GFP.labnote.md`;
+    await waitFor(() => expect(Object.keys(h.vault.files())).toContain(moved));
+    expect(Object.keys(h.vault.files())).toContain(`${EXP}/002_WD010_Design.labnote.md`);
+    const readme = h.vault.files()[`${EXP}/README.labnote.md`];
+    expect(readme.indexOf('(./002_WD010_Design.labnote.md)')).toBeLessThan(readme.indexOf('(./003_WT020_Protein_Expression_Measurement_GFP.labnote.md)'));
+    await waitFor(() => expect(document.activeElement?.getAttribute('title')).toContain('003_WT020'));
+    expect(h.asked.confirm).toEqual([]);
+  });
+
+  it('dragging the first Workflow onto the last row asks with the rename list, then moves it to the end', async () => {
+    mount();
+    await expandExperiment();
+    h.answer.confirm(true);
+    const src = row(/Gibson run/);
+    expect(src.getAttribute('draggable')).toBe('true');
+    expect(row(/^README/).getAttribute('draggable')).toBeNull();
+    const data = { effectAllowed: '', dropEffect: '', setData: () => undefined };
+    fireEvent.dragStart(src, { dataTransfer: data });
+    const target = row(/WD010/);
+    fireEvent.dragOver(target, { dataTransfer: data, clientY: 10 });
+    await waitFor(() => expect(row(/WD010/).classList.contains('drop-after')).toBe(true));
+    fireEvent.drop(row(/WD010/), { dataTransfer: data, clientY: 10 });
+    await waitFor(() => expect(Object.keys(h.vault.files())).toContain(`${EXP}/003_WB030_DNA_Assembly_Gibson_run.labnote.md`));
+    expect(h.asked.confirm[0].message).toContain('001_WB030_DNA_Assembly_Gibson_run.labnote.md → 003_WB030_DNA_Assembly_Gibson_run.labnote.md');
+    const readme = h.vault.files()[`${EXP}/README.labnote.md`];
+    expect(readme).toContain('- [x] [WB030 DNA Assembly Gibson run](./003_WB030_DNA_Assembly_Gibson_run.labnote.md)');
+  });
+
+  it('Alt+Shift+Up on a Unit Operation row moves its section up in the Workflow note', async () => {
+    mount();
+    await expandExperiment();
+    fireEvent.keyDown(row(/GFP/), { key: 'ArrowRight' });
+    const uoRow = await findRow(/plate 1/);
+    fireEvent.keyDown(uoRow, { key: 'ArrowUp', altKey: true, shiftKey: true });
+    await waitFor(() => {
+      const text = h.vault.files()[WF2];
+      expect(text.indexOf('### [UHW380 Microplate Reading] plate 1')).toBeLessThan(text.indexOf('### [UHW180 Incubation]'));
+    });
   });
 
   it('a legacy checklist line without "- " (and CRLF) reads as done and toggles in place', async () => {
