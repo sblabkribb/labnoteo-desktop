@@ -292,16 +292,36 @@ describe('toPromptMessages', () => {
     );
   });
 
-  it('a tainted message, or one with web/paper sources, is fenced and seeds the taint', () => {
-    const tainted = toPromptMessages(docOf([msg('user', 'q'), msg('assistant', '<untrusted-data x', { tainted: true })]));
+  it('a tainted reply, or one with web/paper sources, goes back unfenced as the assistant turn and seeds the taint', () => {
+    // real-server check (2026-11-11): fenced assistant turns taught the model to answer inside fence tags, without tools.
+    const tainted = toPromptMessages(docOf([msg('user', 'q'), msg('assistant', 'GFP 부품 3개', { tainted: true })]));
     expect(tainted.initialTaint).toEqual([HISTORY_TAINT]);
-    expect(tainted.messages[0]).toEqual({ role: 'user', content: 'q' });
-    expect(tainted.messages[1]!.content).toMatch(/^<untrusted-data source="earlier reply" id="[0-9a-f]{12}">\n<untrusted_data x\n/);
+    expect(tainted.taintedReplies).toBe(true);
+    expect(tainted.fenced).toBe(false);
+    expect(tainted.messages).toEqual([
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'GFP 부품 3개' },
+    ]);
     const sourced = toPromptMessages(
       docOf([msg('assistant', '웹 답', { sources: [{ kind: 'web', label: 'x', target: 'https://example.test/' }] })])
     );
     expect(sourced.initialTaint).toEqual([HISTORY_TAINT]);
-    expect(sourced.messages[0]!.content).toMatch(/^<untrusted-data source="earlier reply"/);
+    expect(sourced.taintedReplies).toBe(true);
+    expect(sourced.messages[0]).toEqual({ role: 'assistant', content: '웹 답' });
+  });
+
+  it('fence tags a saved reply echoed are taken out of it before it goes back', () => {
+    const echoed = '<untrusted-data source="earlier reply" id="0123456789ab">\n디자인 목록: A, B\n</untrusted-data id="0123456789ab">';
+    const r = toPromptMessages(docOf([msg('assistant', echoed, { tainted: true })]));
+    expect(r.messages).toEqual([{ role: 'assistant', content: '디자인 목록: A, B' }]);
+  });
+
+  it('a clean history has no tainted replies; a tainted user message is still fenced', () => {
+    expect(toPromptMessages(docOf([msg('user', 'q'), msg('assistant', 'a')])).taintedReplies).toBe(false);
+    const r = toPromptMessages(docOf([msg('user', '붙여 넣은 웹 글', { tainted: true })]));
+    expect(r.fenced).toBe(true);
+    expect(r.taintedReplies).toBe(false);
+    expect(r.messages[0]!.content).toMatch(/^<untrusted-data source="earlier message" id="[0-9a-f]{12}">\n붙여 넣은 웹 글\n/);
   });
 
   it('an empty summary sends no summary message', () => {
@@ -309,6 +329,7 @@ describe('toPromptMessages', () => {
       messages: [],
       initialTaint: [],
       fenced: false,
+      taintedReplies: false,
     });
   });
 

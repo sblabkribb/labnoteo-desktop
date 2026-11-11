@@ -12,10 +12,12 @@
  *   그대로인 답: "답을 주지 않았습니다", 아무것도 바꾸지 못한 도구 이야기)를 그 사용자 글과 함께 뺀다. 새 답은 저장할 때의
  *   `answered` 표시로, 예전 답은 글로 가린다. 보관함을 바꾼 도구 차례는 글이 없어도 남는다. 오류·고리·취소로 끝난 차례는
  *   처음부터 저장되지 않는다(useAssistantSession). 저장된 기록 파일은 그대로다: 보낼 때만 거른다.
- * - `toPromptMessages`: 오염된 요약과 메시지는 울타리에 싸서 보내고, 그런 것이 하나라도 가면 실행을 오염된 채로
- *   시작하게 `initialTaint` 를 준다(R11). 요약은 시스템 메시지가 아니라 기록 앞의 사용자 메시지다.
+ * - `toPromptMessages`: 오염된 요약과 사용자 메시지는 울타리에 싸서 보내고, 그런 것이 하나라도 가면 실행을 오염된 채로
+ *   시작하게 `initialTaint` 를 준다(R11). 요약은 시스템 메시지가 아니라 기록 앞의 사용자 메시지다. 오염된 앞선 답(도우미
+ *   차례)은 울타리 없이(베낀 태그는 지우고) 보내고 `taintedReplies` 로 알린다: 울타리에 싼 도우미 차례를 본 모델이 도구
+ *   없이 울타리 태그 안에 앞 답을 되풀이하거나 지어냈다(real-server check, 2026-11-11). 실행은 그래도 오염된 채로 시작한다.
  */
-import { fenceUntrusted } from '../ai/untrusted';
+import { fenceUntrusted, stripFenceTags } from '../ai/untrusted';
 import { catalogs } from '../i18n/t';
 import { koTerms, vendorKo } from '../labnote/i18n';
 import { estimateTokens, truncateToTokens } from '../labnote/context/tokens';
@@ -240,8 +242,10 @@ export interface PromptMessages {
   messages: ChatMessage[];
   /** 울타리에 싼 것이 하나라도 가면 `[HISTORY_TAINT]`, 아니면 빈 배열. */
   initialTaint: string[];
-  /** 울타리에 싼 요약이나 메시지가 있다(시스템 프롬프트에 울타리 규칙이 필요하다). */
+  /** 울타리에 싼 요약이나 사용자 메시지가 있다(시스템 프롬프트에 울타리 규칙이 필요하다). */
   fenced: boolean;
+  /** 바깥 내용이 닿은 앞선 답이 있다(울타리 없이 간다: 시스템 프롬프트가 그렇다고 알린다). */
+  taintedReplies: boolean;
 }
 
 /**
@@ -279,10 +283,18 @@ export function toPromptMessages(doc: PromptHistory, opts: { budgetTokens?: numb
     break;
   }
   picked.reverse();
+  let taintedReplies = false;
   for (const m of picked) {
     const tainted = messageTainted(m);
+    if (m.role === 'assistant') {
+      // The model's own earlier answer goes back as its own turn, never fenced: a fenced assistant turn taught the model
+      // to answer inside fence tags and without tools (real-server check, 2026-11-11). Echoed tags are taken out.
+      taintedReplies ||= tainted;
+      out.push({ role: 'assistant', content: stripFenceTags(m.text) });
+      continue;
+    }
     fenced ||= tainted;
-    out.push({ role: m.role, content: tainted ? fencedText(m) : m.text });
+    out.push({ role: m.role, content: tainted ? fenceUntrusted(m.text, { kind: 'scholar', label: 'earlier message' }).text : m.text });
   }
-  return { messages: out, initialTaint: fenced ? [HISTORY_TAINT] : [], fenced };
+  return { messages: out, initialTaint: fenced || taintedReplies ? [HISTORY_TAINT] : [], fenced, taintedReplies };
 }
