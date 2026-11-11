@@ -63,6 +63,15 @@ const missing = (kind: Kind): ToolResult => ({
   params: [kind],
 });
 
+/**
+ * Workflow 결과에 Unit Operation 목록이 없을 때 결과에 붙는 말(real-app check, 2026-11-11: 모델이 Workflow 의 Unit
+ * Operation 을 하나씩 찾다 단계 한도에 걸렸다).
+ */
+export const NO_UO_LIST_NOTE =
+  "The catalog does not list these Workflows' Unit Operations. Do not search for them one by one: answer from the " +
+  'description, and say that the catalog has no Unit Operation list (workflow_get_method, if you have it, gives the ' +
+  'ones named in papers).';
+
 /** 카탈로그 코드 꼴(UHW010, USW020, WB030, WD010 …). */
 const CODE = /^(?:U[HS]W|W[A-Z])\d{3}$/i;
 
@@ -186,7 +195,8 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     ...value,
     description: clip(value.description, value.id.toUpperCase() === code ? EXACT_DESCRIPTION_CHARS : DESCRIPTION_CHARS),
   }));
-  return { ok: true, data: { ...(asked ? { kind: asked } : {}), query, results } };
+  const bareWorkflows = results.some((r) => r.kind === 'workflow' && !r.unitOperations);
+  return { ok: true, data: { ...(asked ? { kind: asked } : {}), query, results, ...(bareWorkflows ? { note: NO_UO_LIST_NOTE } : {}) } };
 }
 
 export function searchCatalogTool(): ToolDef {

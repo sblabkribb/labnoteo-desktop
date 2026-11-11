@@ -127,7 +127,7 @@ export const CATALOG_RULES =
   'say that it comes from the catalog. Only then, if workflow_get_method is in your tool list, you may add what papers ' +
   "say in a separate part labelled '논문 요약' (in English replies 'Paper summary'); if it has no paper data, say so in " +
   "one short line. Do not use notes from other experiment folders for this. Never invent Workflow or Unit Operation " +
-  'codes: name only codes that a tool returned.';
+  'codes: name only codes that a tool returned. One or two catalog searches are enough; do not look items up one by one.';
 
 /** 답에 쓰면 안 되는 내부 표기(인용 표기와 울타리). 늘 넣는다. */
 export const ANSWER_FORM_RULES =

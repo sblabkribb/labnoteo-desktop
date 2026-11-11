@@ -6,7 +6,7 @@
 import { MemFileSystem, runTool, type ToolContext } from '@labnoteo/core';
 import { ensureWorkflowResources } from '@labnoteo/core/lib/workflowDataLoader';
 import { setLang } from '../../../i18n/lang';
-import { SEARCH_CATALOG_MAX, searchCatalogTool } from '../searchCatalog';
+import { NO_UO_LIST_NOTE, SEARCH_CATALOG_MAX, searchCatalogTool } from '../searchCatalog';
 
 async function seeded(): Promise<MemFileSystem> {
   const fs = new MemFileSystem();
@@ -122,10 +122,17 @@ describe('search_catalog', () => {
     const path = 'resources/workflows/workflows_en.json';
     const json = JSON.parse(await fs.read(path)) as { workflows: Array<Record<string, unknown>> };
     const id = json.workflows[0].id as string;
-    expect((hitsOf(await run(ctxOf(fs), { query: id }))[0] as Record<string, unknown>).unitOperations).toBeUndefined();
+    const bare = await run(ctxOf(fs), { query: id });
+    expect((hitsOf(bare)[0] as Record<string, unknown>).unitOperations).toBeUndefined();
+    // Without a list the result says so, so the model does not look Unit Operations up one by one.
+    expect((bare.data as { note?: string }).note).toBe(NO_UO_LIST_NOTE);
+    const uo = await run(ctxOf(fs), { kind: 'unitOp', query: 'UHW010' });
+    expect((uo.data as { note?: string }).note).toBeUndefined();
     json.workflows[0] = { ...json.workflows[0], unitOperations: ['UHW010', { id: 'UHW100' }] };
     await fs.write(path, JSON.stringify(json));
-    expect((hitsOf(await run(ctxOf(fs), { query: id }))[0] as Record<string, unknown>).unitOperations).toEqual(['UHW010', 'UHW100']);
+    const listed = await run(ctxOf(fs), { query: id, limit: 1 });
+    expect((hitsOf(listed)[0] as Record<string, unknown>).unitOperations).toEqual(['UHW010', 'UHW100']);
+    expect((listed.data as { note?: string }).note).toBeUndefined();
   });
 
   it('a long keyword query with no hit for every word still finds the best partial matches', async () => {
