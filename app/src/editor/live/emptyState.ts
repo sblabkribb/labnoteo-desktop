@@ -1,6 +1,7 @@
 import { Facet, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
-import { parseWorkflowChecklistFromReadme, workflowChecklistSectionRange } from '@labnoteo/core/lib/workflowStructure';
+import { workflowChecklistSectionRange } from '@labnoteo/core/lib/workflowStructure';
+import { checklistEntries } from '../../labnote/checklistTick';
 import { t } from '../../i18n/t';
 import type { Lang } from '../../i18n/lang';
 import { editorLang, langChanged } from './editorLang';
@@ -76,12 +77,15 @@ const cardFor = (lang: Lang): Decoration => {
   return card;
 };
 
-/** Where the card goes: the end of the "Related Workflows" heading line, when the checklist is empty. */
+/**
+ * Where the card goes: the end of the "Related Workflows" heading line, when the checklist is empty. Entries are read like
+ * the tree and the "Workflow n/m" count (checklistEntries), so legacy `.md` links and wikilinks count too.
+ */
 export function emptyStateAt(state: EditorState): number | null {
   if (!state.facet(readmeEmptyState)) return null;
   const text = state.doc.toString();
   const range = workflowChecklistSectionRange(text);
-  if (!range || parseWorkflowChecklistFromReadme(text).length > 0) return null;
+  if (!range || checklistEntries(text).length > 0) return null;
   return state.doc.line(range.header + 1).to;
 }
 

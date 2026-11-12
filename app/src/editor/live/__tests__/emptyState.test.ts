@@ -80,6 +80,15 @@ describe('README empty-state card', () => {
     expect(card(view(README([ENTRY(1)]), readmeEmptyState.of({ onAddWorkflow: () => {} })))).toBeNull();
     expect(card(view(README([]), readmeEmptyState.of({ onAddWorkflow: () => {} }), false))).toBeNull();
   });
+
+  it('is not drawn when the checklist only has legacy lines (.md links, wikilinks without .labnote) or bare core lines', () => {
+    const facet = readmeEmptyState.of({ onAddWorkflow: () => {} });
+    expect(card(view(README(['[x] [WD090 Old design](./001_WD090_Old_design.md)']), facet))).toBeNull();
+    expect(card(view(README(['[ ] [[002_WB010_Old_assembly]]']), facet))).toBeNull();
+    expect(card(view(README(['[ ] [001 WD090 Design](./001_WD090_Design.labnote.md)']), facet))).toBeNull();
+    // 체크리스트 줄이 아닌 글만 있으면 카드는 그대로
+    expect(card(view(README(['Some text, [x] not an entry']), facet))).not.toBeNull();
+  });
 });
 
 describe('checklistTickWatch', () => {
