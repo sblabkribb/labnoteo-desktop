@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setLang } from '../../i18n/lang';
 import { clearEditorStatus, countWords, publishEditorStatus } from '../../editor/editorStatus';
 import { notePosition } from '../../labnote/notePosition';
-import { noteWrites } from '../../labnote/openNotes';
-import { Breadcrumb, NoteLead, StatusChip, type WorkflowTickIo } from '../Breadcrumb';
+import { Breadcrumb, NoteLead, StatusChip } from '../Breadcrumb';
 import { NavButtons } from '../ViewHeader';
 import { StatusBar } from '../StatusBar';
 import { SelectMenu } from '../SelectMenu';
@@ -66,73 +65,13 @@ describe('Breadcrumb', () => {
     expect(document.querySelector('.chip.status')).toBeNull();
   });
 
-  it('a workflow note shows a Workflow done checkbox chip that toggles; disabled when the checklist has no entry', async () => {
-    const onToggle = vi.fn();
-    const props = { onOpen: vi.fn(), onJump: vi.fn(), onMenu: vi.fn(), onToggleWorkflowDone: onToggle };
-    const pos = notePosition(WF, WF_TEXT, { now: '2026-11-10 12:00' });
-    const { rerender } = render(<Breadcrumb {...props} position={pos} workflowTicked={false} />);
-    const box = screen.getByRole('checkbox', { name: 'Workflow 완료' });
-    expect(box.getAttribute('aria-checked')).toBe('false');
-    expect(box.getAttribute('title')).toMatch(/^Workflow 완료로 표시하기/);
-    await userEvent.click(box);
-    expect(onToggle).toHaveBeenCalledTimes(1);
-    rerender(<Breadcrumb {...props} position={pos} workflowTicked={true} />);
-    expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('true');
-    expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('data-shape')).toBe('check');
-    rerender(<Breadcrumb {...props} position={pos} workflowTicked={undefined} />);
-    const missing = screen.getByRole('checkbox', { name: 'Workflow 완료' }) as HTMLButtonElement;
-    expect(missing.disabled).toBe(true);
-    expect(missing.getAttribute('title')).toContain('폴더와 Workflow 체크리스트 맞추기');
-    // 읽는 중이면 그리지 않는다
-    rerender(<Breadcrumb {...props} position={pos} workflowTicked="loading" />);
+  it('a workflow note header has no Workflow done chip (done is ticked in the tree, the README or the palette)', () => {
+    publishEditorStatus(WF, { text: WF_TEXT, save: 'saved' });
+    render(<NoteLead path={WF} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} />);
+    expect(screen.getByText('Unit Operation 1/2')).toBeTruthy();
     expect(screen.queryByRole('checkbox')).toBeNull();
-  });
-
-  it('NoteLead reads the README tick, toggles it, and re-reads when the app writes the README', async () => {
-    publishEditorStatus(WF, { text: WF_TEXT, save: 'saved' });
-    let ticked = false;
-    const io: WorkflowTickIo = {
-      read: vi.fn(async () => ticked),
-      toggle: vi.fn(async () => (ticked = !ticked)),
-    };
-    render(<NoteLead path={WF} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} workflowTick={io} />);
-    const box = await screen.findByRole('checkbox', { name: 'Workflow 완료' });
-    expect(io.read).toHaveBeenCalledWith(WF);
-    expect(box.getAttribute('aria-checked')).toBe('false');
-    await userEvent.click(box);
-    expect(io.toggle).toHaveBeenCalledWith(WF);
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('true'));
-    // 다른 곳(실험 탭)에서 README 를 고치면 다시 읽는다
-    ticked = false;
-    act(() => noteWrites.emit(`${EXP}/README.labnote.md`));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('false'));
-    // 다른 노트의 쓰기는 보지 않는다
-    const reads = vi.mocked(io.read).mock.calls.length;
-    act(() => noteWrites.emit('labnote/004_Plan/README.labnote.md'));
-    expect(vi.mocked(io.read).mock.calls.length).toBe(reads);
-  });
-
-  it('NoteLead re-reads for a legacy README.md and when an open README editor changes its unsaved text', async () => {
-    publishEditorStatus(WF, { text: WF_TEXT, save: 'saved' });
-    let ticked: boolean | undefined = false;
-    const io: WorkflowTickIo = { read: vi.fn(async () => ticked), toggle: vi.fn(async () => undefined) };
-    render(<NoteLead path={WF} onOpen={vi.fn()} onJump={vi.fn()} onMenu={vi.fn()} workflowTick={io} />);
-    await screen.findByRole('checkbox', { name: 'Workflow 완료' });
-    // 예전 보관함의 README.md 에 쓴 것
-    ticked = true;
-    act(() => noteWrites.emit(`${EXP}/README.md`));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('true'));
-    // 편집기에 열린 README 의 저장하지 않은 글이 바뀌면 다시 읽는다(읽기는 그 버퍼를 본다)
-    ticked = false;
-    act(() => publishEditorStatus(`${EXP}/README.md`, { text: '## Related Workflows\n\n[ ] [GFP](./002_WT020_Protein_Expression_Measurement_GFP.labnote.md)\n', save: 'dirty' }));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('false'));
-    const reads = vi.mocked(io.read).mock.calls.length;
-    // 커서만 움직인 것(같은 글), 다른 실험의 README 는 다시 읽지 않는다
-    act(() => publishEditorStatus(`${EXP}/README.md`, { line: 3, col: 2 }));
-    act(() => publishEditorStatus('labnote/004_Plan/README.md', { text: 'x', save: 'dirty' }));
-    act(() => noteWrites.emit('labnote/004_Plan/README.md'));
-    expect(vi.mocked(io.read).mock.calls.length).toBe(reads);
-    clearEditorStatus('labnote/004_Plan/README.md');
+    expect(screen.queryByText('Workflow 완료')).toBeNull();
+    expect(document.querySelector('[data-command-id="app.toggleWorkflowDone"]')).toBeNull();
   });
 
   it('a workflow with no UO offers a disabled hint in the menu', async () => {

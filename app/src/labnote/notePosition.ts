@@ -78,7 +78,7 @@ const filled = (v: unknown) => v !== null && v !== undefined && String(v).trim()
  */
 export function notePosition(path: string, text: string, opts: { line?: number; now?: string } = {}): NotePosition {
   const folder = posix.dirname(path) === '.' ? '' : posix.dirname(path);
-  // 예전 보관함의 `NNN_Wxxx_*.md` 도 Workflow 노트다(완료 칩, UO 진행)
+  // 예전 보관함의 `NNN_Wxxx_*.md` 도 Workflow 노트다(완료 권유, UO 진행)
   if (isWorkflowNote(path)) {
     const now = opts.now ?? getSeoulDateTimeString();
     const lines = text.split(/\r?\n/);

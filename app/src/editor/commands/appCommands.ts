@@ -173,7 +173,7 @@ const convertLegacyNotes: AppCommand = {
 
 /**
  * 열린 Workflow 노트의 완료 표시 바꾸기: 플러그인처럼 실험 README "Related Workflows" 체크리스트의 그 줄 [ ] / [x] 를 바꾼다
- * (실험 탭의 체크박스, 보기 머리의 칩과 같은 일). Workflow 노트가 열려 있을 때만 보인다.
+ * (실험 탭의 체크박스, README 의 체크박스와 같은 일). Workflow 노트가 열려 있을 때만 보인다.
  */
 const toggleWorkflowDoneCommand: AppCommand = {
   id: 'app.toggleWorkflowDone',

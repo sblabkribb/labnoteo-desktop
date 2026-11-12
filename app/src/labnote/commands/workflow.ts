@@ -313,7 +313,7 @@ export async function readWorkflowTick(ctx: CommandContext, workflowPath: string
   return text === undefined ? undefined : workflowTickIn(text, workflowPath);
 }
 
-/** 열린 Workflow 노트의 완료 표시를 바꾼다(팔레트 명령, 보기 머리의 칩). 바뀐 뒤의 체크 상태, 못 했으면 undefined. */
+/** 열린 Workflow 노트의 완료 표시를 바꾼다(팔레트 명령, 권유). 바뀐 뒤의 체크 상태, 못 했으면 undefined. */
 export function toggleWorkflowDone(ctx: CommandContext, workflowPath: string): Promise<boolean | undefined> {
   return toggleWorkflowTick(ctx, posix.dirname(workflowPath), posix.basename(workflowPath));
 }

@@ -127,10 +127,9 @@ describe('view header and status bar', () => {
     const exp = crumbs.getByRole('button', { name: /003\s*E coli host/ });
     const wf = await crumbs.findByRole('button', { name: /WT020\s*GFP/ });
     expect(wf.getAttribute('aria-current')).toBe('page');
-    // UO 진행 칩(하나 끝나고 하나 남음)과 README 체크리스트의 Workflow 완료 체크박스(체크 안 함)
+    // UO 진행 칩(하나 끝나고 하나 남음). Workflow 완료 체크는 머리에 없다(실험 탭, README 체크박스, 팔레트)
     await waitFor(() => expect(header().getByText('Unit Operation 1/2')).toBeTruthy());
-    const done = await header().findByRole('checkbox', { name: 'Workflow 완료' });
-    expect(done.getAttribute('aria-checked')).toBe('false');
+    expect(header().queryByRole('checkbox')).toBeNull();
     expect(header().getByRole('button', { name: 'UO 추가' })).toBeTruthy();
     expect(header().getByRole('button', { name: '표 넣기' })).toBeTruthy();
     expect(header().queryByRole('button', { name: 'Workflow 추가' })).toBeNull();
@@ -166,22 +165,45 @@ describe('view header and status bar', () => {
     await openPath(README);
   });
 
-  it('the Workflow done checkbox in the header ticks and unticks the README checklist line', async () => {
+  it('the palette command ticks and unticks the README checklist line of the open Workflow', async () => {
     const user = userEvent.setup();
     const vault = installFakeVault(FILES);
     render(<App />);
     await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
     await user.click(await screen.findByTitle(WF_NAME));
     await openPath(WF);
-    const box = await header().findByRole('checkbox', { name: 'Workflow 완료' });
-    await user.click(box);
+    await runFromPalette(user, 'Workflow 완료 표시 바꾸기');
     await waitFor(() => expect(vault.files()[README]).toContain(`- [x] [WT020 Protein Expression Measurement GFP](./${WF_NAME})`));
-    await waitFor(() => expect(header().getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('true'));
-    await user.click(header().getByRole('checkbox', { name: 'Workflow 완료' }));
+    await runFromPalette(user, 'Workflow 완료 표시 바꾸기');
     await waitFor(() => expect(vault.files()[README]).toContain(`- [ ] [WT020 Protein Expression Measurement GFP](./${WF_NAME})`));
-    await waitFor(() => expect(header().getByRole('checkbox', { name: 'Workflow 완료' }).getAttribute('aria-checked')).toBe('false'));
     // 다른 줄은 그대로다
     expect(vault.files()[README]).toContain('- [x] [WB150 PCR](./001_WB150_PCR.labnote.md)');
+  });
+
+  it('a bare README checklist line (no dash) ticks from its editor checkbox; only the box changes and the count follows', async () => {
+    const user = userEvent.setup();
+    const bare = (FILES[README] as string).replace(/^- \[/gm, '[');
+    const vault = installFakeVault({ ...FILES, [README]: bare });
+    render(<App />);
+    await screen.findByText('fake-vault', { selector: '.vault-bar-name' });
+    await user.click(await screen.findByTitle(WF_NAME));
+    await openPath(WF);
+    await user.click(within(screen.getByRole('navigation', { name: '노트 위치' })).getByRole('button', { name: /003\s*E coli host/ }));
+    await openPath(README);
+    await waitFor(() => expect(header().getByText('Workflow 1/3')).toBeTruthy());
+    const v = await editorView();
+    act(() => v.dispatch({ selection: { anchor: 0 } }));
+    const box = await waitFor(() => {
+      const el = [...v.contentDOM.querySelectorAll<HTMLElement>('input.lno-task')].find((b) =>
+        v.state.doc.lineAt(v.posAtDOM(b)).text.startsWith('[ ] [WT020'),
+      );
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.mouseDown(box, { button: 0 });
+    expect(v.state.doc.toString()).toBe(bare.replace('[ ] [WT020', '[x] [WT020'));
+    await waitFor(() => expect(header().getByText('Workflow 2/3')).toBeTruthy());
+    await waitFor(() => expect(vault.files()[README]).toBe(bare.replace('[ ] [WT020', '[x] [WT020')), { timeout: 5000 });
   });
 
   it('a plain note has no primary action and no structure position; the status bar counts words', async () => {

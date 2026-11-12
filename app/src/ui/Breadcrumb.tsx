@@ -1,14 +1,8 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { listen as tauriListen } from '@tauri-apps/api/event';
-import * as posix from '@labnoteo/core/posix';
+import { useMemo, type MouseEvent } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
-import { editorStatus, subscribeEditorStatus, useEditorLoaded, useEditorText } from '../editor/editorStatus';
-import { coreT } from '../labnote/i18n';
-import { noteWrites } from '../labnote/openNotes';
+import { useEditorLoaded, useEditorText } from '../editor/editorStatus';
 import { notePosition, type NotePosition } from '../labnote/notePosition';
-import { isReadmeName, samePath } from '../labnote/paths';
-import { subscribeVaultChanges, type ListenFn } from '../vault/useVaultEvents';
 import { STATUS_SHAPE_ICON as SHAPE_ICON, statusLabel, statusShape } from '../labnote/statusLabels';
 import type { MenuItem } from '../labnote/ui/menuStore';
 import { Icon } from './Icon';
@@ -51,105 +45,6 @@ export function StatusChip(p: { status: string; onClick?: () => void }) {
   );
 }
 
-/**
- * Workflow 노트 머리의 완료 체크(체크박스 칩). 기준은 플러그인처럼 README "Related Workflows" 체크리스트의 [ ] / [x] 다:
- * 누르면 그 줄을 바꾼다(`onToggle`). `ticked` 가 undefined 면 체크리스트에 이 Workflow 가 없어 누를 수 없다.
- */
-export function WorkflowDoneChip(p: { ticked: boolean | undefined; onToggle?: () => void }) {
-  useLang();
-  const missing = p.ticked === undefined;
-  const title = missing
-    ? t('header.wfDone.missing', coreT('Sync workflow checklist with folder'))
-    : p.ticked
-      ? t('header.wfDone.on')
-      : t('header.wfDone.off');
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={p.ticked === true}
-      className="chip status wf-done"
-      data-shape={p.ticked ? 'check' : 'dashed'}
-      data-command-id="app.toggleWorkflowDone"
-      title={title}
-      disabled={missing || !p.onToggle}
-      onClick={p.onToggle}
-    >
-      <Icon name={p.ticked ? 'square-check' : 'square'} size={14} />
-      <span className="btn-label-collapsible">{t('header.wfDone')}</span>
-    </button>
-  );
-}
-
-/**
- * README 를 다시 읽을 때(앱의 쓰기, 보관함 감시자, 열린 편집기): 그 실험 폴더의 README(README.labnote.md, 예전 보관함의 README.md)
- * 이거나 무엇이 바뀌었는지 모를 때('').
- */
-const touchesReadme = (changed: string, dir: string) =>
-  changed === '' || (samePath(posix.dirname(changed), dir) && isReadmeName(posix.basename(changed)));
-
-/** Workflow 노트 머리가 README 체크를 읽고 바꾸는 길(App 이 CommandContext 로 채운다). */
-export interface WorkflowTickIo {
-  read(workflowPath: string): Promise<boolean | undefined>;
-  toggle(workflowPath: string): Promise<boolean | undefined>;
-}
-
-/**
- * 열린 Workflow 노트의 README 체크 상태. 읽기 전이면 'loading', 체크리스트에 없으면 undefined.
- * README 가 바뀌면(앱이 닫힌 README 에 쓴 것: noteWrites, 밖의 변경: 보관함 감시자, 편집기에 열린 README 의 저장하지 않은 글:
- * editorStatus) 다시 읽고, 누른 뒤에는 돌려받은 값을 쓴다. README 는 README.labnote.md 와 예전 이름 README.md 를 다 본다.
- */
-export function useWorkflowTick(
-  path: string,
-  io: WorkflowTickIo | undefined,
-  listen: ListenFn = tauriListen as ListenFn,
-): { ticked: boolean | undefined | 'loading'; toggle?: () => void } {
-  const [ticked, setTicked] = useState<boolean | undefined | 'loading'>('loading');
-  const active = io !== undefined && notePosition(path, '').kind === 'workflow';
-  useEffect(() => {
-    if (!active) return;
-    let live = true;
-    let seq = 0;
-    const load = () => {
-      const mine = ++seq;
-      io!.read(path).then(
-        (v) => live && mine === seq && setTicked(v),
-        () => live && mine === seq && setTicked(undefined),
-      );
-    };
-    setTicked('loading');
-    load();
-    const dir = posix.dirname(path);
-    const offWrites = noteWrites.subscribe((p) => touchesReadme(p, dir) && load());
-    const offWatch = subscribeVaultChanges(listen, (c) => touchesReadme(c.path, dir) && load());
-    // 편집기에 열린 README 의 저장하지 않은 글: 본문이 바뀌어 나올 때마다 다시 읽는다(읽기는 그 버퍼를 본다, readReadmeText)
-    let seenText: string | undefined;
-    const offEdits = subscribeEditorStatus(() => {
-      const s = editorStatus();
-      if (!s || s.text === seenText || !touchesReadme(s.path, dir) || s.path === '') return;
-      seenText = s.text;
-      load();
-    });
-    return () => {
-      live = false;
-      offWrites();
-      offWatch();
-      offEdits();
-    };
-    // io 는 App 이 그릴 때마다 새로 만든다: 경로와 켜짐만 본다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, active, listen]);
-  if (!active) return { ticked: 'loading' };
-  return {
-    ticked,
-    toggle: () =>
-      void io!.toggle(path).then(
-        (v) => v !== undefined && setTicked(v),
-        () => undefined,
-      ),
-  };
-}
-
 interface CrumbProps {
   position: NotePosition;
   /** 경로의 노트를 연다(실험 → README). */
@@ -162,12 +57,6 @@ interface CrumbProps {
   onStatus?: () => void;
   /** 본문을 다 읽었다. 아니면(읽는 중) 세지 않은 칩(상태, 워크플로 0/0)을 그리지 않는다. 기본 true. */
   loaded?: boolean;
-  /**
-   * Workflow 노트의 README 완료 체크(체크박스 칩). 없거나 'loading' 이면 칩을 그리지 않는다. undefined 면 체크리스트에 없다(누를 수 없다).
-   */
-  workflowTicked?: boolean | undefined | 'loading';
-  /** Workflow 완료 체크를 바꾼다(체크박스 칩). */
-  onToggleWorkflowDone?: () => void;
 }
 
 /**
@@ -226,9 +115,6 @@ export function Breadcrumb(p: CrumbProps) {
             {t('header.uoChip', pos.uoDone, pos.uoTotal)}
           </span>
         )}
-        {'workflowTicked' in p && p.workflowTicked !== 'loading' && (
-          <WorkflowDoneChip ticked={p.workflowTicked} onToggle={p.onToggleWorkflowDone} />
-        )}
       </>
     );
   }
@@ -281,17 +167,9 @@ function crumbExperiment(code: string, title: string) {
   );
 }
 
-/**
- * 편집기 머리의 경로 칸: 열린 노트의 위치를 편집기가 낸 본문에서 읽어 Breadcrumb 으로 그린다.
- * `workflowTick` 을 주면 Workflow 노트에 README 완료 체크 칩을 붙인다.
- */
-export function NoteLead(
-  p: Omit<CrumbProps, 'position' | 'workflowTicked' | 'onToggleWorkflowDone'> & { path: string; workflowTick?: WorkflowTickIo },
-) {
-  const { workflowTick, ...rest } = p;
+/** 편집기 머리의 경로 칸: 열린 노트의 위치를 편집기가 낸 본문에서 읽어 Breadcrumb 으로 그린다. */
+export function NoteLead(p: Omit<CrumbProps, 'position'> & { path: string }) {
   const position = useNotePosition(p.path);
   const loaded = useEditorLoaded(p.path);
-  const tick = useWorkflowTick(p.path, workflowTick);
-  const extra = workflowTick && position.kind === 'workflow' ? { workflowTicked: tick.ticked, onToggleWorkflowDone: tick.toggle } : {};
-  return <Breadcrumb {...rest} {...extra} position={position} loaded={loaded} />;
+  return <Breadcrumb {...p} position={position} loaded={loaded} />;
 }

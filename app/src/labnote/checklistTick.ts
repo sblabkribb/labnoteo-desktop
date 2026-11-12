@@ -1,6 +1,6 @@
 /**
  * README "Related Workflows" 체크리스트에서 Workflow 노트 하나의 [ ] / [x] 를 찾고 바꾼다(Workflow 완료: 실험 탭의 체크박스,
- * 보기 머리의 칩, 팔레트 명령, 권유).
+ * README 편집기의 체크박스, 팔레트 명령, 권유).
  * - 구역은 코어의 workflowChecklistSectionRange, 줄은 코어의 workflowChecklistEntryLink(`.labnote.md` 링크, 위키링크)로 읽는다.
  * - 예전(VS Code 시절) 보관함의 줄도 읽는다: `.md` 로 끝나는 링크(`[x] [WD090 …](./001_WD090_….md)`), `.labnote` 없는 위키링크.
  *   코어의 체크리스트 정규식은 `.labnote.md` 링크만 알아본다(플러그인 동작 그대로라 vendor 는 고치지 않는다).
