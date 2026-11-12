@@ -279,7 +279,7 @@ describe('SamplesPanel', () => {
     th.answer.prompt('ladder', '', '');
     mount(th);
     const dna = await findTypeRow('DNA', 1);
-    expect(dna.getAttribute('aria-keyshortcuts')).toBe('+');
+    expect(dna.getAttribute('aria-keyshortcuts')).toBe('Plus');
     dna.focus();
     fireEvent.keyDown(dna, { key: '+', shiftKey: true });
     await waitFor(async () => expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).toContain('ladder'));

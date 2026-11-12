@@ -147,6 +147,9 @@ function visibleAncestorKey(nodes: readonly TreeNode[], rows: readonly Row[], is
  *   자식이 없는 줄도 접기 자리를 비워 두어 아이콘이 한 줄로 선다.
  * - 들여쓰기는 data-depth(styles/tree.css), 들여쓰기 안내선은 독에 커서나 초점이 있을 때만 보인다. tooltip 은 title. color 는 쓰지 않는다.
  */
+/** aria-keyshortcuts 이름: ARIA 는 키를 '+' 로 잇기 때문에 더하기 키는 'Plus' 로 적는다. */
+const ariaKey = (key: string) => (key === '+' ? 'Plus' : key);
+
 export function TreeView({ nodes, label, expanded, onToggle, onActivate, onContext, isCurrent, toggleOnActivate = true, scrollCurrent = false, className = 'wf-tree', nodeClass, rowClass: extraClass, meta, renderLabel, code, state, badge, actions, focusRequest, onFocusRequest, onMove, dragGroup, onDrop }: TreeViewProps) {
   const rows = useMemo(() => flatten(nodes, expanded), [nodes, expanded]);
   const [focusKey, setFocusKey] = useState<string>();
@@ -302,7 +305,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
         const shape = state?.(row.node);
         const mark2 = badge?.(row.node);
         const buttons = actions?.(row.node) ?? [];
-        const shortcuts = buttons.flatMap((b) => (b.key ? [b.key] : [])).join(' ');
+        const shortcuts = buttons.flatMap((b) => (b.key ? [ariaKey(b.key)] : [])).join(' ');
         return (
           <li
             key={row.key}
@@ -389,7 +392,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
                     className="tree-action"
                     tabIndex={-1}
                     aria-label={b.label}
-                    aria-keyshortcuts={b.key}
+                    aria-keyshortcuts={b.key ? ariaKey(b.key) : undefined}
                     title={b.label}
                     onClick={(e) => {
                       e.stopPropagation();

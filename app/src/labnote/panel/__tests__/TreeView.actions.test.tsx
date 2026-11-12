@@ -31,8 +31,8 @@ describe('TreeView row actions from the keyboard', () => {
     a.focus();
     fireEvent.keyDown(a, { key: '+', shiftKey: true });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(a.getAttribute('aria-keyshortcuts')).toBe('+');
-    expect(screen.getByRole('button', { name: 'Add', hidden: true }).getAttribute('aria-keyshortcuts')).toBe('+');
+    expect(a.getAttribute('aria-keyshortcuts')).toBe('Plus');
+    expect(screen.getByRole('button', { name: 'Add', hidden: true }).getAttribute('aria-keyshortcuts')).toBe('Plus');
   });
 
   it('Ctrl/Alt/Meta with "+" stays with the app (zoom), and rows without the action ignore it', () => {
