@@ -115,10 +115,10 @@ the README checklist follow every change. Unit Operations move the same way insi
 #### 8. Experiment status and the Workflow done checkbox
 
 Click an experiment's status icon to pick its status (such as Planned, In progress, Needs review,
-Completed, Failed, Discontinued or Needs repeat) or clear it; the experiment moves to that group. Each
+Done, Failed, Discontinued or Needs repeat) or clear it; the experiment moves to that group. Each
 Workflow has a done checkbox, in the Experiments tree and in the README's Related Workflows list, and
 the experiment shows "Workflow n/m". When every Workflow is done, the app gently offers to mark the
-experiment completed.
+experiment done.
 
 ![Change an experiment's status from its icon, then tick a Workflow done in the tree and in the README](docs/images/en/labnoteo-status.gif)
 
