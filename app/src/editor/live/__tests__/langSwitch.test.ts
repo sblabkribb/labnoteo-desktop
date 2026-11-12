@@ -171,3 +171,14 @@ describe('live preview widgets follow the editor language', () => {
     expect(undoDepth(v.state)).toBe(0);
   });
 });
+
+describe('README checklist checkboxes follow the editor language', () => {
+  it('a bare Related Workflows box relabels ko → en and stays a box', () => {
+    const doc = ['## Related Workflows', '', '[ ] [001 WD090 X](./001_WD090_X.labnote.md)', '', 'end'].join('\n');
+    const v = view(doc);
+    expect(q(v, 'input.lno-task')?.getAttribute('aria-label')).toBe('할 일 완료 전환');
+    switchTo(v, 'en');
+    expect(q(v, 'input.lno-task')?.getAttribute('aria-label')).toBe('Toggle task');
+    expect(v.state.doc.toString()).toBe(doc);
+  });
+});

@@ -11,6 +11,8 @@ import { CheckboxWidget, LabelWidget, bulletWidget, toggleTaskAt } from './widge
 import { isImageTarget, resolveImagePath, splitAltSize } from './imagePath';
 import { ImageWidget, imageLoader } from './imageWidget';
 import { linkResolution, linkStateOf } from './linkResolution';
+import { workflowChecklistSectionRange } from '@labnoteo/core/lib/workflowStructure';
+import { checklistLineLink } from '../../labnote/checklistTick';
 
 /**
  * 라이브 미리보기의 인라인 플러그인(계획 D4). 보이는 범위(visibleRanges)만 훑어 다음을 단다:
@@ -24,6 +26,9 @@ import { linkResolution, linkStateOf } from './linkResolution';
  *   대괄호를 숨긴 뒤 코드를 칩(lno-chip lno-uo-code lno-uo-…)으로 단다.
  * - 할 일: 줄이 드러나지 않았으면 `- ` 를 숨기고 `[ ]`·`[x]` 를 체크박스(CheckboxWidget)로 바꾼다. 끝난 항목 줄은
  *   lno-task-done. 누름은 taskHandlers 가 받는다.
+ * - README "Related Workflows" 의 맨 체크리스트 줄(코어가 대시 없이 쓰는 `[ ] [이름](./x.labnote.md)`, 예전 `.md`
+ *   링크·위키링크, checklistLineLink 가 알아보는 줄): 그 구역 안에서만 `[ ]`·`[x]` 를 같은 체크박스로 바꾼다(누르면
+ *   상자 글자만 바뀐다). 다른 곳의 `[x]` 글은 그대로 둔다.
  * - 인용: 모든 줄에 lno-quote, 줄이 드러나지 않았으면 `> ` 를 숨긴다. 첫 줄이 `> [!type]` 이면 콜아웃: 모든 줄에
  *   lno-callout lno-callout-<type>(모르는 종류는 note), 드러나지 않은 첫 줄은 `[!type]` 을 숨기고 나머지를 lno-callout-title 로.
  * - 울타리 코드 블록: 모든 줄에 lno-codeblock, 첫·끝 줄에 -first·-last, 울타리 줄에 lno-fence(흐리게, 숨기지 않는다).
@@ -95,6 +100,8 @@ const checkboxFor = (lang: Lang): Decoration[] => {
   return set;
 };
 const taskDoneLine = Decoration.line({ class: 'lno-task-done' });
+/** 맨 체크리스트 줄의 상자(줄 머리, 들여쓰기만 앞에 둔다). */
+const BARE_BOX = /^\s*\[([ xX])\]/;
 
 const quoteLine = Decoration.line({ class: 'lno-quote' });
 /** 콜아웃 첫 줄. 인용 노드의 시작(`>`)부터 읽는다. */
@@ -433,7 +440,43 @@ export function buildDecorations(view: EditorView): { decorations: DecorationSet
       },
     });
   }
+  checklistBoxes();
   return { decorations: Decoration.set(decos, true), hidden: Decoration.set(hides, true) };
+
+  /**
+   * README "Related Workflows" 구역의 맨 체크리스트 줄(목록 기호 없는 `[ ] [..](..)`): 상자를 체크박스로. 구역은
+   * 상자로 시작하는 줄을 처음 만날 때만 찾는다(대부분의 노트는 글 전체를 읽지 않는다).
+   */
+  function checklistBoxes(): void {
+    let range: { header: number; end: number } | undefined | null = null;
+    const done = new Set<number>();
+    for (const { from, to } of view.visibleRanges) {
+      for (let pos = from; pos <= to; ) {
+        const line = state.doc.lineAt(pos);
+        pos = line.to + 1;
+        if (done.has(line.number)) continue;
+        done.add(line.number);
+        const m = BARE_BOX.exec(line.text);
+        if (!m) continue;
+        if (skips.some((s) => line.from >= s.from && line.to <= s.to)) continue;
+        if (range === null) range = workflowChecklistSectionRange(state.doc.toString());
+        if (!range || line.number - 1 <= range.header || line.number - 1 >= range.end) continue;
+        if (checklistLineLink(line.text) === undefined) continue;
+        if (inCode(line.from)) continue;
+        const checked = m[1] !== ' ';
+        if (checked) decos.push(taskDoneLine.range(line.from));
+        if (revealLine(state, line.number, lines)) continue;
+        const boxFrom = line.from + m[0].length - 3;
+        conceal(boxFrom, boxFrom + 3, checkbox[checked ? 1 : 0]);
+      }
+    }
+  }
+
+  function inCode(pos: number): boolean {
+    for (let n: SyntaxNode | null = tree.resolveInner(pos, 1); n; n = n.parent)
+      if (n.name === 'FencedCode' || n.name === 'CodeBlock' || n.name === 'HTMLBlock' || n.name === 'CommentBlock') return true;
+    return false;
+  }
 }
 
 class LivePlugin {

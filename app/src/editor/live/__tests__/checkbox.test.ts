@@ -131,3 +131,65 @@ describe('라이브 미리보기: 할 일 체크박스', () => {
     expect(v.state.doc.toString()).toBe('- [ ] a\nz');
   });
 });
+
+describe('라이브 미리보기: README "Related Workflows" 의 맨 체크리스트 줄(대시 없음)', () => {
+  const README = [
+    '# Exp',
+    '',
+    '## Related Workflows',
+    '',
+    '[ ] [001 WD090 Genome Editing Design - test](./001_WD090_Genome_Editing_Design_test.labnote.md)',
+    '[x] [002 WB010 Old](./002_WB010_Old.md)',
+    '[ ] [[003_WB020_Wiki.labnote|Wiki]]',
+    '- [ ] [004 WB030 Dash](./004_WB030_Dash.labnote.md)',
+    '[ ] plain text, no link',
+    '',
+    '## Notes',
+    '',
+    '[x] [005 elsewhere](./005_elsewhere.labnote.md)',
+    '[ ] just text',
+    'z',
+  ].join('\n');
+  const lineOf = (v: EditorView, n: number) => v.contentDOM.querySelectorAll<HTMLElement>('.cm-line')[n];
+
+  it('bare entries in the section become checkboxes; other `[ ]`/`[x]` text stays text', () => {
+    const v = view(README, README.length);
+    const boxes = v.contentDOM.querySelectorAll<HTMLInputElement>('input.lno-task');
+    // 001, 002, 003 (맨 줄) + 004 (목록 할 일). 링크 없는 줄과 다른 구역은 글자 그대로
+    expect(boxes).toHaveLength(4);
+    expect([...boxes].map((b) => b.checked)).toEqual([false, true, false, false]);
+    expect(lineOf(v, 4).textContent!.startsWith('[ ]')).toBe(false);
+    expect(lineOf(v, 5).classList.contains('lno-task-done')).toBe(true);
+    expect(lineOf(v, 4).classList.contains('lno-task-done')).toBe(false);
+    expect(lineOf(v, 8).textContent).toBe('[ ] plain text, no link');
+    expect(lineOf(v, 12).textContent!.startsWith('[x]')).toBe(true);
+    expect(lineOf(v, 12).querySelector('input')).toBeNull();
+    expect(lineOf(v, 13).textContent).toBe('[ ] just text');
+  });
+
+  it('the cursor line shows the raw box', () => {
+    const at = README.indexOf('[x] [002');
+    const v = view(README, at + 5);
+    expect(lineOf(v, 5).textContent!.startsWith('[x] ')).toBe(true);
+    expect(lineOf(v, 5).querySelector('input')).toBeNull();
+  });
+
+  it('clicking a bare box changes only the box character (no dash added), once', () => {
+    const v = view(README, README.length, { onTr: (tr) => seen.push(tr) });
+    const box = lineOf(v, 4).querySelector('input.lno-task')!;
+    mouse(box, 'mousedown');
+    const want = README.replace('[ ] [001', '[x] [001');
+    expect(v.state.doc.toString()).toBe(want);
+    expect(seen.filter((tr) => tr.docChanged)).toHaveLength(1);
+    mouse(lineOf(v, 5).querySelector('input.lno-task')!, 'mousedown');
+    expect(v.state.doc.toString()).toBe(want.replace('[x] [002', '[ ] [002'));
+  });
+
+  it('works in a CRLF note', () => {
+    const doc = README.split('\n').join('\r\n');
+    const v = view(doc, 0, { lineSeparator: '\r\n' });
+    expect(v.contentDOM.querySelectorAll('input.lno-task')).toHaveLength(4);
+    mouse(lineOf(v, 4).querySelector('input.lno-task')!, 'mousedown');
+    expect(v.state.doc.toString()).toBe(README.replace('[ ] [001', '[x] [001'));
+  });
+});
