@@ -10,6 +10,7 @@ import { getLang, setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
 import { coreT } from '../../labnote/i18n';
 import { createTestHost, type TestHost } from '../../labnote/__tests__/testHost';
+import { rememberExperiment } from '../../labnote/port/sampleFolders';
 import { ContextMenu } from '../../labnote/ui/ContextMenu';
 import { closeMenu } from '../../labnote/ui/menuStore';
 import {
@@ -223,6 +224,87 @@ describe('SamplesPanel', () => {
     await waitFor(async () => expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).toContain('ladder'));
     // 쓴 뒤 패널이 다시 읽는다(env.changed → sampleEvents)
     expect(await findTypeRow('DNA', 2)).toBeTruthy();
+  });
+
+  it('every type row carries a hover "+" named for its type and scope; samples and details do not', async () => {
+    const th = host();
+    mount(th);
+    const dna = await findTypeRow('DNA', 1);
+    expect(t('samples.addTyped', 'DNA', t('samples.scope.local'))).toBe('DNA 샘플 추가 (로컬)');
+    expect(within(dna).getByRole('button', { name: 'DNA 샘플 추가 (로컬)' }).className).toBe('tree-action');
+    const reagent = typeRow('Reagent', 1);
+    expect(within(reagent).getByRole('button', { name: 'Reagent 샘플 추가 (전역)' })).toBeTruthy();
+    // Every type row under both roots (Local and Global each list the built-in types)
+    const types = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].filter((li) => li.querySelector('.sample-swatch'));
+    expect(types.length).toBeGreaterThan(2);
+    for (const li of types) expect(li.querySelectorAll('.tree-action')).toHaveLength(1);
+    // Sample rows (and, once expanded, detail rows) have none
+    const sample = row(/DNA-1/);
+    expect(sample.querySelector('.tree-action')).toBeNull();
+    fireEvent.click(sample);
+    await screen.findByText(t('samples.detail.alias', 'pUC'));
+    const details = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].filter((li) =>
+      li.textContent?.startsWith(t('samples.detail.alias', '')),
+    );
+    expect(details.length).toBeGreaterThan(0);
+    for (const li of details) expect(li.querySelector('.tree-action')).toBeNull();
+    // Roots have none either
+    expect(screen.getByRole('treeitem', { name: new RegExp(t('samples.root.global').replace(/[()]/g, '\\$&')) }).querySelector(':scope > .tree-actions')).toBeNull();
+  });
+
+  it('en: the "+" reads Add DNA sample (Global)', async () => {
+    setLang('en');
+    const th = host();
+    mount(th);
+    expect(await screen.findByRole('button', { name: 'Add DNA sample (Global)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add DNA sample (Local)' })).toBeTruthy();
+  });
+
+  it('the "+" adds a sample of that type in the folder the tree shows, without toggling or activating the row', async () => {
+    const th = host();
+    th.setActive(NOTE);
+    th.answer.prompt('ladder', '', '');
+    mount(th);
+    const dna = await findTypeRow('DNA', 1);
+    const before = dna.getAttribute('aria-expanded');
+    fireEvent.click(within(dna).getByRole('button', { name: 'DNA 샘플 추가 (로컬)' }));
+    await waitFor(async () => expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).toContain('ladder'));
+    expect(dna.getAttribute('aria-expanded')).toBe(before);
+    expect(await findTypeRow('DNA', 2)).toBeTruthy();
+  });
+
+  it('the Global "+" writes the global registry', async () => {
+    const th = host();
+    th.setActive(NOTE);
+    th.answer.prompt('Taq2', '', '');
+    mount(th);
+    const reagent = await findTypeRow('Reagent', 1);
+    fireEvent.click(within(reagent).getByRole('button', { name: 'Reagent 샘플 추가 (전역)' }));
+    await waitFor(async () => expect(await th.host.fs.read(`${GLOBAL}/Reagent.json`)).toContain('Taq2'));
+    expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).not.toContain('Taq2');
+  });
+
+  it('a Local "+" pressed when no experiment is known any more says to open a note and writes nothing', async () => {
+    const th = host();
+    const view = render(
+      <>
+        <SamplesPanel ctx={th.ctx} activePath={NOTE} />
+        <ContextMenu />
+      </>,
+    );
+    const dna = await findTypeRow('DNA', 1);
+    // The tree still shows the experiment's Local rows (it re-reads 300 ms later), but the note closed and nothing is remembered
+    view.rerender(
+      <>
+        <SamplesPanel ctx={th.ctx} activePath={undefined} />
+        <ContextMenu />
+      </>,
+    );
+    rememberExperiment(undefined);
+    fireEvent.click(within(dna).getByRole('button', { name: 'DNA 샘플 추가 (로컬)' }));
+    await waitFor(() => expect(th.notes.at(-1)?.message).toBe(coreT('Open a note first to add a local sample.')));
+    expect(th.asked.prompt).toHaveLength(0);
+    expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).not.toContain('DNA-2');
   });
 
   it('View usages opens a picker of spots, or says the sample is unused', async () => {

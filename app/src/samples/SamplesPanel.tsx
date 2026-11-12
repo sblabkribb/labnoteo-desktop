@@ -18,7 +18,8 @@ import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import type { CommandContext } from '../labnote/commands/context';
 import { coreT } from '../labnote/i18n';
-import { TreeView } from '../labnote/panel/TreeView';
+import { runCommand } from '../labnote/commands/runCommand';
+import { TreeView, type TreeAction } from '../labnote/panel/TreeView';
 import { openSampleDefinition } from '../labnote/port/sampleCommands';
 import { createSampleInteractive } from '../labnote/port/sampleCreate';
 import { deleteSampleInteractive } from '../labnote/port/sampleDelete';
@@ -230,6 +231,21 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
     if (items.length > 0) openMenu(ctx, anchor, items);
   };
 
+  /** 종류 줄의 + 단추: 우클릭 메뉴의 "샘플 추가"와 같은 흐름(addSampleOfType)을 바로 부른다. 줄을 펴거나 고르지 않는다. */
+  const typeActions = (node: TreeNode): TreeAction[] | undefined => {
+    if (node.kind !== 'sampleType' || !loaded) return undefined;
+    const payload = node.payload as SampleTypePayload;
+    const rendered = loaded.local;
+    const where = payload.scope === 'global' ? t('samples.scope.global') : t('samples.scope.local');
+    return [
+      {
+        icon: 'plus',
+        label: t('samples.addTyped', payload.type, where),
+        run: () => void runCommand(ctx, () => addSampleOfType(env, payload, rendered, active.current)),
+      },
+    ];
+  };
+
   const nodeClass = (node: TreeNode) =>
     node.kind === 'sampleType' ? `sample-swatch ${sampleTypeClass((node.payload as SampleTypePayload).type)}` : undefined;
 
@@ -272,10 +288,30 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
           onContext={context}
           nodeClass={nodeClass}
           meta={sampleTypeCount}
+          actions={typeActions}
         />
       )}
     </div>
   );
+}
+
+/**
+ * 종류 줄에서 그 종류의 샘플을 하나 더한다: 우클릭 "샘플 추가"와 종류 줄의 + 단추가 함께 쓴다.
+ * Local 은 마지막으로 그린 Local 폴더에 쓴다. 지금 실험 노트가 열려 있지 않으면 알리고 아무것도 쓰지 않는다.
+ */
+export async function addSampleOfType(
+  env: SampleEnv,
+  { scope, type }: Pick<SampleTypePayload, 'scope' | 'type'>,
+  renderedLocal: string,
+  activePath: string | undefined,
+): Promise<void> {
+  // Local writes need a resolvable experiment folder; without one the
+  // sample would land in an unexpected place (or the Global fallback).
+  if (scope === 'local' && !hasLocalScope(activePath)) {
+    env.host.notify('info', env.t('Open a note first to add a local sample.'));
+    return;
+  }
+  await createSampleInteractive(env, { type, folder: scope === 'global' ? env.globalFolder() : renderedLocal, mode: 'generate', scope });
 }
 
 /** 맥락 메뉴의 항목: 옮겨 온 메뉴 목록(sampleMenuItems / typeMenuItems)을 흐름에 잇는다. */
@@ -285,15 +321,7 @@ function menuFor(env: SampleEnv, node: TreeNode, renderedLocal: string, activePa
     const { scope, type } = node.payload as SampleTypePayload;
     return typeMenuItems(node).map(() => ({
       label: coreT('Add sample'),
-      run: async () => {
-        // Local writes need a resolvable experiment folder; without one the
-        // sample would land in an unexpected place (or the Global fallback).
-        if (scope === 'local' && !hasLocalScope(activePath)) {
-          env.host.notify('info', env.t('Open a note first to add a local sample.'));
-          return;
-        }
-        await createSampleInteractive(env, { type, folder: folderOf(scope), mode: 'generate', scope });
-      },
+      run: () => addSampleOfType(env, { scope, type }, renderedLocal, activePath),
     }));
   }
   if (node.kind !== 'sample') return [];
