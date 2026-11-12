@@ -65,7 +65,7 @@ export type DialogSpec =
   | { kind: 'sampleDefinition'; model: SampleDefinitionModel; usages: Promise<UsageGroup[]> }
   | { kind: 'progress'; id: number }
   // 설정 창(UI 재설계 Task 8): 일반·편집기·실험·샘플·연동·단축키·정보. 닫힌 뒤 할 일(설정 창 뒤에 줄 서면 안 되는 질문)이 있으면 그 함수
-  | { kind: 'settings'; page: SettingsPage; deps: SettingsDeps; focus?: 'githubToken' }
+  | { kind: 'settings'; page: SettingsPage; deps: SettingsDeps; focus?: 'githubToken' | 'partbank' }
   | { kind: 'partbankSearch'; opts: PartbankSearchOpts }
   | { kind: 'aiAnswer'; content: string; onInsert?: () => Promise<boolean> }
   | { kind: 'worksheet'; unitOps: readonly WorksheetUnitOp[]; paper: WorksheetPaperSize }

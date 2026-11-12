@@ -223,6 +223,28 @@ describe('Settings > Integrations groups', () => {
     expect(document.activeElement).toBe(screen.getByRole('heading', { level: 4, name: t('integrations.group.research') }));
   });
 
+  it('focus "partbank" (the Samples tab Connect button) scrolls the PartBank heading up and focuses it', async () => {
+    const scroll = vi.fn();
+    const proto = HTMLElement.prototype as unknown as { scrollIntoView?: unknown };
+    const before = proto.scrollIntoView;
+    proto.scrollIntoView = scroll;
+    try {
+      render(<IntegrationSettingsPage deps={fullDeps()} onLeave={async () => {}} focus="partbank" />);
+      await act(async () => {});
+      const head = screen.getByRole('heading', { level: 5, name: coreT('partbank') });
+      expect(document.activeElement).toBe(head);
+      expect(head.getAttribute('tabindex')).toBe('-1');
+      expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+    } finally {
+      proto.scrollIntoView = before;
+    }
+  });
+
+  it('without a focus target the PartBank heading is not focused', async () => {
+    await show(fullDeps());
+    expect(document.activeElement).not.toBe(screen.getByRole('heading', { level: 5, name: coreT('partbank') }));
+  });
+
   it('ko copy keeps "Workflow" in English; en copy has no Hangul', async () => {
     setLang('ko');
     const keys = [

@@ -53,8 +53,9 @@ export function setSettingsSource(fn: () => SettingsDeps | undefined): () => voi
  * 보관함 설정을 아직 읽지 못했으면(값이 없으면) 아무것도 하지 않는다. 이미 보이고 있으면 하나 더 열지 않는다.
  * 닫힌 뒤 할 일이 있으면(샘플 폴더 옮기기 등) 그것까지 기다린다.
  * `opts.focus`: 'githubToken' 이면 연동 쪽의 GitHub 고급 칸을 펴고 토큰 칸에 초점을 준다(로그인 대화상자의 "토큰으로 연결").
+ * 'partbank' 면 연동 쪽의 PartBank 제목을 위로 올리고 초점을 준다(샘플 탭의 "연결하기").
  */
-export async function openSettings(page: SettingsPage = 'general', opts?: { focus?: 'githubToken' }): Promise<void> {
+export async function openSettings(page: SettingsPage = 'general', opts?: { focus?: 'githubToken' | 'partbank' }): Promise<void> {
   const deps = source?.();
   if (!deps) return;
   if (currentDialog()?.spec.kind === 'settings') return;

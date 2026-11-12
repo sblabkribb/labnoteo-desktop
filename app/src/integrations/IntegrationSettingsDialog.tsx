@@ -429,8 +429,8 @@ export function IntegrationSettingsPage(props: {
   onLeave: () => Promise<void>;
   commitRef?: MutableRefObject<(() => Promise<void>) | null>;
   autoFocus?: boolean;
-  /** 열 때 초점을 줄 곳(`openSettings(page, {focus})`). */
-  focus?: GithubFocus;
+  /** 열 때 초점을 줄 곳(`openSettings(page, {focus})`): GitHub 토큰 칸, 또는 PartBank 묶음의 제목. */
+  focus?: GithubFocus | 'partbank';
 }) {
   const { deps } = props;
   const autoFocus = useRef(props.autoFocus === true);
@@ -487,6 +487,24 @@ export function IntegrationSettingsPage(props: {
     head.scrollIntoView?.({ block: 'start' });
     head.focus({ preventScroll: true });
   };
+  /** PartBank 제목: `focus: 'partbank'` 로 열면 차례 단추처럼 위로 올리고 초점을 준다. */
+  const partbankHead = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (props.focus !== 'partbank') return;
+    // 설정 창은 처음 그릴 때 왼쪽 목록에 초점을 준다(부모의 effect 가 이 effect 뒤에 돈다): 그 뒤에 옮긴다.
+    let live = true;
+    queueMicrotask(() => {
+      const head = partbankHead.current;
+      if (!live || !head) return;
+      head.scrollIntoView?.({ block: 'start' });
+      head.focus({ preventScroll: true });
+    });
+    return () => {
+      live = false;
+    };
+    // 열 때 한 번
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -1050,7 +1068,9 @@ export function IntegrationSettingsPage(props: {
 
 
           <section className="integration-section">
-            <h5>{coreT('partbank')}</h5>
+            <h5 ref={partbankHead} tabIndex={-1}>
+              {coreT('partbank')}
+            </h5>
             <p className="prompt-hint">{overrideOr('integrations.partbankIntro')}</p>
             {partbankRows('desktop')}
             {partbankRows('web')}
@@ -1105,7 +1125,7 @@ export function IntegrationSettingsPage(props: {
 
         {deps.github ? (
           <Group gid="github" baseId={id} label={t('integrations.group.github')} lead={t('integrations.group.githubLead')} headRef={headRef('github')}>
-            <GithubSection deps={deps.github} onLeave={leave} focus={props.focus} />
+            <GithubSection deps={deps.github} onLeave={leave} focus={props.focus === 'githubToken' ? 'githubToken' : undefined} />
           </Group>
         ) : null}
 

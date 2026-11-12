@@ -10,6 +10,8 @@
  * - 전역 샘플 추적 스위치가 꺼져 있을 때만 트리 대신 플러그인의 문장을 보인다. 실험 README 의 sample_tracking: no 는
  *   트리를 숨기지 않는다.
  * - 메뉴 동작은 메뉴 층의 runCommand 를 거친다(거절은 알림이 된다).
+ * - 종류 줄의 + 단추는 우클릭 "샘플 추가"와 같은 흐름이다(addSampleOfType).
+ * - 트리 아래에는 PartBank 구역(PartbankSection)이 있다: 연결된 PartBank 에서 찾아 샘플로 가져온다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TreeNode } from '@labnoteo/core';
@@ -46,6 +48,7 @@ import { openMenu, type MenuAnchor, type MenuItem } from '../labnote/ui/menuStor
 import { copyText } from '../links/clipboard';
 import { partbank } from '../partbank/current';
 import { createSampleEnv, sampleEvents, type SampleEnv } from './env';
+import { PartbankSection } from './PartbankSection';
 import { samples } from './sampleStore';
 import { sampleTypeClass } from './typeClass';
 
@@ -291,6 +294,7 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
           actions={typeActions}
         />
       )}
+      <PartbankSection ctx={ctx} env={env} />
     </div>
   );
 }
