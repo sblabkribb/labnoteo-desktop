@@ -244,6 +244,7 @@ export function SamplesPanel({ ctx, activePath }: SamplesPanelProps) {
       {
         icon: 'plus',
         label: t('samples.addTyped', payload.type, where),
+        key: '+',
         run: () => void runCommand(ctx, () => addSampleOfType(env, payload, rendered, active.current)),
       },
     ];

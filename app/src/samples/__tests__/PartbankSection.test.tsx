@@ -8,7 +8,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { sourceForItem } from '@labnoteo/core';
 import { loadSamplesByType } from '@labnoteo/core/lib/sampleStorage';
 import { setLang } from '../../i18n/lang';
-import { t } from '../../i18n/t';
+import { catalogs, t } from '../../i18n/t';
 import { notifySecretsChange } from '../../integrations/probes';
 import { netError, secretStatusOf } from '../../integrations/__tests__/fakeNet';
 import type { SecretStatus } from '../../integrations/netIpc';
@@ -122,13 +122,30 @@ afterEach(() => {
   setLang('en');
 });
 
+describe('PartbankSection: wording', () => {
+  it('names the service "partbank" as the rest of the app and the reused core strings do, with the right Korean particles', () => {
+    for (const lang of ['ko', 'en'] as const) {
+      const pb = Object.entries(catalogs[lang]).filter(([k]) => k.startsWith('samples.pb.'));
+      expect(pb.length).toBeGreaterThan(5);
+      for (const [k, v] of pb) expect([k, v.includes('PartBank')]).toEqual([k, false]);
+    }
+    expect(catalogs.ko['samples.pb.title']).toBe('partbank');
+    // 뱅크 ends in a vowel: 가, not 이
+    expect(catalogs.ko['samples.pb.notConnected'].startsWith('partbank가 ')).toBe(true);
+    expect(catalogs.ko['samples.pb.notConnected']).not.toContain('partbank이');
+    // The core strings in the same section already say partbank
+    setLang('ko');
+    expect(coreT('Search partbank')).toContain('partbank');
+  });
+});
+
 describe('PartbankSection: connection', () => {
   it('is a disclosure headed PartBank, open by default, whose body is a labelled region', async () => {
     setup();
     await settle();
-    const head = screen.getByRole('button', { name: 'PartBank' });
+    const head = screen.getByRole('button', { name: 'partbank' });
     expect(head.getAttribute('aria-expanded')).toBe('true');
-    const region = screen.getByRole('region', { name: 'PartBank' });
+    const region = screen.getByRole('region', { name: 'partbank' });
     expect(head.getAttribute('aria-controls')).toBe(region.id);
     fireEvent.click(head);
     expect(head.getAttribute('aria-expanded')).toBe('false');
@@ -348,10 +365,10 @@ describe('PartbankSection: results', () => {
     clock.flush();
     await screen.findByText('pET28a-sfGFP');
     expect(screen.getByRole('button', { name: 'pET28a-sfGFP 샘플로 가져오기' }).textContent).toBe('샘플로 가져오기');
-    expect(screen.getByRole('button', { name: 'pET28a-sfGFP PartBank에서 열기' }).textContent).toBe('PartBank에서 열기');
+    expect(screen.getByRole('button', { name: 'pET28a-sfGFP partbank에서 열기' }).textContent).toBe('partbank에서 열기');
     act(() => setLang('en'));
     expect(t('samples.pb.importNamed', 'X')).toBe('Import X as sample');
-    expect(t('samples.pb.openNamed', 'X')).toBe('Open X in PartBank');
+    expect(t('samples.pb.openNamed', 'X')).toBe('Open X in partbank');
     expect(t('samples.pb.connect')).toBe('Connect');
   });
 
@@ -372,7 +389,7 @@ describe('PartbankSection: results', () => {
     await settle();
     type('sfgfp');
     clock.flush();
-    fireEvent.click(await screen.findByRole('button', { name: 'sfGFP CDS PartBank에서 열기' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'sfGFP CDS partbank에서 열기' }));
     await waitFor(() => expect(openInPartbank).toHaveBeenCalledTimes(1));
     expect(vi.mocked(openInPartbank).mock.calls[0][1]).toEqual(
       sourceForItem({ type: 'part', id: OID(2), kid: 'KP-01102' }, 'web', PB_WEB),

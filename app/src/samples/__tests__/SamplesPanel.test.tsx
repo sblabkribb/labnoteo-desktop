@@ -273,6 +273,19 @@ describe('SamplesPanel', () => {
     expect(await findTypeRow('DNA', 2)).toBeTruthy();
   });
 
+  it('keyboard: "+" on a focused type row adds a sample of that type (the shown "+" is not a tab stop)', async () => {
+    const th = host();
+    th.setActive(NOTE);
+    th.answer.prompt('ladder', '', '');
+    mount(th);
+    const dna = await findTypeRow('DNA', 1);
+    expect(dna.getAttribute('aria-keyshortcuts')).toBe('+');
+    dna.focus();
+    fireEvent.keyDown(dna, { key: '+', shiftKey: true });
+    await waitFor(async () => expect(await th.host.fs.read(`${LOCAL}/DNA.json`)).toContain('ladder'));
+    expect(row(/DNA-1/).hasAttribute('aria-keyshortcuts')).toBe(false);
+  });
+
   it('the Global "+" writes the global registry', async () => {
     const th = host();
     th.setActive(NOTE);

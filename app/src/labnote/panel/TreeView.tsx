@@ -49,7 +49,10 @@ export interface TreeViewProps {
   state?(node: TreeNode): TreeState | undefined;
   /** 이름(과 코드) 뒤의 작은 표시: 이름이 붙은 그림(role=img, aria-label, title). 실험 줄의 GitHub 상태. */
   badge?(node: TreeNode): TreeBadge | undefined;
-  /** 줄에 커서를 올리면 보이는 작은 단추들(마우스용: 탭 정지가 아니다. 같은 일은 줄과 메뉴로도 한다). */
+  /**
+   * 줄에 커서를 올리거나 줄에 초점이 있으면 보이는 작은 단추들. 탭 정지가 아니다(줄 하나만 탭 정지): 키보드로는 단추의
+   * `key` 를 그 줄에서 누른다(줄과 단추의 aria-keyshortcuts 가 알린다). 같은 일은 메뉴(Shift+F10)로도 한다.
+   */
   actions?(node: TreeNode): TreeAction[] | undefined;
   /** 이 id 의 줄로 초점을 옮기고 보이게 스크롤한다. seq 마다 한 번, 그 줄이 그려진 뒤에(조상이 펼쳐지길 기다린다). */
   focusRequest?: { id: string; seq: number };
@@ -89,6 +92,8 @@ export interface TreeAction {
   icon: IconName;
   label: string;
   run: () => void;
+  /** 줄에 초점이 있을 때 이 단추를 누르는 키(KeyboardEvent.key, 예 '+'). Ctrl·Alt·Meta 와 함께면 앱의 것이다(확대). */
+  key?: string;
 }
 
 /**
@@ -200,6 +205,17 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
     // Alt/Ctrl/Meta+arrow belongs to the app (Alt+←/→ is back and forward): never take it as tree movement.
     if ((e.altKey || e.ctrlKey || e.metaKey) && /^(Arrow|Home$|End$)/.test(e.key)) return;
     const row = rows[index];
+    // 줄의 작은 단추(+)는 탭 정지가 아니다: 그 단추의 키가 그 줄에서 단추를 누른다. Ctrl/Alt/Meta+'+' 는 앱의 확대다.
+    if (!e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1) {
+      const hit = actions?.(row.node)?.find((b) => b.key === e.key);
+      if (hit) {
+        e.preventDefault();
+        e.stopPropagation();
+        setFocusKey(row.key);
+        hit.run();
+        return;
+      }
+    }
     // 체크박스가 있는 줄(Workflow 완료): Space 는 체크박스를 누른다. 메뉴 단추가 있는 줄(실험 상태): Space 는 그 메뉴를 연다.
     // 그 단추들은 탭 정지가 아니라서(줄 하나만 탭 정지) 키보드로는 이 길이다. Enter 는 그대로 연다. 초점은 줄에 남는다.
     if (e.key === ' ' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -286,6 +302,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
         const shape = state?.(row.node);
         const mark2 = badge?.(row.node);
         const buttons = actions?.(row.node) ?? [];
+        const shortcuts = buttons.flatMap((b) => (b.key ? [b.key] : [])).join(' ');
         return (
           <li
             key={row.key}
@@ -300,6 +317,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
             aria-current={(scrollCurrent ? row.key === currentKey : isCurrent?.(row.node)) ? 'true' : undefined}
             {...depth}
             tabIndex={row.key === tabStop ? 0 : -1}
+            aria-keyshortcuts={shortcuts || undefined}
             title={rowTitle(row.node)}
             className={rowClass}
             onClick={(e) => activate(row, e.currentTarget)}
@@ -371,6 +389,7 @@ export function TreeView({ nodes, label, expanded, onToggle, onActivate, onConte
                     className="tree-action"
                     tabIndex={-1}
                     aria-label={b.label}
+                    aria-keyshortcuts={b.key}
                     title={b.label}
                     onClick={(e) => {
                       e.stopPropagation();

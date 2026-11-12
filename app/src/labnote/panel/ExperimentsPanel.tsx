@@ -673,8 +673,8 @@ export function ExperimentsPanel({ ctx, activePath, noteHidden = false }: Experi
 
   const actions = (node: TreeNode): TreeAction[] | undefined => {
     const item = items.get(node.id);
-    if (item?.kind === 'experiment') return [{ icon: 'plus', label: t('experiments.addWorkflow'), run: () => addWorkflow(item.exp) }];
-    if (item?.kind === 'workflow') return [{ icon: 'plus', label: t('experiments.addUo'), run: () => addUo(item.wf) }];
+    if (item?.kind === 'experiment') return [{ icon: 'plus', label: t('experiments.addWorkflow'), run: () => addWorkflow(item.exp), key: '+' }];
+    if (item?.kind === 'workflow') return [{ icon: 'plus', label: t('experiments.addUo'), run: () => addUo(item.wf), key: '+' }];
     return undefined;
   };
 

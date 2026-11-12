@@ -376,7 +376,7 @@ button.tree-state:hover { background: var(--bg-selected); color: var(--text); }
 /* 줄 위에 커서가 있을 때만 보이는 + 단추. 자리를 차지하지 않다가 나타난다 */
 .tree-actions { display: none; flex: none; gap: var(--space-1); margin-left: var(--space-2); }
 .wf-tree-row:hover > .tree-actions { display: inline-flex; }
-/* 키보드로 줄에 머물러도 보인다(단추 자체는 탭 정지가 아니다: Shift+F10 메뉴가 같은 동작을 낸다) */
+/* 키보드로 줄에 머물러도 보인다. 단추 자체는 탭 정지가 아니다: 그 줄에서 단추의 키(+)를 누르면 눌린다(aria-keyshortcuts), Shift+F10 메뉴도 같다 */
 .wf-tree-row:focus-visible > .tree-actions,
 .wf-tree-row > .tree-actions:focus-within { display: inline-flex; }
 .wf-tree-label + .tree-actions { margin-left: auto; }
