@@ -65,10 +65,8 @@ command by purpose and shows its shortcut.
 
 ![Type into a note with live preview, open the right-click menu, switch to source with Ctrl+E and use the Ctrl+O quick switcher](docs/images/en/labnoteo-editor.gif)
 
-Insert a table and move between cells with Tab. Pressing Tab in the last cell adds a new row, so
-you can fill in results without typing the Markdown pipes yourself.
-
-![Insert a table, fill in IPTG, OD600 and GFP values with Tab, and add rows from the last cell](docs/images/en/labnoteo-tables.gif)
+Insert a table from the right-click **Insert** menu or with Ctrl+Alt+T; Tab moves between cells
+and adds a row at the last cell.
 
 #### 3. Links, backlinks and outline
 
@@ -118,10 +116,11 @@ the README checklist follow every change. Unit Operations move the same way insi
 
 Click an experiment's status icon to pick its status (such as Planned, In progress, Needs review,
 Completed, Failed, Discontinued or Needs repeat) or clear it; the experiment moves to that group. Each
-Workflow has a done checkbox, in the tree and in the note header, and the experiment shows
-"Workflow n/m". When every Workflow is done, the app gently offers to mark the experiment completed.
+Workflow has a done checkbox, in the Experiments tree and in the README's Related Workflows list, and
+the experiment shows "Workflow n/m". When every Workflow is done, the app gently offers to mark the
+experiment completed.
 
-![Change an experiment's status from its icon, then tick a Workflow done in the tree and in the note header](docs/images/en/labnoteo-status.gif)
+![Change an experiment's status from its icon, then tick a Workflow done in the tree and in the README](docs/images/en/labnoteo-status.gif)
 
 #### 9. Samples
 
