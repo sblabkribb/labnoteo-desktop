@@ -392,7 +392,7 @@ button.chip.status:hover:not(:disabled) { background: var(--accent-soft); border
 .empty-state-label { flex: 1 1 auto; }
 .empty-state-action kbd { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-label); font-variant-numeric: tabular-nums; }
 
-/* 보기 머리(36px, 본문 위에 붙는다): 왼쪽에 뒤로·앞으로와 경로, 오른쪽에 주 동작·표 넣기·QR·보기 방식·⋯·오른쪽 사이드바.
+/* 보기 머리(36px, 본문 위에 붙는다): 왼쪽에 뒤로·앞으로와 경로, 오른쪽에 주 동작·QR·보기 방식·⋯·오른쪽 사이드바.
    본문 칸(.content)의 좌우 여백을 음수 여백으로 덮어 창 너비로 깔린다. 좁으면 경로 글자가 줄임표로 줄어든다. */
 .view-header {
   position: sticky;
@@ -412,11 +412,11 @@ button.chip.status:hover:not(:disabled) { background: var(--accent-soft); border
 .view-header-actions { display: flex; align-items: center; gap: var(--space-2); flex: none; }
 .view-nav { display: inline-flex; align-items: center; flex: none; }
 .view-primary { white-space: nowrap; }
-/* 좁은 창: "표 넣기" 는 아이콘만 보인다(이름은 그대로 남아 화면 읽기와 툴팁이 읽는다) */
+/* 좁은 창: 상태 칩은 아이콘만 보인다(이름은 그대로 남아 화면 읽기와 툴팁이 읽는다) */
 @media (max-width: 1099.98px) {
   /* 실험 칸과 그 뒤 구분자는 숨긴다: 워크플로 칸이 읽히게(실험은 상태 줄과 실험 탭에 있다) */
   .breadcrumb li:first-child:not(:last-child):has(+ .crumb-sep), .breadcrumb li:first-child + .crumb-sep { display: none; }
-  .view-header-actions .btn-label-collapsible, .view-header-lead .chip.status .btn-label-collapsible {
+  .view-header-lead .chip.status .btn-label-collapsible {
     position: absolute;
     width: 1px;
     height: 1px;

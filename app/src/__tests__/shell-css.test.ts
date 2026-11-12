@@ -150,6 +150,13 @@ describe('앱 셸 CSS 계약', () => {
     expect(ruleFor('.editor-frame')).not.toBeNull();
     expect(sels.some((s) => s.includes('.content [role="alertdialog"]'))).toBe(false);
   });
+  it('view header: no rules left for the removed Workflow done chip or the Insert table label', () => {
+    const sels = parseRules(css).flatMap((r) => r.selectors);
+    expect(sels.filter((s) => /\.wf-done\b/.test(s))).toEqual([]);
+    expect(sels.filter((s) => s.includes('.view-header-actions .btn-label-collapsible'))).toEqual([]);
+    // 좁은 창에서 이름을 숨기는 것은 상태 칩뿐이다
+    expect(sels).toContain('.view-header-lead .chip.status .btn-label-collapsible');
+  });
   it('layers use the z-index scale', () => {
     expect(ruleFor('.dialog-layer')!.decls['z-index']).toBe('var(--z-dialog)');
     expect(ruleFor('.context-menu')!.decls['z-index']).toBe('var(--z-menu)');
