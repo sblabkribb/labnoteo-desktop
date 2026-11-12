@@ -119,7 +119,7 @@ async function openVault(user: ReturnType<typeof userEvent.setup>, name = WF_NAM
 }
 
 describe('view header and status bar', () => {
-  it('a workflow note: breadcrumb experiment › workflow with a UO menu, status chip, Add UO, Insert table, status bar position', async () => {
+  it('a workflow note: breadcrumb experiment › workflow with a UO menu, status chip, Add UO, no Insert table, status bar position', async () => {
     const user = userEvent.setup();
     await openVault(user);
     await openPath(WF);
@@ -131,7 +131,7 @@ describe('view header and status bar', () => {
     await waitFor(() => expect(header().getByText('Unit Operation 1/2')).toBeTruthy());
     expect(header().queryByRole('checkbox')).toBeNull();
     expect(header().getByRole('button', { name: 'UO 추가' })).toBeTruthy();
-    expect(header().getByRole('button', { name: '표 넣기' })).toBeTruthy();
+    expect(header().queryByRole('button', { name: '표 넣기' })).toBeNull();
     expect(header().queryByRole('button', { name: 'Workflow 추가' })).toBeNull();
     // 상태 줄
     await waitFor(() => expect(statusbar().getByRole('button', { name: /WT020 · UO 1\/2 완료/ })).toBeTruthy());
@@ -210,7 +210,7 @@ describe('view header and status bar', () => {
     const user = userEvent.setup();
     await openVault(user, 'Plain note.md');
     await openPath('Plain note.md');
-    expect(header().getByRole('button', { name: '표 넣기' })).toBeTruthy();
+    expect(header().queryByRole('button', { name: '표 넣기' })).toBeNull();
     expect(header().queryByRole('button', { name: 'UO 추가' })).toBeNull();
     expect(header().queryByRole('button', { name: 'Workflow 추가' })).toBeNull();
     expect(screen.getByRole('navigation', { name: '노트 위치' }).textContent).toBe('Plain note');

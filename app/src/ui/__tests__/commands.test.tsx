@@ -159,7 +159,7 @@ describe('everything is a command (Task 12)', () => {
     const rendered = [...document.querySelectorAll('[data-command-id]')].map((el) => el.getAttribute('data-command-id')!);
     expect(rendered.length).toBeGreaterThanOrEqual(13);
     const ids = [...new Set([...rendered, ...sourceCommandIds()])];
-    expect(ids).toEqual(expect.arrayContaining(['app.toggleLeft', 'app.back', 'editor.insert.table', 'editor-toggle-source', 'app.showSystemFiles']));
+    expect(ids).toEqual(expect.arrayContaining(['app.toggleLeft', 'app.back', 'editor-toggle-source', 'app.showSystemFiles']));
     expect(ids.filter((id) => !findCommand(id))).toEqual([]);
   });
 

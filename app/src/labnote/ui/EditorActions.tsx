@@ -14,7 +14,7 @@ interface Props {
   ctx: CommandContext;
   /** 편집기에 열린 노트. */
   path: string;
-  /** 편집기가 바쁜 동안(읽는 중, 대화상자, 풀리지 않은 바깥 변경) true: 표 넣기 단추와 같은 규칙. */
+  /** 편집기가 바쁜 동안(읽는 중, 대화상자, 풀리지 않은 바깥 변경) true. */
   disabled: boolean;
 }
 

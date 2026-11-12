@@ -28,7 +28,7 @@ import { tableAwareInsertPos } from './target';
 
 export type { TableAction };
 
-/** 표 넣기 키(편집기 머리의 "표 넣기" 단추와 같다). 바깥 편집기(Editor.tsx)와 셀 편집기 둘 다 듣는다. */
+/** 표 넣기 키(넣기 메뉴·팔레트의 "표"와 같다). 바깥 편집기(Editor.tsx)와 셀 편집기 둘 다 듣는다. */
 export const INSERT_TABLE_KEY = 'Mod-Alt-t';
 
 /**

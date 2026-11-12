@@ -101,7 +101,7 @@ describe('NoteQrButton', () => {
 });
 
 describe('the Editor view header', () => {
-  it('renders the primary action before Insert table and passes busy while loading', async () => {
+  it('renders the primary action before the view-mode button and passes busy while loading; no Insert table button', async () => {
     h = createTestHost();
     const vault = createFakeVault({ [WF_PATH]: '# 노트\n' });
     let release: () => void = () => undefined;
@@ -119,7 +119,9 @@ describe('the Editor view header', () => {
     const button = () => screen.getByRole('button', { name: 'UO 추가' }) as HTMLButtonElement;
     const header = button().closest('.view-header')!;
     const names = [...header.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? b.textContent);
-    expect(names.indexOf('UO 추가')).toBeLessThan(names.indexOf('표 넣기'));
+    expect(names).not.toContain('표 넣기');
+    expect(names.indexOf('UO 추가')).toBeGreaterThanOrEqual(0);
+    expect(names.indexOf('UO 추가')).toBeLessThan([...header.querySelectorAll('button')].findIndex((b) => b.classList.contains('editor-mode')));
     expect(button().disabled).toBe(true);
     release();
     await m.loaded();

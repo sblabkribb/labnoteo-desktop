@@ -360,7 +360,7 @@ const revealInTree: AppCommand = {
   },
 };
 
-/** 표 넣기(머리의 표 단추와 같다). 키는 편집기의 keymap 이 듣는다. */
+/** 표 넣기(오른쪽 클릭 넣기 메뉴와 같다). 키는 편집기의 keymap 이 듣는다. */
 const insertTableCommand: AppCommand = {
   id: 'editor.insert.table',
   nameKey: 'cmd.insert.table',

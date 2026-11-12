@@ -112,11 +112,11 @@ interface Props {
    * 메뉴를 띄우면 `e.preventDefault()` 로 기본 메뉴를 막는다.
    */
   onContextMenu?: (e: MouseEvent, view: EditorView) => void;
-  /** 보기 머리의 "표 넣기" 앞에 그릴 주 동작. 인자는 편집기가 바쁜지(읽는 중, 대화상자, 풀리지 않은 바깥 변경). */
+  /** 보기 머리의 주 동작. 인자는 편집기가 바쁜지(읽는 중, 대화상자, 풀리지 않은 바깥 변경). */
   headerActions?: (busy: boolean) => ReactNode;
   /** 보기 머리 왼쪽: 뒤로·앞으로와 경로 표시. */
   headerLead?: ReactNode;
-  /** "표 넣기" 뒤, 보기 방식 단추 앞에 그릴 단추(QR 등). 인자는 headerActions 와 같다. */
+  /** 주 동작 뒤, 보기 방식 단추 앞에 그릴 단추(QR 등). 인자는 headerActions 와 같다. */
   headerTools?: (busy: boolean) => ReactNode;
   /** 보기 머리 오른쪽 끝(⋯ 메뉴, 오른쪽 사이드바 단추). */
   headerTrail?: ReactNode;
@@ -582,7 +582,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
               return true;
             },
           },
-          // 표 넣기(머리의 단추와 같다). 잠겨 있으면 insertTable 이 false 를 돌려 아무것도 넣지 않지만, preventDefault 때문에
+          // 표 넣기(오른쪽 클릭 넣기 메뉴, 팔레트와 같다). 잠겨 있으면 insertTable 이 false 를 돌려 아무것도 넣지 않지만, preventDefault 때문에
           // 키는 여기서 처리된 것으로 끝난다(브라우저 기본 동작이나 다른 keymap 으로 넘어가지 않는다).
           // 칸에 포커스가 있을 때는 셀 편집기가 같은 키를 듣고, 잠긴 칸에서도 똑같이 먹는다(commands.ts 의 cellOuterKeys).
           { key: INSERT_TABLE_KEY, preventDefault: true, run: (v) => insertTable(v) },
@@ -900,7 +900,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
   }, [windowApi]);
 
   const gone = external?.kind === 'gone';
-  // 편집기가 잠긴 동안(읽기 전, 대화상자가 열린 동안)에는 표 넣기 단추도 꺼진다
+  // 편집기가 잠긴 동안(읽기 전, 대화상자가 열린 동안)
   const editLocked = status !== 'ready' || dialogOpen;
   // 명령 단추는 바깥 변경이 풀리지 않은 동안에도 쉰다("그대로 두기" 뒤 포함): 명령은 그 노트를 고치지 않는다(NoteBusyError)
   const commandsBusy = editLocked || external !== null;
@@ -917,20 +917,6 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor(
         actions={
           <>
             {headerActions?.(commandsBusy)}
-            <button
-              type="button"
-              className="btn"
-              title={t('ribbon.withKey', t('table.insert'), 'Ctrl+Alt+T')}
-              data-command-id="editor.insert.table"
-              disabled={editLocked}
-              onClick={() => {
-                const view = viewRef.current;
-                if (view) insertTable(view);
-              }}
-            >
-              <Icon name="table" />
-              <span className="btn-label-collapsible">{t('table.insert')}</span>
-            </button>
             {headerTools?.(commandsBusy)}
             <button
               type="button"

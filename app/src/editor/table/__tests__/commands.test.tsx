@@ -541,7 +541,7 @@ describe('insertTable', () => {
   });
 });
 
-// ---------------------------------------------------------------- 편집기의 "표 넣기" 단추
+// ---------------------------------------------------------------- 편집기의 표 넣기 키
 
 const P = 'lab/t.labnote.md';
 
@@ -568,16 +568,24 @@ function mountEditor(files: Record<string, string>) {
   return { files, ref, view, utils };
 }
 
-describe('편집기의 표 넣기 단추', () => {
-  it('읽기 전에는 꺼져 있고, 누르면 3×3 표를 넣고 머리 칸에 포커스를 준다', async () => {
+describe('편집기의 표 넣기', () => {
+  it('보기 머리에 표 단추가 없다: 넣기는 Mod-Alt-t, 넣기 메뉴, 팔레트로 한다', async () => {
     const e = mountEditor({ [P]: '# 노트\n' });
-    const button = screen.getByRole('button', { name: catalogs.ko['table.insert'] }) as HTMLButtonElement;
-    expect(button.className).toBe('btn');
-    expect(button.closest('.view-header')).not.toBeNull(); // 보기 머리에 남아 있다
     await waitFor(() => expect(e.view().state.readOnly).toBe(false));
-    await waitFor(() => expect(button.disabled).toBe(false));
-    await act(async () => button.click());
+    const header = e.utils.container.querySelector('.view-header')!;
+    expect(header).not.toBeNull();
+    expect(header.querySelector('[data-command-id="editor.insert.table"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: '표 넣기' })).toBeNull();
+    e.utils.unmount();
+  });
+
+  it('Mod-Alt-t 로 3×3 표를 넣고 머리 칸에 포커스를 준다', async () => {
+    const e = mountEditor({ [P]: '# 노트\n' });
+    await waitFor(() => expect(e.view().state.readOnly).toBe(false));
     const v = e.view();
+    const isMac = /Mac/.test(navigator.platform);
+    const ev = new KeyboardEvent('keydown', { key: 't', altKey: true, ctrlKey: !isMac, metaKey: isMac, bubbles: true, cancelable: true });
+    await act(async () => void runScopeHandlers(v, ev, 'editor'));
     expect(v.state.doc.toString()).toBe('# 노트\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\n');
     expect(v.state.field(activeCell)).toMatchObject({ r: 0, c: 0 });
     expect(activeCellView(v)).not.toBeNull();
@@ -610,13 +618,6 @@ describe('편집기의 표 넣기 단추', () => {
     expect(handled).toBe(true);
     expect(v.state.doc.toString()).toBe(`${T}\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\n`);
     expect(v.state.field(activeCell)).toEqual({ tableFrom: T.length + 2, r: 0, c: 0 });
-    e.utils.unmount();
-  });
-
-  it('단추의 이름은 언어를 따른다', async () => {
-    const e = mountEditor({ [P]: '' });
-    await act(async () => setLang('en'));
-    expect(screen.getByRole('button', { name: catalogs.en['table.insert'] })).toBeDefined();
     e.utils.unmount();
   });
 });

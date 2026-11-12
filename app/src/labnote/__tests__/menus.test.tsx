@@ -525,11 +525,11 @@ describe('editorMenu', () => {
     expect(t('cmd.format.bold')).toBe('굵게');
   });
 
-  it('the header keeps its Insert table button next to the menu item (spec §5.6 Step 1)', () => {
-    // 단추의 동작(누르면 표, 잠기면 꺼짐, 영어 이름)은 editor/table/__tests__/commands.test.tsx 의 "편집기의 표 넣기 단추"가 본다.
+  it('the header has no Insert table button: tables come from the Insert menu, the palette and Ctrl+Alt+T', () => {
+    // 키의 동작은 editor/table/__tests__/commands.test.tsx 의 "편집기의 표 넣기"가 본다.
     const source = readFileSync('src/editor/Editor.tsx', 'utf-8');
-    expect(source).toContain('data-command-id="editor.insert.table"');
-    expect(source).toContain("t('table.insert')");
+    expect(source).not.toContain('data-command-id="editor.insert.table"');
+    expect(source).toContain('INSERT_TABLE_KEY');
   });
 
   it('every item the editor menu had before is still reachable', () => {

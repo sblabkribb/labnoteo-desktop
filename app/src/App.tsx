@@ -687,7 +687,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     const caret = e.clientX === 0 && e.clientY === 0 ? view.coordsAtPos(view.state.selection.main.head) : null;
     openMenu(ctx, caret ? { x: caret.left, y: caret.bottom } : { x: e.clientX, y: e.clientY }, items, e);
   };
-  // 보기 머리: 뒤로·앞으로, 경로 표시, 상태 칩, 주 동작, 표 넣기, QR, 보기 방식, ⋯ 메뉴, 오른쪽 사이드바 단추.
+  // 보기 머리: 뒤로·앞으로, 경로 표시, 상태 칩, 주 동작, QR, 보기 방식, ⋯ 메뉴, 오른쪽 사이드바 단추.
   const navButtons = (
     <NavButtons
       canBack={nav.current.canBack(selected)}
