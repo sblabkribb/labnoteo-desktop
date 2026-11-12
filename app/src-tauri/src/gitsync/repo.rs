@@ -318,8 +318,10 @@ pub(crate) mod tests {
         assert!(repo.is_bare());
         assert!(repo.workdir().is_none());
         let path = repo.path().to_path_buf();
-        assert!(!path.starts_with(&vault));
-        assert!(path.starts_with(&dirs));
+        // Compare canonical paths: a runner's temp dir can come back as an 8.3 short name (RUNNER~1) on one side.
+        let canon = fs::canonicalize(&path).unwrap();
+        assert!(!canon.starts_with(fs::canonicalize(&vault).unwrap()));
+        assert!(canon.starts_with(fs::canonicalize(&dirs).unwrap()));
         assert!(path.ends_with(format!("repos/{LINK}.git/")) || path.ends_with(format!("repos/{LINK}.git")));
         let cfg = repo.config().unwrap().open_level(git2::ConfigLevel::Local).unwrap();
         assert!(cfg.get_bool("core.longpaths").unwrap());
