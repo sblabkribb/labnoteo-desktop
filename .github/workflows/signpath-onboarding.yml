@@ -1,0 +1,70 @@
+# Unsigned onboarding samples only. This does not publish or modify Releases.
+name: signpath-onboarding
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/signpath-onboarding.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+      - name: Build unsigned samples without updater artifacts
+        working-directory: app
+        run: npx tauri build --ci --target x86_64-pc-windows-msvc --bundles nsis --no-sign --no-binary-patching
+      - name: Collect samples and metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $buildRoot = 'app/src-tauri/target/x86_64-pc-windows-msvc/release'
+          $installer = @(Get-ChildItem -LiteralPath "$buildRoot/bundle/nsis" -Filter '*-setup.exe' -File)
+          if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          New-Item -ItemType Directory -Path 'signpath-sample' | Out-Null
+          Copy-Item -LiteralPath "$buildRoot/labnoteo-app.exe" -Destination 'signpath-sample/labnoteo-app.exe'
+          Copy-Item -LiteralPath $installer[0].FullName -Destination 'signpath-sample'
+          $files = @(Get-ChildItem -LiteralPath 'signpath-sample' -Filter '*.exe' -File | ForEach-Object {
+            [ordered]@{
+              name = $_.Name
+              sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+              productName = $_.VersionInfo.ProductName
+              productVersion = $_.VersionInfo.ProductVersion
+              fileVersion = $_.VersionInfo.FileVersion
+              signatureStatus = (Get-AuthenticodeSignature -LiteralPath $_.FullName).Status.ToString()
+            }
+          })
+          [ordered]@{
+            purpose = 'Unsigned SignPath onboarding sample; not a public release'
+            repository = $env:GITHUB_REPOSITORY
+            commit = (git rev-parse HEAD)
+            run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            files = $files
+          } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath 'signpath-sample/build-metadata.json' -Encoding utf8
+          'Unsigned samples only. No Release was published and no updater key was used.' >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signpath-onboarding-${{ github.run_id }}-${{ github.run_attempt }}
+          path: signpath-sample/
+          if-no-files-found: error
+          retention-days: 14

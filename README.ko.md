@@ -261,6 +261,10 @@ Harness(`dsh`) 같은 다른 AI 도구는 앱에 넣지 않으며, 그 도구를
 
 ## 설치
 
+[Code signing policy — 코드 서명 정책](docs/CODE_SIGNING_POLICY.md) · [개인정보 안내](docs/PRIVACY.md)
+
+SignPath Foundation 신청을 준비 중입니다. 실제 배포 파일의 코드 서명은 아직 적용되지 않았습니다.
+
 Windows 10 또는 11 (64비트).
 
 설치 파일은 [Releases](https://github.com/sblabkribb/labnoteo-desktop/releases) 페이지에 올라갑니다.
