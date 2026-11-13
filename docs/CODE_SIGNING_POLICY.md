@@ -19,8 +19,8 @@ and the download/release page to identify the first signed version.
 
 - Authors and reviewers: maintainers with write access to
   [sblabkribb/labnoteo-desktop](https://github.com/sblabkribb/labnoteo-desktop).
-- Signing approvers: repository administrators designated in SignPath. The actual
-  approver account must be confirmed and listed here before production activation.
+- Signing approver: [Yesung Park (@ParkYaeseong)](https://github.com/ParkYaeseong),
+  Korea Biofoundry. SignPath account provisioning and role assignment are pending.
 - The GitHub Actions identity may submit signing requests; it must not approve them.
 
 Participants must enable MFA for GitHub and SignPath before receiving signing access.

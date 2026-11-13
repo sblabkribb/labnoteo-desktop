@@ -26,8 +26,10 @@ signing rehearsal passes. Do not replace the existing Tauri updater key.
   2026-11-13. Cite the public source/commit history, release download counts, Actions
   logs, README demonstrations, and related https://github.com/sblabkribb/labnoteo.
   Do not claim widespread adoption or institutional endorsement without evidence.
-- Contact first/last name, account email, organization, and signing approver: obtain
-  from the maintainer; do not infer legal representation from the repository name.
+- Contact: Yesung Park, Korea Biofoundry. The maintainer provided the account email
+  directly for the application; it is not stored in this repository.
+- Designated signing approver: [ParkYaeseong](https://github.com/ParkYaeseong).
+  SignPath role assignment and MFA verification remain pending.
 - Discovery source: AI assistant / ChatGPT, with official SignPath documentation.
 
 Publish the code signing and privacy policy links before submitting the application
