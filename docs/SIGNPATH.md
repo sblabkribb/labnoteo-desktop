@@ -2,7 +2,8 @@
 
 ## Current stage
 
-Preparation only: no application acceptance, certificate, token, or successful signed
+Application submitted on 2026-11-13; the website confirmed "Form submitted".
+Foundation review is pending. No acceptance, certificate, token, or successful signed
 build is implied. The normal release workflow remains unchanged until a production
 signing rehearsal passes. Do not replace the existing Tauri updater key.
 

@@ -2,8 +2,8 @@
 
 ## Status
 
-SignPath Foundation onboarding is being prepared. The project has not yet received
-production signing access. Existing GitHub Release installers are unsigned; their
+The SignPath Foundation application was submitted on 2026-11-13 and is awaiting review.
+The project has not yet received production signing access. Existing GitHub Release installers are unsigned; their
 `.sig` files authenticate Tauri updates, not the Windows publisher.
 
 The intended service, subject to acceptance, is:

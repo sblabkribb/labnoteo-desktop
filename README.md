@@ -276,7 +276,8 @@ saved first). **Check for updates** in the command palette checks right away.
 
 [Code signing policy](docs/CODE_SIGNING_POLICY.md) · [Privacy policy](docs/PRIVACY.md)
 
-SignPath Foundation onboarding is being prepared. Production code signing is not yet enabled.
+The SignPath Foundation application was submitted on 2026-11-13 and is awaiting review.
+Production code signing is not yet enabled.
 
 Windows 10 or 11 (64-bit).
 
