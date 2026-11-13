@@ -274,6 +274,11 @@ saved first). **Check for updates** in the command palette checks right away.
 
 ## Install
 
+[Code signing policy](docs/CODE_SIGNING_POLICY.md) · [Privacy policy](docs/PRIVACY.md)
+
+The SignPath Foundation application was submitted on 2026-11-13 and is awaiting review.
+Production code signing is not yet enabled.
+
 Windows 10 or 11 (64-bit).
 
 Installers are published on the [Releases](https://github.com/sblabkribb/labnoteo-desktop/releases)
