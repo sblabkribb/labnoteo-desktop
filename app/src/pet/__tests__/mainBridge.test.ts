@@ -227,6 +227,38 @@ describe('mirror out', () => {
   });
 });
 
+describe('a run while there is no desktop pet', () => {
+  it('is forgotten: the pet that starts later is not sent an old answer', async () => {
+    const t = setup({ start: { ok: false } });
+    await t.bridge.start();
+    await flushMicro();
+    t.s.set({ messages: [t.s.item('u1', 'user', 'q'), t.s.item('a1', 'assistant', 'OLD ANSWER', { pending: true })], streaming: true });
+    t.s.set({ messages: [t.s.item('u1', 'user', 'q'), t.s.item('a1', 'assistant', 'OLD ANSWER')], streaming: false });
+    vi.advanceTimersByTime(500);
+    await flushMicro();
+    t.p.set({ desktop: true });
+    vi.advanceTimersByTime(500);
+    await flushMicro();
+    expect(t.of('pet:answer')).toHaveLength(0);
+  });
+
+  it('a run that was going when the pet closed is dropped too', async () => {
+    const t = setup();
+    await t.bridge.start();
+    await flushMicro();
+    t.s.set({ messages: [t.s.item('u1', 'user', 'q'), t.s.item('a1', 'assistant', 'half', { pending: true })], streaming: true });
+    vi.advanceTimersByTime(120);
+    await flushMicro();
+    t.fire('pet:closed', { v: 1 });
+    t.s.set({ messages: [t.s.item('u1', 'user', 'q'), t.s.item('a1', 'assistant', 'half done')], streaming: false });
+    vi.advanceTimersByTime(500);
+    t.p.set({ desktop: true });
+    vi.advanceTimersByTime(500);
+    await flushMicro();
+    expect(t.of('pet:answer').filter((a) => (a as { done: boolean }).done)).toHaveLength(0);
+  });
+});
+
 describe('questions in', () => {
   it('drops invalid payloads silently', async () => {
     const t = setup();

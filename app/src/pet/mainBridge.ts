@@ -8,7 +8,7 @@ import { getLang } from '../i18n/lang';
 import { buildStateEvent } from './mirror';
 import { ANSWER_MAX, clampText, EVT, parseAsk, parseReady, type AnswerEvent, type RejectEvent, type RejectReason } from './protocol';
 
-/** The main window's whole window onto Tauri for the pet. Tests inject a fake; `tauriMainIpc` (petIpc.ts) is the real one. */
+/** The main window's whole window onto Tauri for the pet. Tests inject a fake; `tauriMainIpc` (mainIpc.ts) is the real one. */
 export interface BridgeIpc {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
   listen(event: string, fn: (payload: unknown) => void): Promise<() => void>;
@@ -137,7 +137,8 @@ export function createMainBridge(deps: MainBridgeDeps): MainBridge {
 
   const onSession = () => {
     const snap = session.get();
-    if (snap.streaming && !run) {
+    // Only mirror a run while a desktop pet exists: an old answer must never reach a pet that starts later.
+    if (snap.streaming && !run && store.get().desktop) {
       const last = [...snap.messages].reverse().find((m) => m.role === 'assistant');
       run = { itemId: last?.id ?? null, askId: pending?.askId ?? newId() };
       if (pending) pending.started = true;
@@ -178,6 +179,7 @@ export function createMainBridge(deps: MainBridgeDeps): MainBridge {
   };
 
   const onStore = () => {
+    if (!store.get().desktop) run = null;
     const hidden = store.get().hidden;
     if (hidden !== wasHidden) {
       wasHidden = hidden;
