@@ -162,7 +162,8 @@ describe('SP7 guards', () => {
     expect(createHash('sha256').update(conf.app.security.csp, 'utf8').digest('hex')).toBe(PINNED_CSP_SHA256);
     const cap = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf-8'));
     expect(cap.windows).toEqual(['main']);
-    expect(cap.permissions).toEqual(SP6_PERMISSIONS);
+    // `allow-*` entries are the app's own commands (commands.txt); pet/__tests__/petCapability.test.ts pins them.
+    expect((cap.permissions as unknown[]).filter((p) => !(typeof p === 'string' && p.startsWith('allow-')))).toEqual(SP6_PERMISSIONS);
   });
 
   it('SP7 sources set no inline style, assign no innerHTML, and call no fetch or XMLHttpRequest', () => {

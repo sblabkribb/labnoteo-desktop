@@ -123,7 +123,9 @@ describe('창 권한', () => {
 
   it('기본 권한 묶음은 정확히 이 목록이다 (set-theme 은 제목 표시줄을 고른 테마에 맞추려고, show 는 숨겨 띄운 창을 첫 테마 뒤에 보이려고 연다)', () => {
     expect(cap.windows).toEqual(['main']);
-    expect(cap.permissions).toEqual([
+    // `allow-*` (no plugin or core prefix) are the app's own commands, generated from commands.txt; pet/__tests__/petCapability.test.ts pins them.
+    const own = (cap.permissions as unknown[]).filter((p) => !(typeof p === 'string' && p.startsWith('allow-')));
+    expect(own).toEqual([
       'core:default',
       'core:window:allow-destroy',
       'core:window:allow-set-theme',

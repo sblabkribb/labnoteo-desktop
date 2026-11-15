@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pet",
+  "description": "Desktop pet window: event listen, unlisten and emit (the mirror and the thin-client bubble), dragging its own window, its own geometry, layout, hide, quiet and open-main commands, and reading the active skin images. Nothing from the vault, network, git sync, scan or settings.",
+  "windows": ["pet"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:window:allow-start-dragging",
+    "allow-pet-geometry",
+    "allow-pet-set-layout",
+    "allow-pet-hide",
+    "allow-pet-open-main",
+    "allow-pet-quiet-get",
+    "allow-pet-quiet-set",
+    "allow-pet-start-failed",
+    "allow-skin-read"
+  ]
+}
