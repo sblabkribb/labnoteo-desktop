@@ -20,6 +20,8 @@ export interface AiEnv {
   readonly t: Translator;
   settings(): AppSettings;
   readonly provider: LlmProvider | null;
+  /** 요청에 쓴 설정의 사본(플러그인 0.142.0: 명령이 시작할 때 설정을 얼린다). 오류 문장이 이것으로 쓰인다. 없으면 settings(). */
+  readonly requestSettings?: AppSettings;
   sampleEnv(): SampleEnv;
   /** 화면 언어(플러그인의 getObsidianLanguage). */
   lang(): 'ko' | 'en';
@@ -28,12 +30,14 @@ export interface AiEnv {
 
 export function createAiEnv(ctx: CommandContext, invoke?: InvokeFn): AiEnv {
   let samples: SampleEnv | undefined;
+  const requestSettings = { ...ctx.settings };
   return {
     ctx,
     host: ctx.host,
     t: ctx.host.t,
     settings: () => ctx.settings,
-    provider: createLlmProvider(ctx.settings, invoke),
+    provider: createLlmProvider(requestSettings, invoke),
+    requestSettings,
     sampleEnv: () => (samples ??= createSampleEnv(ctx)),
     lang: () => getLang(),
     invoke,
