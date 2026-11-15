@@ -91,9 +91,9 @@ describe('static pet guards', () => {
     for (const f of petFiles) for (const s of specifiers(readFileSync(f, 'utf-8'))) expect(s, `${f} imports ${s}`).not.toMatch(FORBIDDEN);
   });
 
-  it('PetApp imports only react, src/pet, the skins, the pet store helpers and i18n', () => {
+  it('PetApp imports only react, src/pet, the skins, the pet store helpers, i18n and the icon wrapper', () => {
     const src = readFileSync('src/pet/PetApp.tsx', 'utf-8');
-    const ok = /^(?:react|\.\/[A-Za-z]+|\.\.\/assistant\/skins\/[A-Za-z]+|\.\.\/assistant\/petStore|\.\.\/i18n\/[A-Za-z]+)$/;
+    const ok = /^(?:react|\.\/[A-Za-z]+|\.\.\/assistant\/skins\/[A-Za-z]+|\.\.\/assistant\/petStore|\.\.\/i18n\/[A-Za-z]+|\.\.\/ui\/Icon)$/;
     for (const s of specifiers(src)) expect(s, s).toMatch(ok);
     // from petStore: the sprite and layout helpers only, never the store itself
     const names = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*\x27\.\.\/assistant\/petStore\x27/g)].flatMap((m) => m[1].split(',').map((n) => n.trim().replace(/^type\s+/, '')));

@@ -79,7 +79,7 @@ describe('소스가 부르는 번역 키', () => {
     'src/labnote/ui/CommandPalette.tsx': ['c.nameKey'], // AppCommand.nameKey: appCommands.ts 에 적은 'cmd.*' 글자(appCommands.test.ts 가 ko·en 을 본다)
     'src/ui/EmptyState.tsx': ['a.labelKey'], // ACTIONS 의 'empty.*' 글자
     'src/ui/Ribbon.tsx': ['item.labelKey'], // TOP/MIDDLE/BOTTOM 의 'ribbon.*'·'palette.open' 글자
-    'src/pet/PetApp.tsx': ['item.labelKey', 'REASON_KEY[m.reason]'], // MENU_ITEMS 의 'pet.desktop.menu.*' 글자(menuActions.ts), REASON_KEY 의 'pet.desktop.reason.*' 글자
+    'src/pet/PetApp.tsx': ['item.labelKey', 'REASON_KEY[m.reason]', 'MODE_KEY[id]', 'MODE_PLACEHOLDER[mode]'], // MENU_ITEMS 의 'pet.desktop.menu.*' 글자(menuActions.ts), REASON_KEY 의 'pet.desktop.reason.*' 글자, MODE_KEY·MODE_PLACEHOLDER 의 'chip.*'·'pet.placeholder' 글자(말풍선의 모드 이름과 입력 칸 안내)
     'src/ui/Dock.tsx': ['x.labelKey'], // DOCK_TABS 의 'sidebar.tab.*' 글자
     'src/ui/RightDock.tsx': ['x.labelKey', 'current.labelKey'], // RIGHT_TABS 의 'sidebar.outline'·'sidebar.tab.links' 글자
     'src/ui/settings/ShortcutsPage.tsx': ['c.nameKey'], // AppCommand.nameKey: appCommands.ts 에 적은 'cmd.*' 글자(appCommands.test.ts 가 ko·en 을 본다)

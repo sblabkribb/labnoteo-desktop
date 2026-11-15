@@ -23,12 +23,15 @@ if (typeof window.PointerEvent === 'undefined') {
 
 type Call = [string, Record<string, unknown> | undefined];
 
-const GEO = { sprite: { x: 1000, y: 800, w: 64, h: 64 }, areas: [{ x: 0, y: 0, w: 1920, h: 1040 }], scale: 1 };
+const PANEL = { w: 360, h: 440, minW: 300, minH: 340, maxW: 640, maxH: 900 };
+const GEO = { sprite: { x: 1000, y: 800, w: 64, h: 64 }, areas: [{ x: 0, y: 0, w: 1920, h: 1040 }], scale: 1, panel: PANEL };
 const ARGS_FIXTURE = JSON.parse(readFileSync('src-tauri/tests/ipc-args.json', 'utf-8')) as Record<string, string[]>;
 const PET_CAP = JSON.parse(readFileSync('src-tauri/capabilities/pet.json', 'utf-8')) as { permissions: string[] };
 const ALLOWED = new Set(PET_CAP.permissions.filter((p) => p.startsWith('allow-')).map((p) => p.slice(6).replace(/-/g, '_')));
 
-function fakeIpc(opts: { quiet?: boolean; skinData?: unknown } = {}) {
+function fakeIpc(opts: { quiet?: boolean; skinData?: unknown; panel?: { w: number; h: number }; bounds?: Partial<typeof PANEL> } = {}) {
+  const bounds = { ...PANEL, ...opts.bounds };
+  let panel = { ...bounds, ...(opts.panel ?? {}) };
   const handlers = new Map<string, Set<(p: unknown) => void>>();
   const calls: Call[] = [];
   const emitted: Array<[string, unknown]> = [];
@@ -38,7 +41,12 @@ function fakeIpc(opts: { quiet?: boolean; skinData?: unknown } = {}) {
     invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
       calls.push([cmd, args]);
       if (cmd === 'pet_quiet_get') return opts.quiet === true;
-      if (cmd === 'pet_geometry') return GEO;
+      if (cmd === 'pet_geometry') return { ...GEO, panel };
+      if (cmd === 'pet_panel_size') {
+        const a = args as { w: number; h: number };
+        panel = { ...bounds, w: Math.min(Math.max(a.w, bounds.minW), bounds.maxW), h: Math.min(Math.max(a.h, bounds.minH), bounds.maxH) };
+        return panel;
+      }
       if (cmd === 'skin_read') return opts.skinData;
       return undefined;
     }),
@@ -73,6 +81,7 @@ async function mount(ipc: ReturnType<typeof fakeIpc>, extra: Partial<React.Compo
   return view;
 }
 const flush = () => act(async () => {});
+const asks = (ipc: ReturnType<typeof fakeIpc>) => ipc.emitted.filter(([e]) => e === EVT.ask).map(([, p]) => p as { v: number; askId: string; mode: string; text: string; section?: unknown });
 const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
 const spriteButton = () => screen.getByRole('button', { name: t('pet.desktop.pet') });
 const click = async (el: Element) => {
@@ -149,7 +158,7 @@ describe('PetApp', () => {
     const open = layouts(ipc);
     expect(open).toHaveLength(1);
     expect(open[0].mode).toBe('panel');
-    expect(open[0].rect).toMatchObject({ w: 320, h: 64 + 8 + 260 });
+    expect(open[0].rect).toMatchObject({ w: 360, h: 64 + 8 + 440 });
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(ipc.names()).not.toContain('pet_open_main');
     await click(spriteButton());
@@ -180,13 +189,12 @@ describe('PetApp', () => {
   });
 
   describe('the question box', () => {
-    const open = async (ipc: ReturnType<typeof fakeIpc>) => {
+    const open = async (ipc: ReturnType<typeof fakeIpc>, st: Record<string, unknown> = {}) => {
       await mount(ipc);
-      await ipc.fire(EVT.state, state());
+      await ipc.fire(EVT.state, state(st));
       await click(spriteButton());
       return screen.getByRole('textbox') as HTMLTextAreaElement;
     };
-    const asks = (ipc: ReturnType<typeof fakeIpc>) => ipc.emitted.filter(([e]) => e === EVT.ask).map(([, p]) => p as { v: number; askId: string; text: string });
 
     it('sends at most 500 characters with a valid askId, then clears the box; a second Enter while pending sends nothing', async () => {
       const ipc = fakeIpc();
@@ -197,6 +205,7 @@ describe('PetApp', () => {
       expect(asks(ipc)).toHaveLength(1);
       expect(asks(ipc)[0].text.length).toBeLessThanOrEqual(500);
       expect(asks(ipc)[0].askId).toMatch(/^[A-Za-z0-9-]{8,40}$/);
+      expect(asks(ipc)[0].mode).toBe('chat');
       expect(box.value).toBe('');
       fireEvent.change(box, { target: { value: 'again' } });
       fireEvent.keyDown(box, { key: 'Enter' });
@@ -218,12 +227,24 @@ describe('PetApp', () => {
       expect(box.value).toBe('line');
     });
 
+    it('the Send button does the same as Enter and is disabled with nothing to send', async () => {
+      const ipc = fakeIpc();
+      const box = await open(ipc);
+      const send = screen.getByRole('button', { name: t('pet.send') }) as HTMLButtonElement;
+      expect(send.disabled).toBe(true);
+      fireEvent.change(box, { target: { value: 'via button' } });
+      expect(send.disabled).toBe(false);
+      fireEvent.click(send);
+      await flush();
+      expect(asks(ipc).map((a) => a.text)).toEqual(['via button']);
+    });
+
     it('a reject shows exactly the catalog sentence of its code, in both languages, and never payload text', async () => {
       for (const lang of ['en', 'ko'] as const) {
         const ipc = fakeIpc();
         setLang(lang);
-        const box = await open(ipc);
-        for (const code of ['no-vault', 'not-configured', 'busy', 'invalid']) {
+        const box = await open(ipc, { lang });
+        for (const code of ['no-vault', 'not-configured', 'busy', 'invalid', 'no-note', 'no-workflow']) {
           fireEvent.change(box, { target: { value: 'hello' } });
           fireEvent.keyDown(box, { key: 'Enter' });
           await flush();
@@ -251,6 +272,273 @@ describe('PetApp', () => {
       fireEvent.keyDown(box, { key: 'Enter' });
       await flush();
       expect(asks(ipc)).toHaveLength(2);
+    });
+
+    it('the box is a resizable multi-line textarea like the panel one', async () => {
+      const box = await open(fakeIpc());
+      expect(box.tagName).toBe('TEXTAREA');
+      expect(box.getAttribute('placeholder')).toBe(t('pet.placeholder'));
+      expect(box.className).toContain('pet-composer-input');
+    });
+  });
+
+  describe('the panel looks and works like the in-window assistant', () => {
+    const open = async (ipc: ReturnType<typeof fakeIpc>, st: Record<string, unknown> = {}) => {
+      await mount(ipc);
+      await ipc.fire(EVT.state, state({ folder: '001_Cloning', ...st }));
+      await click(spriteButton());
+    };
+    const chip = (key: string) => screen.getByRole('button', { name: t(key) });
+
+    it('the header says Assistant and names the open experiment; without one it says the chat is not saved and has no clear button', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      expect(screen.getByRole('heading', { name: t('pet.title') })).toBeTruthy();
+      expect(screen.getByText(t('pet.folder', '001_Cloning'))).toBeTruthy();
+      expect(screen.getByRole('button', { name: t('history.clear') })).toBeTruthy();
+      expect(screen.getByRole('button', { name: t('pet.close') })).toBeTruthy();
+      cleanup();
+      const bare = fakeIpc();
+      await open(bare, { folder: '' });
+      expect(screen.getByText(t('pet.ephemeral'))).toBeTruthy();
+      expect(screen.queryByRole('button', { name: t('history.clear') })).toBeNull();
+    });
+
+    it('has the five modes with the panel labels, Chat selected; the labels follow the language', async () => {
+      for (const lang of ['en', 'ko'] as const) {
+        setLang(lang);
+        const ipc = fakeIpc();
+        await open(ipc, { lang });
+        const bar = screen.getByRole('toolbar', { name: t('pet.chips') });
+        const names = [...bar.querySelectorAll('button')].map((b) => b.textContent);
+        expect(names).toEqual(['chip.howTo', 'chip.section', 'chip.unitOp', 'chip.workflow', 'chip.chat'].map((k) => t(k)));
+        expect(chip('chip.chat').getAttribute('aria-pressed')).toBe('true');
+        expect(chip('chip.section').getAttribute('aria-pressed')).toBe('false');
+        cleanup();
+      }
+    });
+
+    it('choosing a mode selects it and changes the hint in the box', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      fireEvent.click(chip('chip.workflow'));
+      await flush();
+      expect(chip('chip.workflow').getAttribute('aria-pressed')).toBe('true');
+      expect(chip('chip.chat').getAttribute('aria-pressed')).toBe('false');
+      expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe(t('chip.workflow.placeholder'));
+      fireEvent.click(chip('chip.unitOp'));
+      await flush();
+      expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe(t('chip.unitOp.placeholder'));
+    });
+
+    it('arrow keys move between the modes like the panel toolbar', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      const chat = chip('chip.chat');
+      chat.focus();
+      fireEvent.keyDown(chat, { key: 'ArrowRight' });
+      expect(document.activeElement).toBe(chip('chip.howTo'));
+      fireEvent.keyDown(document.activeElement as Element, { key: 'End' });
+      expect(document.activeElement).toBe(chip('chip.chat'));
+    });
+
+    it.each([
+      ['workflow', 'plasmid cloning'],
+      ['unitOp', 'add PCR cleanup'],
+      ['chat', 'hello'],
+    ] as const)('the %s mode sends its mode with the text', async (mode, text) => {
+      const ipc = fakeIpc();
+      await open(ipc, { unitTarget: '001_wf.md' });
+      fireEvent.click(chip(`chip.${mode}`));
+      await flush();
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: text } });
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+      await flush();
+      expect(asks(ipc)).toEqual([expect.objectContaining({ v: 1, mode, text })]);
+      expect(Object.keys(asks(ipc)[0]).sort()).toEqual(['askId', 'mode', 'text', 'v']);
+    });
+
+    it('how to use shows the help text, has no box and nothing to send, and its button goes back to chat', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      fireEvent.click(chip('chip.howTo'));
+      await flush();
+      expect(screen.queryByRole('textbox')).toBeNull();
+      expect(screen.queryByRole('button', { name: t('pet.send') })).toBeNull();
+      for (const k of ['howto.what', 'howto.chips', 'howto.history', 'howto.hide']) expect(screen.getByText(t(k))).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: t('howto.startChat') }));
+      await flush();
+      expect(chip('chip.chat').getAttribute('aria-pressed')).toBe('true');
+      expect(asks(ipc)).toEqual([]);
+    });
+
+    it('section: pick from the open note, Send waits for a pick, the text is optional, and the pick travels with the mode', async () => {
+      const ipc = fakeIpc();
+      await open(ipc, { sections: ['Methods', 'Notes'] });
+      fireEvent.click(chip('chip.section'));
+      await flush();
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      expect([...select.options].map((o) => o.textContent)).toEqual([t('section.choose'), 'Methods', 'Notes', t('section.new')]);
+      const send = screen.getByRole('button', { name: t('pet.send') }) as HTMLButtonElement;
+      expect(send.disabled).toBe(true);
+      fireEvent.change(select, { target: { value: '1' } });
+      expect(send.disabled).toBe(false);
+      fireEvent.click(send);
+      await flush();
+      expect(asks(ipc)).toEqual([expect.objectContaining({ mode: 'section', text: '', section: { kind: 'pick', index: 1, label: 'Notes' } })]);
+    });
+
+    it('section: a new title is sent as a new section; an empty title is not sendable', async () => {
+      const ipc = fakeIpc();
+      await open(ipc, { sections: ['Methods'] });
+      fireEvent.click(chip('chip.section'));
+      await flush();
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'new' } });
+      const send = screen.getByRole('button', { name: t('pet.send') }) as HTMLButtonElement;
+      expect(send.disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText(t('section.newTitle')), { target: { value: 'Safety' } });
+      fireEvent.change(screen.getByRole('textbox', { name: t('pet.composer') }), { target: { value: 'be brief' } });
+      fireEvent.click(send);
+      await flush();
+      expect(asks(ipc)).toEqual([expect.objectContaining({ mode: 'section', text: 'be brief', section: { kind: 'new', title: 'Safety' } })]);
+    });
+
+    it('section: when the open note changes the old pick is dropped', async () => {
+      const ipc = fakeIpc();
+      await open(ipc, { sections: ['Methods', 'Notes'] });
+      fireEvent.click(chip('chip.section'));
+      await flush();
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } });
+      await ipc.fire(EVT.state, state({ seq: 5, folder: '001_Cloning', sections: ['Other'] }));
+      expect((screen.getByRole('button', { name: t('pet.send') }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('unit operation names the target note, or says there is no workflow note', async () => {
+      const ipc = fakeIpc();
+      await open(ipc, { unitTarget: '001_wf.md' });
+      fireEvent.click(chip('chip.unitOp'));
+      await flush();
+      expect(screen.getByText(t('chip.target', '001_wf.md'))).toBeTruthy();
+      await ipc.fire(EVT.state, state({ seq: 6, folder: '001_Cloning', unitTarget: '' }));
+      expect(screen.getByText(t('chip.noWorkflow'))).toBeTruthy();
+    });
+
+    it('a creating mode with no experiment open says so instead of showing a box', async () => {
+      const ipc = fakeIpc();
+      await open(ipc, { folder: '' });
+      for (const key of ['chip.section', 'chip.unitOp', 'chip.workflow']) {
+        fireEvent.click(chip(key));
+        await flush();
+        expect(screen.getByText(t('pet.needExperiment'))).toBeTruthy();
+        expect(screen.queryByRole('textbox')).toBeNull();
+      }
+      fireEvent.click(chip('chip.chat'));
+      await flush();
+      expect(screen.getByRole('textbox')).toBeTruthy();
+    });
+
+    it('clear asks first inside the bubble; Cancel changes nothing, Delete sends pet:clear and empties the answer', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      await ipc.fire(EVT.answer, answer({ text: 'An old answer' }));
+      expect(screen.getByRole('log').textContent).toContain('An old answer');
+      fireEvent.click(screen.getByRole('button', { name: t('history.clear') }));
+      expect(screen.getByText(t('history.clearConfirm'))).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: t('dialog.cancel') }));
+      expect(ipc.emitted.filter(([e]) => e === EVT.clear)).toEqual([]);
+      expect(screen.queryByText(t('history.clearConfirm'))).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: t('history.clear') }));
+      fireEvent.click(screen.getByRole('button', { name: t('history.clearAction') }));
+      await flush();
+      expect(ipc.emitted.filter(([e]) => e === EVT.clear)).toEqual([[EVT.clear, { v: 1 }]]);
+      expect(screen.getByRole('log').textContent).not.toContain('An old answer');
+      expect(ipc.names()).not.toContain('pet_open_main');
+    });
+
+    it('Hide assistant hides the pet like the menu entry, and Close only closes the bubble', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      fireEvent.click(screen.getByRole('button', { name: t('pet.close') }));
+      await flush();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(ipc.names()).not.toContain('pet_hide');
+      await click(spriteButton());
+      fireEvent.click(screen.getByRole('button', { name: t('pet.hide') }));
+      await flush();
+      expect(ipc.names()).toContain('pet_hide');
+    });
+  });
+
+  describe('resizing the bubble', () => {
+    const open = async (ipc: ReturnType<typeof fakeIpc>) => {
+      await mount(ipc);
+      await ipc.fire(EVT.state, state({ folder: '001_A' }));
+      await click(spriteButton());
+    };
+    const grip = () => screen.getByRole('button', { name: t('pet.resize') });
+    const sizeCalls = (ipc: ReturnType<typeof fakeIpc>) => ipc.calls.filter((c) => c[0] === 'pet_panel_size').map((c) => c[1]);
+
+    it('opens at the size the window remembered and sets it as CSS variables (no inline style)', async () => {
+      const ipc = fakeIpc({ panel: { w: 400, h: 500 } });
+      const { container } = await mount(ipc);
+      await ipc.fire(EVT.state, state());
+      await click(spriteButton());
+      expect(layouts(ipc)[0].rect).toMatchObject({ w: 400, h: 64 + 8 + 500 });
+      const bubble = container.querySelector('.pet-desktop-bubble') as HTMLElement;
+      expect(bubble.style.getPropertyValue('--pet-bubble-w')).toBe('400px');
+      expect(bubble.style.getPropertyValue('--pet-bubble-h')).toBe('500px');
+      expect(bubble.getAttribute('style')).not.toMatch(/width:|height:/);
+    });
+
+    it('dragging the corner away from the sprite grows the bubble, then saves the size on release', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      const g = grip();
+      fireEvent.pointerDown(g, { button: 0, pointerId: 1, screenX: 500, screenY: 500 });
+      fireEvent.pointerMove(g, { pointerId: 1, screenX: 450, screenY: 470 }); // up and to the left: the bubble sits above the sprite, hugging its right
+      await flush();
+      expect(sizeCalls(ipc).at(-1)).toEqual({ w: 410, h: 470, commit: false });
+      expect(layouts(ipc).at(-1)).toMatchObject({ mode: 'panel', rect: { w: 410, h: 64 + 8 + 470 } });
+      fireEvent.pointerUp(g, { button: 0, pointerId: 1, screenX: 450, screenY: 470 });
+      await flush();
+      expect(sizeCalls(ipc).at(-1)).toEqual({ w: 410, h: 470, commit: true });
+    });
+
+    it('the size the window answers (clamped) is the one drawn, never the one asked for', async () => {
+      const ipc = fakeIpc({ bounds: { minW: 300, minH: 340, maxW: 420, maxH: 480 } });
+      const { container } = await mount(ipc);
+      await ipc.fire(EVT.state, state());
+      await click(spriteButton());
+      const g = grip();
+      fireEvent.pointerDown(g, { button: 0, pointerId: 1, screenX: 500, screenY: 500 });
+      fireEvent.pointerMove(g, { pointerId: 1, screenX: -4000, screenY: -4000 });
+      await flush();
+      const bubble = container.querySelector('.pet-desktop-bubble') as HTMLElement;
+      expect(bubble.style.getPropertyValue('--pet-bubble-w')).toBe('420px');
+      expect(bubble.style.getPropertyValue('--pet-bubble-h')).toBe('480px');
+      expect(layouts(ipc).at(-1)).toMatchObject({ rect: { w: 420, h: 64 + 8 + 480 } });
+    });
+
+    it('arrow keys on the handle resize in steps and save at once; Home goes back to the default', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      const g = grip();
+      fireEvent.keyDown(g, { key: 'ArrowLeft' });
+      await flush();
+      expect(sizeCalls(ipc).at(-1)).toEqual({ w: 376, h: 440, commit: true });
+      fireEvent.keyDown(g, { key: 'ArrowUp', shiftKey: true });
+      await flush();
+      expect(sizeCalls(ipc).at(-1)).toEqual({ w: 376, h: 504, commit: true });
+      fireEvent.keyDown(g, { key: 'Home' });
+      await flush();
+      expect(sizeCalls(ipc).at(-1)).toEqual({ w: 360, h: 440, commit: true });
+    });
+
+    it('the handle is a labelled button with a hint for screen readers', async () => {
+      const ipc = fakeIpc();
+      await open(ipc);
+      expect(grip().getAttribute('aria-describedby')).toBeTruthy();
+      expect(screen.getByText(t('pet.resizeHint'))).toBeTruthy();
     });
   });
 
@@ -343,6 +631,8 @@ describe('PetApp', () => {
     await mount(ipc, { skinDeps: { urls: { create: () => 'blob:x/1', revoke: () => undefined } } });
     await ipc.fire(EVT.state, state({ skin: 'pal' }));
     await click(spriteButton());
+    fireEvent.keyDown(screen.getByRole('button', { name: t('pet.resize') }), { key: 'ArrowLeft' });
+    await flush();
     fireEvent.contextMenu(spriteButton());
     await flush();
     for (const index of [0, 1, 2]) {
@@ -355,7 +645,7 @@ describe('PetApp', () => {
     await click(spriteButton());
     await mount(ipc, { canDraw: async () => false });
     const names = new Set(ipc.names());
-    for (const n of ['pet_quiet_get', 'pet_geometry', 'pet_set_layout', 'pet_quiet_set', 'pet_hide', 'pet_open_main', 'pet_start_failed', 'skin_read']) expect(names.has(n), n).toBe(true);
+    for (const n of ['pet_quiet_get', 'pet_geometry', 'pet_set_layout', 'pet_panel_size', 'pet_quiet_set', 'pet_hide', 'pet_open_main', 'pet_start_failed', 'skin_read']) expect(names.has(n), n).toBe(true);
     for (const [cmd, args] of ipc.calls) {
       expect(ALLOWED.has(cmd), cmd).toBe(true);
       expect(Object.keys(args ?? {}).sort(), cmd).toEqual([...(ARGS_FIXTURE[cmd] ?? [])].sort());
