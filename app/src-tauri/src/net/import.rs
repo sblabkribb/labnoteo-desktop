@@ -1,5 +1,5 @@
 //! "Import from file…" in the Integration settings dialog: LLM, PartBank,
-//! bfworkflow and GitHub connection settings and keys, read from one file the
+//! bfworkflow, web search and GitHub connection settings and keys, read from one file the
 //! user picks.
 //!
 //! The webview never names a path: Rust shows the file picker itself
@@ -15,12 +15,13 @@
 //! {"llm": {"provider": "openai", "baseUrl": "…", "model": "…", "apiKey": "…"},
 //!  "partbank": {"connection": "web", "url": "…", "apiKey": "…"},
 //!  "bfworkflow": {"url": "…", "apiKey": "…"},
+//!  "search": {"url": "…", "galleryUrl": "…"},
 //!  "github": {"clientId": "…", "token": "…"}}
 //! ```
 //!
 //! or as `.env` lines (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_PROVIDER`,
 //! `PARTBANK_URL`, `PARTBANK_API_KEY`, `PARTBANK_CONNECTION`, `BFWORKFLOW_URL`,
-//! `BFWORKFLOW_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_TOKEN`; a ` # comment`
+//! `BFWORKFLOW_API_KEY`, `SEARXNG_URL`, `GALLERY_URL`, `GITHUB_CLIENT_ID`, `GITHUB_TOKEN`; a ` # comment`
 //! after an unquoted value is dropped), and
 //! checks every field with the same parsers and key
 //! rules the dialog uses. Unknown keys are ignored.
@@ -51,6 +52,14 @@
 //! `mcpClientServers` settings patch, which holds the whole new list), never a
 //! header value. A secret-looking URL is skipped and never echoed.
 //!
+//! The search part is app-wide too: the web search (SearXNG) address follows the
+//! rules of `assistant.json` (http or https, no account info, query or fragment,
+//! clear text only for this computer or an origin the vault allows), the optional
+//! gallery address is https only. `url` may also be spelled `searxngUrl`, and
+//! `searxngUrl` / `galleryUrl` are read at the top level too. Both are written to
+//! `assistant.json` by `finish_search_import`, changing only the address the file
+//! names (the other one is kept); nothing of it goes to the webview.
+//!
 //! The GitHub part is app-wide, not a vault setting: its token goes to the
 //! fixed-origin GitHub slot (offline, not checked against GitHub; the next
 //! GitHub call does that), and its client ID comes back in the outcome's
@@ -71,6 +80,10 @@ use super::config::{
 };
 use super::error::{NetError, NetErrorKind};
 use super::github::GithubState;
+use super::web_search::parse_searxng_url;
+use crate::assistant::config::{
+    parse_gallery_url, read_at as read_assistant, write_at as write_assistant, AssistantConfigIn,
+};
 use super::mcp_client::placeholder::{is_placeholder, strip_bearer};
 use super::secrets::{
     clear_secret, get_long, mcp_account, store_long, store_secret, store_secret_at_url, validate_secret_for, SecretStore, Secrets, Slot,
@@ -112,6 +125,8 @@ pub enum Part {
     /// One entry of `mcpServers` / `servers`.
     McpServer,
     Github,
+    /// The web search (SearXNG) address and the optional gallery address: app-wide, in `assistant.json`.
+    Search,
 }
 
 /// Why a field was refused.
@@ -208,6 +223,10 @@ pub enum ImportOutcome {
         /// app-wide. Never sent to the webview.
         #[serde(skip)]
         github: Option<GithubImport>,
+        /// The search part, when it was imported: for the command to write
+        /// to `assistant.json`. Never sent to the webview.
+        #[serde(skip)]
+        search: Option<SearchImport>,
     },
 }
 
@@ -219,6 +238,14 @@ pub struct GithubImport {
     pub client_id: Option<String>,
     /// A token was stored in the GitHub slot.
     pub token_saved: bool,
+}
+
+/// What an imported search part leaves for `finish_search_import`: the
+/// addresses already checked, in the form `assistant.json` stores.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SearchImport {
+    pub searxng_url: Option<String>,
+    pub gallery_url: Option<String>,
 }
 
 /// One field as found in the file. Blank counts as absent.
@@ -281,6 +308,12 @@ struct GithubFields {
 }
 
 #[derive(Debug, Default, PartialEq)]
+struct SearchFields {
+    url: Field,
+    gallery_url: Field,
+}
+
+#[derive(Debug, Default, PartialEq)]
 struct Parsed {
     llm: LlmFields,
     partbank: PartbankFields,
@@ -288,6 +321,7 @@ struct Parsed {
     /// The `mcpServers` (or `servers`) object as found.
     mcp: Option<Map<String, Value>>,
     github: GithubFields,
+    search: SearchFields,
 }
 
 impl Parsed {
@@ -364,6 +398,19 @@ fn parse_json(text: &str) -> Option<Parsed> {
     if let Some(o) = part("github") {
         p.github = GithubFields { client_id: Field::of_json(o.get("clientId")), token: Field::of_json(o.get("token")) };
     }
+    // `search` takes `url` (or `searxngUrl`) and `galleryUrl`; the same two names are also read at the top level.
+    let first = |o: &Map<String, Value>, names: &[&str]| {
+        names.iter().map(|n| Field::of_json(o.get(*n))).find(|f| !f.is_absent()).unwrap_or_default()
+    };
+    if let Some(o) = part("search") {
+        p.search = SearchFields { url: first(o, &["url", "searxngUrl"]), gallery_url: first(o, &["galleryUrl"]) };
+    }
+    if p.search.url.is_absent() {
+        p.search.url = first(root, &["searxngUrl"]);
+    }
+    if p.search.gallery_url.is_absent() {
+        p.search.gallery_url = first(root, &["galleryUrl"]);
+    }
     Some(p)
 }
 
@@ -412,6 +459,8 @@ fn parse_env(text: &str) -> Parsed {
             "BFWORKFLOW_API_KEY" => p.bfw.api_key = field,
             "GITHUB_CLIENT_ID" => p.github.client_id = field,
             "GITHUB_TOKEN" => p.github.token = field,
+            "SEARXNG_URL" => p.search.url = field,
+            "GALLERY_URL" => p.search.gallery_url = field,
             _ => {}
         }
     }
@@ -616,6 +665,46 @@ fn plan_github(f: &GithubFields, bad: &mut Vec<Invalid>) -> Option<GithubPlan> {
     (bad.len() == before).then_some(GithubPlan { client_id, token })
 }
 
+/// The search part: the web search address (clear text only for this computer
+/// or an origin the vault allows, as in `assistant.json`) and the optional
+/// gallery address (https). All or nothing, like every part.
+fn plan_search(f: &SearchFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) -> Option<SearchImport> {
+    let part = Part::Search;
+    let before = bad.len();
+    let mut check = |field: &Field, name: &'static str, parse: &dyn Fn(&str) -> Option<Url>| -> Option<String> {
+        let raw = text_of(field, part, name, bad)?;
+        match parse(raw) {
+            Some(u) => Some(url_setting(&u)),
+            None => {
+                bad.push(Invalid { part, field: name, reason: Problem::BadUrl, name: None });
+                None
+            }
+        }
+    };
+    let searxng_url = check(&f.url, "url", &|raw| parse_searxng_url(raw, &cfg.allow_http));
+    let gallery_url = check(&f.gallery_url, "galleryUrl", &parse_gallery_url);
+    (bad.len() == before).then_some(SearchImport { searxng_url, gallery_url })
+}
+
+/// Writes an imported search part to this PC's `assistant.json`, changing only
+/// the addresses the file named (the other one is kept). A write that fails
+/// takes the part out of the summary and adds a problem line; it never fails
+/// the import (the other parts' keys are already saved). `allow_http` is the
+/// vault's allowed clear-text origins.
+pub fn finish_search_import(settings_file: &Path, allow_http: &[String], outcome: &mut ImportOutcome) {
+    let ImportOutcome::Done { imported, invalid, search: Some(part), .. } = outcome else { return };
+    let stored = read_assistant(settings_file);
+    let cfg = AssistantConfigIn {
+        searxng_url: part.searxng_url.clone().or(stored.searxng_url),
+        gallery_url: part.gallery_url.clone().or(stored.gallery_url),
+    };
+    if write_assistant(settings_file, cfg, allow_http).is_err() {
+        imported.retain(|i| i.part != Part::Search);
+        let field = if part.searxng_url.is_some() { "url" } else { "galleryUrl" };
+        invalid.push(Invalid { part: Part::Search, field, reason: Problem::AppData, name: None });
+    }
+}
+
 /// Stores the GitHub token in the fixed-origin slot. The refresh token of an
 /// earlier sign-in belongs to another token, so it goes first.
 fn store_github(store: &dyn SecretStore, cfg: &ServiceConfig, token: &str) -> Result<(), NetError> {
@@ -638,14 +727,22 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
     let mut invalid = Vec::new();
     let mut settings = Map::new();
     let mut github = None;
+    let mut search = None;
     let parts = [
         (Part::Llm, parsed.llm == LlmFields::default()),
         (Part::Partbank, parsed.partbank == PartbankFields::default()),
         (Part::Bfworkflow, parsed.bfw == BfwFields::default()),
         (Part::Github, parsed.github == GithubFields::default()),
+        (Part::Search, parsed.search == SearchFields::default()),
     ];
     for (part, empty) in parts {
         if empty {
+            continue;
+        }
+        if part == Part::Search {
+            let Some(plan) = plan_search(&parsed.search, cfg, &mut invalid) else { continue };
+            search = Some(plan);
+            imported.push(Imported { part, key_saved: false });
             continue;
         }
         if part == Part::Github {
@@ -667,7 +764,7 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
             Part::Bfworkflow => plan_bfw(&parsed.bfw, cfg, &mut invalid),
             // MCP entries are imported one by one below.
             Part::McpServer => None,
-            Part::Github => unreachable!("handled above"),
+            Part::Github | Part::Search => unreachable!("handled above"),
         };
         let Some(plan) = plan else { continue };
         // The key first: if Credential Manager refuses it, the part's settings are not saved either.
@@ -694,7 +791,7 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
         }
         mcp = done;
     }
-    ImportOutcome::Done { imported, invalid, mcp, settings, github }
+    ImportOutcome::Done { imported, invalid, mcp, settings, github, search }
 }
 
 /// The preset servers (spec §5.3): preset, name, URL. Same as `presets.ts`.
@@ -1090,6 +1187,7 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
         .into_path()
         .map_err(|_| NetError::new(NetErrorKind::BadInput, "the chosen file is not a local path"))?;
     let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
+    let allow_http = cfg.allow_http.clone();
     let store = secrets.0.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         import_picked(&app.state::<NetState>(), store.as_ref(), &path, &root, &cfg)
@@ -1098,6 +1196,7 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
     .map_err(|e| NetError::new(NetErrorKind::Io, format!("import failed: {e}")))?;
     let mut outcome = outcome;
     finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &mut outcome);
+    finish_search_import(&settings.0, &allow_http, &mut outcome);
     Ok(Some(outcome))
 }
 
@@ -1127,6 +1226,7 @@ pub fn integration_import_bytes(
     let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
     let mut outcome = import_bytes(secrets.0.as_ref(), &name, bytes, &cfg);
     finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &mut outcome);
+    finish_search_import(&settings.0, &cfg.allow_http, &mut outcome);
     Ok(outcome)
 }
 
@@ -1938,6 +2038,167 @@ GITHUB_TOKEN={GH_FAKE}
         let (out, kept) = import_file(&MemoryStore::default(), &file, &dir.join("vault"), &cfg("{}"));
         assert!(!done_mcp(&out).1.is_empty());
         assert_eq!(kept, Some(std::fs::canonicalize(&file).unwrap()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn import_search(dir: &Path, name: &str, text: &str, cfg: &ServiceConfig) -> ImportOutcome {
+        let mut out = import_bytes(&MemoryStore::default(), name, text.as_bytes(), cfg);
+        finish_search_import(&dir.join("config").join("settings.json"), &cfg.allow_http, &mut out);
+        out
+    }
+
+    fn stored_search(dir: &Path) -> crate::assistant::config::AssistantConfig {
+        crate::assistant::config::read_at(&dir.join("config").join("settings.json"))
+    }
+
+    #[test]
+    fn a_file_with_llm_and_search_imports_both_and_keeps_the_gallery_address() {
+        let dir = scratch_dir("import-search-both");
+        let settings = dir.join("config").join("settings.json");
+        // An earlier gallery address is on file and must survive a search-only change.
+        crate::assistant::config::write_at(
+            &settings,
+            crate::assistant::config::AssistantConfigIn {
+                searxng_url: Some("https://old.search.example".into()),
+                gallery_url: Some("https://gallery.lab.example/index.json".into()),
+            },
+            &[],
+        )
+        .unwrap();
+        let json = r#"{"llm": {"provider": "ollama", "baseUrl": "http://localhost:11434", "model": "qwen"},
+                       "search": {"url": "https://search.lab.example/"}}"#;
+        let out = import_search(&dir, "conn.json", json, &cfg("{}"));
+        let (imported, invalid, s) = done(&out);
+        assert!(invalid.is_empty(), "{invalid:?}");
+        assert_eq!(
+            imported,
+            &vec![Imported { part: Part::Llm, key_saved: false }, Imported { part: Part::Search, key_saved: false }]
+        );
+        assert_eq!(s["llmModel"], "qwen");
+        let stored = stored_search(&dir);
+        assert_eq!(stored.searxng_url.as_deref(), Some("https://search.lab.example"));
+        assert_eq!(stored.gallery_url.as_deref(), Some("https://gallery.lab.example/index.json"));
+        // Nothing of the search part goes to the webview as a setting.
+        assert!(!s.keys().any(|k| k.to_lowercase().contains("search") || k.to_lowercase().contains("gallery")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_alone_is_accepted_in_every_spelling() {
+        let cases = [
+            ("a.json", r#"{"search": {"url": "https://s.lab.example"}}"#),
+            ("a.json", r#"{"search": {"searxngUrl": "https://s.lab.example"}}"#),
+            ("a.json", r#"{"searxngUrl": "https://s.lab.example"}"#),
+            ("a.env", "SEARXNG_URL=https://s.lab.example\n"),
+            ("a.env", "export SEARXNG_URL=\"https://s.lab.example\" # note\n"),
+            ("a.txt", "SEARXNG_URL = https://s.lab.example/"),
+        ];
+        for (name, text) in cases {
+            let dir = scratch_dir("import-search-alone");
+            let out = import_search(&dir, name, text, &cfg("{}"));
+            let (imported, invalid, settings) = done(&out);
+            assert!(invalid.is_empty(), "{text}: {invalid:?}");
+            assert_eq!(imported, &vec![Imported { part: Part::Search, key_saved: false }], "{text}");
+            assert!(settings.is_empty(), "{text}");
+            assert_eq!(stored_search(&dir).searxng_url.as_deref(), Some("https://s.lab.example"), "{text}");
+            assert_eq!(stored_search(&dir).gallery_url, None, "{text}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn the_gallery_address_is_imported_the_same_way() {
+        let dir = scratch_dir("import-search-gallery");
+        let out = import_search(
+            &dir,
+            "a.env",
+            "GALLERY_URL=https://gallery.lab.example/index.json\nSEARXNG_URL=https://s.lab.example\n",
+            &cfg("{}"),
+        );
+        assert!(done(&out).1.is_empty());
+        let stored = stored_search(&dir);
+        assert_eq!(stored.gallery_url.as_deref(), Some("https://gallery.lab.example/index.json"));
+        assert_eq!(stored.searxng_url.as_deref(), Some("https://s.lab.example"));
+        // Gallery alone keeps the search address.
+        let out = import_search(&dir, "b.json", r#"{"search": {"galleryUrl": "https://g2.lab.example/i.json"}}"#, &cfg("{}"));
+        assert!(done(&out).1.is_empty());
+        let stored = stored_search(&dir);
+        assert_eq!(stored.gallery_url.as_deref(), Some("https://g2.lab.example/i.json"));
+        assert_eq!(stored.searxng_url.as_deref(), Some("https://s.lab.example"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_invalid_search_address_is_reported_without_blocking_the_other_parts() {
+        let dir = scratch_dir("import-search-bad");
+        let store = MemoryStore::default();
+        for bad in [
+            "ftp://s.example",
+            "https://user:pw@s.example",
+            "https://s.example/?q=1",
+            "https://s.example/#x",
+            "http://search.lab.example",
+            "not a url",
+        ] {
+            let json = serde_json::json!({
+                "llm": {"provider": "openai", "baseUrl": "https://gw.lab.example/v1", "model": "gpt-x", "apiKey": "sk-test-llm"},
+                "search": {"url": bad}
+            })
+            .to_string();
+            let mut out = import_bytes(&store, "c.json", json.as_bytes(), &cfg("{}"));
+            finish_search_import(&dir.join("config").join("settings.json"), &[], &mut out);
+            let (imported, invalid, settings) = done(&out);
+            assert_eq!(imported, &vec![Imported { part: Part::Llm, key_saved: true }], "{bad}");
+            assert_eq!(
+                invalid,
+                &vec![Invalid { part: Part::Search, field: "url", reason: Problem::BadUrl, name: None }],
+                "{bad}"
+            );
+            assert_eq!(settings["llmModel"], "gpt-x");
+            assert_eq!(stored_search(&dir), Default::default(), "{bad}");
+            let text = serde_json::to_string(&out).unwrap();
+            assert!(!text.contains("s.example") && !text.contains("sk-test-llm"), "{text}");
+        }
+        // A non-text value is a problem of its own; the gallery follows its own https rule.
+        let out = import_search(&dir, "d.json", r#"{"search": {"url": 7, "galleryUrl": "http://g.example"}}"#, &cfg("{}"));
+        let (imported, invalid, _) = done(&out);
+        assert!(imported.is_empty());
+        assert_eq!(
+            invalid,
+            &vec![
+                Invalid { part: Part::Search, field: "url", reason: Problem::NotText, name: None },
+                Invalid { part: Part::Search, field: "galleryUrl", reason: Problem::BadUrl, name: None },
+            ]
+        );
+        assert_eq!(stored_search(&dir), Default::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plain_http_search_is_allowed_for_this_computer_and_listed_origins_only() {
+        let dir = scratch_dir("import-search-http");
+        let out = import_search(&dir, "a.env", "SEARXNG_URL=http://localhost:8080\n", &cfg("{}"));
+        assert!(done(&out).1.is_empty());
+        assert_eq!(stored_search(&dir).searxng_url.as_deref(), Some("http://localhost:8080"));
+        let allowed = cfg(r#"{"allowHttpOrigins":["http://192.168.0.7:8888"]}"#);
+        let out = import_search(&dir, "b.env", "SEARXNG_URL=http://192.168.0.7:8888/\n", &allowed);
+        assert!(done(&out).1.is_empty());
+        assert_eq!(stored_search(&dir).searxng_url.as_deref(), Some("http://192.168.0.7:8888"));
+        let out = import_search(&dir, "c.env", "SEARXNG_URL=http://192.168.0.9:8888\n", &allowed);
+        assert_eq!(done(&out).1.len(), 1);
+        assert_eq!(stored_search(&dir).searxng_url.as_deref(), Some("http://192.168.0.7:8888"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_search_part_that_cannot_be_saved_is_a_problem_not_a_failed_import() {
+        let dir = scratch_dir("import-search-io");
+        // The config folder's `assistant.json` is a folder: the write fails.
+        std::fs::create_dir_all(dir.join("config").join("assistant.json")).unwrap();
+        let out = import_search(&dir, "a.env", "SEARXNG_URL=https://s.lab.example\nLLM_MODEL=qwen\n", &cfg("{}"));
+        let (imported, invalid, _) = done(&out);
+        assert_eq!(imported, &vec![Imported { part: Part::Llm, key_saved: false }]);
+        assert_eq!(invalid, &vec![Invalid { part: Part::Search, field: "url", reason: Problem::AppData, name: None }]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
