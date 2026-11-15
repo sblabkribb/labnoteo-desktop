@@ -16,7 +16,9 @@ import {
 type Calls = Array<[string, Record<string, unknown> | undefined]>;
 
 /** Rust 쪽 저장소 흉내: settings_vault_write 가 쓴 글을 settings_vault_read 가 돌려준다. */
-function fakeStore(opts: { stored?: string | null; plugin?: string | null; llmKey?: boolean } = {}) {
+function fakeStore(
+  opts: { stored?: string | null; plugin?: string | null; llmKey?: boolean; connections?: string | null; damaged?: boolean } = {},
+) {
   let stored = opts.stored ?? null;
   const calls: Calls = [];
   const invoke = async (cmd: string, args?: Record<string, unknown>) => {
@@ -24,6 +26,7 @@ function fakeStore(opts: { stored?: string | null; plugin?: string | null; llmKe
     if (cmd === 'settings_vault_read') return stored;
     if (cmd === 'settings_import_plugin') return opts.plugin ?? null;
     if (cmd === 'settings_plugin_llm_key') return opts.llmKey ?? false;
+    if (cmd === 'settings_connections') return { values: opts.connections ?? null, damaged: opts.damaged ?? false };
     if (cmd === 'settings_vault_write') {
       stored = String(args?.content);
       return null;
@@ -144,6 +147,52 @@ describe('보관함별 설정', () => {
     expect(count(store.calls, 'settings_vault_write')).toBe(1);
     await loadVaultSettings(store.invoke);
     expect(count(store.calls, 'settings_import_plugin')).toBe(1);
+  });
+
+  it('연동 설정은 PC 하나에 한 번: 처음 여는 보관함도 저장해 둔 LLM·PartBank 설정을 그대로 보인다', async () => {
+    const connections = JSON.stringify({
+      llmProvider: 'ollama',
+      llmModel: 'qwen3',
+      llmEndpointOllama: 'http://192.168.0.5:11434',
+      allowHttpOrigins: ['http://192.168.0.5:11434'],
+      partbankWebUrl: 'https://pb.example',
+      llmTemperature: 0.3,
+    });
+    // 이 보관함에는 설정 파일도 플러그인 data.json 도 없다(첫 시작).
+    const store = fakeStore({ connections });
+    const first = await loadVaultSettings(store.invoke);
+    expect(first.settings.llmProvider).toBe('ollama');
+    expect(first.settings.llmModel).toBe('qwen3');
+    expect(first.settings.llmEndpointOllama).toBe('http://192.168.0.5:11434');
+    expect(first.settings.allowHttpOrigins).toEqual(['http://192.168.0.5:11434']);
+    expect(first.settings.partbankWebUrl).toBe('https://pb.example');
+    expect(first.settings.llmTemperature).toBe(0.3);
+    expect(first.connectionsDamaged).toBe(false);
+    // 처음 저장하는 값도 같은 연동 값이다: 기본값으로 덮어쓰지 않는다.
+    expect(JSON.parse(store.stored() ?? '{}').llmProvider).toBe('ollama');
+    // 플러그인 data.json 이 있는 첫 시작도 플러그인의 연동 값보다 PC 의 값이 앞선다.
+    const withPlugin = fakeStore({ connections, plugin: JSON.stringify({ llmProvider: 'openai', autoSyncUnitOpToc: false }) });
+    const second = await loadVaultSettings(withPlugin.invoke);
+    expect(second.imported).toBe(true);
+    expect(second.settings.autoSyncUnitOpToc).toBe(false);
+    expect(second.settings.llmProvider).toBe('ollama');
+    expect(second.settings.importedFromPlugin).toBe(true);
+  });
+
+  it('손상된 연동 설정 파일은 알리고, 그 값 대신 기본값을 저장하지 않는다', async () => {
+    const store = fakeStore({ damaged: true });
+    const r = await loadVaultSettings(store.invoke);
+    expect(r.connectionsDamaged).toBe(true);
+    const saved = fakeStore({ stored: JSON.stringify({ autoSyncUnitOpToc: false }), damaged: true });
+    expect((await loadVaultSettings(saved.invoke)).connectionsDamaged).toBe(true);
+    // 상태를 알 수 없어도(옛 Rust) 던지지 않는다.
+    const old = (async (cmd: string) => {
+      if (cmd === 'settings_vault_read') return null;
+      if (cmd === 'settings_import_plugin') return null;
+      if (cmd === 'settings_vault_write') return null;
+      throw new Error('unknown command');
+    }) as never;
+    await expect(loadVaultSettings(old)).resolves.toMatchObject({ connectionsDamaged: false });
   });
 
   it('a corrupt stored file falls back to defaults without throwing', async () => {

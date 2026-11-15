@@ -10,7 +10,7 @@ type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
  * 앱이 보관함마다 기억하는 설정. 플러그인 설정 가운데 앱이 쓰는 것만 고른다.
  * 비밀 값(llmApiKey, mcpToken, partbank·bfworkflow 키)은 이 Pick 에 없으므로 저장소로 갈 수 없다:
  * 키는 Windows 자격 증명 관리자에만 있고(Rust secret_* 커맨드), 웹뷰는 '설정됨' 여부만 안다.
- * 연동 주소(partbank, LLM, bfworkflow)는 비밀이 아니라 여기 저장하며, Rust 가 요청마다 이 저장본에서 읽는다.
+ * 연동 설정(partbank, LLM, bfworkflow, MCP 서버, 허용한 http 주소)은 비밀이 아니며 PC 하나에 한 번(connections.json) 저장한다. Rust 가 요청마다 거기서 읽고 보관함 설정 위에 얹어 돌려준다.
  */
 export type AppSettings = Pick<
   LabnoteSettings,
@@ -591,15 +591,20 @@ export async function saveVaultSettings(s: AppSettings, invoke: InvokeFn = tauri
  */
 export async function loadVaultSettings(
   invoke: InvokeFn = tauriInvoke,
-): Promise<{ settings: AppSettings; imported: boolean; foundLlmKey: boolean }> {
+): Promise<{ settings: AppSettings; imported: boolean; foundLlmKey: boolean; connectionsDamaged: boolean }> {
   let stored: string | null = null;
   try {
     stored = await invoke<string | null>('settings_vault_read', {});
   } catch {
-    return { settings: fromPluginData(undefined), imported: false, foundLlmKey: false };
+    return { settings: fromPluginData(undefined), imported: false, foundLlmKey: false, connectionsDamaged: false };
   }
+  // 연동 설정(LLM, PartBank, bfworkflow, MCP 서버, 허용한 http 주소)은 PC 하나에 한 번 저장한다. Rust 가 읽기 결과에 이미 얹어 주지만,
+  // 보관함 설정 파일이 아직 없는 첫 시작에는 여기서 얹는다. 파일이 손상됐으면 알리고, 그 값 대신 기본값을 저장하지 않는다(Rust 가 사본을 둔다).
+  const connections = await readConnections(invoke);
   // 손상된 저장 파일은 Rust 가 없는 것으로 돌려준다. 여기서 읽지 못한 값은 기본값이 된다.
-  if (stored != null) return { settings: fromStored(parse(stored)), imported: false, foundLlmKey: false };
+  if (stored != null) {
+    return { settings: fromStored(parse(stored)), imported: false, foundLlmKey: false, connectionsDamaged: connections.damaged };
+  }
 
   let plugin: string | null = null;
   try {
@@ -609,7 +614,8 @@ export async function loadVaultSettings(
   }
   const raw = plugin != null ? parse(plugin) : undefined;
   const imported = raw !== undefined && raw !== null && typeof raw === 'object' && !Array.isArray(raw);
-  const settings = imported ? { ...fromPluginData(raw), importedFromPlugin: true } : fromPluginData(undefined);
+  const first = imported ? { ...fromPluginData(raw), importedFromPlugin: true } : fromPluginData(undefined);
+  const settings = connections.values ? fromStored({ ...first, ...connections.values }) : first;
   try {
     await saveVaultSettings(settings, invoke);
   } catch {
@@ -624,7 +630,21 @@ export async function loadVaultSettings(
       foundLlmKey = false;
     }
   }
-  return { settings, imported, foundLlmKey };
+  return { settings, imported, foundLlmKey, connectionsDamaged: connections.damaged };
+}
+
+/** Rust 가 가진 PC 전체의 연동 설정 값(JSON 객체)과 파일 손상 여부. 알 수 없으면 값 없음, 손상 아님. */
+async function readConnections(invoke: InvokeFn): Promise<{ values?: Record<string, unknown>; damaged: boolean }> {
+  try {
+    const r = await invoke<{ values?: string | null; damaged?: boolean } | null>('settings_connections', {});
+    const values = typeof r?.values === 'string' ? parse(r.values) : undefined;
+    return {
+      values: values && typeof values === 'object' && !Array.isArray(values) ? (values as Record<string, unknown>) : undefined,
+      damaged: r?.damaged === true,
+    };
+  } catch {
+    return { damaged: false };
+  }
 }
 
 /**
@@ -639,11 +659,14 @@ export function useVaultSettings(
   settings: AppSettings | undefined;
   imported: boolean;
   foundLlmKey: boolean;
+  /** 이 PC 의 연동 설정 파일(connections.json)이 손상돼 있다: 사본을 남겼고 App 이 한 번 알린다. */
+  connectionsDamaged: boolean;
   update(patch: Partial<AppSettings>): Promise<boolean>;
 } {
   const [settings, setSettings] = useState<AppSettings>();
   const [imported, setImported] = useState(false);
   const [foundLlmKey, setFoundLlmKey] = useState(false);
+  const [connectionsDamaged, setConnectionsDamaged] = useState(false);
   const current = useRef<AppSettings>();
   useEffect(() => {
     let live = true;
@@ -651,12 +674,14 @@ export function useVaultSettings(
     setSettings(undefined);
     setImported(false);
     setFoundLlmKey(false);
+    setConnectionsDamaged(false);
     loadVaultSettings(invoke).then((r) => {
       if (!live) return;
       current.current = r.settings;
       setSettings(r.settings);
       setImported(r.imported);
       setFoundLlmKey(r.foundLlmKey);
+      setConnectionsDamaged(r.connectionsDamaged);
     });
     return () => {
       live = false;
@@ -676,5 +701,5 @@ export function useVaultSettings(
       () => false,
     );
   };
-  return { settings, imported, foundLlmKey, update };
+  return { settings, imported, foundLlmKey, connectionsDamaged, update };
 }

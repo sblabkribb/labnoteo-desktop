@@ -331,7 +331,7 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     else void openFile(path, { line: line0 });
   };
   // 보관함별 설정(앱 설정 폴더에 둔다). 처음 여는 Obsidian 보관함이면 플러그인 설정을 한 번 가져온다.
-  const { settings, imported: settingsImported, foundLlmKey, update: updateSettings } = useVaultSettings(vault.root);
+  const { settings, imported: settingsImported, foundLlmKey, connectionsDamaged, update: updateSettings } = useVaultSettings(vault.root);
   // 명령이 쓰는 호스트: 대화상자, 알림, 열린 노트는 버퍼를 기준으로 하는 파일 시스템, 열린 편집기의 편집 대상.
   const host = useMemo(
     () =>
@@ -352,6 +352,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     llmKeyOffered.current = vault.root;
     void offerPluginLlmKey(host);
   }, [foundLlmKey, vault.root, host]);
+  // 이 PC 의 연동 설정 파일(connections.json)이 손상됐으면 한 번 알린다. Rust 가 사본(.bak)을 남겼고 기본값으로 덮어쓰지 않는다.
+  const damageNoted = useRef(false);
+  useEffect(() => {
+    if (!connectionsDamaged || damageNoted.current) return;
+    damageNoted.current = true;
+    host.notify('warn', t('settings.connectionsDamaged'));
+  }, [connectionsDamaged, host]);
   // 샘플 저장소(알려진 ID, README 의 sample_tracking)를 이 보관함의 fs 와 설정에 묶고, 대장 JSON 변경과 창 초점을 잇는다.
   useSampleStoreWiring(host.fs, settings);
   // 편집기의 샘플 설정(D8): 저장소 판이나 샘플 설정이 바뀔 때만 새 객체다.
