@@ -119,7 +119,8 @@ describe('assignUnmatched', () => {
     expect(r?.status).toBe('filed');
     // the QR code's page and date are the defaults
     expect(h.asked.prompt.map((p) => p.value)).toEqual(['1/1', '2026-10-15']);
-    expect(h.asked.prompt[0].validate?.('x')).toBe(coreT('Enter a page like 2/3.'));
+    expect(h.asked.prompt[0].validate?.('x')).toBe(coreT('Enter a page like 2/3, or leave it empty.'));
+    expect(h.asked.prompt[0].validate?.('')).toBeNull();
     expect(h.asked.prompt[1].validate?.('')).toBeNull();
     expect(h.asked.prompt[1].validate?.('2026-02-30')).toBe(coreT('Enter a date like 2026-10-15, or leave it empty.'));
     expect(fileManually).toHaveBeenCalledWith(
@@ -129,16 +130,28 @@ describe('assignUnmatched', () => {
     expect(h.notes.map((n) => n.kind)).toEqual(['info']);
   });
 
-  it('an empty print date files without one; a page without a QR code starts at 1/1 and no hint', async () => {
+  it('an empty print date files without one; a page without a QR code is not prefilled and no hint (#576)', async () => {
     const d = deps({ [NOTE]: NOTE_TEXT });
     h.answer.pick((items: Array<{ value: unknown }>) => items[0].value, () => 0);
-    h.answer.prompt('1/1', '');
+    h.answer.prompt('', '');
     await assignUnmatched(d, { path: PLAIN_PATH, name: PLAIN });
     expect(h.asked.pick[0].items[0].description).toBeUndefined();
-    expect(h.asked.prompt.map((p) => p.value)).toEqual(['1/1', '']);
+    expect(h.asked.prompt.map((p) => p.value)).toEqual(['', '']);
+    // an empty page files the photo without a page (NO_PAGE), not as page 1/1
     expect(fileManually).toHaveBeenCalledWith(
       { path: PLAIN_PATH, name: PLAIN },
-      { note: ref(NOTE), unitOpIndex: 0, page: { page: 1, pageCount: 1 } },
+      { note: ref(NOTE), unitOpIndex: 0, page: { page: 0, pageCount: 0 } },
+    );
+  });
+
+  it('a page typed for a photo without a QR code still files as that page', async () => {
+    const d = deps({ [NOTE]: NOTE_TEXT });
+    h.answer.pick((items: Array<{ value: unknown }>) => items[0].value, () => 0);
+    h.answer.prompt('1/2', '');
+    await assignUnmatched(d, { path: PLAIN_PATH, name: PLAIN });
+    expect(fileManually).toHaveBeenCalledWith(
+      { path: PLAIN_PATH, name: PLAIN },
+      { note: ref(NOTE), unitOpIndex: 0, page: { page: 1, pageCount: 2 } },
     );
   });
 });

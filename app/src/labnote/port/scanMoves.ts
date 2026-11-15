@@ -1,5 +1,5 @@
 // Ported from app/vendor/labnoteo/src/barcode/barcodeFeature.ts:31-42 sha256:688d0cb02151a30c
-// Ported from app/vendor/labnoteo/src/barcode/barcodeFeature.ts:362-405 sha256:58728a7a48a39166
+// Ported from app/vendor/labnoteo/src/barcode/barcodeFeature.ts:364-407 sha256:58728a7a48a39166
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: planScanMoves is verbatim. moveScansWithNote becomes a function over ScanMoveDeps instead of a
 // BarcodeFeature method, taking the note's old and new paths (TFile becomes a path; app.vault.read becomes the

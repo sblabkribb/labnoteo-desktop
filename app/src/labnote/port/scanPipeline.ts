@@ -1,7 +1,8 @@
-// Ported from app/vendor/labnoteo/src/scan/scanPipeline.ts:1-400 sha256:eeb595308882c946
-// Ported from app/vendor/labnoteo/src/scan/scanPipeline.ts:402-498 sha256:0d254e8da2ecdfcd
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/scan/scanPipeline.ts:1-415 sha256:54dbf94538dccfa7
+// Ported from app/vendor/labnoteo/src/scan/scanPipeline.ts:417-526 sha256:649be387e5102e22
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: PipelineDeps drops the Obsidian App and takes noteIds (NoteIdService over the note-ID index), fs (the
+// Changes: 0.142.0 (#576): a photo filed without a page (page NO_PAGE = 0, core scanPayload hasPage) is never taken for an earlier scan of a printed page and never one for it; its caption says 'No page · …' instead of Printout 1/1; previousImages(result) lists the earlier scans' images (as vault paths) for the question before removePrevious trashes them.
 // editor-aware AppFs: read, trash), processNote(path, fn) (refuses a composing or busy open note with NoteBusyError),
 // images (ImageStoreDeps: vault_exists, vault_read_image, scan_write_image, LinkIndex.backlinks), listImages
 // (vault_list_images) and an optional ready() awaited before a run (the note-ID index's first build);
@@ -39,7 +40,7 @@ import type { LabnoteHost, Translator } from '@labnoteo/core';
 import { insertScanEntries, listFiledScans, listUnitOpBlocks, removeScanEntry, resolveScanTarget, type ScanEntry } from '@labnoteo/core';
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
-import { isPagePayload, unitOpFingerprint, type PagePayload, type ScanPayload } from '@labnoteo/core/lib/scanPayload';
+import { hasPage, isPagePayload, unitOpFingerprint, type PagePayload, type ScanPayload } from '@labnoteo/core/lib/scanPayload';
 import * as posix from '@labnoteo/core/posix';
 import { pickByName, resolveImagePath } from '../../editor/live/imagePath';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
@@ -352,8 +353,17 @@ export class ScanPipeline {
     batchHashes.add(page.hash);
 
     const unitOpIndex = target.kind === 'block' ? target.block.index : 0;
+    // A photo filed without a page is no page of the printout: it is never
+    // taken for an earlier scan of one, nor one for it (#576).
     const previous = filed
-      .filter((s) => s.unitOpIndex === unitOpIndex && s.page === payload.page && s.hash !== page.hash)
+      .filter(
+        (s) =>
+          s.unitOpIndex === unitOpIndex &&
+          hasPage(s) &&
+          hasPage(payload) &&
+          s.page === payload.page &&
+          s.hash !== page.hash,
+      )
       .map((s) => ({ hash: s.hash, embed: s.embed }));
     // A deleted image's name stays taken while an entry still links it (#433).
     const linked = new Set(
@@ -452,6 +462,12 @@ export class ScanPipeline {
   private caption(payload: PagePayload, page: Pick<DecodedPage, 'source' | 'sourcePage'>): string {
     const name = safeSourceName(page.source);
     const source = page.sourcePage ? `${name} p.${page.sourcePage}` : name;
+    // A photo filed without a page says so instead of claiming page 1/1 (#576).
+    if (!hasPage(payload)) {
+      return payload.printedOn
+        ? this.deps.t('No page · printed {0} · imported {1} · {2}', payload.printedOn, getSeoulDateString(), source)
+        : this.deps.t('No page · imported {0} · {1}', getSeoulDateString(), source);
+    }
     if (!payload.printedOn) {
       return this.deps.t('Printout {0}/{1} · imported {2} · {3}', String(payload.page), String(payload.pageCount), getSeoulDateString(), source);
     }
@@ -622,17 +638,28 @@ export class ScanPipeline {
     return removed;
   }
 
+  /**
+   * The images of the earlier scans of the page `result` filed, which {@link removePrevious} trashes; named in the
+   * question before (#576).
+   */
+  async previousImages(result: ScanResult): Promise<string[]> {
+    if (!result.notePath || !result.previous?.length) return [];
+    const notePath = result.notePath;
+    const images: string[] = [];
+    for (const p of result.previous) {
+      const path = await this.resolveEmbed(p.embed, notePath);
+      // An earlier entry may link the name this scan's image took (#433).
+      if (path !== null && path !== result.imagePath && !images.includes(path)) images.push(path);
+    }
+    return images;
+  }
+
   /** Remove the earlier scans of the page `result` filed (and trash their images). */
   async removePrevious(result: ScanResult): Promise<number> {
     if (!result.notePath || !result.previous?.length) return 0;
     const notePath = result.notePath;
     const previous = result.previous;
-    const images: string[] = [];
-    for (const p of previous) {
-      const path = await this.resolveEmbed(p.embed, notePath);
-      // An earlier entry may link the name this scan's image took (#433).
-      if (path !== null && path !== result.imagePath && !images.includes(path)) images.push(path);
-    }
+    const images = await this.previousImages(result);
     const stamp = this.deps.stampNote(notePath);
     let count = 0;
     await this.processWhenFree(notePath, (content) => {

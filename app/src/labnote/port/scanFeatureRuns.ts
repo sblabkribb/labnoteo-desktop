@@ -1,6 +1,7 @@
-// Ported from app/vendor/labnoteo/src/barcode/barcodeFeature.ts:294-356 sha256:3bd51adb64670a02
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/barcode/barcodeFeature.ts:294-358 sha256:1050787e42e499d9
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: the BarcodeFeature methods become the ScanRuns class over ScanRunsDeps; the busy flag polled every
+// Changes: 0.142.0 (#576): ResultActions and ScanRunsDeps gain confirmDelete(message), the vendor's actions.confirmDelete (host.confirm with the label 'Delete earlier scan', destructive), passed on to the results dialog (scan/ResultsDialog.tsx, which asks before removePrevious).
 // 500 ms becomes a promise chain (one batch at a time, in call order, and a batch that throws does not block the
 // next); the "Processing scans…" Notice splits by B8: a manual run uses withProgress (the modal the user asked for,
 // whose line() takes the progress text), a background run with !skipNoQr a sticky non-modal notifyStatus toast
@@ -28,6 +29,8 @@ export interface ResultActions {
   openNote(path: string, hash?: string): void;
   /** The dialog closed to assign the unmatched pages. */
   openUnmatched(): void;
+  /** Ask before something is trashed; true to go ahead (#576). */
+  confirmDelete(message: string): Promise<boolean>;
 }
 
 export interface ScanRunsDeps {
@@ -41,6 +44,8 @@ export interface ScanRunsDeps {
   /** Opens the results dialog over `results` (the same array, so Undo state carries over). */
   openResults(results: ScanResult[], actions: ResultActions): void;
   openUnmatched(): void;
+  /** Asks before the earlier scan of a page is deleted (the host's confirm, "Delete earlier scan", destructive). */
+  confirmDelete(message: string): Promise<boolean>;
   /** The vault guard a batch takes when it starts, unless its caller hands one in. */
   guard(): Promise<VaultGuard>;
 }
@@ -106,6 +111,7 @@ export class ScanRuns {
             });
         },
         openUnmatched: () => this.deps.openUnmatched(),
+        confirmDelete: (message) => this.deps.confirmDelete(message),
       });
     };
     if (manual) {

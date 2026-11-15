@@ -1,6 +1,7 @@
-// Ported from app/vendor/labnoteo/src/scan/unmatchedModal.ts:16-155 sha256:2efbb085345b7472
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/scan/unmatchedModal.ts:17-160 sha256:6e8ceaeeb8d5244f
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: listUnmatched(app) becomes listUnmatched(images), filtering the vault_list_images paths to the files
+// Changes: 0.142.0 (#576): the page of a hand-filed photo may be empty (not prefilled 1/1): empty files it with NO_PAGE as page and pageCount, with the new prompt texts; closing the prompt ends the assignment (undefined) as before.
 // directly in UNMATCHED_FOLDER and giving { path, name } items; the Modal half (render, thumbnails, Delete) is the
 // React dialog scan/UnmatchedDialog.tsx, where thumbnails are readVaultImage blob URLs revoked on close, window.open
 // becomes an in-dialog zoom, the inline img styles become .scan-thumb and fileManager.trashFile becomes fs.trash
@@ -18,6 +19,7 @@
 import type { LabnoteHost, PickItem } from '@labnoteo/core';
 import { listUnitOpBlocks } from '@labnoteo/core';
 import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
+import { NO_PAGE } from '@labnoteo/core/lib/scanPayload';
 import type { NoteRef } from '../barcode/noteIdIndex';
 import { UNMATCHED_FOLDER, unmatchedInfoFromName } from './imageStore';
 import type { NoteIdService } from './noteIdService';
@@ -116,13 +118,17 @@ export async function assignUnmatched(feature: AssignDeps, item: UnmatchedItem):
   }
   const unitOpIndex = await host.pick(items, { title: pickTitle });
   if (unitOpIndex === undefined) return undefined;
+  // A bench photo is no page of a printout: empty is allowed, as for the
+  // print date, and not prefilled 1/1, which made it page 1/1 (#576).
   const pageText = await host.prompt({
     title: host.t('Page'),
-    prompt: host.t('Page number on the printout, e.g. 2/3'),
-    value: qr ? `${qr.page}/${qr.pageCount}` : '1/1',
-    validate: (v) => (parsePageInput(v) ? null : host.t('Enter a page like 2/3.')),
+    prompt: host.t('Page number on the printout, e.g. 2/3. Leave it empty for a photo that is not a printed page.'),
+    value: qr ? `${qr.page}/${qr.pageCount}` : '',
+    placeholder: '2/3',
+    validate: (v) => (v.trim() === '' || parsePageInput(v) ? null : host.t('Enter a page like 2/3, or leave it empty.')),
   });
-  const page = pageText ? parsePageInput(pageText) : undefined;
+  if (pageText === undefined) return undefined;
+  const page = pageText.trim() === '' ? { page: NO_PAGE, pageCount: NO_PAGE } : parsePageInput(pageText);
   if (!page) return undefined;
   const printedText = await host.prompt({
     title: host.t('Print date'),

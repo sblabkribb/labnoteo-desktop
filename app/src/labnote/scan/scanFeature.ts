@@ -100,6 +100,8 @@ export class ScanFeature {
       openFile: (path, at) => ctx.openFile(path, at),
       openResults: (results, actions) => void openResultsDialog(results, this.pipeline, actions),
       openUnmatched: () => void this.openUnmatched(),
+      confirmDelete: (message) =>
+        ctx.host.confirm(message, { confirmLabel: coreT('Delete earlier scan'), destructive: true }),
     });
     this.watcher = new ScanFolderWatcher({
       run: (inputs, opts, manual) => this.runWithProgress(inputs, opts.skipNoQr, manual, opts.guard),

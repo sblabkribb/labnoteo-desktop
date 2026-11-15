@@ -765,6 +765,41 @@ describe('ScanPipeline.fileManually (vendor scanPipeline.test.ts)', () => {
     expect(again.map((r) => r.status)).toEqual(['duplicate']);
   });
 
+  // #576: a bench photo is no page of a printout.
+  it('files a photo without a page: the caption says so, and it never replaces or is replaced as a printed page', async () => {
+    const s = manualSetup();
+    const noPage = (printedOn?: string) => ({ ...target(1, printedOn), page: { page: 0, pageCount: 0 } });
+    const first = await s.pipeline.fileManually(item(QUEUED), noPage());
+    expect(first.status).toBe('filed');
+    expect(s.text.get(NOTE)!).toMatch(/\*No page · imported \d{4}-\d{2}-\d{2} · photo1\.jpg · /);
+    expect(s.text.get(NOTE)!).not.toContain('Printout 0/0');
+    expect(first.previous ?? []).toEqual([]);
+
+    // a second photo without a page is not the "earlier scan" of the first one
+    const SECOND = '_labnote-scans/unmatched/20261021-021800_unknown_photo2.jpg';
+    s.images.set(SECOND, new Uint8Array([7, 7, 7]));
+    const second = await s.pipeline.fileManually(item(SECOND), noPage('2026-09-30'));
+    expect(second.previous ?? []).toEqual([]);
+    expect(s.text.get(NOTE)!).toContain('*No page · printed 2026-09-30 · imported ');
+
+    // and a printed page 1 does not take them for its earlier scan
+    const THIRD = '_labnote-scans/unmatched/20261021-021900_unknown_photo3.jpg';
+    s.images.set(THIRD, new Uint8Array([5, 5, 5]));
+    const printed = await s.pipeline.fileManually(item(THIRD), target(1));
+    expect(printed.previous ?? []).toEqual([]);
+  });
+
+  it('previousImages names the images an earlier-scan removal would trash (#576)', async () => {
+    const s = manualSetup();
+    const first = await s.pipeline.fileManually(item(QUEUED), target(1));
+    const SECOND = '_labnote-scans/unmatched/20261021-021800_unknown_photo2.jpg';
+    s.images.set(SECOND, new Uint8Array([7, 7, 7]));
+    const second = await s.pipeline.fileManually(item(SECOND), target(1));
+    expect(second.previous).toHaveLength(1);
+    expect(await s.pipeline.previousImages(second)).toEqual([first.imagePath]);
+    expect(await s.pipeline.previousImages({ source: 'x', status: 'filed' })).toEqual([]);
+  });
+
   it('writes the print date the user gave', async () => {
     const s = manualSetup();
     await s.pipeline.fileManually(item(QUEUED), target(1, '2026-09-30'));

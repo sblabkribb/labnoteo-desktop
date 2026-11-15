@@ -73,10 +73,12 @@ beforeAll(() => {
 });
 
 let ctx: CommandContext;
+let testHost: ReturnType<typeof createTestHost>;
 let pipeline: ScanPipeline & {
   run: ReturnType<typeof vi.fn>;
   undo: ReturnType<typeof vi.fn>;
   removePrevious: ReturnType<typeof vi.fn>;
+  previousImages: ReturnType<typeof vi.fn>;
 };
 let progressLines: string[];
 let withProgressSpy: ReturnType<typeof vi.fn>;
@@ -85,6 +87,7 @@ function fakePipeline(results: ScanResult[] = [filed()]) {
   return {
     run: vi.fn(async (_inputs: readonly ScanInput[], _opts?: unknown) => results),
     undo: vi.fn(async (r: ScanResult) => r.status === 'filed'),
+    previousImages: vi.fn(async (r: ScanResult) => (r.previous ?? []).map((p) => `exp/scans/${p.embed.replace('![[', '').split('|')[0]}`)),
     removePrevious: vi.fn(async (r: ScanResult) => {
       const n = r.previous?.length ?? 0;
       r.previous = [];
@@ -119,6 +122,7 @@ function makeFeature(deps: Partial<ScanFeatureDeps> = {}): ScanFeature {
 beforeEach(() => {
   setLang('en');
   const h = createTestHost({ [NOTE]: NOTE_TEXT });
+  testHost = h;
   ctx = h.ctx;
   pipeline = fakePipeline();
   progressLines = [];
@@ -233,13 +237,17 @@ describe('results dialog', () => {
         .map((b) => b.textContent),
     ).toEqual([coreT('Open note'), coreT('Delete earlier scan'), coreT('Undo')]);
 
-    // Delete earlier scan: removes, says how many, and the button is spent
+    // Delete earlier scan: asks first and names the image (#576), then removes, says how many, and the button is spent
+    testHost.answer.confirm(true);
     const del = within(row as HTMLElement).getByRole('button', {
       name: coreT('Delete earlier scan'),
     });
     await act(async () => {
       fireEvent.click(del);
     });
+    expect(testHost.asked.confirm).toHaveLength(1);
+    expect(testHost.asked.confirm[0].message).toContain('- old.jpg');
+    expect(testHost.asked.confirm[0].opts).toMatchObject({ confirmLabel: coreT('Delete earlier scan'), destructive: true });
     expect(pipeline.removePrevious).toHaveBeenCalledWith(result);
     expect(currentToasts().map((x) => x.message)).toContain(coreT('Removed {0} earlier scan(s).', '1'));
     expect((del as HTMLButtonElement).disabled).toBe(true);
@@ -264,6 +272,7 @@ describe('results dialog', () => {
     const feature = makeFeature();
     act(() => feature.report([result], true));
     const dialog = screen.getByRole('dialog', { name: coreT('Scan results') });
+    testHost.answer.confirm(true);
     const del = screen.getByRole('button', { name: coreT('Delete earlier scan') });
     del.focus();
     await act(async () => {
@@ -280,6 +289,24 @@ describe('results dialog', () => {
     expect(dialog.contains(document.activeElement)).toBe(true);
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(currentDialog()).toBeNull();
+  });
+
+  // #576: the earlier scan is not trashed without a yes.
+  it('declining the Delete earlier scan question removes nothing and leaves the button', async () => {
+    renderLayer();
+    pipeline = fakePipeline();
+    const result = filed({ previous: [{ hash: 'cd34', embed: '![[old.jpg|200]]' }] });
+    const feature = makeFeature();
+    act(() => feature.report([result], true));
+    testHost.answer.confirm(false);
+    const del = screen.getByRole('button', { name: coreT('Delete earlier scan') });
+    await act(async () => {
+      fireEvent.click(del);
+    });
+    expect(testHost.asked.confirm).toHaveLength(1);
+    expect(pipeline.removePrevious).not.toHaveBeenCalled();
+    expect((del as HTMLButtonElement).disabled).toBe(false);
+    expect(result.previous).toHaveLength(1);
   });
 
   it('a duplicate row has only Open note; an unmatched result offers Assign unmatched scans', () => {

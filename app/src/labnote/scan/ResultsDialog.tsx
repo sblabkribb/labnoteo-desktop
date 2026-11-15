@@ -73,6 +73,10 @@ export function ResultsDialog(props: {
     focusRow.current = rows.indexOf(r);
     busy(r, true);
     try {
+      // Say what goes before it goes: a photo filed as this page by an older release was trashed without a word (#576).
+      const names = (await pipeline.previousImages(r)).map((p) => `- ${p.split('/').pop()}`);
+      const question = coreT('Delete the earlier scan of this page? Its entry leaves the note and its image goes to the trash.');
+      if (!(await actions.confirmDelete(names.length ? `${question}\n\n${names.join('\n')}` : question))) return;
       const n = await pipeline.removePrevious(r);
       notify('info', coreT('Removed {0} earlier scan(s).', String(n)));
       setCleared((s) => new Set(s).add(r));
