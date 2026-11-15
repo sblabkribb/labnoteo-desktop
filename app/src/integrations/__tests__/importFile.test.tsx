@@ -233,6 +233,58 @@ describe('Integration settings: Import from file…', () => {
     expect(t('github.import.importedToken', 'GitHub')).toBe('가져옴: GitHub(토큰 포함)');
   });
 
+  it('a search part: the summary names the web search next to the LLM, saves only the LLM settings, and a bad address is a line of its own', async () => {
+    const f = importDeps({
+      outcome: {
+        status: 'done',
+        imported: [
+          { part: 'llm', keySaved: false },
+          { part: 'search', keySaved: false },
+        ],
+        invalid: [],
+        settings: { llmModel: 'qwen' },
+      },
+    });
+    show(f.deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.imported', t('integrations.import.part.llm')))).toBeTruthy();
+    expect(screen.getByText(t('integrations.import.searchImported'))).toBeTruthy();
+    // 검색 주소는 Rust 가 이 PC 의 assistant.json 에 썼다: 보관함 설정으로는 모델만 저장한다.
+    expect(f.commit).toHaveBeenCalledTimes(1);
+    expect(f.commit.mock.calls[0]![0]).toMatchObject({ llmModel: 'qwen' });
+    expect(JSON.stringify(f.commit.mock.calls[0]![0])).not.toMatch(/search|gallery/i);
+    expect(await screen.findByText(t('integrations.import.deleteAsk'))).toBeTruthy();
+    cleanup();
+    // 검색만 있는 파일도 받아들인다.
+    const only = importDeps({ outcome: { status: 'done', imported: [{ part: 'search', keySaved: false }], invalid: [], settings: {} } });
+    show(only.deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.searchImported'))).toBeTruthy();
+    expect(only.commit).not.toHaveBeenCalled();
+    expect(await screen.findByText(t('integrations.import.deleteAsk'))).toBeTruthy();
+    cleanup();
+    // 틀린 주소는 다른 부분을 막지 않고 줄로 알린다.
+    const bad = importDeps({
+      outcome: {
+        status: 'done',
+        imported: [{ part: 'llm', keySaved: false }],
+        invalid: [{ part: 'search', field: 'url', reason: 'badUrl' }],
+        settings: { llmModel: 'qwen' },
+      },
+    });
+    show(bad.deps);
+    await userEvent.click(await importButton());
+    expect(
+      await screen.findByText(
+        t('integrations.import.invalid', t('integrations.import.part.search'), 'url', t('integrations.import.reason.badUrl')),
+      ),
+    ).toBeTruthy();
+    expect(bad.commit).toHaveBeenCalledTimes(1);
+    setLang('ko');
+    expect(t('integrations.import.part.search')).toBe('웹 검색');
+    expect(t('integrations.import.searchImported')).toContain('웹 검색');
+  });
+
   it('nothing imported: says so and offers no delete', async () => {
     const f = importDeps({
       outcome: { status: 'done', imported: [], invalid: [{ part: 'llm', field: 'apiKey', reason: 'badKey' }], settings: {} },

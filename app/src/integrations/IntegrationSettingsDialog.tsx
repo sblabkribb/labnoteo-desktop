@@ -217,6 +217,7 @@ const PART_LABEL: Record<ImportPart, () => string> = {
   bfworkflow: () => t('integrations.import.part.bfworkflow'),
   mcpServer: () => t('mcpClient.import.part'),
   github: () => t('github.import.part'),
+  search: () => t('integrations.import.part.search'),
 };
 
 const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
@@ -297,9 +298,11 @@ function summaryLines(out: ImportOutcome): ImportLine[] {
   const lines: ImportLine[] = out.imported.map((i) => ({
     // GitHub 은 API 키가 아니라 토큰을 가져온다.
     text:
-      i.keySaved && i.part === 'github'
-        ? t('github.import.importedToken', PART_LABEL[i.part]())
-        : t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
+      i.part === 'search'
+        ? t('integrations.import.searchImported')
+        : i.keySaved && i.part === 'github'
+          ? t('github.import.importedToken', PART_LABEL[i.part]())
+          : t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
     warn: false,
   }));
   const mcp = out.mcp ?? [];
