@@ -1,5 +1,5 @@
-// Ported from app/vendor/labnoteo/src/commands.ts:332-439 sha256:6d160ba5da070d7b
-// Ported from app/vendor/labnoteo/src/commands.ts:1322-1341 sha256:b38bc58dad3f9b74
+// Ported from app/vendor/labnoteo/src/commands.ts:333-440 sha256:6d160ba5da070d7b
+// Ported from app/vendor/labnoteo/src/commands.ts:1340-1359 sha256:b38bc58dad3f9b74
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: catalogDescription(id, description) -> catalogDescription(id, description, locale); `getObsidianLanguage()` -> the `locale` parameter.
 // Changes: catalogKoFields is exported and takes a `locale` parameter instead of reading `getObsidianLanguage()`.

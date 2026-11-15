@@ -1,4 +1,4 @@
-// Ported from app/vendor/labnoteo/src/commands.ts:1448-1510 sha256:ce1993018eafe7d8
+// Ported from app/vendor/labnoteo/src/commands.ts:1466-1528 sha256:ce1993018eafe7d8
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: the imports below replace the top of commands.ts. The caller (commands/unitOp.ts) passes a host whose
 // editTarget() is the batching target of the open view, so the restored section heading (#564), the block insert and

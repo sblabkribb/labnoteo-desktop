@@ -359,3 +359,60 @@ describe('sorting off: a deleted UO block takes its entry, a cut one keeps it (p
     m.unmount();
   });
 });
+
+// #588: a template block that lost its `### [..]` heading is left as it is, and said once.
+describe('a damaged unit operation heading (core 0.142.0)', () => {
+  /** A block with the template's Meta / Input / Method parts whose heading lost its brackets. */
+  const damaged = (text: string) =>
+    text.replace(
+      '### [UHW380 Microplate Reading] plate 1\n\n#### Method\n- x',
+      ['### Microplate Reading plate 1', '', '#### Meta', '- Start_date: ', '', '#### Input', '- s', '', '#### Method', '- x'].join('\n'),
+    );
+
+  it('syncTocOnSave rebuilds nothing from it, whatever the setting', () => {
+    const broken = damaged(workflow());
+    expect(broken).not.toBe(workflow());
+    expect(syncTocOnSave(WF, broken, { autoSyncUnitOpToc: true })).toBeNull();
+    expect(syncTocOnSave(WF, broken, { autoSyncUnitOpToc: false })).toBeNull();
+  });
+
+  it('the filter leaves the list alone when the delete leaves a damaged heading behind', () => {
+    const { upkeep } = setup({}, { stamp: false, toc: false });
+    const broken = damaged(workflow());
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: broken,
+        extensions: [EditorState.transactionFilter.of((tr) => {
+          const extra = upkeep.filter(WF, tr);
+          return extra ? [tr, extra] : tr;
+        })],
+      }),
+    });
+    const at = broken.indexOf('---\n\n### [UHW180');
+    view.dispatch({ changes: { from: at, to: broken.indexOf('---\n\n### Microplate') }, userEvent: 'delete.backward' });
+    expect(tocLines(view.state.doc.toString())).toEqual(tocLines(broken));
+    view.destroy();
+  });
+
+  it('a save says so once per kind of damage, not for the heading the caret is on', () => {
+    const { upkeep, notices } = setup({}, { stamp: false, toc: true });
+    const broken = damaged(workflow());
+    const view = new EditorView({ state: EditorState.create({ doc: broken }) });
+    const handle = { view: () => view, busy: () => false };
+    const off = registerOpenNote(WF, handle as unknown as EditorHandle);
+    // caret on the damaged heading: it is being typed, nothing said
+    const headingLine = broken.slice(0, broken.indexOf('### Microplate')).split('\n').length;
+    view.dispatch({ selection: { anchor: view.state.doc.line(headingLine).from } });
+    expect(upkeep.beforeSave(WF, view)).toBe(false);
+    expect(notices).toEqual([]);
+    // caret elsewhere: one warning naming the line, not repeated on the next save
+    view.dispatch({ selection: { anchor: 0 } });
+    expect(upkeep.beforeSave(WF, view)).toBe(false);
+    expect(upkeep.beforeSave(WF, view)).toBe(false);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(`${WF}:${headingLine}`);
+    expect(view.state.doc.toString()).toBe(broken);
+    off();
+    view.destroy();
+  });
+});

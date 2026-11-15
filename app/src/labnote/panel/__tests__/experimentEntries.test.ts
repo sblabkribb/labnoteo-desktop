@@ -54,6 +54,21 @@ describe('readExperimentEntry', () => {
     expect(filterExperiments([a, b], '2025-12-24').map((e) => e.folder)).toEqual([A]);
   });
 
+  // core 0.142.0 (#591): a status that is not text, or empty, is its own group, not "no status".
+  it('marks a status that is not text, or empty, as a statusProblem; a missing or text one has none', async () => {
+    const vault = createFakeVault({
+      [`${A}/README.labnote.md`]: readme('A', '[in-progress]'),
+      [`${B}/README.labnote.md`]: readme('B', '"  "'),
+      'labnote/003_C/README.labnote.md': readme('C', 'completed'),
+      'labnote/004_D/README.labnote.md': ['---', 'title: D', '---', '', '## Summary', ''].join('\n'),
+    });
+    const fs = new TauriLabnoteFs(vault.invoke);
+    expect((await readExperimentEntry(fs, A)).statusProblem).toBe('non-string');
+    expect((await readExperimentEntry(fs, B)).statusProblem).toBe('empty');
+    expect((await readExperimentEntry(fs, 'labnote/003_C')).statusProblem).toBeUndefined();
+    expect((await readExperimentEntry(fs, 'labnote/004_D')).statusProblem).toBeUndefined();
+  });
+
   it('progress counts only checklist entries whose note exists, and a note listed twice once', async () => {
     const vault = createFakeVault({
       [`${A}/README.labnote.md`]: readme(

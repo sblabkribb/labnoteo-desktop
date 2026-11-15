@@ -74,12 +74,26 @@ export function insertDate(ctx: CommandContext, now: () => string): boolean {
   // 표 칸에는 그 칸만 든 셀 편집기가 따로 있다(#303): 그것에 쓴다. 바깥 오프셋은 표의 다른 곳에 닿는다.
   // 아래의 앞부분·Meta 검사는 칸을 노트로 읽으므로 건너뛴다.
   const cell = activeCellView(editor);
+  // 선택이 여럿이면 어느 것에 넣을지 모른다: 아무것도 바꾸지 않는다.
+  if ((cell ?? editor).state.selection.ranges.length > 1) {
+    host.notify('warn', host.t('Use one selection for this command. Nothing was changed.'));
+    return false;
+  }
   if (cell) {
-    const from = cell.state.selection.main.from;
-    const lineBefore = cell.state.doc.toString().slice(0, from).split('\n').pop() ?? '';
-    cell.dispatch(cell.state.replaceSelection(endsAliasedReference(lineBefore, types) ? ` ${text}` : text), {
-      annotations: Transaction.userEvent.of('input.labnote'),
-    });
+    const { from, to } = cell.state.selection.main;
+    if (from !== to) {
+      // 선택한 글은 그대로 두고 그 뒤에 넣는다(플러그인 0.142.0: 선택을 날짜로 바꾸지 않는다).
+      const before = cell.state.doc.toString().slice(0, to).split('\n').pop() ?? '';
+      cell.dispatch({
+        changes: { from: to, insert: `${before && before.trimEnd() === before ? ' ' : ''}${text}` },
+        annotations: Transaction.userEvent.of('input.labnote'),
+      });
+    } else {
+      const lineBefore = cell.state.doc.toString().slice(0, from).split('\n').pop() ?? '';
+      cell.dispatch(cell.state.replaceSelection(endsAliasedReference(lineBefore, types) ? ` ${text}` : text), {
+        annotations: Transaction.userEvent.of('input.labnote'),
+      });
+    }
     // 셀 편집기는 바깥 문서에 바뀐 글자를 한 트랜잭션으로 넘긴다. 다음 입력이 이 날짜에 합쳐지지 않게 기록을 끊는다.
     editor.dispatch({ annotations: isolateHistory.of('after') });
     return true;
@@ -159,10 +173,12 @@ export async function insertIssueMarker(ctx: CommandContext): Promise<boolean> {
     while (used.has(id)) id = generateIssueMarkerId();
     return id;
   };
-  const refuse = (reason: 'conflict' | 'table' | 'frontMatter' | 'codeBlock' | 'comment' | 'notLabnote'): false => {
+  const refuse = (reason: 'conflict' | 'table' | 'frontMatter' | 'codeBlock' | 'comment' | 'notLabnote' | 'meta'): false => {
     host.notify(
       'warn',
-      reason === 'notLabnote'
+      reason === 'meta'
+        ? host.t('Issue markers cannot replace Meta properties. Put the discussion on a line outside Meta.')
+        : reason === 'notLabnote'
         ? host.t(
             'Markers in this note open no issue: only the README and workflow notes (.labnote.md) directly in an experiment folder are read. Put the marker in one of those.',
           )
@@ -178,6 +194,12 @@ export async function insertIssueMarker(ctx: CommandContext): Promise<boolean> {
     );
     return false;
   };
+
+  // 선택이 여럿이면 어느 것에 마커를 넣을지 모른다: 아무것도 바꾸지 않는다.
+  if (first.view.state.selection.ranges.length > 1) {
+    host.notify('warn', host.t('Use one selection for this command. Nothing was changed.'));
+    return false;
+  }
 
   // issue-sync 와 validate 는 이 노트들만 읽는다(#428).
   if (!markerExperimentDir(notePath)) return refuse('notLabnote');

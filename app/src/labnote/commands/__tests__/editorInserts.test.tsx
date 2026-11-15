@@ -91,12 +91,11 @@ describe('insert-date', () => {
     undoRestores(m, README);
   });
 
-  it('with a selection, the date replaces it', async () => {
+  it('with a selection, the selected text is kept and the date goes after it (core 0.142.0)', async () => {
     const m = await open(README_PATH, README);
     select(m, '온도가', 0, 3);
     expect(insertDate(h.ctx, NOW)).toBe(true);
-    expect(docOf(m)).toContain('2026-11-06 문제다.');
-    expect(docOf(m)).not.toContain('온도가');
+    expect(docOf(m)).toContain('온도가 2026-11-06 문제다.');
     undoRestores(m, README);
   });
 
@@ -375,5 +374,19 @@ describe('block inserts (Task 16: the editor menu Insert submenu)', () => {
     h = createTestHost();
     expect(runBlockInsert(h.ctx, insertHr)).toBe(false);
     expect(h.notes).toEqual([{ kind: 'info', message: t('cmd.props.noNote') }]);
+  });
+});
+
+// core 0.142.0: a Meta property takes no marker (#589). Several selections cannot be made in the app's editor (native
+// selection, no allowMultipleSelections), so the commands' "Use one selection" guard has no test to reach it.
+describe('0.142.0 selection rules', () => {
+  it('insert-issue-marker over a Meta property is refused with its own sentence', async () => {
+    const m = await open(WF_PATH, META);
+    select(m, "- Start_date: '2026-12-01'", 2, 10);
+    expect(await act(() => insertIssueMarker(h.ctx))).toBe(false);
+    expect(docOf(m)).toBe(META);
+    expect(h.notes.map((n) => n.message)).toEqual([
+      coreT('Issue markers cannot replace Meta properties. Put the discussion on a line outside Meta.'),
+    ]);
   });
 });

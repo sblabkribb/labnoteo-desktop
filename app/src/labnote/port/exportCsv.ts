@@ -1,5 +1,5 @@
-// Ported from app/vendor/labnoteo/src/exportCsv.ts:32-656 sha256:37885349054c5529
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/exportCsv.ts:33-697 sha256:a43e8b973cad144b
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: LabnotePlugin → CsvCtx (host, vaultRoot, refresh); TFile → a vault-relative path string (noteLabel and the CSV names use its base name); plugin.t → host.t; plugin.app.vault.read and plugin.fs → host.fs, the editor-aware fs, so an open note's buffer with unsaved edits is what is exported (A-R1); vault.adapter.write → host.fs.write with the BOM-led string (Rust writes it as UTF-8, EF BB BF).
 // Changes: fileManager.renameFile → host.fs.rename, without link updates (A-R4); the "not in the vault index" check is gone (a missing CSV fails the rename instead); vault.getFileByPath for the experiment's notes → every `.md` name host.fs.list gives (the app has no file index to check them against).
 // Changes: new Notice(text) → host.notify('info', text); new Notice(`⚠️ ${text}`, 15000) → host.notify('warn', text, { ms: 15000 }) (the warn toast marks it, so no ⚠️ prefix, A-R5); confirmModal → host.confirm(msg, { confirmLabel, destructive }); listFileNames / trashTableCsvs from ./tableCsvFiles; windowsPathsOver(app, …) → windowsPathsOver(ctx.vaultRoot, …) from ./experiments.
@@ -7,7 +7,9 @@
 // Changes: isFileLocked also accepts FsCommandError.code EBUSY (the Rust `locked` kind); EPERM/EACCES kept.
 // Changes: withCaretGuard / CARET_GRACE_MS removed (an Obsidian focus quirk, #470; A-R2); explorerHint removed (the app tree lists .csv files, A-R7).
 // Changes: the active file → ctx.activePath(); the vault is re-read (ctx.refresh()) after an export or cleanup that may have changed files.
+// Changes: 0.142.0 (#590): NoteCsvPlan also keeps the text and path it was planned from (source, sourcePath) and the lines of issue markers inside a table (invalidMarkers, from core parseIssueMarkers); an export that finds a marker in a table refuses with the list of positions (refuseInvalidMarkers); before writing, and before the stale-CSV cleanup trashes anything, sourcesMatch re-reads the notes (and, for a folder, lists them again) and stops with 'The notes changed during export…' when they differ; offerStaleCsvCleanup takes the stillCurrent check and re-reads the orphan CSVs so only still-orphaned ones are trashed. new Notice(…, 10000) → host.notify('warn', …, { ms: 10000 }); vault.read → host.fs.read.
 import * as posix from '@labnoteo/core/posix';
+import { parseIssueMarkers } from '@labnoteo/core';
 import {
   classifyCsvOverwrites,
   csvRowCount,
@@ -75,6 +77,11 @@ async function readCsv(ctx: CsvCtx, path: string): Promise<string | { locked: tr
 interface NoteCsvPlan {
   /** The note's vault path. */
   file: string;
+  /** The note's text and path as they were planned from; an export that finds them changed stops (#590). */
+  source: string;
+  sourcePath: string;
+  /** Lines of issue markers inside a table, which the export refuses (#590). */
+  invalidMarkers: number[];
   dir: string;
   /** Tables left out: no blank line above them, or inside a comment. */
   notRendered: number;
@@ -94,6 +101,9 @@ async function planNoteCsvExport(ctx: CsvCtx, file: string): Promise<NoteCsvPlan
   const name = posix.basename(file);
   const plan: NoteCsvPlan = {
     file,
+    source: content,
+    sourcePath: file,
+    invalidMarkers: parseIssueMarkers(content.replace(/\r\n/g, '\n')).malformed.filter(m => m.reason === 'table').map(m => m.line),
     dir,
     notRendered,
     hidden,
@@ -247,7 +257,8 @@ async function offerStaleCsvCleanup(
   dir: string,
   stale: readonly string[],
   orphans: readonly string[] = [],
-  notes: 'one' | 'many' = 'one'
+  notes: 'one' | 'many' = 'one',
+  stillCurrent?: () => Promise<boolean>
 ): Promise<string> {
   const { host } = ctx;
   const total = stale.length + orphans.length;
@@ -273,7 +284,10 @@ async function offerStaleCsvCleanup(
   ].filter(Boolean);
   const ok = await host.confirm(sections.join('\n\n'), { confirmLabel: host.t('Move to trash'), destructive: true });
   if (!ok) return host.t('{0} old CSV file(s) kept.', String(total));
-  const kept = await trashTableCsvs(host, dir, [...stale, ...orphans]);
+  if (stillCurrent && !(await stillCurrent())) return host.t('The notes changed during export. CSV cleanup was skipped.');
+  const freshOrphans = await orphanCsvsIn(ctx, dir);
+  const safeOrphans = orphans.filter(name => freshOrphans.includes(name));
+  const kept = orphans.length - safeOrphans.length + await trashTableCsvs(host, dir, [...stale, ...safeOrphans]);
   const moved = host.t('{0} CSV file(s) moved to the trash.', String(total - kept));
   return kept > 0 ? `${moved} ${host.t('{0} old CSV file(s) kept.', String(kept))}` : moved;
 }
@@ -368,15 +382,41 @@ function renameText(ctx: CsvCtx, result: CsvWriteResult): string {
     .join(' ');
 }
 
+/** Whether the notes still hold the text the export was planned from (#590). */
+async function sourcesMatch(ctx: CsvCtx, plans: readonly NoteCsvPlan[]): Promise<boolean> {
+  try {
+    for (const p of plans) {
+      if (p.file !== p.sourcePath || (await ctx.host.fs.read(p.file)) !== p.source) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function refuseInvalidMarkers(ctx: CsvCtx, plans: readonly NoteCsvPlan[]): boolean {
+  const positions = plans.flatMap(p => p.invalidMarkers.map(line => `${p.sourcePath}:${line}`));
+  if (!positions.length) return false;
+  ctx.host.notify(
+    'warn',
+    ctx.host.t('Issue markers cannot go inside a table. Move these markers below the table and export again: {0}', positions.join(', ')),
+    { ms: 10000 }
+  );
+  return true;
+}
+
 export async function exportTablesToCsv(ctx: CsvCtx, notePath: string): Promise<void> {
   const plan = await planNoteCsvExport(ctx, notePath);
+  if (refuseInvalidMarkers(ctx, [plan])) return;
   const skipped = skippedText(ctx, [plan]);
   if (plan.outputs.length === 0) {
     const cleanup = await offerStaleCsvCleanup(
       ctx,
       plan.dir,
       await staleCsvsOf(ctx, notePath, 0),
-      await orphanCsvsIn(ctx, plan.dir)
+      await orphanCsvsIn(ctx, plan.dir),
+      'one',
+      () => sourcesMatch(ctx, [plan])
     );
     if (cleanup) ctx.refresh();
     ctx.host.notify('info', [ctx.host.t('No tables found in this note.'), skipped, cleanup].filter(Boolean).join(' '));
@@ -386,12 +426,18 @@ export async function exportTablesToCsv(ctx: CsvCtx, notePath: string): Promise<
     ctx.host.notify('info', ctx.host.t('No changes made.'));
     return;
   }
+  if (!(await sourcesMatch(ctx, [plan]))) {
+    ctx.host.notify('info', ctx.host.t('The notes changed during export. Run the export again.'));
+    return;
+  }
   const result = await writeNoteCsvExport(ctx, plan);
   const cleanup = await offerStaleCsvCleanup(
     ctx,
     plan.dir,
     await staleCsvsOf(ctx, notePath, plan.outputs.length),
-    await orphanCsvsIn(ctx, plan.dir)
+    await orphanCsvsIn(ctx, plan.dir),
+    'one',
+    () => sourcesMatch(ctx, [plan])
   );
   ctx.refresh();
   const paths = plan.outputs.map(o => o.path);
@@ -428,10 +474,16 @@ export async function exportExperimentTablesToCsv(ctx: CsvCtx, dir: string): Pro
   const plans: NoteCsvPlan[] = [];
   for (const name of ordered) plans.push(await planNoteCsvExport(ctx, posix.join(dir, name)));
   const skipped = skippedText(ctx, plans);
+  if (refuseInvalidMarkers(ctx, plans)) return;
+  const stillCurrent = async () =>
+    (await sourcesMatch(ctx, plans)) &&
+    (await host.fs.list(dir)).filter(n => n.toLowerCase().endsWith('.md')).sort().join('\n') === [...names].sort().join('\n');
   const staleOf = async () =>
     (await Promise.all(plans.map(p => staleCsvsOf(ctx, p.file, p.outputs.length)))).flat();
-  const cleanupAll = async () =>
-    offerStaleCsvCleanup(ctx, dir, await staleOf(), await orphanCsvsIn(ctx, dir), 'many');
+  const cleanupAll = async () => {
+    if (!(await stillCurrent())) return host.t('The notes changed during export. CSV cleanup was skipped.');
+    return offerStaleCsvCleanup(ctx, dir, await staleOf(), await orphanCsvsIn(ctx, dir), 'many', stillCurrent);
+  };
   const withTables = plans.filter(p => p.outputs.length > 0);
   if (withTables.length === 0) {
     const cleanup = await cleanupAll();
@@ -447,6 +499,10 @@ export async function exportExperimentTablesToCsv(ctx: CsvCtx, dir: string): Pro
     return;
   }
   const result: CsvWriteResult = { written: [], locked: [], renamed: [], notRenamed: 0 };
+  if (!(await stillCurrent())) {
+    host.notify('info', host.t('The notes changed during export. Run the export again.'));
+    return;
+  }
   for (const plan of withTables) {
     const r = await writeNoteCsvExport(ctx, plan);
     result.written.push(...r.written);

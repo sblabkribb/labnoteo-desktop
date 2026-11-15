@@ -15,10 +15,11 @@ import { isolateHistory } from '@codemirror/commands';
 import { Transaction, type TransactionSpec } from '@codemirror/state';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { minimalReplacement } from '@labnoteo/core';
+import { isValidWorkflowPath } from '@labnoteo/core/lib/workflowStructure';
 import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { toDocBreaks } from '../editTarget';
 import { openNote, processNote } from '../openNotes';
-import { classifyChange, LastUpdatedScheduler, LastUpdatedTracker, pruneOnUnitOpDelete, syncTocOnSave, type UpkeepSettings } from '../port/lastUpdatedStamp';
+import { classifyChange, DamagedHeadingReporter, LastUpdatedScheduler, LastUpdatedTracker, pruneOnUnitOpDelete, syncTocOnSave, type UpkeepSettings } from '../port/lastUpdatedStamp';
 
 /** 손질이 한 편집의 userEvent. 'input' 으로 시작하지 않는다: 사용자 편집이 아니다. */
 export const UPKEEP_EVENT = 'labnote.upkeep';
@@ -54,6 +55,7 @@ export interface Upkeep {
 
 export function createUpkeep(deps: UpkeepDeps): Upkeep {
   const tracker = new LastUpdatedTracker(deps.today);
+  const damaged = new DamagedHeadingReporter(deps.notify);
   /** 노트마다 마지막 변경이 되돌리기·다시 하기였는가: 그 직후 저장은 목록을 고치지 않는다(다시 하기 기록이 남게). */
   const lastFromHistory = new Map<string, boolean>();
   const scheduler = new LastUpdatedScheduler({
@@ -80,6 +82,11 @@ export function createUpkeep(deps: UpkeepDeps): Upkeep {
   });
   return {
     observe(path, update) {
+      // A caret move alone can leave a damaged heading behind: say so once (#588).
+      if (update.selectionSet && !update.docChanged && isValidWorkflowPath(path)) {
+        const state = update.state;
+        damaged.report(path, state.doc.toString(), state.doc.lineAt(state.selection.main.head).number - 1);
+      }
       for (const tr of update.transactions) {
         if (!tr.docChanged) continue;
         const change = classifyChange(tr);
@@ -94,6 +101,7 @@ export function createUpkeep(deps: UpkeepDeps): Upkeep {
     beforeSave(path, view) {
       if (view.composing || view.state.readOnly) return false;
       const text = view.state.doc.toString();
+      if (damaged.report(path, text, view.state.doc.lineAt(view.state.selection.main.head).number - 1)) return false;
       const next = syncTocOnSave(path, text, deps.settings(), {
         caret: view.state.selection.main.head,
         fromHistory: lastFromHistory.get(path) ?? false,

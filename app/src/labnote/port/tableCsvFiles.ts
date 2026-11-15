@@ -1,6 +1,6 @@
-// Ported from app/vendor/labnoteo/src/commands.ts:1842-1877 sha256:af4e49258e6c0fef
-// Ported from app/vendor/labnoteo/src/commands.ts:1879-1909 sha256:7f9d7e1f2d3ac644
-// Ported from app/vendor/labnoteo/src/commands.ts:1911-1948 sha256:d72da857647c6dde
+// Ported from app/vendor/labnoteo/src/commands.ts:1860-1895 sha256:af4e49258e6c0fef
+// Ported from app/vendor/labnoteo/src/commands.ts:1897-1927 sha256:7f9d7e1f2d3ac644
+// Ported from app/vendor/labnoteo/src/commands.ts:1929-1966 sha256:d72da857647c6dde
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: App → host (Pick<AppHost, 'fs'>; offerTableCsvCleanupOnDelete's app and host are one host); moveTableCsvs: app.vault.getFileByPath(...) instanceof TFile → host.fs.exists, fileManager.renameFile → host.fs.rename without link updates (A-R4); trashTableCsvs: app.vault.getFileByPath / fileManager.trashFile / vault.trash / adapter.trashSystem / adapter.trashLocal → host.fs.trash(path) (the Windows recycle bin; the app has no TFile index or "Deleted files" setting); posix from '@labnoteo/core/posix'.
 import type { LabnoteHost } from '@labnoteo/core';

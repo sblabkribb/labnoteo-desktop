@@ -1,14 +1,15 @@
-// Ported from app/vendor/labnoteo/src/print/worksheetPrint.ts:36-275 sha256:11a5fa3390222c04
-// Ported from app/vendor/labnoteo/src/print/worksheetPrint.ts:277-309 sha256:e67f7c72709416dd
-// Ported from app/vendor/labnoteo/src/print/worksheetPrint.ts:311-392 sha256:33186b389d8ed716
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/print/worksheetPrint.ts:37-276 sha256:11a5fa3390222c04
+// Ported from app/vendor/labnoteo/src/print/worksheetPrint.ts:278-322 sha256:ea7927bf1cd20a5b
+// Ported from app/vendor/labnoteo/src/print/worksheetPrint.ts:324-405 sha256:33186b389d8ed716
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: inline and blocksHtml are exported (the whole-note print reuses them); buildWorksheetHtml is gone: the pages are worksheetPrintPages(paginateWorksheet(...)) and go to deps.print (print/printRoot.ts printPages) or, as a standalone file built from the sanitized tree (print/openInBrowser.ts standaloneFromPages), to deps.openInBrowser('worksheet', noteId, html); noteTitleOf(app, file) becomes noteTitleOf(path, content), reading the front-matter title through core parseFrontMatterYaml; WorksheetDeps swaps app and TFile for a path and read(path), and gains choose (the dialog), print and openInBrowser; WorksheetModal becomes the React print/WorksheetDialog.tsx behind deps.choose, so WorksheetChoice is exported here, with unitOpLabel for its rows; 'Printing from Obsidian did not work…' becomes overrideOr('print.openedInBrowser'). The footer's scan-folder sentence stays the plugin key (Part B adds the scan folder).
+// Changes: 0.142.0 (#588): printWorksheetCommand refuses a note with a damaged unit operation heading (core damagedUnitOpHeadings), before the choice and again after it (the note is read again), with the vendor's warning.
 /**
  * "Print experiment worksheet": the unit operations of a workflow note as
  * pages to carry into the lab, each with a QR code naming the note, the unit
  * operation and the page, so a photo of it can be filed back automatically.
  */
-import { parseFrontMatterYaml, type Translator } from '@labnoteo/core';
+import { damagedUnitOpHeadings, parseFrontMatterYaml, type Translator } from '@labnoteo/core';
 import { getSeoulDateString } from '@labnoteo/core/lib/dateUtils';
 import { encodePagePayload, payloadLabel, unitOpFingerprint, type PagePayload } from '@labnoteo/core/lib/scanPayload';
 import type { SampleLocationLookup } from '@labnoteo/core/lib/sampleStorage';
@@ -286,13 +287,24 @@ const noImages = async (): Promise<Blob | undefined> => undefined;
 /** Pick the unit operations to print (lab ones preselected), then print or open in a browser. */
 export async function printWorksheetCommand(deps: WorksheetDeps, path: string): Promise<void> {
   const { host } = deps;
-  const unitOps = listWorksheetUnitOps(await deps.read(path));
+  const text = await deps.read(path);
+  const damaged = damagedUnitOpHeadings(text);
+  if (damaged.length) {
+    host.notify('warn', deps.t('Unit operation heading is invalid at {0}:{1}. Restore a heading such as ### [UHW010 Name] Alias. The contents and table of contents were left unchanged.', path, String(damaged[0].line + 1)));
+    return;
+  }
+  const unitOps = listWorksheetUnitOps(text);
   if (unitOps.length === 0) {
     host.notify('info', deps.t('This note has no unit operations to print. Add one with "{0}" first.', deps.t('Insert unit operation')));
     return;
   }
   const choice = await deps.choose(unitOps, deps.paper());
   if (!choice) return;
+  const damagedAfterChoice = damagedUnitOpHeadings(await deps.read(path));
+  if (damagedAfterChoice.length) {
+    host.notify('warn', deps.t('Unit operation heading is invalid at {0}:{1}. Restore a heading such as ### [UHW010 Name] Alias. The contents and table of contents were left unchanged.', path, String(damagedAfterChoice[0].line + 1)));
+    return;
+  }
   if (choice.paper !== deps.paper()) await deps.setPaper(choice.paper);
   const noteId = await deps.ensureNoteId(path);
   if (!noteId) return;

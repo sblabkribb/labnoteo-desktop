@@ -7,6 +7,7 @@ import type { ExperimentEntry, LabnoteFs } from '@labnoteo/core';
 import { frontMatterNames, isDiscussFlagged, linkRetries, parseFrontMatterYaml } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import { retryOfLinkpath } from '@labnoteo/core/lib/labnoteStructure';
+import { diagnoseStatus } from '@labnoteo/core/lib/experimentStatus';
 import { experimentMarkerSpots } from '../../../vendor/labnoteo/src/issueMarkerIndex';
 import { frontMatterText } from '../frontMatterText';
 import { checklistEntries, checklistTickOf } from '../checklistTick';
@@ -107,6 +108,8 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     countIn(fs, folder, names, RESOURCES, SYSTEM_IN_RESOURCES),
   ]);
 
+  const statusKind = diagnoseStatus(fm.status);
+  const statusProblem: ExperimentEntry['statusProblem'] = statusKind === 'non-string' || statusKind === 'empty' ? statusKind : undefined;
   const linkpath = retryOfLinkpath(fm.retry_of);
   const retryOf = linkpath ? posix.dirname(linkpath) : undefined;
   return {
@@ -117,6 +120,7 @@ async function entryFrom(fs: LabnoteFs, folder: string, names: readonly string[]
     ...(resources !== undefined ? { resources } : {}),
     title: typeof fm.title === 'string' ? fm.title : undefined,
     status: typeof fm.status === 'string' ? fm.status : undefined,
+    ...(statusProblem ? { statusProblem } : {}),
     discuss: isDiscussFlagged(fm),
     lastUpdated: typeof updated === 'string' && updated.trim() ? updated.trim() : undefined,
     created: typeof created === 'string' && created.trim() ? created.trim() : undefined,

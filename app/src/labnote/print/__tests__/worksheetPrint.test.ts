@@ -278,6 +278,16 @@ describe('printWorksheetCommand', () => {
     expect(h.events).toEqual([]);
   });
 
+  it('a damaged unit operation heading stops the print before the choice (#588)', async () => {
+    const broken = ['### Spin one', '#### Meta', '- Start_date: today', '#### Input', '- sample', '#### Method', 'spin'].join('\n');
+    const h = harness(broken, { choice: { indices: [1], paper: 'a4', target: 'print' } });
+    await printWorksheetCommand(h.deps, PATH);
+    expect(h.events).toEqual([]);
+    expect(h.printed).toEqual([]);
+    expect(h.notes.map((n) => n.kind)).toEqual(['warn']);
+    expect(h.notes[0].message).toContain(`${PATH}:1`);
+  });
+
   it('cancel in the dialog assigns no ID and prints nothing', async () => {
     const before = threeOps();
     const h = harness(before);
@@ -293,7 +303,8 @@ describe('printWorksheetCommand', () => {
     const h = harness(threeOps(), { choice: { indices: [2], paper: 'a4', target: 'print' } });
     await printWorksheetCommand(h.deps, PATH);
     expect(h.events).toEqual(['choose:1,2,3:a4', 'ensureNoteId', 'print:a4']);
-    expect(h.reads()).toBe(2);
+    // the note, again after the choice (a damaged heading stops the print, #588), and again after the ID was assigned
+    expect(h.reads()).toBe(3);
     expect(h.printed).toHaveLength(1);
     const pages = h.printed[0].pages;
     expect(pages.length).toBeGreaterThan(0);

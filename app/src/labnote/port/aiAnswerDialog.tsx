@@ -1,4 +1,4 @@
-// Ported from app/vendor/labnoteo/src/modals.ts:410-471 sha256:cfb094c711a12229
+// Ported from app/vendor/labnoteo/src/modals.ts:413-474 sha256:cfb094c711a12229
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: the Obsidian Modal (AiAnswerModal, aiAnswerModal) becomes the React DialogSpec kind 'aiAnswer' (AiAnswerDialog, drawn by DialogLayer) opened by aiAnswerDialog, which resolves when the dialog closes. MarkdownRenderer.render and its Component become plain text in <pre class="ai-answer"> (D19): model output never becomes HTML, so sourcePath is accepted but unused. Notice becomes notify ('info' for a copy, 'warn' when it fails). onInsert is optional: without it there is no "Insert into note" button. While onInsert runs the Insert button is disabled (no double insert), and a rejected onInsert counts as not inserted (the dialog stays open). Titles and labels go through coreT with the plugin's keys.
 import { useEffect, useRef, useState } from 'react';

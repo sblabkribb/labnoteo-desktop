@@ -79,7 +79,10 @@ describe('exportExperimentTablesToCsv (#347)', () => {
     await exportExperimentTablesToCsv(th.ctx, DIR);
     const noteReads = reads().filter((p) => p.endsWith('.md'));
     const rest = ['b.md', 'A.md', '002_WT030_B.labnote.md', '001_WT020_A.labnote.md'].sort((a, b) => a.localeCompare(b));
-    expect(noteReads).toEqual([README, ...rest.map((n) => `${DIR}/${n}`)]);
+    // The planning pass reads in this order; the export then re-reads the notes to see they did not change (#590).
+    const order = [README, ...rest.map((n) => `${DIR}/${n}`)];
+    expect(noteReads.slice(0, order.length)).toEqual(order);
+    expect(noteReads.length % order.length).toBe(0);
     expect(last()).toContain(
       `Tables per note: README 1, ${rest.map((n) => `${n.replace(/(?:\.labnote)?\.md$/, '')} 1`).slice(0, 4).join(', ')}`,
     );

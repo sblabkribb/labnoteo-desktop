@@ -1,5 +1,5 @@
-// Ported from app/vendor/labnoteo/src/dateFieldPicker.ts:226-233 sha256:ad49a4b99b89f2bf
-// Ported from app/vendor/labnoteo/src/dateFieldPicker.ts:242-244 sha256:4db9c54d4c6336d2
+// Ported from app/vendor/labnoteo/src/dateFieldPicker.ts:232-239 sha256:ad49a4b99b89f2bf
+// Ported from app/vendor/labnoteo/src/dateFieldPicker.ts:250-252 sha256:4db9c54d4c6336d2
 // labnoteO 0.140.2, Apache-2.0.
 // Changes: only the check rules of the Meta date picker. warnIfOutOfOrder (End_date earlier than its Start_date, #192) and the picked-year check (#308) become one pure function, checkDates(start, end), over the two stored values; the picker's "unreadable stored value" notice (#364) becomes its 'unreadable' result. The Notice calls stay with the caller (editor/live/dateChip.ts), which uses the app's toasts and i18n keys date.endBeforeStart / date.implausibleYear / date.unreadable. The rules themselves are the core's isEndBeforeStart, isPlausibleMetaDate and toDateTimeLocalValue, unchanged.
 import { isEndBeforeStart, isPlausibleMetaDate, toDateTimeLocalValue } from '@labnoteo/core/lib/dateUtils';

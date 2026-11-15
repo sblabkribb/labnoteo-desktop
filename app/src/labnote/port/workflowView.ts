@@ -1,10 +1,11 @@
-// Ported from app/vendor/labnoteo/src/views/workflowView.ts:297-334 sha256:a40fe987fe71fdcd
-// Ported from app/vendor/labnoteo/src/views/workflowView.ts:363-436 sha256:baf82cce4ca39225
-// Ported from app/vendor/labnoteo/src/views/workflowView.ts:444-457 sha256:88ebcb824443ff15
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/views/workflowView.ts:301-338 sha256:a40fe987fe71fdcd
+// Ported from app/vendor/labnoteo/src/views/workflowView.ts:367-442 sha256:5e6995d2b7e6f068
+// Ported from app/vendor/labnoteo/src/views/workflowView.ts:450-463 sha256:88ebcb824443ff15
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: checklistProgress(file) -> checklistProgress(folder, items, isFile): the caller (panel/experimentEntries.ts) reads the README and lists the folder; no mtime cache, no background re-read, `getAbstractFileByPath(p) instanceof TFile` -> `isFile(p)`; the de-duplication compares `key(path)` (default: the path), so a case-insensitive vault passes a case fold and two links differing only in case count once.
 // Changes: render()'s label object -> treeLabels(host); its search words -> discussWords(host); its `kept` filter -> keptExperiments(all, found, kept). `this.plugin.t` -> `host.t`. Drawing, grouping state, the no-match text and the group-by choices (with "By last updated", #515) stay in WorkflowsPanel.tsx.
 // Changes: showMarkers(folder) method -> showMarkers(host, folder); `this.plugin.host` -> `host`, `this.plugin.t` -> `host.t`.
+// Changes: 0.142.0 (#591): treeLabels gains nonStringStatus and emptyStatus ('(status must be text)', '(empty status)') for the new statusProblem groups; panel/experimentEntries.ts sets ExperimentEntry.statusProblem from core diagnoseStatus (the vendor's experiments()).
 
 import type { ExperimentEntry, ExperimentTreeLabels, LabnoteHost } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
@@ -71,6 +72,8 @@ export function treeLabels(host: Pick<LabnoteHost, 't'>): ExperimentTreeLabels {
     invalidStatus: host.t('(not an allowed status)'),
     invalidStatusTooltip: host.t('Validation fails on this status. Allowed statuses: {0}'),
     missingStatus: host.t('(validation fails)'),
+    nonStringStatus: host.t('(status must be text)'),
+    emptyStatus: host.t('(empty status)'),
     missingStatusTooltip: host.t(
       'An experiment without a status fails validation. Set one with "{0}".',
       host.t('Change experiment status')

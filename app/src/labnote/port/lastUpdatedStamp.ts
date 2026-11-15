@@ -1,15 +1,16 @@
 // Ported from app/vendor/labnoteo/src/lastUpdatedTracker.ts:1-109 sha256:d5f272f95deef5ed
 // Ported from app/vendor/labnoteo/src/lastUpdatedStamp.ts:22-32 sha256:9e7731b9bfb70fdb
-// Ported from app/vendor/labnoteo/src/unitOpReorderFilter.ts:33-117 sha256:c05e01d2bebc276b
-// Ported from app/vendor/labnoteo/src/unitOpReorderFilter.ts:120-186 sha256:590911ec16ecfc27
-// Ported from app/vendor/labnoteo/src/main.ts:2653-2670 sha256:cce7725341955e97
-// Ported from app/vendor/labnoteo/src/main.ts:2707-2758 sha256:492d19325690832d
-// Ported from app/vendor/labnoteo/src/main.ts:2627-2639 sha256:92b4005177071fe0
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/unitOpReorderFilter.ts:34-118 sha256:c05e01d2bebc276b
+// Ported from app/vendor/labnoteo/src/unitOpReorderFilter.ts:121-188 sha256:5086cd81d29163dc
+// Ported from app/vendor/labnoteo/src/main.ts:2684-2701 sha256:cce7725341955e97
+// Ported from app/vendor/labnoteo/src/main.ts:2738-2789 sha256:492d19325690832d
+// Ported from app/vendor/labnoteo/src/main.ts:2657-2670 sha256:47eb0f0fdae4b413
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: one file for the writing upkeep (UI redesign Task 20). LastUpdatedTracker is the vendor class unchanged. isLabNotePath and experimentReadmeOf are the vendor helpers. classifyChange is the vendor classify() of unitOpReorderFilter: a user edit is a transaction whose userEvent is input.*, delete.* or move.* (the app's checkbox tick is 'input.toggle', so the vendor's isTaskToggle shape test is dropped); undo/redo is fromHistory; and an edit made by an app command ('input.labnote', which may set the date itself, as readmeStamp does) counts as a user edit but never as a date set by hand. stampLastUpdated (vendor plugin.stampLastUpdated) and LastUpdatedScheduler (vendor scheduleLastUpdatedStamp and markUserEdit) take their settings, notify and the note writer as deps instead of the plugin: window.setTimeout → setTimeout with a delay that defaults to the vendor's 2000 ms, console.warn on a failed write is kept, Notices → deps.notify('info') with the vendor strings through coreT. syncTocOnSave is the body of the vendor's debounced registerUnitOpTocAutoSync, run when a workflow note is saved instead of 1.5 s after an edit; it returns the new text, or null when nothing changes, when the caret sits in the span the rewrite would replace (shouldDeferTocSync), or right after an undo/redo. With the setting off it applies only refreshUnitOpTocEntries, as the vendor timer does: the order is left as the researcher arranged it and no entry is dropped on save. pruneOnUnitOpDelete is the sorting-off branch of the vendor reorder filter (deletesWholeUnitOpHeading, #406): a user deletion that takes a whole `### [` heading line drops that block's entry in the same transaction, but a cut ('delete.cut') does not, since the block is usually pasted back elsewhere. The filter skips composition, file reloads and undo/redo as the vendor's does; with sorting on it does nothing here, since the save rebuilds the list.
+// Changes: 0.142.0 (#588): a note with a damaged unit operation heading (core damagedUnitOpHeadings) is left alone: syncTocOnSave returns null and pruneOnUnitOpDelete returns no changes. DamagedHeadingReporter is the vendor's reportDamagedHeading (main.ts): one warning per note and kind of damage, not for the heading the caret is on; autoUpkeep.ts calls it on save and on a caret move (the vendor's updateListener on selectionSet), with deps.notify as the notice.
 
 import type { Transaction, Text } from '@codemirror/state';
-import { minimalReplacement, pruneUnitOpTocEntries, rebuildUnitOpToc, refreshUnitOpTocEntries, shouldDeferTocSync } from '@labnoteo/core';
+import { damagedUnitOpHeadings, minimalReplacement, pruneUnitOpTocEntries, rebuildUnitOpToc, refreshUnitOpTocEntries, shouldDeferTocSync } from '@labnoteo/core';
 import * as posix from '@labnoteo/core/posix';
 import { getSeoulDateString, readLastUpdatedDate, touchLastUpdatedDate } from '@labnoteo/core/lib/dateUtils';
 import { getExperimentDir } from '@labnoteo/core/lib/labnoteStructure';
@@ -288,6 +289,8 @@ export function syncTocOnSave(
   opts: { caret?: number; fromHistory?: boolean } = {},
 ): string | null {
   if (!isValidWorkflowPath(path) || opts.fromHistory) return null;
+  // A damaged `### [` heading is left as it is: nothing is rebuilt from it (#588).
+  if (damagedUnitOpHeadings(text).length > 0) return null;
   const before = text;
   const after = settings.autoSyncUnitOpToc
     ? rebuildUnitOpToc(before)
@@ -296,6 +299,35 @@ export function syncTocOnSave(
   if (!edit) return null;
   if (opts.caret !== undefined && shouldDeferTocSync(opts.caret, edit)) return null;
   return after;
+}
+
+/**
+ * Says once per note and kind of damage that a unit operation heading is invalid (main.ts reportDamagedHeading): the
+ * heading the caret is on is the one being typed, so it is not reported. True while any heading is damaged.
+ */
+export class DamagedHeadingReporter {
+  private readonly notices = new Map<string, string>();
+  constructor(private readonly notify: (message: string) => void) {}
+  report(path: string, text: string, caretLine: number): boolean {
+    const damaged = damagedUnitOpHeadings(text);
+    if (!damaged.length) {
+      this.notices.delete(path);
+      return false;
+    }
+    const bad = damaged.find((h) => h.line !== caretLine);
+    const key = damaged.map((h) => h.title).join('\n');
+    if (bad && this.notices.get(path) !== key) {
+      this.notices.set(path, key);
+      this.notify(
+        coreT(
+          'Unit operation heading is invalid at {0}:{1}. Restore a heading such as ### [UHW010 Name] Alias. The contents and table of contents were left unchanged.',
+          path,
+          String(bad.line + 1),
+        ),
+      );
+    }
+    return true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -335,5 +367,6 @@ export function pruneOnUnitOpDelete(
   if (tr.isUserEvent('input.type.compose') || tr.isUserEvent('set') || tr.isUserEvent('undo') || tr.isUserEvent('redo')) return [];
   if (!isValidWorkflowPath(path)) return [];
   if (!deletesWholeUnitOpHeading(tr) || tr.isUserEvent('delete.cut')) return [];
+  if (damagedUnitOpHeadings(tr.newDoc.toString()).length > 0) return [];
   return pruneUnitOpTocEntries(tr.newDoc.toString());
 }

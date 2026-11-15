@@ -236,3 +236,34 @@ describe('exportTablesToCsv (one note)', () => {
     }
   });
 });
+
+// #590: an @issue marker inside a table is refused, and an export notices that its source changed under it.
+describe('exportTablesToCsv guards (core 0.142.0)', () => {
+  it('refuses a note with an issue marker inside a table, listing where, and writes nothing', async () => {
+    const withMarker = ['# X', '', '| a | b |', '| --- | --- |', '| 1 | 2 @issue;ISS-test;check the value |', ''].join('\n');
+    const { th, calls, writes } = setup({ [NOTE]: withMarker });
+    await exportTablesToCsv(th.ctx, NOTE);
+    expect(writes()).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].kind).toBe('warn');
+    expect(calls[0].message).toBe(
+      `Issue markers cannot go inside a table. Move these markers below the table and export again: ${NOTE}:5`,
+    );
+  });
+
+  it('stops when the note changes between the plan and the write', async () => {
+    const text = note([['a'], ['1']]);
+    const { th, calls, writes } = setup({ [NOTE]: text });
+    // the overwrite question is asked before the write: change the note while it is open
+    const real = th.ctx.host.fs.read.bind(th.ctx.host.fs);
+    let reads = 0;
+    th.ctx.host.fs.read = async (p: string) => {
+      const out = await real(p);
+      // the second read of the note is the check before writing
+      return p === NOTE && ++reads >= 2 ? `${out}\nedited meanwhile\n` : out;
+    };
+    await exportTablesToCsv(th.ctx, NOTE);
+    expect(writes()).toEqual([]);
+    expect(calls.at(-1)?.message).toBe('The notes changed during export. Run the export again.');
+  });
+});
