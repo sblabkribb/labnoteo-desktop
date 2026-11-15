@@ -5,6 +5,7 @@ pub mod gitsync;
 pub mod index;
 pub mod mcp;
 pub mod net;
+pub mod pet;
 pub mod print;
 pub mod scan;
 pub mod skins;
