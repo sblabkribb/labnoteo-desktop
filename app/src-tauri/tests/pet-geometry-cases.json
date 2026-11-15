@@ -1,0 +1,22 @@
+{
+  "minVisible": 24,
+  "clamp": [
+    { "name": "inside one monitor stays", "areas": [[0,0,1920,1040]], "rect": [100,100,96,96], "want": [100,100,96,96] },
+    { "name": "only 20px visible on the right edge snaps inside", "areas": [[0,0,1920,1040]], "rect": [1900,500,96,96], "want": [1824,500,96,96] },
+    { "name": "above the top-left corner snaps inside", "areas": [[0,0,1920,1040]], "rect": [-80,-80,96,96], "want": [0,0,96,96] },
+    { "name": "exactly 24px visible on the left is allowed", "areas": [[0,0,1920,1040]], "rect": [-72,300,96,96], "want": [-72,300,96,96] },
+    { "name": "fully on the left monitor of two", "areas": [[-1920,0,1920,1080],[0,0,2560,1400]], "rect": [-100,10,96,96], "want": [-100,10,96,96] },
+    { "name": "the monitor it was on was unplugged", "areas": [[0,0,1920,1040]], "rect": [2600,200,96,96], "want": [1824,200,96,96] },
+    { "name": "hidden under the taskbar (work area ends at 1040)", "areas": [[0,0,1920,1040]], "rect": [500,1030,96,96], "want": [500,944,96,96] },
+    { "name": "offset monitors: the nearest centre wins", "areas": [[0,0,1920,1080],[1920,-200,1280,1600]], "rect": [1900,-300,96,96], "want": [1920,-200,96,96] },
+    { "name": "no monitors known: unchanged", "areas": [], "rect": [5,5,96,96], "want": [5,5,96,96] },
+    { "name": "area smaller than the sprite: pinned to its corner", "areas": [[0,0,50,50]], "rect": [200,200,96,96], "want": [0,0,96,96] }
+  ],
+  "grow": [
+    { "name": "bottom right: bubble above, right aligned", "areas": [[0,0,1920,1040]], "sprite": [1700,800,96,96], "bubble": [320,260], "gap": 8, "want": { "rect": [1476,532,320,364], "side": "above", "align": "right" } },
+    { "name": "top left: flips below and aligns left", "areas": [[0,0,1920,1040]], "sprite": [10,10,96,96], "bubble": [320,260], "gap": 8, "want": { "rect": [10,10,320,364], "side": "below", "align": "left" } },
+    { "name": "bottom right corner", "areas": [[0,0,1920,1040]], "sprite": [1824,944,96,96], "bubble": [320,260], "gap": 8, "want": { "rect": [1600,676,320,364], "side": "above", "align": "right" } },
+    { "name": "top edge, middle: below, right aligned", "areas": [[0,0,1920,1040]], "sprite": [1000,5,96,96], "bubble": [320,260], "gap": 8, "want": { "rect": [776,5,320,364], "side": "below", "align": "right" } },
+    { "name": "area smaller than the window: pinned, more room below", "areas": [[0,0,400,300]], "sprite": [50,50,96,96], "bubble": [320,260], "gap": 8, "want": { "rect": [50,0,320,364], "side": "below", "align": "left" } }
+  ]
+}
