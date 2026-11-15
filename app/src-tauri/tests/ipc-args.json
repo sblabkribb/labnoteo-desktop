@@ -26,6 +26,7 @@
   "vault_created_times": ["paths"],
   "print_open_in_browser": ["kind", "noteId", "html"],
   "settings_vault_read": [],
+  "settings_connections": [],
   "settings_vault_write": ["content"],
   "settings_import_plugin": [],
   "settings_plugin_llm_key": [],

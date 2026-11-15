@@ -377,6 +377,32 @@ fn ipc_argument_names_match_the_typescript_side() {
     );
     assert!(dir.join("config").join("vaults").is_dir());
 
+    // Connection settings are app-wide: `connections.json` beside `settings.json`,
+    // shown on top of the vault's own settings, and never copied from defaults.
+    assert_eq!(ok("settings_connections", args("settings_connections", vec![])), json!({"values": null, "damaged": false}));
+    ok(
+        "settings_vault_write",
+        args("settings_vault_write", vec![json!(r#"{"schemaVersion":2,"llmProvider":"ollama","llmModel":"qwen"}"#)]),
+    );
+    let conn = dir.join("config").join("connections.json");
+    assert!(conn.is_file());
+    let status = ok("settings_connections", args("settings_connections", vec![]));
+    assert_eq!(status["damaged"], false);
+    assert!(status["values"].as_str().unwrap().contains("qwen"));
+    let read: Value = serde_json::from_str(ok("settings_vault_read", args("settings_vault_read", vec![])).as_str().unwrap()).unwrap();
+    assert_eq!((read["llmModel"].as_str(), read["schemaVersion"].as_i64()), (Some("qwen"), Some(2)));
+    std::fs::write(&conn, "{ torn").unwrap();
+    assert_eq!(ok("settings_connections", args("settings_connections", vec![])), json!({"values": null, "damaged": true}));
+    assert!(dir.join("config").join("connections.json.bak").is_file());
+    // An explicit save with real values replaces the damaged file (its copy stays).
+    ok(
+        "settings_vault_write",
+        args("settings_vault_write", vec![json!(r#"{"schemaVersion":2,"llmProvider":"ollama","llmModel":"qwen"}"#)]),
+    );
+    assert_eq!(ok("settings_connections", args("settings_connections", vec![]))["damaged"], false);
+    // Back to a PC with no connection settings for the rest of this test.
+    std::fs::remove_file(&conn).unwrap();
+
     // Integration keys (Windows Credential Manager; here the memory store):
     // the webview only ever learns a flag and an epoch, never the key.
     assert_eq!(ok("secret_set", args("secret_set", vec![json!("partbankWeb"), json!("pbk_t")])), Value::Null);
