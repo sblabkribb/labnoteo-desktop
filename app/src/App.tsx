@@ -97,6 +97,10 @@ import { Ribbon } from './ui/Ribbon';
 import { PetLayer } from './assistant/PetLayer';
 import { openAssistant, toggleAssistant } from './assistant/commands';
 import { bubbleActions, connectAssistant } from './assistant/wiring';
+import { petStore } from './assistant/petStore';
+import { assistantSession } from './assistant/useAssistantSession';
+import { createMainBridge } from './pet/mainBridge';
+import { tauriMainIpc } from './pet/petIpc';
 import { EmptyState } from './ui/EmptyState';
 import { Dock } from './ui/Dock';
 import { RightDock } from './ui/RightDock';
@@ -386,6 +390,12 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   const assistantCtx = useRef(ctx);
   assistantCtx.current = ctx;
   useEffect(() => connectAssistant(() => assistantCtx.current), []);
+  // 바탕화면 도우미 창(plan Task 7): 이 창의 도우미를 비추고 그 창의 질문을 받는다. 레이아웃 저장소가 읽힌 뒤에 시작한다.
+  useEffect(() => {
+    const bridge = createMainBridge({ ipc: tauriMainIpc, session: assistantSession, store: petStore, ready: layoutStore.ready() });
+    void bridge.start().catch((e) => console.warn('[labnoteo] desktop pet bridge failed:', e));
+    return () => bridge.stop();
+  }, []);
   const petActions = useMemo(() => bubbleActions(() => assistantCtx.current), []);
   // 쓰는 동안의 손질(Task 20): last_updated_date 찍기와 저장 때의 UO 목록 맞추기. 보관함마다 새로 만든다(손으로 정한 날짜도 보관함마다).
   const upkeepSettings = useRef(settings);

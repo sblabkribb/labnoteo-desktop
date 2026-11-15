@@ -43,6 +43,8 @@ export interface PetSnapshot {
   hidden: boolean;
   scale: 2 | 3;
   skin: string;
+  /** 바탕화면의 도우미 창이 떠 있다(저장하지 않는다). 그동안 창 안의 그림은 그리지 않는다. */
+  desktop: boolean;
 }
 
 /**
@@ -161,6 +163,8 @@ export interface PetStore {
   /** 지금 그리는 스킨(설치한 스킨은 틀이 96px 까지 크다): 자리 자르기에 그 크기를 쓰고, 바로 다시 자른다(저장하지 않는다). */
   setSkinManifest(skin: SkinManifest): void;
   setHidden(hidden: boolean): void;
+  /** 바탕화면 도우미 창이 떠 있는지(메모리에만 둔다). */
+  setDesktop(on: boolean): void;
   toggleVisible(): void;
   /** 지금 뷰포트(자리 안내에 쓴다). */
   viewport(): Viewport;
@@ -266,7 +270,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
     skin: p.skin,
     bubble: fitBubble(savedBubble(p)),
   });
-  let snap: PetSnapshot = { state: 'idle', open: false, ...fromLayout(layout.get().pet) };
+  let snap: PetSnapshot = { state: 'idle', open: false, desktop: false, ...fromLayout(layout.get().pet) };
 
   const emit = (patch: Partial<PetSnapshot>) => {
     snap = { ...snap, ...patch };
@@ -383,6 +387,9 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
       if (hidden) store.setOpen(false);
       layout.setPet({ hidden });
     },
+    setDesktop(on) {
+      if (on !== snap.desktop) emit({ desktop: on });
+    },
     toggleVisible() {
       store.setHidden(!snap.hidden);
     },
@@ -394,7 +401,7 @@ export function createPetStore(opts: PetStoreOptions = {}): PetStore {
       dragging = false;
       resizing = false;
       manifest = BUILTIN_SKIN;
-      snap = { state: 'idle', open: false, ...fromLayout(layout.get().pet) };
+      snap = { state: 'idle', open: false, desktop: false, ...fromLayout(layout.get().pet) };
       for (const fn of [...subs]) fn();
     },
   };

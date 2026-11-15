@@ -345,3 +345,28 @@ describe('the assistant window size (resizable bubble)', () => {
     expect(store.get().bubble).toEqual({ w: 900, h: 700 });
   });
 });
+
+describe('desktop pet flag', () => {
+  it('defaults to false, notifies once on a change and is never written to ui.json', () => {
+    const { store, invoke } = setup();
+    expect(store.get().desktop).toBe(false);
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setDesktop(true);
+    store.setDesktop(true);
+    expect(store.get().desktop).toBe(true);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls.filter((c) => c[0] === 'ui_prefs_write')).toHaveLength(0);
+    store.setDesktop(false);
+    expect(store.get().desktop).toBe(false);
+  });
+
+  it('survives a layout change and resetForTest clears it', () => {
+    const { store, layout } = setup();
+    store.setDesktop(true);
+    layout.setPet({ scale: 3 });
+    expect(store.get().desktop).toBe(true);
+    store.resetForTest();
+    expect(store.get().desktop).toBe(false);
+  });
+});

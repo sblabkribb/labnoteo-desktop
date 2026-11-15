@@ -110,6 +110,8 @@ export interface AssistantSession {
   runChip(run: ChipRun): Promise<void>;
   /** 지금 런타임이 쓸 수 있는지(AI 제공자가 있는지). */
   ready(): Promise<boolean>;
+  /** 지금 질문을 받을 수 있는지: 런타임 없음(no-vault), 실행 중(busy), 제공자 없음(not-configured) 순. */
+  availability(): Promise<'ok' | 'no-vault' | 'not-configured' | 'busy'>;
   stop(): void;
   /** 이 폴더의 기록을 확인한 뒤 지운다. 지웠으면 true. 실험 밖이면 화면만 비운다. */
   clear(): Promise<boolean>;
@@ -395,6 +397,11 @@ const session: AssistantSession = {
     } catch {
       return false;
     }
+  },
+  async availability() {
+    if (!deps.runtime?.()) return 'no-vault';
+    if (snap.streaming) return 'busy';
+    return (await session.ready()) ? 'ok' : 'not-configured';
   },
   stop() {
     if (!run) return;

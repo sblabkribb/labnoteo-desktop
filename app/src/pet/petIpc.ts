@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { emit as tauriEmit, listen as tauriListen } from '@tauri-apps/api/event';
+import { emit as tauriEmit, emitTo as tauriEmitTo, listen as tauriListen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 /** The pet page's whole window onto Tauri. The only file in src/pet/ that imports @tauri-apps/api; tests inject a fake. */
@@ -15,4 +15,11 @@ export const tauriPetIpc: PetIpc = {
   listen: (event, fn) => tauriListen(event, (e) => fn(e.payload)),
   emit: (event, payload) => tauriEmit(event, payload),
   startDragging: () => getCurrentWindow().startDragging(),
+};
+
+/** The main window's side of the pet events (used by mainBridge.ts). */
+export const tauriMainIpc = {
+  invoke: (cmd: string, args?: Record<string, unknown>) => tauriInvoke(cmd, args),
+  listen: (event: string, fn: (payload: unknown) => void) => tauriListen(event, (e) => fn(e.payload)),
+  emitTo: (target: string, event: string, payload: unknown) => tauriEmitTo(target, event, payload),
 };

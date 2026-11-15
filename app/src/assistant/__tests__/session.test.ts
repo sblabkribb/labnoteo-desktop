@@ -327,3 +327,49 @@ describe('assistant session', () => {
     expect(session.get().messages[1]!.error).toBe('연동 설정에서 AI 제공자를 먼저 설정하세요.');
   });
 });
+
+describe('availability', () => {
+  it('is no-vault without a runtime, busy while streaming, not-configured when the provider is not ready, else ok', async () => {
+    const none = setup();
+    expect(await none.session.availability()).toBe('no-vault');
+
+    const gate = deferred();
+    const live = runtime(async () => {
+      await gate.promise;
+      return {};
+    });
+    const a = setup({ rt: live.rt });
+    a.session.setActivePath(NOTE_A);
+    await flush();
+    expect(await a.session.availability()).toBe('ok');
+    const sent = a.session.send('q');
+    await flush();
+    expect(await a.session.availability()).toBe('busy');
+    gate.resolve();
+    await sent;
+    expect(await a.session.availability()).toBe('ok');
+
+    const off = runtime(async () => ({}));
+    off.rt.available = async () => ({ ok: false, reason: 'x' }) as never;
+    const b = setup({ rt: off.rt });
+    expect(await b.session.availability()).toBe('not-configured');
+  });
+
+  it('precedence: no-vault, then busy, then not-configured', async () => {
+    const gate = deferred();
+    const live = runtime(async () => {
+      await gate.promise;
+      return {};
+    });
+    live.rt.available = async () => ({ ok: false, reason: 'x' }) as never;
+    const a = setup({ rt: live.rt });
+    a.session.setActivePath(NOTE_A);
+    await flush();
+    const sent = a.session.send('q');
+    await flush();
+    expect(await a.session.availability()).toBe('busy');
+    gate.resolve();
+    await sent;
+    expect(await a.session.availability()).toBe('not-configured');
+  });
+});
