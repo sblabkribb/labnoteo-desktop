@@ -4,7 +4,7 @@ import { getSampleDisplayMeta, suggestSampleTypeName } from '@labnoteo/core/lib/
 import { t } from '../i18n/t';
 import { coreT } from '../labnote/i18n';
 import type { CommandContext } from '../labnote/commands/context';
-import { partitionCustomSampleTypes, removedCustomSampleTypes } from '../labnote/port/customSampleTypes';
+import { partitionCustomSampleTypes, registryFileNames, removedCustomSampleTypes } from '../labnote/port/customSampleTypes';
 import { commitGlobalFolder, offerGlobalSampleFolderMove, offerToRestoreSampleTypes } from '../labnote/port/sampleSettings';
 import type { AppSettings } from '../labnote/settings';
 import { SettingRow, Toggle } from '../ui/settings/SettingRow';
@@ -81,9 +81,10 @@ function typeNotices(input: string, stored: readonly string[]): string[] {
   if (reserved.length > 0) {
     out.push(
       coreT(
-        '{0}: Windows keeps this name for a device, so its {Type}.json cannot be made there. It was not saved. Use another name, such as {1}.',
+        '{0}: Windows keeps this name for a device, so {2} cannot be made there. It was not saved. Use another name, such as {1}.',
         reserved.join(', '),
         reserved.map((r) => `${r}Sample`).join(', '),
+        registryFileNames(reserved),
       ),
     );
   }
@@ -108,9 +109,10 @@ function typeNotices(input: string, stored: readonly string[]): string[] {
   if (caseDuplicates.length > 0) {
     out.push(
       coreT(
-        '{0}: differs from {1} only in letter case, so on Windows both would share one {Type}.json and their samples would mix. It was not saved.',
+        '{0}: differs from {1} only in letter case, so on Windows both would share {2} and their samples would mix. It was not saved.',
         caseDuplicates.map((d) => d.name).join(', '),
         caseDuplicates.map((d) => d.clashesWith).join(', '),
+        registryFileNames(caseDuplicates.map((d) => d.clashesWith)),
       ),
     );
   }
@@ -133,8 +135,9 @@ function legacyWarnings(stored: readonly string[]): string[] {
   if (legacyReserved.length > 0) {
     out.push(
       coreT(
-        '{0} is a name Windows keeps for devices: its {Type}.json cannot be made or checked out on Windows, and git stops there. Move its samples to another type with Change type, then remove the name.',
+        '{0} is a name Windows keeps for devices: {1} cannot be made or checked out on Windows, and git stops there. Move its samples to another type with Change type, then remove the name.',
         legacyReserved.join(', '),
+        registryFileNames(legacyReserved),
       ),
     );
   }
@@ -159,9 +162,10 @@ function legacyWarnings(stored: readonly string[]): string[] {
   if (legacyCaseDuplicates.length > 0) {
     out.push(
       coreT(
-        '{0} differs from {1} only in letter case: on Windows both share one {Type}.json, so their samples mix. Keep one of them.',
+        '{0} differs from {1} only in letter case: on Windows both share {2}, so their samples mix. Keep one of them.',
         legacyCaseDuplicates.map((d) => d.name).join(', '),
         legacyCaseDuplicates.map((d) => d.clashesWith).join(', '),
+        registryFileNames(legacyCaseDuplicates.map((d) => d.clashesWith)),
       ),
     );
   }

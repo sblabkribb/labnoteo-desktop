@@ -19,7 +19,7 @@ export function ConfirmDialog(props: {
   const cancel = useRef<HTMLButtonElement>(null);
 
   // 사용자가 부르지 않은 질문(A9)도 위험한 확인처럼 취소에 초점을 둔다(위험색은 칠하지 않는다).
-  const cancelFirst = spec.destructive || spec.unsolicited;
+  const cancelFirst = spec.destructive || spec.unsolicited || spec.focusCancel;
   useEffect(() => (cancelFirst ? cancel : confirm).current?.focus(), [cancelFirst]);
 
   return (
@@ -39,7 +39,7 @@ export function ConfirmDialog(props: {
       </div>
       <div className="dialog-actions">
         <button ref={cancel} type="button" onClick={() => props.onDone(false)}>
-          {t('dialog.cancel')}
+          {spec.cancelLabel ?? t('dialog.cancel')}
         </button>
         <button ref={confirm} type="button" className={spec.destructive ? 'danger' : 'primary'} onClick={() => props.onDone(true)}>
           {spec.confirmLabel ?? t('dialog.ok')}

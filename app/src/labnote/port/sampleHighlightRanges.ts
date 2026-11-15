@@ -1,9 +1,10 @@
-// Ported from app/vendor/labnoteo/src/sampleHighlight.ts:40-67 sha256:23311c4c48e8a6a5
-// Ported from app/vendor/labnoteo/src/sampleHighlight.ts:78-107 sha256:cd226ae8ef546144
-// Ported from app/vendor/labnoteo/src/sampleHighlight.ts:109-215 sha256:4007eec8f1158ad6
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/sampleHighlight.ts:41-68 sha256:23311c4c48e8a6a5
+// Ported from app/vendor/labnoteo/src/sampleHighlight.ts:79-109 sha256:da83fbd5f81a5f24
+// Ported from app/vendor/labnoteo/src/sampleHighlight.ts:111-220 sha256:6bd79b348c82d56a
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: sample checks only (issue markers dropped); colour → sampleTypeClass instead of an inline style (CSP); returns plain ranges for a CM6 ViewPlugin; definedIds passed in.
 // Changes: HighlightState and MarkerOptions keep only their sample members (colors, the marker, duplicate, comment and malformed members go with the markers); collectTokenRanges loses its `colors` parameter, adds sampleTypeClass(type) after the ID class and uses the app's lno-* class names; sampleTokenRanges is the app's entry point over these.
+// Changes: 0.142.0 (#590): the vendor's MarkerOptions.inTable and the table markers turned into malformed ones belong to the issue-marker half of collectTokenRanges, which this port drops (the app draws no issue-marker highlight), so nothing changed here beyond the line numbers.
 import { findSampleIdRanges, staleSampleAliasEnd } from '@labnoteo/core';
 import { sampleTypeClass } from '../../samples/typeClass';
 import type { KnownSampleIds } from './sampleIdIndex';

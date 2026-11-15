@@ -72,9 +72,10 @@ describe('SampleSettingsDialog', () => {
     expect(
       screen.getByText(
         coreT(
-          '{0}: differs from {1} only in letter case, so on Windows both would share one {Type}.json and their samples would mix. It was not saved.',
+          '{0}: differs from {1} only in letter case, so on Windows both would share {2} and their samples would mix. It was not saved.',
           'Dna',
           'DNA',
+          'DNA.json',
         ),
       ),
     ).toBeTruthy();
@@ -152,8 +153,9 @@ describe('SampleSettingsDialog', () => {
     expect(
       screen.getByText(
         coreT(
-          '{0} is a name Windows keeps for devices: its {Type}.json cannot be made or checked out on Windows, and git stops there. Move its samples to another type with Change type, then remove the name.',
+          '{0} is a name Windows keeps for devices: {1} cannot be made or checked out on Windows, and git stops there. Move its samples to another type with Change type, then remove the name.',
           'AUX',
+          'AUX.json',
         ),
       ),
     ).toBeTruthy();
@@ -163,9 +165,10 @@ describe('SampleSettingsDialog', () => {
     expect(
       screen.getByText(
         coreT(
-          '{0}: Windows keeps this name for a device, so its {Type}.json cannot be made there. It was not saved. Use another name, such as {1}.',
+          '{0}: Windows keeps this name for a device, so {2} cannot be made there. It was not saved. Use another name, such as {1}.',
           'CON',
           'CONSample',
+          'CON.json',
         ),
       ),
     ).toBeTruthy();

@@ -1,8 +1,9 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1031-1047 sha256:ffb375f9524c5bc9
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1097-1278 sha256:63bb36a7721812f0
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:1321-1366 sha256:1d931e56b488573d
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1068-1084 sha256:ffb375f9524c5bc9
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1134-1319 sha256:42591865222b06c6
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:1362-1407 sha256:1d931e56b488573d
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; usageSpotLabel takes the core Translator, as `translate`, since the app catalog test reads a bare one-letter t call as an app key. ScopedNote and notesInSampleScope (1259-1300) were ported ahead in sampleScope.ts (Task 14) and are re-exported here. otherExperimentsWithSample (1011-1027) comes here ahead of its edit range (Task 20), because notesForSample needs it. notesReferencingSample, notesUsingSample, notesForSample and heldNotesSentence are exported for the edit, delete and move ports.
+// Changes: 0.142.0 (#592): sampleUsageSpots lists the spots of every note in the sample's scope with includeAiCallouts; a spot inside an AI summary carries referenceKind 'ai-summary', and one in a note that only blocks deleting carries 'deletion-blocker'; usageSpotLabel appends 'AI summary reference' / 'Deletion-blocking reference'. The top-of-note fallback spot is gone (the scan now finds every note it lists).
 import type { PickItem, Translator } from '@labnoteo/core';
 import { compareSamples, getSampleDisplayMeta, isCatalogSampleType } from '@labnoteo/core/lib/sampleUtils';
 import {
@@ -192,16 +193,26 @@ export async function sampleUsages(env: SampleEnv, folder: string, type: string,
  * its top, so the list never drops a note the path list has.
  */
 export async function sampleUsageSpots(env: SampleEnv, folder: string, type: string, id: string): Promise<SampleUsageSpot[]> {
-  return (await notesUsingSample(env, folder, type, id)).flatMap((doc) => {
-    const spots = findSampleUsageSpots([doc], type, id, sampleListHeaders(env));
-    return spots.length > 0 ? spots : [{ path: doc.path, line: 0, ch: 0, heading: '' }];
+  const used = new Set((await notesUsingSample(env, folder, type, id)).map((doc) => doc.path));
+  const { notes } = await notesForSample(env, { folder, type, id });
+  return notes.flatMap((doc) => {
+    const spots = findSampleUsageSpots([doc], type, id, sampleListHeaders(env), { includeAiCallouts: true });
+    return spots.map((spot) => ({
+      ...spot,
+      ...(!used.has(doc.path) && !spot.referenceKind ? { referenceKind: 'deletion-blocker' as const } : {}),
+    }));
   });
 }
 
 /** Where in its note a usage is, for the usage list: the section and the 1-based line. */
 export function usageSpotLabel(translate: Translator, spot: SampleUsageSpot): string {
   const line = String(spot.line + 1);
-  return spot.heading ? translate('{0} · line {1}', spot.heading, line) : translate('Line {0}', line);
+  const label = spot.heading ? translate('{0} · line {1}', spot.heading, line) : translate('Line {0}', line);
+  return spot.referenceKind === 'ai-summary'
+    ? `${label} · ${translate('AI summary reference')}`
+    : spot.referenceKind === 'deletion-blocker'
+      ? `${label} · ${translate('Deletion-blocking reference')}`
+      : label;
 }
 
 /**

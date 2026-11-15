@@ -1,6 +1,7 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:137-316 sha256:d3da8d7a327b0f49
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:139-320 sha256:3eabd41bb69666f6
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); plugin.t → env.t; new Notice(m) → env.host.notify('info', m); pickModal(app, items, { title }) → env.host.pick(items, { title }); plugin.host.editTarget() → env.editTarget(); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.markUserEdit removed. insertSampleReference takes `target: EditTarget | undefined` and goes through env.insertAtCursor (cell-aware, D20) when there is no target or a table cell editor is active in the target's note, in place of the vendor's tableCellEditorOf/writeIntoCell (#543); the cell's own text before its cursor decides the space writeIntoCell puts before a reference after an aliased one (endsAliasedReference). insertExperimentSamplesTable reads the caret as the end of the table being edited when a cell editor is active (the vendor's "below the table" rule for a table cursor), and makes every edit inside one env.editTarget().batch (one undo step); the batch re-reads the note's text and the list-table ranges after the picker in the Replace branch too, not only in the Insert-one-more branch.
+// Changes: 0.142.0 (#598): the list of experiment samples reads each registry with core readSamplesByType (an unreadable registry throws instead of reading as empty), keys used references with sampleReferenceKey, and lists a Global sample unless a Local one has the same id in any letter case.
 import { endsAliasedReference, isOffsetBeforeBody, maskAiCallouts, planReferenceInsert, type EditTarget } from '@labnoteo/core';
 import { caretBeforeModal, caretIn } from '@labnoteo/core/lib/caret';
 import {
@@ -14,8 +15,9 @@ import {
 import {
   extractSampleInfoFromText,
   isSameSampleFolder,
-  loadSamplesByType,
   noteLabsamplesFolder,
+  readSamplesByType,
+  sampleReferenceKey,
   type SampleInfo,
   type SampleRecord,
 } from '@labnoteo/core/lib/sampleStorage';
@@ -108,7 +110,7 @@ export async function insertExperimentSamplesTable(env: SampleEnv): Promise<bool
     // An earlier table and an AI answer list samples without using them (#385, #318).
     const text = maskSampleListTables(maskAiCallouts(note.text), headers);
     for (const s of extractSampleInfoFromText(text, customTypes)) {
-      used.add(`${s.type}\u0000${s.id}`);
+      used.add(sampleReferenceKey(s.type, s.id));
       references.push(s);
     }
   }
@@ -119,18 +121,20 @@ export async function insertExperimentSamplesTable(env: SampleEnv): Promise<bool
   };
   const rows: string[][] = [];
   for (const type of types) {
-    const localDb = await loadSamplesByType(env.fs, local, type);
+    const localDb = await readSamplesByType(env.fs, local, type);
     remember(localDb);
     if (isCatalogSampleType(type)) remember(await loadCatalogSamples(env, local, type));
     const listed: Array<{ id: string; rec: SampleRecord; scope: SampleScope }> = Object.entries(localDb).map(
       ([id, rec]) => ({ id, rec, scope: 'local' }),
     );
     if (globalFolder) {
-      const globalDb = await loadSamplesByType(env.fs, globalFolder, type);
+      const globalDb = await readSamplesByType(env.fs, globalFolder, type);
       remember(globalDb);
       if (isCatalogSampleType(type)) remember(await loadCatalogSamples(env, globalFolder, type));
       for (const [id, rec] of Object.entries(globalDb)) {
-        if (!localDb[id] && used.has(`${type}\u0000${id}`)) listed.push({ id, rec, scope: 'global' });
+        if (!Object.keys(localDb).some((key) => key.toLowerCase() === id.toLowerCase()) && used.has(sampleReferenceKey(type, id))) {
+          listed.push({ id, rec, scope: 'global' });
+        }
       }
     }
     // By alias within each type, as the sample view lists them (#410).

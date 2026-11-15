@@ -150,7 +150,10 @@ describe('sample usages', () => {
     expect(spots).toEqual([
       { path: `${A}/001_WD010_A.labnote.md`, line: 2, ch: 2, heading: '[UHW1 PCR] 첫 › Input' },
       { path: `${A}/001_WD010_A.labnote.md`, line: 4, ch: 4, heading: '[UHW1 PCR] 첫 › Output' },
+      // a note whose own registry has the id is not a usage, but it would block a delete (#592)
+      { path: `${B}/001_WD010_C.labnote.md`, line: 0, ch: 0, heading: '', referenceKind: 'deletion-blocker' },
     ]);
+    expect(usageSpotLabel(e.t, spots[2])).toBe('Line 1 · Deletion-blocking reference');
     expect(usageSpotLabel(e.t, spots[0])).toBe('[UHW1 PCR] 첫 › Input · line 3');
     expect(usageSpotLabel(e.t, { path: 'x', line: 0, ch: 0, heading: '' })).toBe('Line 1');
   });
@@ -161,10 +164,13 @@ describe('sample usages', () => {
     expect([...new Set(spots.map((s) => s.path))].sort()).toEqual(['Home.md', NOTE]); // 062's DNA-1 is another experiment's
   });
 
-  it('AI callouts and list-table rows are not usages', async () => {
+  it('AI callouts and list-table rows are not usages; the spot list shows an AI one as such (#593)', async () => {
     const body = `> [!note] AI\n> DNA-1 was used\n\n${'| ID | Alias | Description | Location | Scope | Discarded |\n|---|---|---|---|---|---|\n| DNA-1 | pUC | | | Local | |'}\n`;
     const e = env({ ...SAMPLE_VAULT, 'labnote/061_PCR/002_x.labnote.md': body });
-    expect((await sampleUsageSpots(e, LOCAL, 'DNA', 'DNA-1')).some((s) => s.path.endsWith('002_x.labnote.md'))).toBe(false);
+    const own = (await sampleUsageSpots(e, LOCAL, 'DNA', 'DNA-1')).filter((s) => s.path.endsWith('002_x.labnote.md'));
+    // only the AI callout line is listed, marked as such; the list-table row is not
+    expect(own).toHaveLength(1);
+    expect(own[0]).toMatchObject({ line: 1, referenceKind: 'ai-summary' });
     expect(await sampleUsages(e, LOCAL, 'DNA', 'DNA-1')).not.toContain('labnote/061_PCR/002_x.labnote.md');
   });
 

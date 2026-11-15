@@ -32,6 +32,17 @@ describe('확인 대화상자', () => {
     await expect(p).resolves.toBe(false);
   });
 
+  // 플러그인 0.142.0 (#572): 거절이 어딘가로 이어질 때 둘째 단추에 이름을 주고, 위험색 없이 그것을 기본으로 한다.
+  it('cancelLabel names the second button and focusCancel makes it the default without the warning colour', async () => {
+    renderLayer();
+    const p = openIn(() => confirmDialog('슬롯이 찼습니다.', { confirmLabel: '그래도 저장', cancelLabel: '위치 고치기', focusCancel: true }));
+    expect(screen.queryByRole('button', { name: '취소' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '위치 고치기' }));
+    expect(screen.getByRole('button', { name: '그래도 저장' }).classList.contains('danger')).toBe(false);
+    await userEvent.keyboard('{Enter}');
+    await expect(p).resolves.toBe(false);
+  });
+
   it('a title, when given, heads the dialog and names it (no empty header row, Visual QA)', () => {
     renderLayer();
     void openIn(() => confirmDialog('AI가 보관함을 바꾸려고 해요(섹션 추가). 허용할까요?', { title: 'AI 작업 확인' }));

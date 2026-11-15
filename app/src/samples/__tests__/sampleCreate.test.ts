@@ -144,8 +144,31 @@ describe('createSampleInteractive', () => {
       expect(th.asked.confirm[0].message).toMatch(
         /^kept \(RNA-9, Local RNA sample\) is already stored at -80 \/ p1 \/ a1\. Save R1 \(RNA-[^)]+\) anyway\?$/,
       );
-      expect(th.asked.confirm[0].opts).toEqual({ confirmLabel: 'Save anyway' });
+      // #572: declining goes back to the location, so that is the button Enter takes
+      expect(th.asked.confirm[0].opts).toEqual({ confirmLabel: 'Save anyway', cancelLabel: 'Change location', focusCancel: true });
       expect(Object.keys(json(th, REGISTRY))).toEqual(['RNA-9']);
+      // closing the location prompt after declining says what was not created
+      expect(messages(th)).toContainEqual(expect.stringMatching(/^R1 \(RNA-[\d-]+\) was not created\. You had entered: R1$/));
+    });
+
+    // #572: declining dropped the alias and description along with the slot.
+    it('goes back to the location with what was typed when the slot is declined', async () => {
+      const th = host(SLOT);
+      th.answer.confirm(false);
+      th.answer.prompt('R1', 'first run', '-80 / P1 / A1', '-80 / P1 / A2');
+
+      const created = await add(th);
+
+      expect(th.asked.prompt[3].value).toBe('-80 / P1 / A1');
+      expect(json(th, REGISTRY)[created!.id]).toMatchObject({ alias: 'R1', descriptions: ['first run'], location: '-80 / P1 / A2' });
+    });
+
+    it('stays quiet when the location is closed without a slot being declined', async () => {
+      const th = host(SLOT);
+      th.answer.prompt('R1', 'first run', undefined);
+
+      expect(await add(th)).toBeUndefined();
+      expect(messages(th).filter((m) => m.includes('was not created'))).toEqual([]);
     });
 
     it('saves it once confirmed', async () => {

@@ -1,6 +1,7 @@
-// Ported from app/vendor/labnoteo/src/main.ts:3165-3218 sha256:41b727ae4c4b393c
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/main.ts:3196-3253 sha256:328065914e8e71c8
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); the plugin's private methods become functions over a per-session SampleSyncSession (timer map, aliasConflictsShown, the failure flag); window.setTimeout → setTimeout with the delay passed in; the sampleTrackingFor check moves to fire time (samples/sync.ts awaits samples.ready, D11), so scheduleSampleSync only filters *.labnote.md; vault.read → the caller passes the text (open buffer or fs.read); before saving, every Local and Global {Type}.json of the types in the text is checked with assertRegistryReadable (an empty file is fine, as in safeRegistryFs) and an unreadable one stops the run with one app warning per session (t('samples.syncFailed', path), D12/D13) instead of console.warn; the write goes through env.fs (safeRegistryFs), whose RegistryUnreadableError gets the same warning; plugin.settings.globalSampleFolder → env.globalFolder(); sampleSuggest.clearCache + refreshSampleViews → env.changed(touched registry files); syncSamples returns the touched paths.
+// Changes: 0.142.0 (#577, #598): saveSamplesFromDocument takes the vendor's onError callback: a registry core cannot read or parse is left as it is, one type at a time, and the app's one-warning-per-session samples.syncFailed is shown (console.warn as the vendor). A registry file with only white space stays no conflict in the app (as in safeRegistryFs and assertRegistryReadable), although core 0.142.0 reads it as an unreadable ledger: tolerateEmptyRegistries shows it to core as `{}` for the read and the modify, so the sync writes into it.
 import { maskAiCallouts } from '@labnoteo/core/lib/aiCallout';
 import {
   extractSampleInfoFromText,
@@ -10,6 +11,7 @@ import {
   type SampleAliasConflict,
 } from '@labnoteo/core/lib/sampleStorage';
 import { maskSampleListTables } from '@labnoteo/core/lib/sampleUtils';
+import type { AppFs } from '../../fs/tauriLabnoteFs';
 import { t as appT } from '../../i18n/t';
 import { assertRegistryReadable, RegistryUnreadableError, type SampleEnv } from '../../samples/env';
 import { sampleListHeaders } from './sampleListTable';
@@ -60,6 +62,26 @@ function warnFailure(env: SampleEnv, session: SampleSyncSession, file: string): 
   env.host.notify('warn', appT('samples.syncFailed', file));
 }
 
+/**
+ * A registry file with only white space is no conflict here (the app's choice, as in safeRegistryFs and
+ * assertRegistryReadable): core 0.142.0 reads such a file as an unreadable ledger and skips the type, so a blank file
+ * is shown to it as `{}` and the sync writes into it.
+ */
+function tolerateEmptyRegistries(fs: AppFs): AppFs {
+  const blank = (text: string): boolean => text.trim() === '';
+  return {
+    ...fs,
+    read: async (p) => {
+      const raw = await fs.read(p);
+      return p.endsWith('.json') && blank(raw) ? '{}' : raw;
+    },
+    modify: async (p, fn) => {
+      const existed = await fs.exists(p);
+      return fs.modify(p, (cur) => fn(existed && p.endsWith('.json') && blank(cur) ? '{}' : cur));
+    },
+  };
+}
+
 /** Returns the registry files of the types in `content` (empty when nothing was synced). */
 export async function syncSamples(env: SampleEnv, session: SampleSyncSession, path: string, content: string): Promise<string[]> {
   const touched = sampleSyncTargets(env, path, content);
@@ -68,12 +90,17 @@ export async function syncSamples(env: SampleEnv, session: SampleSyncSession, pa
     // A conflicted registry is read by core as `{}`: never save over one (D13). An empty file is fine.
     for (const file of touched) await assertRegistryReadable(env.fs, file);
     const conflicts = await saveSamplesFromDocument(
-      env.fs,
+      tolerateEmptyRegistries(env.fs),
       path,
       content,
       env.globalFolder(),
       env.settings().customSampleTypes,
-      sampleListHeaders(env)
+      sampleListHeaders(env),
+      // A registry core could not read or parse is left as it is, one type at a time (#598): the same one warning per session.
+      (file, error) => {
+        console.warn('[labnoteo] sample sync skipped:', file, error);
+        warnFailure(env, session, file);
+      }
     );
     noticeAliasConflicts(env, session, conflicts);
     // Freshly-written definitions should show up in autocomplete, the highlight and the panel right away.

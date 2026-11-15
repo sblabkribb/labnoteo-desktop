@@ -1,6 +1,7 @@
-// Ported from app/vendor/labnoteo/src/settings.ts:160-300 sha256:b078fd284371eb96
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/settings.ts:160-309 sha256:68d6ec5e01c89fa3
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: none beyond imports from @labnoteo/core, and invalidFolderText's parameter `t` is renamed `translate` (as in bilingualName.ts) so the app's i18n catalog test does not take the plugin's l10n keys for app catalog keys.
+// Changes: 0.142.0 (#573): registryFileNames(types) is new (`CON.json, aux.json`): the notices name the real registry files instead of the pattern {Type}.json; samples/SampleSettingsDialog.tsx passes it as the new {2} / {1} argument of the four notices.
 import type { Translator } from '@labnoteo/core';
 import { isWindowsReservedName, type InvalidFolderReason } from '@labnoteo/core/lib/regexUtils';
 import {
@@ -48,6 +49,15 @@ export interface CustomSampleTypesInput {
   reserved: string[];
   /** Such names kept from before, so their samples can still be moved to another type. */
   legacyReserved: string[];
+}
+
+/**
+ * The registry files of sample types, as a notice names them (`CON.json, aux.json`).
+ * A notice is plain text, so the file pattern `{Type}.json` read as a slot
+ * nobody filled in (#573).
+ */
+export function registryFileNames(types: readonly string[]): string {
+  return [...new Set(types)].map(type => `${type}.json`).join(', ');
 }
 
 /**

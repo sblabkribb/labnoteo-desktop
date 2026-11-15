@@ -38,6 +38,7 @@ import { applySampleSettings, pickSampleSettings } from './samples/SampleSetting
 import { registerLlmProbe } from './ai/llmProbe';
 import { useSampleEditorConfig, useSampleStoreWiring } from './samples/useSampleStore';
 import { createSampleEnv } from './samples/env';
+import { discoverSampleTypesOnOpen } from './labnote/commands/sampleDiscovery';
 import { wireSampleFollowUps } from './samples/followUps';
 import { installSampleActionRunners } from './samples/actionRunners';
 import { registerSampleSources } from './samples/sources';
@@ -472,6 +473,13 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
     if (!ctx || catalogNoticed.current) return;
     catalogNoticed.current = true;
     void catalogNoticeOnOpen(ctx);
+  }, [ctx]);
+  // 보관함마다 한 번: 샘플 추적이 켜져 있으면 설정에 없는 시료 종류의 대장을 찾아 등록할지 묻는다(플러그인 0.142.0).
+  const sampleTypesDiscovered = useRef(false);
+  useEffect(() => {
+    if (!ctx || sampleTypesDiscovered.current) return;
+    sampleTypesDiscovered.current = true;
+    void discoverSampleTypesOnOpen(ctx);
   }, [ctx]);
   // GitHub(P-R9): 보관함마다 한 번 상태를 새로 읽고(앞 보관함의 것은 버린다), 끝나지 않은 올리기가 있으면 [마저 하기] 알림 하나.
   // 가드는 이 화면의 ref 에 한 번만 만든다: StrictMode 의 효과 두 번 돌기에도 알림은 하나다.

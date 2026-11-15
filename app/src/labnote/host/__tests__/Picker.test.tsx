@@ -165,6 +165,17 @@ describe('고르기 대화상자', () => {
     await expect(p).resolves.toEqual(['cancelled']);
   });
 
+  // core 0.142.0 PickManyOpts: the text above the list (line breaks kept) and the name of the OK button
+  it('pickMany shows opts.message above the list and names the OK button with opts.confirmLabel', async () => {
+    renderLayer();
+    const p = openIn(() => pickManyDialog(STATUSES, { title: '채우기', message: '첫 줄\n둘째 줄', confirmLabel: '노트 고치기' }));
+    expect(document.querySelector('.picker-message')?.textContent).toBe('첫 줄\n둘째 줄');
+    expect(screen.queryByRole('button', { name: '확인' })).toBeNull();
+    await userEvent.click(screen.getByRole('checkbox', { name: /^completed/ }));
+    await userEvent.click(screen.getByRole('button', { name: '노트 고치기' }));
+    await expect(p).resolves.toEqual(['completed']);
+  });
+
   it('labels change with setLang while open', async () => {
     renderLayer();
     void openIn(() => pickDialog(STATUSES));

@@ -358,6 +358,7 @@ export function PickManyDialog(props: {
   return (
     <DialogFrame title={spec.title} label={spec.placeholder ?? t('picker.label')} className="picker" onCancel={props.onCancel}>
       <div className="picker-body" onKeyDown={onKeyDown}>
+        {spec.message ? <p className="picker-message">{spec.message}</p> : null}
         <input
           ref={input}
           type="text"
@@ -387,7 +388,7 @@ export function PickManyDialog(props: {
           {t('dialog.cancel')}
         </button>
         <button type="button" className="primary" onClick={submit}>
-          {t('dialog.ok')}
+          {spec.confirmLabel ?? t('dialog.ok')}
         </button>
       </div>
     </DialogFrame>

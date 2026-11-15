@@ -282,6 +282,14 @@
   line-height: 1.6;
 }
 .dialog.picker.palette > .picker-note { padding: var(--space-3) var(--space-6); }
+/* 여러 개 고르기 위의 글(코어 PickManyOpts.message): 줄바꿈은 그대로 */
+.picker-message {
+  margin: 0 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.6;
+  white-space: pre-line;
+}
 .picker-hint {
   margin: 0;
   padding: var(--space-3) var(--space-6);

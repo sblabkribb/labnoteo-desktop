@@ -43,7 +43,17 @@ export interface AppHost extends LabnoteHost {
   /** 코어의 확인에 `unsolicited`(A9)와 제목(`title`)을 더한다. */
   confirm(
     message: string,
-    opts?: { title?: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean },
+    opts?: {
+      title?: string;
+      confirmLabel?: string;
+      /** 거절이 어딘가로 이어질 때 둘째 단추의 이름(플러그인의 cancelLabel, #572). */
+      cancelLabel?: string;
+      /** 위험색 없이 취소 단추를 기본으로 한다(플러그인의 focusCancel, #572). */
+      focusCancel?: boolean;
+      signal?: AbortSignal;
+      destructive?: boolean;
+      unsolicited?: boolean;
+    },
   ): Promise<boolean>;
 }
 

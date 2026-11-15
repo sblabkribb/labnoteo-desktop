@@ -47,7 +47,15 @@ export type DialogSpec =
       /** 사용자가 부르지 않은 질문(A9): 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
       unsolicited?: boolean;
     } & PickExtras
-  | { kind: 'pickMany'; items: readonly PickItem<unknown>[]; title?: string; placeholder?: string }
+  | {
+      kind: 'pickMany';
+      items: readonly PickItem<unknown>[];
+      title?: string;
+      placeholder?: string;
+      /** 목록 위의 글(줄바꿈은 그대로), 확인 단추의 이름(코어 PickManyOpts). */
+      message?: string;
+      confirmLabel?: string;
+    }
   | { kind: 'prompt'; opts: PromptOpts }
   | { kind: 'alias'; opts: AliasOpts }
   | {
@@ -56,6 +64,10 @@ export type DialogSpec =
       /** 창 머리의 제목. 없으면 머리에는 닫기 단추만 있다. */
       title?: string;
       confirmLabel?: string;
+      /** 둘째 단추의 이름(기본은 취소). 거절이 다른 곳으로 이어질 때(#572). */
+      cancelLabel?: string;
+      /** 위험색 없이 취소 단추에 초점(#572). */
+      focusCancel?: boolean;
       signal?: AbortSignal;
       destructive?: boolean;
       /** 사용자가 부르지 않은 질문(A9): 취소 단추에 초점, 처음 UNSOLICITED_ARM_MS 동안 Enter 와 Space 를 무시한다. */
@@ -291,7 +303,10 @@ export async function pickThen<T, R>(
   }
 }
 
-export function pickManyDialog<T>(items: readonly PickItem<T>[], opts: { title?: string; placeholder?: string } = {}): Promise<T[]> {
+export function pickManyDialog<T>(
+  items: readonly PickItem<T>[],
+  opts: { title?: string; placeholder?: string; message?: string; confirmLabel?: string } = {},
+): Promise<T[]> {
   return openDialog<T[]>({ kind: 'pickMany', items, ...opts }, []);
 }
 
@@ -313,7 +328,15 @@ export function aliasDialog(opts: AliasOpts): Promise<string | undefined | Alias
 
 export function confirmDialog(
   message: string,
-  opts: { title?: string; confirmLabel?: string; signal?: AbortSignal; destructive?: boolean; unsolicited?: boolean } = {},
+  opts: {
+    title?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    focusCancel?: boolean;
+    signal?: AbortSignal;
+    destructive?: boolean;
+    unsolicited?: boolean;
+  } = {},
 ): Promise<boolean> {
   return openDialog<boolean>({ kind: 'confirm', message, ...opts }, false);
 }

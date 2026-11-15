@@ -1,6 +1,7 @@
-// Ported from app/vendor/labnoteo/src/sampleActions.ts:429-916 sha256:a456f3b861dc7411
-// labnoteO 0.140.2, Apache-2.0.
+// Ported from app/vendor/labnoteo/src/sampleActions.ts:433-956 sha256:643823520ca7c3ac
+// labnoteO 0.142.0, Apache-2.0.
 // Changes: App/LabnotePlugin → SampleEnv (D5); Notice → host.notify; modals → host dialogs. In detail: plugin.t → env.t; new Notice(m[, ms]) → env.host.notify('info' | 'warn', m) without the duration (warn for the refused folder, the alias twins and the discarded notices); promptModal/pickModal/confirmModal(app, …, label) → env.host.prompt/pick/confirm(…, { confirmLabel: label }); pickModal's initialQuery is dropped because the app's pick dialog has no initial query (it still pre-fills the create fallback); plugin.fs → env.fs; plugin.settings.globalSampleFolder → env.globalFolder(); plugin.settings.customSampleTypes → env.settings().customSampleTypes; plugin.refreshSampleViews() → env.changed([written registry]); an unreadable (conflicted) target registry is refused with RegistryUnreadableError before the first prompt; validateAlias/validateDescription/loadCatalogSamples take env. confirmAliasClash, confirmLocationClash, aliasSiblingLabel, globalSamplesWithAlias and findRegisteredSample are exported for the edit and move ports. The 0.140.2 alias naming of the slot question (#553) is taken as is; confirmLocationClash's alias stays optional (the edit port passes it too), and a saved sample without one is named by its ID.
+// Changes: 0.142.0 (#572): promptFreeLocation is new (exported for the edit port): the storage location is asked again while it names a taken slot and the user declines to save it anyway, instead of dropping everything typed; when the user gives up after declining, a notice says what was not created and what had been entered ('{0} was not created. You had entered: {1}'). confirmLocationClash's question has the cancel button 'Change location' and focuses it (host.confirm opts cancelLabel and focusCancel, added to the app host's confirm: ConfirmDialog.tsx).
 import type { PickItem } from '@labnoteo/core';
 import { invalidVaultFolderReason } from '@labnoteo/core/lib/regexUtils';
 import {
@@ -225,25 +226,28 @@ export async function createSampleInteractive(
     validate: validateDescription(env),
   });
   if (descRaw === undefined) return undefined;
-  const locationRaw = await env.host.prompt({
-    title: env.t('Enter a storage location (optional)'),
-    value: existing?.record.location ?? '',
-    placeholder: env.t('e.g. Freezer-2 / Box-3 / A1'),
-  });
-  if (locationRaw === undefined) return undefined;
   const description = clean(descRaw);
-  const location = clean(locationRaw);
-  if (
-    !(await confirmLocationClash(env, {
-      folder: existing?.folder ?? folder,
-      id,
-      alias: alias ?? existing?.record.alias,
-      location,
-      before: existing?.record.location,
-    }))
-  ) {
+  const placed = await promptFreeLocation(env, {
+    folder: existing?.folder ?? folder,
+    id,
+    alias: alias ?? existing?.record.alias,
+    before: existing?.record.location,
+  });
+  if (!placed.ok) {
+    // Only after a taken slot: what was typed is gone, so say what it was (#572).
+    if (placed.declined) {
+      const saving = alias ? `${alias} (${id})` : id;
+      const entered = [alias, description].filter(Boolean).join(' · ');
+      env.host.notify(
+        'info',
+        entered
+          ? env.t('{0} was not created. You had entered: {1}', saving, entered)
+          : env.t('{0} was not created.', saving),
+      );
+    }
     return undefined;
   }
+  const location = placed.location;
 
   if (existing) {
     // A blank field keeps the stored value, as in the note sync (#73); clearing
@@ -364,6 +368,31 @@ export async function confirmAliasClash(
 }
 
 /**
+ * Ask for a storage location, going back to it while it names a slot another sample is in and the user would rather
+ * change it (#572). Declining the overlap used to drop everything typed so far; now only closing the location prompt
+ * gives up. `declined` says the overlap was declined before that, so the caller can say what was not saved.
+ */
+export async function promptFreeLocation(
+  env: SampleEnv,
+  opts: { folder: string; id: string; alias?: string | null; before?: string | null },
+): Promise<{ ok: true; location: string | null } | { ok: false; declined: boolean }> {
+  let value = opts.before ?? '';
+  let declined = false;
+  for (;;) {
+    const raw = await env.host.prompt({
+      title: env.t('Enter a storage location (optional)'),
+      value,
+      placeholder: env.t('e.g. Freezer-2 / Box-3 / A1'),
+    });
+    if (raw === undefined) return { ok: false, declined };
+    const location = clean(raw);
+    if (await confirmLocationClash(env, { ...opts, location })) return { ok: true, location };
+    declined = true;
+    value = raw;
+  }
+}
+
+/**
  * Ask before a sample takes a storage slot another sample is in (#512). A slot
  * holds one tube whatever the sample's type is, so every type of this folder
  * and of Global is read. True when the location may be saved: also when it is
@@ -403,7 +432,12 @@ export async function confirmLocationClash(
       ? env.t('{0} is already stored at {1}.', taken[0], location)
       : env.t('{0} samples are already stored at {1}: {2}.', String(taken.length), location, taken.join(', '));
   const saving = opts.alias ? `${opts.alias} (${id})` : id;
-  return env.host.confirm(`${held} ${env.t('Save {0} anyway?', saving)}`, { confirmLabel: env.t('Save anyway') });
+  // Declining goes back to the location (#572), so it is the default: Enter no longer puts a second tube in the slot.
+  return env.host.confirm(`${held} ${env.t('Save {0} anyway?', saving)}`, {
+    confirmLabel: env.t('Save anyway'),
+    cancelLabel: env.t('Change location'),
+    focusCancel: true,
+  });
 }
 
 /** A sample sharing an alias, as an alias question names it: its ID, marked when discarded (#419). */
