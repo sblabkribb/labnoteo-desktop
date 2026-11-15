@@ -41,8 +41,19 @@ const fixture: Record<string, string[]> = JSON.parse(
  * 문헌 검색 커맨드 두 개(Task 11, Rust)는 Task 13 의 scholar/ipc.ts 래퍼가 비웠다.
  * feat/github-upload: github_* 커맨드 열여덟은 Task 11 의 githubIpc.ts 래퍼로 비웠다.
  * 어시스턴트의 읽기 전용 partbank 도구용 partbank_read(Rust)는 labservices/ipc.ts 의 partbankRead 래퍼로 비웠다.
+ * 데스크톱 펫 커맨드 아홉 개(pet_*)는 이 하네스의 래퍼가 아니라 src/pet/petIpc.ts 의 일반 invoke 로 부른다. 인자 이름은 pet/__tests__/PetApp.test.tsx 가 같은 픽스처로 맞춘다.
  */
-const PENDING_TS_WRAPPERS: readonly string[] = [];
+const PENDING_TS_WRAPPERS: readonly string[] = [
+  'pet_start',
+  'pet_close',
+  'pet_geometry',
+  'pet_set_layout',
+  'pet_hide',
+  'pet_open_main',
+  'pet_quiet_get',
+  'pet_quiet_set',
+  'pet_start_failed',
+];
 
 /**
  * 실제로 보낸 커맨드별 인자 이름(정렬)을 기록하는 가짜 invoke.

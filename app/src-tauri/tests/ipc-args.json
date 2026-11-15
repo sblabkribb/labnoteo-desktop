@@ -139,5 +139,14 @@
   "github_statuses": [],
   "github_default_owner_get": [],
   "github_default_owner_set": ["owner"],
-  "github_unlink": ["folder"]
+  "github_unlink": ["folder"],
+  "pet_start": ["spriteW", "spriteH"],
+  "pet_close": [],
+  "pet_geometry": [],
+  "pet_set_layout": ["args"],
+  "pet_hide": [],
+  "pet_open_main": [],
+  "pet_quiet_get": [],
+  "pet_quiet_set": ["quiet"],
+  "pet_start_failed": []
 }

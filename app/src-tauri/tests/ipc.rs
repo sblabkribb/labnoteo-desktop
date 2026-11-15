@@ -83,6 +83,7 @@ fn ipc_argument_names_match_the_typescript_side() {
         .manage(labnoteo_app_lib::skins::SkinStaging::default())
         .manage(labnoteo_app_lib::skins::SheetStaging::default())
         .manage(labnoteo_app_lib::skins::GalleryState::default())
+        .manage(labnoteo_app_lib::pet::commands::PetRuntime::default())
         // Skin pack dialogs: the open dialog picks a too-big temp file once,
         // then cancels; the save dialog picks a temp path once, then cancels.
         .manage(labnoteo_app_lib::skins::SkinFileDialogs {
@@ -1267,6 +1268,23 @@ title: 실험
     );
     assert!(!dir.join("vault").join("assistant.json").exists());
     assert!(!dir.join("fresh").join("assistant.json").exists());
+
+    // The desktop pet: quiet mode lives in pet-window.json beside settings.json (here: no config dir known, so it
+    // stays off and nothing is written). The window commands need a real window and are only checked for their
+    // argument names; a layout with an unknown mode or field is refused before anything else.
+    assert_eq!(ok("pet_quiet_get", args("pet_quiet_get", vec![])), json!(false));
+    assert_eq!(ok("pet_quiet_set", args("pet_quiet_set", vec![json!(true)])), Value::Null);
+    assert_eq!(ok("pet_quiet_get", args("pet_quiet_get", vec![])), json!(false));
+    assert!(call("pet_set_layout", args("pet_set_layout", vec![json!({"mode": "evil"})])).is_err());
+    assert!(call("pet_set_layout", json!({"args": {"mode": "sprite", "cmd": "x"}})).is_err());
+    assert_eq!(call("pet_geometry", args("pet_geometry", vec![])).unwrap_err(), json!("notStarted"));
+    // Not called here (a mock window would be hidden, destroyed or raised): their argument lists are still checked.
+    for cmd in ["pet_start", "pet_close", "pet_hide", "pet_open_main", "pet_start_failed"] {
+        let n = fixture[cmd].as_array().unwrap().len();
+        let _ = args(cmd, (0..n).map(|_| json!(0)).collect());
+    }
+    assert_eq!(call("pet_start", json!({"spriteW": 0, "spriteH": 96})).unwrap()["reason"], "size");
+    assert_eq!(call("pet_start", json!({"spriteW": 9999, "spriteH": 96})).unwrap()["reason"], "size");
 
     // A misspelled argument is refused rather than ignored.
     assert!(call("vault_write", json!({"path": "b.md", "contents": "x"})).is_err());

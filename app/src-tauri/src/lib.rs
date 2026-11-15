@@ -186,6 +186,16 @@ macro_rules! register_commands {
             $crate::gitsync::upload::github_default_owner_get,
             $crate::gitsync::upload::github_default_owner_set,
             $crate::gitsync::upload::github_unlink,
+            // The desktop pet
+            $crate::pet::commands::pet_start,
+            $crate::pet::commands::pet_close,
+            $crate::pet::commands::pet_geometry,
+            $crate::pet::commands::pet_set_layout,
+            $crate::pet::commands::pet_hide,
+            $crate::pet::commands::pet_open_main,
+            $crate::pet::commands::pet_quiet_get,
+            $crate::pet::commands::pet_quiet_set,
+            $crate::pet::commands::pet_start_failed,
         ])
     };
 }
@@ -236,6 +246,17 @@ pub fn run() {
         .manage(skins::SheetStaging::default())
         // The gallery index fetched last; downloads take an entry id from it only.
         .manage(skins::GalleryState::default())
+        // The desktop pet window's runtime state (hidden for now, sprite anchor, saved position); created by `pet_start`.
+        .manage(pet::commands::PetRuntime::default())
+        .on_window_event(|window, event| {
+            pet::window::on_window_event(window, event);
+            // The pet alone would keep the process alive once the main window is gone.
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                if let Some(pet) = window.app_handle().get_webview_window(pet::window::LABEL) {
+                    let _ = pet.destroy();
+                }
+            }
+        })
         // SP7 Part C: a page load in the main webview (reload, navigation,
         // crash recovery) stops the MCP server and fails its pending calls,
         // from Rust, because JS cannot reliably invoke during unload (C3).
@@ -253,6 +274,8 @@ pub fn run() {
                 .app_config_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("kr.sblab.labnoteo"));
             app.manage(vault::SettingsFile(dir.join("settings.json")));
+            // The pet's position and quiet mode live beside settings.json (pet-window.json).
+            *app.state::<pet::commands::PetRuntime>().config_dir.lock().unwrap_or_else(|e| e.into_inner()) = Some(dir.clone());
             // The search index is a cache and lives in the app data dir, never
             // in a vault. Same fallback as above: never abort startup over it.
             let data = app
