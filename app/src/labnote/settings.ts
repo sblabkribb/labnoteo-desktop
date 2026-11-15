@@ -576,10 +576,25 @@ function parse(text: string): unknown {
   }
 }
 
+/** PC 전체에 저장되는 연동 키(Rust `connections::KEYS` 와 같다). */
+const CONNECTION_KEYS: ReadonlySet<string> = new Set([
+  'llmProvider', 'llmEndpointOllama', 'llmEndpointOpenai', 'llmModel', 'llmContextWindow', 'llmTemperature',
+  'llmThinking', 'llmMaxOutputTokens', 'llmServerLimit', 'partbankDefaultConnection', 'partbankWebUrl',
+  'partbankDesktopUrl', 'bfwConnection', 'bfwUrl', 'allowHttpOrigins', 'mcpClientServers',
+]);
+
 /** 지금 열린 보관함의 설정을 저장한다(앱 설정 폴더, 보관함 밖). 앱 키만 쓴다. */
-export async function saveVaultSettings(s: AppSettings, invoke: InvokeFn = tauriInvoke): Promise<void> {
+export async function saveVaultSettings(
+  s: AppSettings,
+  invoke: InvokeFn = tauriInvoke,
+  /** 주면 이 연동 키만 보낸다(나머지 연동 키는 저장된 값이 그대로 남는다). 없으면 모두 보낸다. */
+  connectionKeysToSend?: ReadonlySet<string>,
+): Promise<void> {
   const clean: Record<string, unknown> = {};
-  for (const k of KEYS) clean[k] = s[k];
+  for (const k of KEYS) {
+    if (connectionKeysToSend && CONNECTION_KEYS.has(k) && !connectionKeysToSend.has(k)) continue;
+    clean[k] = s[k];
+  }
   if (s.importedFromPlugin === true) clean.importedFromPlugin = true;
   await invoke<void>('settings_vault_write', { content: JSON.stringify(clean) });
 }
@@ -693,10 +708,16 @@ export function useVaultSettings(
    */
   const update = (patch: Partial<AppSettings>): Promise<boolean> => {
     if (!current.current) return Promise.resolve(false);
-    const next = { ...current.current, ...patch };
+    const before = current.current;
+    const next = { ...before, ...patch };
     current.current = next;
     setSettings(next);
-    return saveVaultSettings(next, invoke).then(
+    // 연동 설정은 PC 하나에 저장되고 다른 창이 바꿨을 수 있다: 이번에 실제로 바뀐 연동 키만 보내, 오래된 창이 남의 변경을 되돌리지 않게 한다.
+    const changed = new Set<string>();
+    for (const k of Object.keys(patch)) {
+      if (CONNECTION_KEYS.has(k) && JSON.stringify(patch[k as keyof AppSettings]) !== JSON.stringify(before[k as keyof AppSettings])) changed.add(k);
+    }
+    return saveVaultSettings(next, invoke, changed).then(
       () => true,
       () => false,
     );
