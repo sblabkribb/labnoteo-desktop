@@ -322,6 +322,7 @@ export const BFW_DEFAULT_URL = 'https://workflow.kbiofoundry.kr';
 export function isServiceUrl(v: unknown): v is string {
   if (typeof v !== 'string') return false;
   const raw = v.trim();
+  if (raw.length > 2048) return false; // Rust `connections::MAX_TEXT`
   let url: URL;
   try {
     url = new URL(raw);
@@ -348,6 +349,7 @@ function httpOrigins(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   const out: string[] = [];
   for (const e of v) {
+    if (out.length >= 64) break; // Rust `connections::MAX_ORIGINS`
     if (isOriginUrl(e) && new URL(e.trim()).protocol === 'http:') {
       const o = e.trim();
       if (!out.includes(o)) out.push(o);
@@ -632,7 +634,8 @@ export async function loadVaultSettings(
   const first = imported ? { ...fromPluginData(raw), importedFromPlugin: true } : fromPluginData(undefined);
   const settings = connections.values ? fromStored({ ...first, ...connections.values }) : first;
   try {
-    await saveVaultSettings(settings, invoke);
+    // 연동 파일이 손상돼 있으면 기본값을 보내지 않는다(Rust 가 사본을 두었고, 사용자가 직접 바꾼 값만 새 파일을 만든다).
+    await saveVaultSettings(settings, invoke, connections.damaged ? new Set() : undefined);
   } catch {
     // 저장하지 못해도 이번 실행은 이 값으로 쓴다. 다음에 다시 가져온다.
   }

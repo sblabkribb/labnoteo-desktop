@@ -155,7 +155,8 @@ pub fn has_user_values(conn: &Map<String, Value>) -> bool {
 pub enum Stored {
     Missing,
     Valid(Map<String, Value>),
-    /// Unreadable, not JSON, no `settings` object or a value that fails its check.
+    /// Unreadable, not JSON or no `settings` object. (A single value that fails
+    /// its check is dropped instead, see `read_state`.)
     Corrupt,
 }
 
@@ -169,7 +170,11 @@ pub fn read_state(settings_file: &Path) -> Stored {
     let Some(Value::Object(settings)) = doc.get("settings") else { return Stored::Corrupt };
     let (conn, _) = split(settings);
     if validate_strict(&conn).is_err() {
-        return Stored::Corrupt;
+        // One bad key (for example a value a newer app version wrote) must not
+        // take every connection with it: the good keys stay, the bad ones read
+        // as their defaults, and the file as it was is copied once.
+        keep_copy(&config_path(settings_file));
+        return Stored::Valid(lenient(&conn));
     }
     Stored::Valid(conn)
 }
@@ -209,7 +214,8 @@ fn invalid(key: &str) -> FsError {
 /// keys given replace the stored ones and the others stay. With none (or a
 /// damaged one, copied first) a file is created only when `conn` holds values
 /// the user set, so a never-configured vault's defaults never take the place a
-/// configured vault could still fill, and defaults never replace a damaged file.
+/// configured vault could still fill, and a whole snapshot of defaults never
+/// replaces a damaged file (a save naming only some keys does).
 pub fn save(settings_file: &Path, conn: &Map<String, Value>) -> Result<(), FsError> {
     validate_strict(conn).map_err(|k| invalid(&k))?;
     if conn.is_empty() {
@@ -229,7 +235,11 @@ pub fn save(settings_file: &Path, conn: &Map<String, Value>) -> Result<(), FsErr
             }
         }
         Stored::Corrupt => {
-            if has_user_values(conn) {
+            // A save that names only some keys is an edit the user made on purpose, even
+            // when its values are the defaults (a PartBank-web user could otherwise never
+            // repair the file). Only a whole-snapshot save of defaults, which a vault's
+            // first start sends, never replaces a damaged file.
+            if has_user_values(conn) || conn.len() < KEYS.len() {
                 keep_copy(&config_path(settings_file));
                 write_map(settings_file, conn)
             } else {
@@ -457,7 +467,7 @@ mod tests {
         let a = s.vault("a");
         settings::write_at(&s.settings(), &a, LLM).unwrap();
         let file = config_path(&s.settings());
-        for junk in ["{", "[]", r#"{"settings":[]}"#, r#"{"version":1,"settings":{"llmProvider":"bogus"}}"#] {
+        for junk in ["{", "[]", r#"{"settings":[]}"#] {
             std::fs::write(&file, junk).unwrap();
             let eff = effective_at(&s.settings(), &a);
             assert!(eff.damaged, "{junk}");
@@ -468,15 +478,69 @@ mod tests {
             let _ = std::fs::remove_file(file.with_file_name("connections.json.bak"));
             let _ = std::fs::remove_file(file.with_file_name("connections.json.bak.1"));
         }
-        // Defaults saved while it is damaged do not replace it.
+        // A whole snapshot of defaults (a vault's first start) does not replace it.
         std::fs::write(&file, "{").unwrap();
-        settings::write_at(&s.settings(), &a, r#"{"llmProvider":"none","llmModel":"llama3.1"}"#).unwrap();
+        let all_defaults: Map<String, Value> = KEYS
+            .iter()
+            .map(|k| {
+                let v = match *k {
+                    "llmProvider" => json!("none"),
+                    "llmModel" => json!("llama3.1"),
+                    "llmContextWindow" => json!(8192),
+                    "llmThinking" => json!("auto"),
+                    "llmEndpointOllama" => json!(DEFAULT_LLM_OLLAMA),
+                    "llmEndpointOpenai" => json!(DEFAULT_LLM_OPENAI),
+                    "partbankDefaultConnection" => json!("web"),
+                    "bfwConnection" => json!("server"),
+                    "partbankWebUrl" => json!(DEFAULT_PARTBANK_WEB),
+                    "partbankDesktopUrl" => json!(DEFAULT_PARTBANK_DESKTOP),
+                    "bfwUrl" => json!(DEFAULT_BFW_URL),
+                    "allowHttpOrigins" | "mcpClientServers" => json!([]),
+                    _ => Value::Null,
+                };
+                (k.to_string(), v)
+            })
+            .collect();
+        assert!(!has_user_values(&all_defaults));
+        settings::write_at(&s.settings(), &a, &Value::Object(all_defaults).to_string()).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "{");
+        // An edit that names only some keys replaces it even with default values, and the old bytes stay in the copy.
+        settings::write_at(&s.settings(), &a, r#"{"partbankDefaultConnection":"web"}"#).unwrap();
+        assert_eq!(stored(&s)["partbankDefaultConnection"], "web");
+        assert_eq!(std::fs::read_to_string(file.with_file_name("connections.json.bak")).unwrap(), "{");
+        std::fs::write(&file, "{").unwrap();
         // A save with real values replaces it, and the old bytes stay in the copy.
         settings::write_at(&s.settings(), &a, LLM).unwrap();
         assert_eq!(stored(&s)["llmModel"], "gpt-x");
         assert_eq!(std::fs::read_to_string(file.with_file_name("connections.json.bak")).unwrap(), "{");
         assert!(!effective_at(&s.settings(), &a).damaged);
+    }
+
+    #[test]
+    fn one_bad_key_drops_only_that_key_and_keeps_a_copy() {
+        let s = Scratch::new();
+        let a = s.vault("a");
+        let file = config_path(&s.settings());
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let raw = r#"{"version":1,"settings":{"llmProvider":"bogus","llmModel":"gpt-x","partbankWebUrl":"https://pb.lab.example"}}"#;
+        std::fs::write(&file, raw).unwrap();
+        let eff = effective_at(&s.settings(), &a);
+        assert!(!eff.damaged);
+        assert_eq!(eff.settings["llmModel"], "gpt-x");
+        assert_eq!(eff.settings["partbankWebUrl"], "https://pb.lab.example");
+        assert!(eff.settings.get("llmProvider").is_none(), "the bad key reads as its default");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), raw, "read never rewrites the file");
+        assert_eq!(std::fs::read_to_string(file.with_file_name("connections.json.bak")).unwrap(), raw);
+        // Too many origins (older or newer app) is one bad key as well.
+        let origins: Vec<String> = (0..65).map(|i| format!("http://10.0.0.{i}:80")).collect();
+        let doc = json!({"version":1,"settings":{"allowHttpOrigins":origins,"llmModel":"m"}});
+        std::fs::write(&file, doc.to_string()).unwrap();
+        assert!(!effective_at(&s.settings(), &a).damaged);
+        assert_eq!(effective_at(&s.settings(), &a).settings["llmModel"], "m");
+        // A later save of one key keeps the good ones.
+        settings::write_at(&s.settings(), &a, r#"{"llmModel":"n"}"#).unwrap();
+        assert_eq!(stored(&s)["llmModel"], "n");
+        assert!(!stored(&s).contains_key("allowHttpOrigins"));
     }
 
     #[test]

@@ -1194,7 +1194,7 @@ pub async fn integration_import_pick<R: tauri::Runtime>(
     let path = picked
         .into_path()
         .map_err(|_| NetError::new(NetErrorKind::BadInput, "the chosen file is not a local path"))?;
-    let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
+    let cfg = ServiceConfig::load_for_repair(&settings.0, Some(&root))?;
     let allow_http = cfg.allow_http.clone();
     let store = secrets.0.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -1231,7 +1231,7 @@ pub fn integration_import_bytes(
     let name = crate::vault::fs::header(&request, "x-lno-name")
         .map_err(|_| NetError::new(NetErrorKind::BadInput, "the file name is missing"))?;
     let root = vault.root().map_err(|_| no_vault())?;
-    let cfg = ServiceConfig::load(&settings.0, Some(&root))?;
+    let cfg = ServiceConfig::load_for_repair(&settings.0, Some(&root))?;
     let mut outcome = import_bytes(secrets.0.as_ref(), &name, bytes, &cfg);
     finish_github_import(&dirs.0, secrets.0.as_ref(), &github, &mut outcome);
     finish_search_import(&settings.0, &cfg.allow_http, &mut outcome);

@@ -325,9 +325,20 @@ impl ServiceConfig {
     /// The open vault's stored settings (defaults when none are stored).
     /// With no vault open, `notConfigured`.
     pub fn load(settings_file: &Path, root: Option<&Path>) -> Result<ServiceConfig, NetError> {
+        Self::load_inner(settings_file, root, false)
+    }
+
+    /// Like `load`, but a damaged `connections.json` is not an error: the
+    /// connection values read as their defaults. For the file import, which is
+    /// the way to repair a damaged file (its settings are saved by the webview).
+    pub fn load_for_repair(settings_file: &Path, root: Option<&Path>) -> Result<ServiceConfig, NetError> {
+        Self::load_inner(settings_file, root, true)
+    }
+
+    fn load_inner(settings_file: &Path, root: Option<&Path>, allow_damaged: bool) -> Result<ServiceConfig, NetError> {
         let root = root.ok_or_else(|| NetError::new(NetErrorKind::NotConfigured, "no vault is open"))?;
         let eff = crate::vault::connections::effective_at(settings_file, root);
-        if eff.damaged {
+        if eff.damaged && !allow_damaged {
             return Err(NetError::new(
                 NetErrorKind::NotConfigured,
                 "the connection settings file is damaged (a copy was kept next to it); open the settings and save them again",
@@ -638,6 +649,17 @@ pub mod tests {
     #[test]
     fn no_vault_is_not_configured() {
         assert_eq!(ServiceConfig::load(Path::new("x/settings.json"), None).unwrap_err().kind, NetErrorKind::NotConfigured);
+    }
+
+    #[test]
+    fn a_damaged_connection_file_blocks_calls_but_not_the_import_that_repairs_it() {
+        let dir = scratch_dir("config-damaged-repair");
+        let (file, root) = settings_file(&dir, r#"{}"#);
+        std::fs::write(file.with_file_name("connections.json"), "{not json").unwrap();
+        assert_eq!(ServiceConfig::load(&file, Some(&root)).unwrap_err().kind, NetErrorKind::NotConfigured);
+        let c = ServiceConfig::load_for_repair(&file, Some(&root)).unwrap();
+        assert_eq!(c.llm_provider, LlmKind::None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
