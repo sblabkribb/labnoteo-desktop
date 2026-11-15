@@ -924,7 +924,7 @@ pub async fn github_plan(
     info_findings: Vec<Value>,
 ) -> Result<PlanOutcome, NetError> {
     let root = vault.root().map_err(|_| NetError::new(NetErrorKind::NotConfigured, "no vault is open"))?;
-    let settings_json = crate::vault::settings::read_at(&settings.0, &root).unwrap_or_else(|| "{}".to_string());
+    let settings_json = crate::vault::connections::effective_at(&settings.0, &root).json();
     let cfg = ServiceConfig::from_settings_json(&settings_json);
     let saved = saved_secrets(secrets.0.as_ref(), &cfg, &github);
     let dirs = dirs.0.clone();

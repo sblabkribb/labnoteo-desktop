@@ -56,10 +56,36 @@ pub fn read_at(settings_file: &Path, root: &Path) -> Option<String> {
     Some(settings.to_string())
 }
 
-/// Store `content` (JSON) as `root`'s settings. Invalid JSON is refused as an
-/// `io` error and nothing is written. Write-then-rename, so a crash cannot leave
-/// a half-written file.
+/// Store `content` (JSON) as `root`'s settings. The connection keys
+/// (`connections::KEYS`) go to the app-wide `connections.json`; the per-vault
+/// file keeps the rest, plus any connection keys an older app version left in
+/// it (carried over unchanged, never deleted). Invalid JSON, or a connection
+/// value that fails its check, is refused as an `io` error and nothing is
+/// written.
 pub fn write_at(settings_file: &Path, root: &Path, content: &str) -> Result<(), FsError> {
+    let value: Value = serde_json::from_str(content)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let Value::Object(all) = value else {
+        return write_raw_at(settings_file, root, content);
+    };
+    let (conn, mut rest) = super::connections::split(&all);
+    super::connections::save(settings_file, &conn)?;
+    let old = read_at(settings_file, root).and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    if let Some(Value::Object(old)) = old {
+        for key in super::connections::KEYS {
+            if !rest.contains_key(key) {
+                if let Some(v) = old.get(key) {
+                    rest.insert(key.to_string(), v.clone());
+                }
+            }
+        }
+    }
+    write_raw_at(settings_file, root, &Value::Object(rest).to_string())
+}
+
+/// Writes `content` as the per-vault file as it is (no split). Write-then-rename,
+/// so a crash cannot leave a half-written file.
+fn write_raw_at(settings_file: &Path, root: &Path, content: &str) -> Result<(), FsError> {
     let settings: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let target = store_path(settings_file, root);
@@ -153,9 +179,26 @@ pub fn import_llm_key_at(store: &dyn SecretStore, root: &Path) -> Result<bool, N
     Ok(true)
 }
 
+/// The open vault's settings with the app-wide connection settings on top;
+/// `None` when the vault has no settings file of its own yet.
 #[tauri::command]
 pub fn settings_vault_read(state: tauri::State<'_, VaultState>, settings: tauri::State<'_, SettingsFile>) -> Option<String> {
-    read_at(&settings.0, &state.root().ok()?)
+    let eff = super::connections::effective_at(&settings.0, &state.root().ok()?);
+    eff.vault_found.then(|| eff.json())
+}
+
+/// The app-wide connection settings (`values`, when valid) and whether their
+/// file is damaged (a copy was kept). The webview fills a vault's first start
+/// with `values`, and tells the user about a damaged file.
+#[tauri::command]
+pub fn settings_connections(
+    state: tauri::State<'_, VaultState>,
+    settings: tauri::State<'_, SettingsFile>,
+) -> super::connections::ConnectionsStatus {
+    match state.root() {
+        Ok(root) => super::connections::status_at(&settings.0, &root),
+        Err(_) => super::connections::ConnectionsStatus { values: None, damaged: false },
+    }
 }
 
 #[tauri::command]

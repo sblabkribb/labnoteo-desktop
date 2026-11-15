@@ -1,4 +1,5 @@
 pub mod attach;
+pub mod connections;
 pub mod fs;
 pub mod journal;
 pub mod path;

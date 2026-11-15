@@ -1,7 +1,7 @@
-//! Service URLs, read from the open vault's stored settings on every call (D8).
+//! Service URLs, read from the app-wide connection settings (`connections.json`, with the open vault's own settings under them) on every call (D8).
 //!
 //! The webview never names a host: every network command reads the URL for its
-//! slot from `vault::settings::read_at`. PartBank and bfworkflow URLs are
+//! slot from `vault::connections::effective_at`. PartBank and bfworkflow URLs are
 //! origins only; an LLM endpoint may carry a short path for a gateway.
 //! A missing key falls back to the plugin's default (vendor `settings.ts`); a
 //! present but invalid URL is `None`, never the default, so a typo is never
@@ -326,8 +326,14 @@ impl ServiceConfig {
     /// With no vault open, `notConfigured`.
     pub fn load(settings_file: &Path, root: Option<&Path>) -> Result<ServiceConfig, NetError> {
         let root = root.ok_or_else(|| NetError::new(NetErrorKind::NotConfigured, "no vault is open"))?;
-        let json = crate::vault::settings::read_at(settings_file, root).unwrap_or_else(|| "{}".to_string());
-        let mut cfg = ServiceConfig::from_settings_json(&json);
+        let eff = crate::vault::connections::effective_at(settings_file, root);
+        if eff.damaged {
+            return Err(NetError::new(
+                NetErrorKind::NotConfigured,
+                "the connection settings file is damaged (a copy was kept next to it); open the settings and save them again",
+            ));
+        }
+        let mut cfg = ServiceConfig::from_settings_json(&eff.json());
         cfg.web_search = crate::assistant::config::read_at(settings_file).searxng_url.as_deref().and_then(parse_service_url);
         Ok(cfg)
     }
@@ -492,6 +498,23 @@ pub mod tests {
     }
 
     #[test]
+    fn connection_settings_are_set_once_and_shown_in_every_vault() {
+        let dir = scratch_dir("conn-two-vaults");
+        let (file, _a) = settings_file(
+            &dir,
+            r#"{"llmProvider":"ollama","llmModel":"qwen","llmEndpointOllama":"http://192.168.0.5:11434","allowHttpOrigins":["http://192.168.0.5:11434"],"autoSyncUnitOpToc":false}"#,
+        );
+        // Another vault that never saw these settings.
+        std::fs::create_dir_all(dir.join("other")).unwrap();
+        let other = std::fs::canonicalize(dir.join("other")).unwrap();
+        let cfg = ServiceConfig::load(&file, Some(&other)).unwrap();
+        assert_eq!(cfg.llm_provider, LlmKind::Ollama);
+        assert_eq!(cfg.llm_ollama.as_ref().unwrap().as_str(), "http://192.168.0.5:11434/");
+        assert_eq!(cfg.allow_http, vec!["http://192.168.0.5:11434".to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn service_url_rules() {
         assert_eq!(parse_service_url("https://partbank.kbiofoundry.kr/").unwrap().as_str(), "https://partbank.kbiofoundry.kr/");
         assert!(parse_service_url("ftp://x").is_none());
@@ -624,12 +647,19 @@ pub mod tests {
         let c = ServiceConfig::load(&file, Some(&root)).unwrap();
         assert_eq!(origin(c.partbank_web.as_ref().unwrap()), "https://pb.example");
         assert_eq!(c.llm_provider, LlmKind::Openai);
-        // A vault with no stored settings gets the defaults.
+        // Connection settings are app-wide: a vault with no settings of its own shows the same ones.
         let other = dir.join("other");
         std::fs::create_dir_all(&other).unwrap();
         let c = ServiceConfig::load(&file, Some(&other)).unwrap();
-        assert_eq!(origin(c.partbank_web.as_ref().unwrap()), "https://partbank.kbiofoundry.kr");
+        assert_eq!(origin(c.partbank_web.as_ref().unwrap()), "https://pb.example");
+        assert_eq!(c.llm_provider, LlmKind::Openai);
         assert_eq!(c.web_search, None);
+        // A PC that never stored any gets the defaults.
+        let fresh = scratch_dir("config-load-fresh");
+        let c = ServiceConfig::load(&fresh.join("config").join("settings.json"), Some(&other)).unwrap();
+        assert_eq!(origin(c.partbank_web.as_ref().unwrap()), "https://partbank.kbiofoundry.kr");
+        assert_eq!(c.llm_provider, LlmKind::None);
+        let _ = std::fs::remove_dir_all(&fresh);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

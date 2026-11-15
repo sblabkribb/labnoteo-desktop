@@ -51,6 +51,7 @@ macro_rules! register_commands {
             $crate::vault::attach::vault_write_attachment,
             $crate::vault::settings::settings_vault_read,
             $crate::vault::settings::settings_vault_write,
+            $crate::vault::settings::settings_connections,
             $crate::vault::settings::settings_import_plugin,
             $crate::vault::settings::settings_plugin_llm_key,
             $crate::vault::settings::settings_import_llm_key,
