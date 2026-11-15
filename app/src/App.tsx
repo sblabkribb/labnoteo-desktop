@@ -388,11 +388,21 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   usePaletteHotkey(ctx);
   // 떠 있는 도우미의 대화(assistant 명세 §4.5): 내장 런타임과 압축은 지금 명령 맥락으로 돈다(실행마다 새 AiEnv).
   const assistantCtx = useRef(ctx);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   assistantCtx.current = ctx;
   useEffect(() => connectAssistant(() => assistantCtx.current), []);
   // 바탕화면 도우미 창(plan Task 7): 이 창의 도우미를 비추고 그 창의 질문을 받는다. 레이아웃 저장소가 읽힌 뒤에 시작한다.
   useEffect(() => {
-    const bridge = createMainBridge({ ipc: tauriMainIpc, session: assistantSession, store: petStore, ready: layoutStore.ready() });
+    // The creating modes of the pet read the open note and the experiment's workflow notes the way the in-window panel does.
+    const note = bubbleActions(() => assistantCtx.current);
+    const bridge = createMainBridge({
+      ipc: tauriMainIpc,
+      session: assistantSession,
+      store: petStore,
+      ready: layoutStore.ready(),
+      context: { activePath: () => selectedRef.current, activeNote: note.activeNote, workflowNotes: note.workflowNotes },
+    });
     void bridge.start().catch((e) => console.warn('[labnoteo] desktop pet bridge failed:', e));
     return () => bridge.stop();
   }, []);

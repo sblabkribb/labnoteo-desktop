@@ -34,7 +34,7 @@ pub struct PetRuntime {
 
 /// What the main window may hand to the pet, and what the pet may hand to the main window. Nothing else is relayed.
 pub const TO_PET: [&str; 3] = ["pet:state", "pet:answer", "pet:reject"];
-pub const TO_MAIN: [&str; 2] = ["pet:ask", "pet:ready"];
+pub const TO_MAIN: [&str; 3] = ["pet:ask", "pet:clear", "pet:ready"];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,7 @@ pub fn pet_relay(rt: State<'_, PetRuntime>, event: String, payload: serde_json::
     }
 }
 
-/// Pet to main window: only `pet:ask` and `pet:ready`, delivered to the main window alone.
+/// Pet to main window: only `pet:ask`, `pet:clear` and `pet:ready`, delivered to the main window alone.
 #[tauri::command]
 pub fn pet_to_main<R: Runtime>(app: AppHandle<R>, event: String, payload: serde_json::Value) -> bool {
     TO_MAIN.contains(&event.as_str()) && app.emit_to("main", &event, payload).is_ok()

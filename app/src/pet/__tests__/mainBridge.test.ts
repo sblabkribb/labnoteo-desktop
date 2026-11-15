@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BUILTIN_SKIN } from '../../assistant/skins/builtin';
 import type { PetSnapshot } from '../../assistant/petStore';
 import type { ChatItem, SessionSnapshot } from '../../assistant/useAssistantSession';
-import { createMainBridge, type BridgeIpc } from '../mainBridge';
+import { sectionLabel, sectionOptions } from '../../assistant/SectionPicker';
+import { createMainBridge, type BridgeIpc, type MainBridgeDeps } from '../mainBridge';
 import { parseAnswer, parseReject, parseState } from '../protocol';
 
 const SECRET = 'sk-SECRET-1234567890-labnote/001_A/private.md';
@@ -43,6 +44,7 @@ function fakeSession(availability: Avail = 'ok') {
   let snap: SessionSnapshot = { folder: 'labnote/001_A', loading: false, messages: [], summarised: false, streaming: false, notice: null, chip: 'chat' };
   const subs = new Set<() => void>();
   const sends: string[] = [];
+  const chipRuns: unknown[] = [];
   let release: (() => void) | null = null;
   const session = {
     get: () => snap,
@@ -58,13 +60,18 @@ function fakeSession(availability: Avail = 'ok') {
       sends.push(text);
       return new Promise<void>((r) => (release = r));
     }),
+    runChip: vi.fn((run: unknown) => {
+      chipRuns.push(run);
+      return new Promise<void>((r) => (release = r));
+    }),
+    clear: vi.fn(async (_opts?: { confirmed?: boolean }) => true),
   };
   const set = (patch: Partial<SessionSnapshot>) => {
     snap = { ...snap, ...patch };
     subs.forEach((fn) => fn());
   };
   const item = (id: string, role: 'user' | 'assistant', text: string, extra: Partial<ChatItem> = {}): ChatItem => ({ id, role, text, sources: [], tainted: false, ...extra });
-  return { session, set, sends, finish: () => release?.(), subs, item };
+  return { session, set, sends, chipRuns, finish: () => release?.(), subs, item };
 }
 
 function fakeStore(over: Partial<PetSnapshot> = {}) {
@@ -94,7 +101,7 @@ const flushMicro = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 
-function setup(opts: { avail?: Avail; start?: unknown; store?: Partial<PetSnapshot>; ready?: Promise<void> } = {}) {
+function setup(opts: { avail?: Avail; start?: unknown; store?: Partial<PetSnapshot>; ready?: Promise<void>; context?: MainBridgeDeps['context'] } = {}) {
   const i = fakeIpc(opts.start);
   const s = fakeSession(opts.avail);
   const p = fakeStore(opts.store);
@@ -108,6 +115,7 @@ function setup(opts: { avail?: Avail; start?: unknown; store?: Partial<PetSnapsh
     manifest: async () => BUILTIN_SKIN,
     dpr: () => 1,
     newId: () => `local-run-${++n}`,
+    ...(opts.context ? { context: opts.context, contextMs: 1000 } : {}),
   });
   return { ...i, s, p, bridge };
 }
@@ -349,7 +357,7 @@ describe('guards', () => {
     t.s.set({ messages: [t.s.item('a1', 'assistant', 'x', { pending: true })], streaming: true });
     t.bridge.stop();
     await flushMicro();
-    expect(new Set(t.unlistened)).toEqual(new Set(['pet:ready', 'pet:ask', 'pet:closed']));
+    expect(new Set(t.unlistened)).toEqual(new Set(['pet:ready', 'pet:ask', 'pet:clear', 'pet:closed']));
     expect(t.s.subs.size).toBe(0);
     expect(t.p.subs.size).toBe(0);
     vi.advanceTimersByTime(1000);
@@ -357,5 +365,204 @@ describe('guards', () => {
     t.fire('pet:ready', { v: 1 });
     await flushMicro();
     expect(t.emitted).toHaveLength(0);
+  });
+});
+
+const NOTE = 'labnote/001_A/001_wf.md';
+const MD = '# Title\n\n## Methods\n\ntext\n\n## Notes\n\nmore\n';
+const OPTIONS = sectionOptions(MD, undefined);
+const ctx = (over: Partial<NonNullable<MainBridgeDeps['context']>> = {}): NonNullable<MainBridgeDeps['context']> => ({
+  activePath: () => NOTE,
+  activeNote: async () => ({ path: NOTE, text: MD }),
+  workflowNotes: async () => ['labnote/001_A/001_first.md', 'labnote/001_A/002_second.md'],
+  ...over,
+});
+const ask = (o: Record<string, unknown>) => ({ v: 1, askId: 'ask-12345678', text: 'do it', ...o });
+const pick = (i: number) => ({ kind: 'pick', index: i, label: sectionLabel(OPTIONS[i]!) });
+
+describe('questions in, by mode', () => {
+  it('sets up the section list the test relies on', () => {
+    expect(OPTIONS.map((o) => o.heading)).toEqual(['Methods', 'Notes']);
+  });
+
+  it('section: runs the section chip with the parameters the panel would send', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'section', text: ' more detail ', section: pick(1) }));
+    await flushMicro();
+    expect(t.s.chipRuns).toEqual([
+      { chip: 'section', params: { documentPath: NOTE, heading: 'Notes', parentHeading: 'Title', existing: 'yes' }, line: 'Notes — more detail', text: 'more detail' },
+    ]);
+    expect(t.s.session.setChip).toHaveBeenCalledWith('section');
+    expect(t.s.sends).toEqual([]);
+  });
+
+  it('section: a new title becomes a new section', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'section', text: '', section: { kind: 'new', title: 'Safety' } }));
+    await flushMicro();
+    expect(t.s.chipRuns).toEqual([{ chip: 'section', params: { documentPath: NOTE, heading: 'Safety', existing: 'no' }, line: 'Safety', text: '' }]);
+  });
+
+  it('section: a list that changed since the pet drew it is refused', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'section', section: { kind: 'pick', index: 1, label: 'Something else' } }));
+    await flushMicro();
+    expect(t.of('pet:reject').map((r) => parseReject(r)?.reason)).toEqual(['invalid']);
+    t.fire('pet:ask', ask({ askId: 'ask-87654321', mode: 'section', section: { kind: 'pick', index: 9, label: 'Methods' } }));
+    await flushMicro();
+    expect(t.of('pet:reject').map((r) => parseReject(r)?.reason)).toEqual(['invalid', 'invalid']);
+    expect(t.s.chipRuns).toEqual([]);
+  });
+
+  it('section: no open note says so (no-note)', async () => {
+    const t = setup({ context: ctx({ activeNote: async () => undefined }) });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'section', section: pick(0) }));
+    await flushMicro();
+    expect(parseReject(t.of('pet:reject')[0])?.reason).toBe('no-note');
+  });
+
+  it.each(['section', 'unitOp', 'workflow'] as const)('%s outside an experiment says no-note and runs nothing', async (mode) => {
+    const t = setup({ context: ctx() });
+    t.s.set({ folder: null });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode, section: pick(0) }));
+    await flushMicro();
+    expect(parseReject(t.of('pet:reject')[0])?.reason).toBe('no-note');
+    expect(t.s.chipRuns).toEqual([]);
+  });
+
+  it('unit operation: the open workflow note is the target', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'unitOp', text: 'add PCR cleanup' }));
+    await flushMicro();
+    expect(t.s.chipRuns).toEqual([{ chip: 'unitOp', params: { documentPath: NOTE }, line: 'add PCR cleanup', text: 'add PCR cleanup' }]);
+    expect(t.s.session.setChip).toHaveBeenCalledWith('unitOp');
+  });
+
+  it('unit operation: with another note open the first workflow note of the experiment is the target; none says no-workflow', async () => {
+    const t = setup({ context: ctx({ activePath: () => 'labnote/001_A/README.md' }) });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'unitOp', text: 'x' }));
+    await flushMicro();
+    expect((t.s.chipRuns[0] as { params: unknown }).params).toEqual({ documentPath: 'labnote/001_A/001_first.md' });
+
+    const none = setup({ context: ctx({ activePath: () => 'labnote/001_A/README.md', workflowNotes: async () => [] }) });
+    await none.bridge.start();
+    await flushMicro();
+    none.fire('pet:ask', ask({ mode: 'unitOp', text: 'x' }));
+    await flushMicro();
+    expect(parseReject(none.of('pet:reject')[0])?.reason).toBe('no-workflow');
+    expect(none.s.chipRuns).toEqual([]);
+  });
+
+  it('workflow: points at the open note, else the experiment folder', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'workflow', text: 'plasmid cloning' }));
+    await flushMicro();
+    expect(t.s.chipRuns).toEqual([{ chip: 'workflow', params: { documentPath: NOTE }, line: 'plasmid cloning', text: 'plasmid cloning' }]);
+    const bare = setup({ context: ctx({ activePath: () => undefined }) });
+    await bare.bridge.start();
+    await flushMicro();
+    bare.fire('pet:ask', ask({ mode: 'workflow', text: 'x' }));
+    await flushMicro();
+    expect((bare.s.chipRuns[0] as { params: unknown }).params).toEqual({ documentPath: 'labnote/001_A' });
+  });
+
+  it('how to use does not call the model: it is refused as not sendable', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'howTo' }));
+    await flushMicro();
+    expect(parseReject(t.of('pet:reject')[0])?.reason).toBe('invalid');
+    expect(t.s.sends).toEqual([]);
+    expect(t.s.chipRuns).toEqual([]);
+  });
+
+  it.each(['no-vault', 'not-configured', 'busy'] as const)('every mode is refused with %s when the assistant cannot answer', async (reason) => {
+    const t = setup({ avail: reason, context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'workflow', text: 'x' }));
+    await flushMicro();
+    expect(parseReject(t.of('pet:reject')[0])?.reason).toBe(reason);
+    expect(t.s.chipRuns).toEqual([]);
+  });
+
+  it('an unknown mode is dropped like any invalid event', async () => {
+    const t = setup({ context: ctx() });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ask', ask({ mode: 'shell' }));
+    await flushMicro();
+    expect(t.s.session.availability).not.toHaveBeenCalled();
+  });
+});
+
+describe('experiment context out', () => {
+  it('the state carries the folder name, the section labels and the target note name only', async () => {
+    const t = setup({ context: ctx({ activePath: () => 'labnote/001_A/README.md' }) });
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:ready', { v: 1 });
+    await flushMicro();
+    vi.advanceTimersByTime(1000);
+    await flushMicro();
+    vi.advanceTimersByTime(120);
+    await flushMicro();
+    const last = parseState(t.of('pet:state').at(-1))!;
+    expect(last.folder).toBe('001_A');
+    expect(last.sections).toEqual(OPTIONS.map(sectionLabel));
+    expect(last.unitTarget).toBe('001_first.md');
+    expect(JSON.stringify(t.emitted)).not.toContain('labnote/');
+  });
+
+  it('a change of the open note reaches the pet within one poll, no change sends nothing more', async () => {
+    let md = MD;
+    const t = setup({ context: ctx({ activeNote: async () => ({ path: NOTE, text: md }) }) });
+    await t.bridge.start();
+    await flushMicro();
+    vi.advanceTimersByTime(1000);
+    await flushMicro();
+    vi.advanceTimersByTime(120);
+    await flushMicro();
+    const n = t.of('pet:state').length;
+    vi.advanceTimersByTime(3000);
+    await flushMicro();
+    expect(t.of('pet:state')).toHaveLength(n);
+    md = MD + '\n## Safety\n\nx\n';
+    vi.advanceTimersByTime(1000);
+    await flushMicro();
+    vi.advanceTimersByTime(120);
+    await flushMicro();
+    expect(parseState(t.of('pet:state').at(-1))!.sections).toContain('Safety');
+  });
+});
+
+describe('clear in', () => {
+  it('pet:clear clears the conversation without a dialog in the main window and never raises it', async () => {
+    const t = setup();
+    await t.bridge.start();
+    await flushMicro();
+    t.fire('pet:clear', { v: 1 });
+    t.fire('pet:clear', { v: 3 });
+    await flushMicro();
+    expect(t.s.session.clear).toHaveBeenCalledTimes(1);
+    expect(t.s.session.clear).toHaveBeenCalledWith({ confirmed: true });
+    expect(t.invoked.map((c) => c.cmd)).not.toContain('pet_open_main');
   });
 });

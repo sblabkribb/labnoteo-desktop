@@ -132,7 +132,7 @@ export function parseReject(raw: unknown): RejectEvent | null {
 
 export const parseReady = (raw: unknown): ReadyEvent | null => (isObj(raw) && raw.v === 1 ? { v: 1 } : null);
 
-const oneLine = (raw: unknown, max: number): string => clampText(raw, max).replace(/\s*\n\s*/g, ' ').trim();
+export const oneLine = (raw: unknown, max: number): string => clampText(raw, max).replace(/\s*\n\s*/g, ' ').trim();
 
 function parseSection(raw: unknown): SectionPick | null {
   if (!isObj(raw)) return null;
