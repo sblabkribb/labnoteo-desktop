@@ -59,6 +59,40 @@ describe('인라인 스타일', () => {
 
 });
 
+// The desktop pet page (plan D11): the same app-protocol CSP as the main window, so its HTML must stay free of inline code and styles.
+describe('desktop pet page', () => {
+  const html = readFileSync('pet.html', 'utf-8');
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+
+  it('has exactly one module script with a src, and no inline script body anywhere', () => {
+    const modules = scripts.filter((m) => /\btype\s*=\s*["']module["']/i.test(m[1]));
+    expect(modules).toHaveLength(1);
+    expect(modules[0][1]).toMatch(/\bsrc\s*=\s*["'][^"']+["']/);
+    for (const m of scripts) {
+      expect(m[1], 'every script has a src').toMatch(/\bsrc\s*=/);
+      expect(m[2].trim(), 'no inline script body').toBe('');
+    }
+  });
+
+  it('has no style attribute, no <style>, no external stylesheet link and no <base>', () => {
+    expect(html).not.toMatch(/\sstyle\s*=/i);
+    expect(html).not.toMatch(/<style\b/i);
+    expect(html).not.toMatch(/<link\b[^>]*rel\s*=\s*["']?stylesheet/i);
+    expect(html).not.toMatch(/<base\b/i);
+  });
+
+  it('is not a configured window: tauri.conf.json lists only the main window (Rust creates the pet)', () => {
+    expect(conf.app.windows).toHaveLength(1);
+    expect(conf.app.windows[0].title).toBe('labnoteO');
+    expect(JSON.stringify(conf.app.windows)).not.toMatch(/pet/i);
+  });
+
+  it('shares the one strict CSP: nothing is added for the pet', () => {
+    expect(typeof conf.app.security.csp).toBe('string');
+    expect(conf.app.security.csp).not.toMatch(/unsafe-inline|unsafe-eval|asset:/);
+  });
+});
+
 // script-src 'self' 는 같은 출처의 파일은 허용하고 인라인 스크립트는 막는다. 개발 서버의 CSP 는 느슨해서 인라인을 써도 개발 중에는 보이지 않는다.
 describe('index.html', () => {
   const page = readFileSync('index.html', 'utf-8');

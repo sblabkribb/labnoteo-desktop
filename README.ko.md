@@ -178,7 +178,8 @@ Workflow 서버인 [bfworkflow](https://github.com/sblabkribb/bfworkflow)를 연
 Workflow 만들기 칩과 자유 대화가 나옵니다. Workflow와 Unit Operation 질문은 카탈로그 설명부터 찾아 답하고,
 답마다 눌러 볼 수 있는 출처 칩이 붙습니다. **노트에 넣기**는 답을 출처 목록과 함께 넣습니다. 노트를 바꾸는
 일은 미리 보기를 보여 주고 허용할 때만 합니다. 대화 창은 크기를 바꿀 수 있고, 대화 기록은 보관함이 아니라
-이 PC의 앱 폴더에 실험별로 남습니다.
+이 PC의 앱 폴더에 실험별로 남습니다. 도우미는 바탕화면에도 작은 펫으로 항상 맨 앞에 떠 있습니다. 누르면 앱 창을
+열지 않고 짧게 물어볼 수 있고, 오른쪽 버튼을 누르면 이번만 숨기기, 조용히 하기, labnoteO 창 열기가 나옵니다.
 
 ![Flasko에게 WB150 Workflow를 묻고, 카탈로그 출처를 보고, 답을 노트에 넣고, 새 Unit Operation을 허용하는 모습](docs/images/ko/labnoteo-assistant.gif)
 

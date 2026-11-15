@@ -186,7 +186,9 @@ Flasko, the flask in the bottom-right corner, is the in-app assistant. Click it 
 Unit Operations are answered from the catalog first, and every answer carries source chips you can
 click. **Insert into note** adds the answer with its sources. Anything that would change a note is
 shown as a preview and runs only after you allow it. The chat window can be resized, and chat
-history is kept per experiment in this PC's app folder, never in the vault.
+history is kept per experiment in this PC's app folder, never in the vault. The assistant also lives on
+your desktop as a small always-on-top pet: click it to ask a short question without opening the app
+window, or right-click it for Hide for now, Quiet mode and Open labnoteO window.
 
 ![Ask Flasko about the WB150 Workflow, see the cited catalog sources, insert the answer and approve a new Unit Operation](docs/images/en/labnoteo-assistant.gif)
 

@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 type Cap = { identifier: string; windows: string[]; permissions: Array<string | { identifier: string }> };
@@ -52,5 +53,50 @@ describe('the pet window capability', () => {
     for (const c of commands) expect(granted.has(allow(c)), c).toBe(!PET_ONLY.includes(c));
     const known = new Set(commands.map(allow));
     for (const g of granted) expect(known.has(g), g).toBe(true);
+  });
+});
+
+// Static guards (plan Task 9): the pet code must not be able to reach the vault, the network, git, scanning or settings.
+function files(dir: string, ext: RegExp): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) return name === '__tests__' ? [] : files(p, ext);
+    return ext.test(name) && !/\.test\./.test(name) ? [p] : [];
+  });
+}
+const specifiers = (src: string): string[] =>
+  // \x27 and \x22 are the two quote characters (kept out of the literal for the escapes guard)
+  [...src.matchAll(/(?:^|\n)\s*(?:import|export)\b[^;\x27\x22]*?\bfrom\s*[\x27\x22]([^\x27\x22]+)[\x27\x22]|(?:^|\n)\s*import\s*[\x27\x22]([^\x27\x22]+)[\x27\x22]/g)].map((m) => m[1] ?? m[2]);
+const FORBIDDEN = /^(?:\.\.\/)+(?:fs|vault|integrations|github|labnote|partbank|bfworkflow|ai|labservices|links|search)(?:\/|$)/;
+
+describe('static pet guards', () => {
+  const petFiles = files('src/pet', /\.(?:ts|tsx)$/);
+
+  it('finds the pet sources and parses their imports', () => {
+    expect(petFiles.length).toBeGreaterThan(5);
+    expect(specifiers("import { a } from '../x';\nimport '../y.css';")).toEqual(['../x', '../y.css']);
+    expect('../integrations/netIpc').toMatch(FORBIDDEN);
+    expect('../assistant/petStore').not.toMatch(FORBIDDEN);
+  });
+
+  it('no pet source imports the vault, fs, integrations, github, labnote, partbank, bfworkflow, ai, labservices, links or search code', () => {
+    for (const f of petFiles) for (const s of specifiers(readFileSync(f, 'utf-8'))) expect(s, `${f} imports ${s}`).not.toMatch(FORBIDDEN);
+  });
+
+  it('PetApp imports only react, src/pet, the skins, the pet store helpers and i18n', () => {
+    const src = readFileSync('src/pet/PetApp.tsx', 'utf-8');
+    const ok = /^(?:react|\.\/[A-Za-z]+|\.\.\/assistant\/skins\/[A-Za-z]+|\.\.\/assistant\/petStore|\.\.\/i18n\/[A-Za-z]+)$/;
+    for (const s of specifiers(src)) expect(s, s).toMatch(ok);
+    // from petStore: the sprite and layout helpers only, never the store itself
+    const names = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*\x27\.\.\/assistant\/petStore\x27/g)].flatMap((m) => m[1].split(',').map((n) => n.trim().replace(/^type\s+/, '')));
+    expect(names.length).toBeGreaterThan(0);
+    for (const n of names) expect(['applySkinVars', 'BUBBLE_GAP', 'DRAG_THRESHOLD', 'snapScale'], n).toContain(n);
+  });
+
+  it('the pet Rust sources never mention the vault, net, git sync, scan, directory reads, secrets, process spawning or the opener', () => {
+    const rust = files('src-tauri/src/pet', /\.rs$/);
+    expect(rust.length).toBeGreaterThanOrEqual(4);
+    const bad = /vault::|net::|gitsync|scan::|read_dir|secrets|Command::new|opener/;
+    for (const f of rust) expect(readFileSync(f, 'utf-8'), f).not.toMatch(bad);
   });
 });

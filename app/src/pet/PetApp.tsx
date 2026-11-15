@@ -5,7 +5,6 @@ import { useSkin, type SkinDeps } from '../assistant/skins/useSkin';
 import { applyHtmlLang, setLang } from '../i18n/lang';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
-import type { InvokeFn } from '../integrations/netIpc';
 import { growWindow, type Rect } from './geometry';
 import { MENU_ITEMS, runMenuAction, type MenuAction, type MenuDeps } from './menuActions';
 import { EMPTY_MIRROR, mirrorReduce } from './mirror';
@@ -46,6 +45,9 @@ export interface PetAppProps {
   canDraw?: (url: string) => Promise<boolean>;
   newId?: () => string;
 }
+
+/** The skin loader's own invoke shape (kept here so the pet page imports nothing from the integrations code). */
+type InvokeFn = NonNullable<SkinDeps['invoke']>;
 
 const defaultNewId = (): string =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
