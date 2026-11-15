@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, ty
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { Icon } from '../ui/Icon';
+import { buildChipRun } from './chipRun';
 import { ChipBar } from './ChipBar';
 import { chipGate, isWorkflowNotePath, type ChipId } from './chips';
 import { HowToCard } from './HowToCard';
@@ -209,29 +210,8 @@ export function Bubble(props: {
       void chat.send(text);
       return;
     }
-    if (chip === 'section' && section) {
-      const documentPath = notePath ?? props.activePath ?? '';
-      void chat.runChip({
-        chip,
-        params: {
-          documentPath,
-          heading: section.heading,
-          ...(section.parentHeading ? { parentHeading: section.parentHeading } : {}),
-          ...(section.after ? { after: section.after } : {}),
-          existing: section.existing ? 'yes' : 'no',
-        },
-        line: text ? `${section.heading} — ${text}` : section.heading,
-        text,
-      });
-      return;
-    }
-    if (chip === 'unitOp' && unitOpTarget) {
-      void chat.runChip({ chip, params: { documentPath: unitOpTarget }, line: text, text });
-      return;
-    }
-    if (chip === 'workflow') {
-      void chat.runChip({ chip, params: { documentPath: props.activePath ?? chat.folder ?? '' }, line: text, text });
-    }
+    const run = buildChipRun(chip, { text, section, notePath, activePath: props.activePath, folder: chat.folder, unitOpTarget });
+    if (run) void chat.runChip(run);
   };
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();

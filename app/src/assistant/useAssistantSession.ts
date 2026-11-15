@@ -113,8 +113,8 @@ export interface AssistantSession {
   /** 지금 질문을 받을 수 있는지: 런타임 없음(no-vault), 실행 중(busy), 제공자 없음(not-configured) 순. */
   availability(): Promise<'ok' | 'no-vault' | 'not-configured' | 'busy'>;
   stop(): void;
-  /** 이 폴더의 기록을 확인한 뒤 지운다. 지웠으면 true. 실험 밖이면 화면만 비운다. */
-  clear(): Promise<boolean>;
+  /** 이 폴더의 기록을 확인한 뒤 지운다. 지웠으면 true. 실험 밖이면 화면만 비운다. `confirmed` 면 이미 물었으니 묻지 않는다(바탕화면 도우미가 자기 칸에서 물었다). */
+  clear(opts?: { confirmed?: boolean }): Promise<boolean>;
   /** 모든 기록을 지운 뒤(설정 창): 화면을 비운다(저장소는 이미 비었다). */
   forget(): void;
   resetForTest(deps?: SessionDeps): void;
@@ -408,7 +408,7 @@ const session: AssistantSession = {
     abortRun();
     pet('idle');
   },
-  async clear() {
+  async clear(opts) {
     const folder = snap.folder;
     if (folder === null) {
       abortRun();
@@ -420,7 +420,7 @@ const session: AssistantSession = {
     const ask =
       deps.confirm ??
       ((message: string) => confirmDialog(message, { confirmLabel: t('history.clearAction'), destructive: true }));
-    if (!(await ask(t('history.clearConfirm')))) return false;
+    if (!opts?.confirmed && !(await ask(t('history.clearConfirm')))) return false;
     if (snap.folder !== folder) return false;
     const mine = gen;
     abortRun();

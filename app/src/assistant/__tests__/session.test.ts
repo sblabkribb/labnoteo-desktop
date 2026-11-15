@@ -319,6 +319,15 @@ describe('assistant session', () => {
     expect(session.get().messages).toEqual([]);
   });
 
+  it('clear({ confirmed: true }) removes the folder without opening the dialog (the desktop pet asked its own question)', async () => {
+    const { session, mem, confirm } = setup({ seed: { [A]: stored(A, ['a']) } });
+    session.setActivePath(NOTE_A);
+    await flush();
+    expect(await session.clear({ confirmed: true })).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(mem.docs.has(A)).toBe(false);
+  });
+
   it('without a runtime the reply says to configure AI first', async () => {
     const { session } = setup();
     session.setActivePath(NOTE_A);

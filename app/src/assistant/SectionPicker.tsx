@@ -67,6 +67,12 @@ export function sectionOptions(md: string, cursorLine?: number): SectionOption[]
 
 const NEW = 'new';
 
+/** The text of one choice in the list (a missing section says so). The desktop pet shows the same text. */
+export function sectionLabel(o: SectionOption): string {
+  const base = o.parentHeading && o.planning ? `${o.heading} · ${o.parentHeading}` : o.heading;
+  return o.existing ? base : t('section.missing', base);
+}
+
 function choiceOf(o: SectionOption): SectionChoice {
   return {
     heading: o.heading,
@@ -85,10 +91,6 @@ export function SectionPicker(props: { options: SectionOption[]; value: SectionC
   const id = useId();
   const [picked, setPicked] = useState('');
   const [title, setTitle] = useState('');
-  const label = (o: SectionOption): string => {
-    const base = o.parentHeading && o.planning ? `${o.heading} · ${o.parentHeading}` : o.heading;
-    return o.existing ? base : t('section.missing', base);
-  };
   const onSelect = (value: string) => {
     setPicked(value);
     if (value === NEW) {
@@ -115,7 +117,7 @@ export function SectionPicker(props: { options: SectionOption[]; value: SectionC
         </option>
         {props.options.map((o, i) => (
           <option key={`${i}:${o.parentHeading ?? ''}:${o.heading}`} value={String(i)}>
-            {label(o)}
+            {sectionLabel(o)}
           </option>
         ))}
         <option value={NEW}>{t('section.new')}</option>
