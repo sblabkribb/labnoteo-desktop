@@ -199,6 +199,22 @@ jobs:
         working-directory: app/src-tauri
         run: cargo test --target x86_64-pc-windows-msvc
 
+      # The text people see in the update dialog and on the release page: .github/release-notes/<tag>.md when the
+      # release has one (written by a person or Claude with the change), else only the install note.
+      - name: Release notes
+        id: notes
+        if: steps.pre.outputs.skip != 'true'
+        run: |
+          f=".github/release-notes/$TAG.md"
+          if [ -f "$f" ]; then body="$(cat "$f")"; else body="Windows installer (unsigned: SmartScreen will warn on first install)."; fi
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            echo "$body"
+            echo
+            echo "Windows installer (unsigned: SmartScreen will warn on first install)."
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       # Right before the build, after every guard and test passed. The tag stays (no --cleanup-tag).
       - name: Remove the incomplete release
         if: steps.pre.outputs.skip != 'true' && steps.pre.outputs.state != 'none'
@@ -221,7 +237,7 @@ jobs:
           projectPath: app
           tagName: ${{ env.TAG }}
           releaseName: labnoteO ${{ env.TAG }}
-          releaseBody: "Windows installer (unsigned: SmartScreen will warn on first install)."
+          releaseBody: ${{ steps.notes.outputs.body }}
           commitish: ${{ steps.head.outputs.sha }}
           # A draft is invisible to installed apps (releases/latest skips drafts) until the step below publishes it.
           releaseDraft: true
