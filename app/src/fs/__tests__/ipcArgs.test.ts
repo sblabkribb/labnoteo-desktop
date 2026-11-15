@@ -52,6 +52,7 @@ const PENDING_TS_WRAPPERS: readonly string[] = [
   'pet_open_main',
   'pet_quiet_get',
   'pet_quiet_set',
+  'pet_panel_size',
   'pet_start_failed',
   'pet_subscribe',
   'pet_relay',

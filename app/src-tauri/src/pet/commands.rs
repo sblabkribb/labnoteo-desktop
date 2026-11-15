@@ -30,6 +30,8 @@ pub struct PetRuntime {
     pub saver: AtomicBool,
     /// The pet page's inbox: the main window's events reach it only through here, never through the global event bus.
     pub relay: Mutex<Option<Channel<serde_json::Value>>>,
+    /// The panel bubble's size in logical px ((0, 0) until the pet starts); always clamped again when read.
+    pub panel: Mutex<(u32, u32)>,
 }
 
 /// What the main window may hand to the pet, and what the pet may hand to the main window. Nothing else is relayed.
@@ -42,6 +44,19 @@ pub struct Geometry {
     pub sprite: Rect,
     pub areas: Vec<Rect>,
     pub scale: f64,
+    pub panel: PanelInfo,
+}
+
+/// The panel bubble's size and the bounds for it on the sprite's monitor, in logical px.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelInfo {
+    pub w: u32,
+    pub h: u32,
+    pub min_w: u32,
+    pub min_h: u32,
+    pub max_w: u32,
+    pub max_h: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -83,6 +98,12 @@ pub fn pet_geometry<R: Runtime>(window: WebviewWindow<R>, rt: State<'_, PetRunti
 #[tauri::command]
 pub fn pet_set_layout<R: Runtime>(window: WebviewWindow<R>, rt: State<'_, PetRuntime>, args: LayoutArgs) -> Result<(), String> {
     window::set_layout(&window, &rt, args)
+}
+
+/// The pet page asks for a panel size (the person is dragging the bubble corner); the answer is the clamped size and bounds.
+#[tauri::command]
+pub fn pet_panel_size<R: Runtime>(window: WebviewWindow<R>, rt: State<'_, PetRuntime>, w: u32, h: u32, commit: bool) -> Result<PanelInfo, String> {
+    window::set_panel(&window, &rt, w, h, commit)
 }
 
 #[tauri::command]

@@ -13,7 +13,7 @@ const lib = read('src-tauri/src/lib.rs');
 const block = lib.split('generate_handler![')[1].split(']')[0];
 const registered = [...block.matchAll(/\$crate::(?:[a-z0-9_]+::)*([a-z0-9_]+),/g)].map((m) => m[1]);
 const allow = (c: string) => `allow-${c.replace(/_/g, '-')}`;
-const PET_ONLY = ['pet_geometry', 'pet_set_layout', 'pet_hide', 'pet_open_main', 'pet_quiet_get', 'pet_quiet_set', 'pet_start_failed', 'pet_subscribe', 'pet_to_main'];
+const PET_ONLY = ['pet_geometry', 'pet_set_layout', 'pet_hide', 'pet_open_main', 'pet_quiet_get', 'pet_quiet_set', 'pet_panel_size', 'pet_start_failed', 'pet_subscribe', 'pet_to_main'];
 
 describe('the pet window capability', () => {
   it('applies to the pet window only, and the main capability to the main window only', () => {

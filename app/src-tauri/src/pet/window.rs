@@ -9,7 +9,7 @@ use tauri::{
     WindowEvent,
 };
 
-use super::commands::{Geometry, LayoutArgs, PetRuntime, StartResult};
+use super::commands::{Geometry, LayoutArgs, PanelInfo, PetRuntime, StartResult};
 use super::config::{self, PetConfig};
 use super::geometry::{clamp_to_areas, default_position, Rect, MIN_VISIBLE};
 
@@ -18,6 +18,12 @@ const BUBBLE_GAP: u32 = 8;
 const MAX_SPRITE: u32 = 512;
 const WATCH_EVERY: Duration = Duration::from_secs(3);
 const SAVE_AFTER_MOVE: Duration = Duration::from_millis(300);
+/// The panel bubble in logical px: the size it opens at, the smallest and the largest the person can drag it to.
+pub const PANEL_DEFAULT: (u32, u32) = (360, 440);
+pub const PANEL_MIN: (u32, u32) = (300, 340);
+pub const PANEL_MAX: (u32, u32) = (640, 900);
+/// Room kept between the window and the edge of the work area.
+const SCREEN_MARGIN: u32 = 16;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -28,14 +34,67 @@ pub enum Mode {
     Panel,
 }
 
-/// The window size of a mode in logical px: the sprite alone, or the sprite stacked with a bubble.
-pub fn size(mode: Mode, sprite: (u32, u32)) -> (u32, u32) {
+/// The window size of a mode in logical px: the sprite alone, or the sprite stacked with a bubble (`panel` is the
+/// panel bubble's own size).
+pub fn size(mode: Mode, sprite: (u32, u32), panel: (u32, u32)) -> (u32, u32) {
     let (w, h) = sprite;
     match mode {
         Mode::Sprite => (w, h),
         Mode::Toast => (w.max(240), h + BUBBLE_GAP + 72),
-        Mode::Panel => (w.max(320), h + BUBBLE_GAP + 260),
+        Mode::Panel => (w.max(panel.0), h + BUBBLE_GAP + panel.1),
     }
+}
+
+/// Smallest and largest panel bubble (logical px) that fit a work area of `area` logical px beside a sprite of
+/// `sprite`: the fixed bounds, cut down to what the monitor has room for (the smallest never exceeds the largest).
+pub fn panel_bounds(area: (u32, u32), sprite: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+    let max_w = PANEL_MAX.0.min(area.0.saturating_sub(SCREEN_MARGIN)).max(1);
+    let max_h = PANEL_MAX.1.min(area.1.saturating_sub(sprite.1 + BUBBLE_GAP + SCREEN_MARGIN)).max(1);
+    ((PANEL_MIN.0.min(max_w), PANEL_MIN.1.min(max_h)), (max_w, max_h))
+}
+
+/// A wanted panel size inside `panel_bounds`.
+pub fn clamp_panel(want: (u32, u32), area: (u32, u32), sprite: (u32, u32)) -> (u32, u32) {
+    let (lo, hi) = panel_bounds(area, sprite);
+    (want.0.clamp(lo.0, hi.0), want.1.clamp(lo.1, hi.1))
+}
+
+/// The work area that holds the sprite's centre, else the one nearest to it.
+fn area_of(areas: &[Rect], sprite: Option<Rect>) -> Option<Rect> {
+    let s = sprite?;
+    let (cx, cy) = (s.x as i64 + s.w as i64 / 2, s.y as i64 + s.h as i64 / 2);
+    let inside = areas
+        .iter()
+        .find(|a| cx >= a.x as i64 && cx < a.x as i64 + a.w as i64 && cy >= a.y as i64 && cy < a.y as i64 + a.h as i64);
+    inside
+        .or_else(|| {
+            areas.iter().min_by_key(|a| {
+                let (mx, my) = (a.x as i64 + a.w as i64 / 2, a.y as i64 + a.h as i64 / 2);
+                (cx - mx).pow(2) + (cy - my).pow(2)
+            })
+        })
+        .copied()
+}
+
+/// The panel bubble's size right now: the saved or default size, clamped to the monitor the sprite is on.
+fn effective_panel<R: Runtime>(app: &AppHandle<R>, rt: &PetRuntime, scale: f64) -> PanelInfo {
+    let sprite_logical = *lock(&rt.sprite_logical);
+    let areas = work_areas(app);
+    let area = area_of(&areas, *lock(&rt.sprite)).or_else(|| areas.first().copied());
+    let logical = |v: i32| ((v.max(0) as f64) / scale.max(0.1)).floor() as u32;
+    let area_l = area
+        .map(|a| (logical(a.w), logical(a.h)))
+        .unwrap_or((PANEL_MAX.0 + SCREEN_MARGIN, PANEL_MAX.1 + sprite_logical.1 + BUBBLE_GAP + SCREEN_MARGIN));
+    let stored = *lock(&rt.panel);
+    let want = if stored == (0, 0) { PANEL_DEFAULT } else { stored };
+    let (lo, hi) = panel_bounds(area_l, sprite_logical);
+    let (w, h) = clamp_panel(want, area_l, sprite_logical);
+    PanelInfo { w, h, min_w: lo.0, min_h: lo.1, max_w: hi.0, max_h: hi.1 }
+}
+
+fn panel_size<R: Runtime>(app: &AppHandle<R>, rt: &PetRuntime, scale: f64) -> (u32, u32) {
+    let p = effective_panel(app, rt, scale);
+    (p.w, p.h)
 }
 
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -134,6 +193,7 @@ fn build<R: Runtime>(app: &AppHandle<R>, rt: &PetRuntime, w: u32, h: u32) -> Opt
     *lock(&rt.sprite_logical) = (w, h);
     *lock(&rt.offset) = (0, 0);
     *lock(&rt.mode) = Mode::Sprite;
+    *lock(&rt.panel) = config_of(rt).panel.unwrap_or(PANEL_DEFAULT);
     let scale = window.scale_factor().unwrap_or(1.0);
     let (sw, sh) = (px(w, scale), px(h, scale));
     let (x, y) = config_of(rt).pos.unwrap_or_else(|| default_position(sw, sh, &areas));
@@ -183,7 +243,7 @@ fn window_rect<R: Runtime>(window: &Window<R>) -> Option<Rect> {
 fn reapply<R: Runtime>(window: &Window<R>, rt: &PetRuntime) {
     let scale = window.scale_factor().unwrap_or(1.0);
     let sprite = *lock(&rt.sprite_logical);
-    let (w, h) = size(*lock(&rt.mode), sprite);
+    let (w, h) = size(*lock(&rt.mode), sprite, panel_size(window.app_handle(), rt, scale));
     let _ = window.set_size(LogicalSize::new(w as f64, h as f64));
     let areas = work_areas(window.app_handle());
     if let Some(r) = window_rect(window) {
@@ -199,7 +259,22 @@ fn reapply<R: Runtime>(window: &Window<R>, rt: &PetRuntime) {
 
 pub fn geometry<R: Runtime>(window: &WebviewWindow<R>, rt: &PetRuntime) -> Result<Geometry, String> {
     let sprite = (*lock(&rt.sprite)).ok_or("notStarted")?;
-    Ok(Geometry { sprite, areas: work_areas(window.app_handle()), scale: window.scale_factor().unwrap_or(1.0) })
+    let scale = window.scale_factor().unwrap_or(1.0);
+    Ok(Geometry { sprite, areas: work_areas(window.app_handle()), scale, panel: effective_panel(window.app_handle(), rt, scale) })
+}
+
+/// The person is dragging the bubble corner: keep the size inside the bounds for this monitor (and save it when
+/// `commit`). The page then asks for a layout with the new size.
+pub fn set_panel<R: Runtime>(window: &WebviewWindow<R>, rt: &PetRuntime, w: u32, h: u32, commit: bool) -> Result<PanelInfo, String> {
+    (*lock(&rt.sprite)).ok_or("notStarted")?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let before = effective_panel(window.app_handle(), rt, scale);
+    let (cw, ch) = (w.clamp(before.min_w, before.max_w), h.clamp(before.min_h, before.max_h));
+    *lock(&rt.panel) = (cw, ch);
+    if commit {
+        update_config(rt, |c| c.panel = Some((cw, ch)));
+    }
+    Ok(effective_panel(window.app_handle(), rt, scale))
 }
 
 pub fn set_layout<R: Runtime>(window: &WebviewWindow<R>, rt: &PetRuntime, args: LayoutArgs) -> Result<(), String> {
@@ -214,7 +289,7 @@ pub fn set_layout<R: Runtime>(window: &WebviewWindow<R>, rt: &PetRuntime, args: 
         }
         mode => {
             let want = args.rect.ok_or("rect")?;
-            let (lw, lh) = size(mode, sprite_logical);
+            let (lw, lh) = size(mode, sprite_logical, panel_size(window.app_handle(), rt, scale));
             if want.w <= 0 || want.h <= 0 || want.w > px(lw, scale) + 2 || want.h > px(lh, scale) + 2 {
                 return Err("size".into());
             }
@@ -225,7 +300,7 @@ pub fn set_layout<R: Runtime>(window: &WebviewWindow<R>, rt: &PetRuntime, args: 
             (clamp_to_areas(want, &areas, MIN_VISIBLE), offset)
         }
     };
-    let (lw, lh) = size(args.mode, sprite_logical);
+    let (lw, lh) = size(args.mode, sprite_logical, panel_size(window.app_handle(), rt, scale));
     let growing = window_rect(&window.as_ref().window()).map(|c| target.w > c.w || target.h > c.h).unwrap_or(true);
     *lock(&rt.offset) = offset;
     *lock(&rt.mode) = args.mode;
@@ -328,10 +403,40 @@ mod tests {
 
     #[test]
     fn the_three_sizes_for_a_96_sprite() {
-        assert_eq!(size(Mode::Sprite, (96, 96)), (96, 96));
-        assert_eq!(size(Mode::Toast, (96, 96)), (240, 176));
-        assert_eq!(size(Mode::Panel, (96, 96)), (320, 364));
-        assert_eq!(size(Mode::Toast, (300, 100)), (300, 180));
+        assert_eq!(size(Mode::Sprite, (96, 96), (320, 260)), (96, 96));
+        assert_eq!(size(Mode::Toast, (96, 96), (320, 260)), (240, 176));
+        assert_eq!(size(Mode::Panel, (96, 96), (320, 260)), (320, 364));
+        assert_eq!(size(Mode::Panel, (96, 96), PANEL_DEFAULT), (360, 544));
+        assert_eq!(size(Mode::Toast, (300, 100), (320, 260)), (300, 180));
+        // a sprite wider than the bubble keeps its own width
+        assert_eq!(size(Mode::Panel, (400, 100), (320, 260)), (400, 368));
+    }
+
+    #[test]
+    fn the_panel_is_kept_between_the_bounds_and_the_monitor() {
+        let area = (1920, 1200);
+        let sprite = (96, 96);
+        assert_eq!(clamp_panel((10, 10), area, sprite), PANEL_MIN);
+        assert_eq!(clamp_panel((5000, 5000), area, sprite), PANEL_MAX);
+        assert_eq!(clamp_panel((400, 500), area, sprite), (400, 500));
+        // a small monitor cuts the largest size down: the height leaves room for the sprite, the gap and a margin
+        assert_eq!(clamp_panel((900, 900), (500, 600), sprite), (500 - SCREEN_MARGIN, 600 - 96 - BUBBLE_GAP - SCREEN_MARGIN));
+        // a very small area never makes the smallest bigger than the largest, and nothing is zero
+        let (lo, hi) = panel_bounds((200, 150), sprite);
+        assert!(lo.0 <= hi.0 && lo.1 <= hi.1 && lo.0 >= 1 && lo.1 >= 1, "{lo:?} {hi:?}");
+        assert_eq!(panel_bounds((0, 0), (500, 500)), ((1, 1), (1, 1)));
+    }
+
+    #[test]
+    fn the_work_area_of_the_sprite_is_the_one_holding_it() {
+        let a = Rect { x: 0, y: 0, w: 1000, h: 800 };
+        let b = Rect { x: 1000, y: 0, w: 1000, h: 800 };
+        let on_b = Rect { x: 1100, y: 100, w: 64, h: 64 };
+        assert_eq!(area_of(&[a, b], Some(on_b)), Some(b));
+        let off = Rect { x: 5000, y: 100, w: 64, h: 64 };
+        assert_eq!(area_of(&[a, b], Some(off)), Some(b));
+        assert_eq!(area_of(&[a, b], None), None);
+        assert_eq!(area_of(&[], Some(on_b)), None);
     }
 
     #[test]
@@ -352,7 +457,9 @@ mod tests {
         *rt.config_dir.lock().unwrap() = Some(d.clone());
         update_config(&rt, |c| c.quiet = true);
         update_config(&rt, |c| c.pos = Some((5, -6)));
-        assert_eq!(config_of(&rt), PetConfig { pos: Some((5, -6)), quiet: true });
+        assert_eq!(config_of(&rt), PetConfig { pos: Some((5, -6)), quiet: true, panel: None });
+        update_config(&rt, |c| c.panel = Some((410, 520)));
+        assert_eq!(config_of(&rt).panel, Some((410, 520)));
         let _ = std::fs::remove_dir_all(&d);
     }
 

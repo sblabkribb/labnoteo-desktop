@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'src-tauri');
-const PET_ONLY = new Set(['pet_geometry', 'pet_set_layout', 'pet_hide', 'pet_open_main', 'pet_quiet_get', 'pet_quiet_set', 'pet_start_failed']);
+const PET_ONLY = new Set(['pet_geometry', 'pet_set_layout', 'pet_hide', 'pet_open_main', 'pet_quiet_get', 'pet_quiet_set', 'pet_panel_size', 'pet_start_failed', 'pet_subscribe', 'pet_to_main']);
 const commands = readFileSync(join(root, 'commands.txt'), 'utf-8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 const file = join(root, 'capabilities', 'default.json');
 const text = readFileSync(file, 'utf-8');

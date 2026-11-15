@@ -148,6 +148,7 @@
   "pet_open_main": [],
   "pet_quiet_get": [],
   "pet_quiet_set": ["quiet"],
+  "pet_panel_size": ["w", "h", "commit"],
   "pet_start_failed": [],
   "pet_subscribe": ["onEvent"],
   "pet_relay": ["event", "payload"],

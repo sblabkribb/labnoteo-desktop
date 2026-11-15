@@ -1278,6 +1278,11 @@ title: 실험
     assert!(call("pet_set_layout", args("pet_set_layout", vec![json!({"mode": "evil"})])).is_err());
     assert!(call("pet_set_layout", json!({"args": {"mode": "sprite", "cmd": "x"}})).is_err());
     assert_eq!(call("pet_geometry", args("pet_geometry", vec![])).unwrap_err(), json!("notStarted"));
+    // The bubble size: nothing to size before a pet has started; negative or fractional sizes never reach the command.
+    assert_eq!(call("pet_panel_size", args("pet_panel_size", vec![json!(400), json!(500), json!(true)])).unwrap_err(), json!("notStarted"));
+    assert!(call("pet_panel_size", json!({"w": -1, "h": 500, "commit": false})).is_err());
+    assert!(call("pet_panel_size", json!({"w": 400.5, "h": 500, "commit": false})).is_err());
+    assert!(call("pet_panel_size", json!({"w": 400, "h": 500})).is_err());
     // Not called here (a mock window would be hidden, destroyed or raised): their argument lists are still checked.
     for cmd in ["pet_start", "pet_close", "pet_hide", "pet_open_main", "pet_start_failed", "pet_subscribe"] {
         let n = fixture[cmd].as_array().unwrap().len();
@@ -1288,10 +1293,12 @@ title: 실험
         assert_eq!(ok("pet_relay", args("pet_relay", vec![json!(ev), json!({})])), json!(false), "{ev}");
     }
     assert_eq!(ok("pet_relay", args("pet_relay", vec![json!("pet:state"), json!({})])), json!(false), "no pet is listening");
-    for ev in ["llm://frame", "vault://changed", "pet:state", "pet:closed"] {
+    for ev in ["llm://frame", "vault://changed", "pet:state", "pet:closed", "pet:answer", "pet:reject"] {
         assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!(ev), json!({})])), json!(false), "{ev}");
     }
-    assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!("pet:ask"), json!({})])), json!(true));
+    for ev in ["pet:ask", "pet:clear", "pet:ready"] {
+        assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!(ev), json!({})])), json!(true), "{ev}");
+    }
     // Switching the pet off in the main window (pet_close) lifts a "Hide for now", so switching it on starts a new one.
     {
         use tauri::Manager;

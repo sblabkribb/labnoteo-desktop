@@ -11,6 +11,7 @@
     "allow-pet-open-main",
     "allow-pet-quiet-get",
     "allow-pet-quiet-set",
+    "allow-pet-panel-size",
     "allow-pet-start-failed",
     "allow-pet-subscribe",
     "allow-pet-to-main",

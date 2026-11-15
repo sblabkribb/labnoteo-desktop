@@ -75,6 +75,7 @@ pet_close
 pet_geometry
 pet_hide
 pet_open_main
+pet_panel_size
 pet_quiet_get
 pet_quiet_set
 pet_relay
