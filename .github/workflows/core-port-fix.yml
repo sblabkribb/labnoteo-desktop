@@ -1,0 +1,189 @@
+# When sync-core cannot follow a new labnoteO release because the app's copies of core code (src/labnote/port/*.ts)
+# no longer match it ("port drift"), Claude re-ports the changed code, the checks run, and a pull request opens.
+# A person reads the pull request and merges it; merging starts sync-core, which then bumps the version and
+# releases (the release chain in sync-core.yml does the rest). Nothing is merged or released by this workflow.
+#
+# One-time setup (maintainer): add the repository secret ANTHROPIC_API_KEY (an Anthropic API key).
+# Without it this workflow only prints a notice and the core-sync issue that sync-core opened stays the signal.
+#
+# Safety:
+#   - The prompt is fixed text. Nothing from an issue, a comment or the upstream release notes reaches it.
+#   - It runs only for failed sync-core runs of this repository on main (schedule, dispatch or repository_dispatch).
+#   - Claude may edit files and run npm, node and git inside the checkout; it has no GitHub token (the token is
+#     used by the steps that push and open the pull request, after Claude has finished) and no other secret.
+#   - The pull request is only opened when install, tests and build pass.
+name: core-port-fix
+
+on:
+  workflow_run:
+    workflows: [sync-core]
+    types: [completed]
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: core-port-fix
+  cancel-in-progress: false
+
+jobs:
+  port:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Is there a key for Claude?
+        id: key
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          echo "has=$HAS_KEY" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_KEY" != true ]; then
+            echo "::notice::core-port-fix is idle: the repository secret ANTHROPIC_API_KEY is not set."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.has == 'true'
+        with:
+          ref: main
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the newest labnoteO release
+        id: find
+        if: steps.key.outputs.has == 'true'
+        run: bash .github/scripts/find-core-release.sh | tee -a "$GITHUB_OUTPUT"
+
+      - name: Is a port pull request already open for it?
+        id: existing
+        if: steps.key.outputs.has == 'true' && steps.find.outputs.behind == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LATEST: ${{ steps.find.outputs.latest }}
+        run: |
+          n=$(gh pr list --state open --head "claude/core-port-$LATEST" --json number --jq '.[0].number' || true)
+          echo "pr=$n" >> "$GITHUB_OUTPUT"
+          if [ -n "$n" ]; then echo "::notice::PR #$n already ports $LATEST"; fi
+
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.has == 'true' && steps.find.outputs.behind == 'true' && steps.existing.outputs.pr == ''
+        with:
+          node-version: 22
+
+      - name: Move the core and install
+        id: prepare
+        if: steps.key.outputs.has == 'true' && steps.find.outputs.behind == 'true' && steps.existing.outputs.pr == ''
+        env:
+          LATEST: ${{ steps.find.outputs.latest }}
+        run: |
+          git checkout -b "claude/core-port-$LATEST"
+          git -C app/vendor/labnoteo checkout --quiet "$LATEST"
+          cd app
+          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
+
+      - name: Claude re-ports the changed core code
+        id: claude
+        if: steps.prepare.outcome == 'success'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@6a5ea47b830d07cbc07c0e5ab22e20e16ae1961b # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: |
+            This repository is labnoteO Desktop. The core (git submodule app/vendor/labnoteo) was just moved to the newest
+            release and is checked out. The app keeps copies of some core files in app/src/labnote/port/*.ts, each with a
+            header "// Ported from app/vendor/labnoteo/<file>:<from>-<to> sha256:<hash>". The tests
+            app/src/labnote/__tests__/provenance.test.ts and koCoverage.test.ts fail because the core changed.
+            Fix that for good, in the app only (never edit app/vendor/):
+            1. In app/, run `npm test` and list the failing tests.
+            2. For each failing ported file, read the upstream change (`git -C app/vendor/labnoteo diff
+               $(git rev-parse origin/main:app/vendor/labnoteo) HEAD -- <file>`: the core commit main had, to the one now
+               checked out) and re-port it by the porting rule in
+               docs/superpowers/plans/2026-11-06-notebook-commands.md ("Porting rule"): keep the app's own adaptations,
+               bring in the upstream behaviour change, update the header range, the hash (node app/scripts/portHash.mjs),
+               the version line and the Changes line. Where the app has no equivalent of a new core feature, say so in
+               the Changes line instead of inventing UI.
+            3. Add any missing Korean keys the way koCoverage expects.
+            4. Run `npm test` and `npm run build` in app/ until both pass. Do not commit; do not touch app/package-lock.json
+               beyond what npm already wrote. Do not change workflow files, secrets or anything outside app/.
+            Finish with a short plain-text summary of what changed upstream and what you did per file.
+          claude_args: >-
+            --max-turns 120
+            --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git rev-parse:*),Bash(git -C app/vendor/labnoteo:*),Bash(git submodule status:*)"
+
+      - name: Checks
+        id: checks
+        if: steps.prepare.outcome == 'success'
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          npm run build
+
+      - name: Open the pull request
+        if: steps.checks.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LATEST: ${{ steps.find.outputs.latest }}
+          CURRENT: ${{ steps.find.outputs.current }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/vendor/labnoteo app/package-lock.json app/src
+          git commit -m "chore(core): follow labnoteO $LATEST (ports re-done by Claude)" \
+            -m "Moves app/vendor/labnoteo from $CURRENT to $LATEST and re-ports the changed core code in app/src/labnote/port. Install, tests and build pass. Read the diff before merging."
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --quiet "$remote" "HEAD:refs/heads/claude/core-port-$LATEST"
+          gh pr create --base main --head "claude/core-port-$LATEST" \
+            --title "Follow labnoteO $LATEST (ports re-done by Claude)" \
+            --body "sync-core could not follow labnoteO $LATEST because the app's copies of core code no longer matched it. Claude re-ported the changed code; install, tests and build pass in this run.
+
+          Review the changes in app/src/labnote/port (each file's header says what changed upstream and what was kept), then merge. Merging starts sync-core, which bumps the version and releases.
+
+          Log: $RUN_URL"
+
+      - name: Say that it did not work
+        if: failure() || (steps.prepare.outcome == 'success' && steps.checks.outcome != 'success')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create core-sync --color D93F0B --description 'labnoteO core update needs attention' 2>/dev/null || true
+          existing="$(gh issue list --label core-sync --state open --search 'in:title "core-port-fix could not port"' --json number --jq '.[0].number' || echo unknown)"
+          if [ -z "$existing" ]; then
+            gh issue create --label core-sync --title "core-port-fix could not port the new core" \
+              --body "Claude could not make install, tests and build pass after moving the core. Nothing was pushed. Log: $RUN_URL" \
+              || echo "::warning::Could not open the issue"
+          fi
+          exit 1
+
+  start-sync:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'claude/core-port-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start sync-core so the merged core is released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run sync-core.yml --ref main
