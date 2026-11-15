@@ -214,6 +214,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The GitHub OAuth App client ID (public, not a secret) that "Sign in with GitHub" uses. Set it once as the
+          # repository VARIABLE LABNOTEO_GITHUB_CLIENT_ID; empty keeps the app without a built-in ID.
+          LABNOTEO_GITHUB_CLIENT_ID: ${{ vars.LABNOTEO_GITHUB_CLIENT_ID }}
         with:
           projectPath: app
           tagName: ${{ env.TAG }}
