@@ -164,7 +164,8 @@ export function PetLayer(props: {
     // 돌아갈 곳이 없으면(본문에서 단축키로 열었거나 그 요소가 사라졌다) 초점이 곧 사라질 말풍선에 남거나 본문으로
     // 빠지지 않게 도우미로 온다.
     const now = document.activeElement;
-    if (!restore || !now || now === document.body || (wrap.current?.contains(now) && now !== button.current)) button.current?.focus();
+    // 바탕화면 도우미가 떠 있으면 .pet 은 보이지 않는 기준점이라 초점을 주지 않는다.
+    if (!snap.desktop && (!restore || !now || now === document.body || (wrap.current?.contains(now) && now !== button.current))) button.current?.focus();
   };
 
   const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
@@ -303,6 +304,15 @@ export function PetLayer(props: {
 
   // 누르면 할 일을 이름으로: 말풍선이 열려 있으면 "어시스턴트 닫기"
   const label = snap.open ? t('pet.closeAssistant') : t('pet.open');
+  // 바탕화면 도우미가 떠 있는 동안: 같은 단추를 보이지 않는 기준점으로만 둔다(말풍선 자리 잡기와 초점 돌려주기가 읽는다).
+  const anchor = snap.desktop
+    ? ({ 'data-desktop': 'true', 'aria-hidden': true, tabIndex: -1 } as const)
+    : ({
+        'aria-label': label,
+        title: `${t('ribbon.withKey', label, 'Ctrl+Shift+Y')} · ${t('pet.moveHint')}`,
+        'aria-haspopup': 'dialog',
+        'aria-keyshortcuts': 'Control+Shift+Y',
+      } as const);
   return (
     <div ref={wrap} className="pet-wrap" data-open={snap.open}>
       {snap.open && (
@@ -325,12 +335,9 @@ export function PetLayer(props: {
         ref={button}
         type="button"
         className="pet"
-        aria-label={label}
-        title={`${t('ribbon.withKey', label, 'Ctrl+Shift+Y')} · ${t('pet.moveHint')}`}
-        aria-haspopup="dialog"
-        aria-expanded={snap.open}
-        aria-controls={snap.open ? bubbleId : undefined}
-        aria-keyshortcuts="Control+Shift+Y"
+        {...anchor}
+        aria-expanded={snap.desktop ? undefined : snap.open}
+        aria-controls={!snap.desktop && snap.open ? bubbleId : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

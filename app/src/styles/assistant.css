@@ -28,6 +28,11 @@
   user-select: none;
 }
 .pet:hover:not(:disabled) { background: transparent; }
+/* 바탕화면 도우미가 떠 있는 동안 창 안의 그림은 그리지 않는다. 단추는 말풍선 자리와 초점 돌려주기의 기준점으로만 남는다. */
+.pet[data-desktop="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
 .pet:active { cursor: grabbing; }
 
 /* 시트 한 줄을 steps() 로 한 칸씩 넘긴다. 정수 배율이고 흐리게 늘이지 않는다 */

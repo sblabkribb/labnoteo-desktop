@@ -523,3 +523,60 @@ describe('PetLayer: resizing the assistant window (the bubble)', () => {
     }
   });
 });
+
+describe('PetLayer: one pet only (the desktop pet runs)', () => {
+  it('without the desktop pet the sprite is exactly as before', () => {
+    setup();
+    expect(pet().dataset.desktop).toBeUndefined();
+    expect(pet().getAttribute('aria-hidden')).toBeNull();
+    expect(pet().getAttribute('aria-label')).toBeTruthy();
+    expect(pet().tabIndex).toBe(0);
+  });
+
+  it('the .pet button becomes an invisible, unannounced anchor while the desktop pet runs', () => {
+    const { store } = setup();
+    act(() => store.setDesktop(true));
+    const b = pet();
+    expect(b.dataset.desktop).toBe('true');
+    expect(b.getAttribute('aria-hidden')).toBe('true');
+    expect(b.tabIndex).toBe(-1);
+    for (const a of ['aria-label', 'title', 'aria-haspopup', 'aria-keyshortcuts']) expect(b.hasAttribute(a), a).toBe(false);
+    expect(screen.queryAllByRole('button').includes(b)).toBe(false);
+  });
+
+  it('Ctrl+Shift+Y (setOpen) still opens the chat panel, placed against the invisible anchor', () => {
+    const { store } = setup();
+    act(() => store.setDesktop(true));
+    act(() => store.setOpen(true));
+    const bubble = document.querySelector<HTMLElement>('.pet-bubble')!;
+    expect(bubble).toBeTruthy();
+    for (const v of ['--bubble-left', '--bubble-top', '--bubble-bottom', '--bubble-max-h']) expect(bubble.style.getPropertyValue(v), v).not.toBe('');
+  });
+
+  it('closing the panel returns focus per takeRestore; with no restore target the invisible anchor is not focused', () => {
+    const { store } = setup();
+    act(() => store.setDesktop(true));
+    const restore = vi.fn();
+    act(() => store.setOpen(true, restore));
+    fireEvent.click(screen.getAllByRole('button').find((b) => b.closest('.pet-bubble') && /닫|close/i.test((b.getAttribute('aria-label') ?? '') + b.textContent))!);
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(pet());
+
+    act(() => store.setOpen(true));
+    const input = document.querySelector<HTMLElement>('.pet-bubble textarea, .pet-bubble input, .pet-bubble button');
+    input?.focus();
+    fireEvent.click(screen.getAllByRole('button').find((b) => b.closest('.pet-bubble') && /닫|close/i.test((b.getAttribute('aria-label') ?? '') + b.textContent))!);
+    expect(document.activeElement).not.toBe(pet());
+  });
+
+  it('when the pet window closes the sprite comes back without a reload', () => {
+    const { store } = setup();
+    act(() => store.setDesktop(true));
+    expect(pet().dataset.desktop).toBe('true');
+    act(() => store.setDesktop(false));
+    expect(pet().dataset.desktop).toBeUndefined();
+    expect(pet().getAttribute('aria-hidden')).toBeNull();
+    expect(pet().tabIndex).toBe(0);
+    expect(pet().getAttribute('aria-label')).toBeTruthy();
+  });
+});

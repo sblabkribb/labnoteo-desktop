@@ -150,3 +150,10 @@ describe('assistant TSX is CSP-safe', () => {
     }
   });
 });
+
+describe('styles/assistant.css: one pet only', () => {
+  it('the in-window sprite is invisible and inert while the desktop pet runs', () => {
+    expect(decl(top, '.pet[data-desktop="true"]', 'opacity')).toEqual(['0']);
+    expect(decl(top, '.pet[data-desktop="true"]', 'pointer-events')).toEqual(['none']);
+  });
+});
