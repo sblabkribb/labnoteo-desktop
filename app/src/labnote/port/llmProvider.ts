@@ -651,7 +651,7 @@ class OpenAiProvider extends WireProvider {
 
 /** Build the configured provider, or null when AI is disabled. */
 export function createLlmProvider(settings: AppSettings, invoke?: InvokeFn, listen?: ListenFn): LlmProvider | null {
-  // The provider keeps its own copy: a settings change while a request is on its way does not change it (0.142.0, #597).
+  // The provider keeps its own copy: a settings change while a request is on its way does not change its model or body (0.142.0, #597); the address is not part of that copy, Rust reads it from the stored settings on each call.
   settings = { ...settings };
   switch (settings.llmProvider) {
     case 'ollama':
