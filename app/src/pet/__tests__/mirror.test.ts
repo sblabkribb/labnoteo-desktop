@@ -1,7 +1,7 @@
 import { EMPTY_MIRROR, buildStateEvent, mirrorReduce, type MirrorEvent, type MirrorState } from '../mirror';
 import type { AnswerEvent, StateEvent } from '../protocol';
 
-const st = (o: Partial<StateEvent> = {}): StateEvent => ({ v: 1, seq: 1, state: 'idle', skin: 'flasko', scale: 2, busy: false, lang: 'ko', status: '', quiet: false, ...o });
+const st = (o: Partial<StateEvent> = {}): StateEvent => ({ v: 1, seq: 1, state: 'idle', skin: 'flasko', scale: 2, busy: false, lang: 'ko', status: '', quiet: false, folder: '', sections: [], unitTarget: '', ...o });
 const an = (o: Partial<AnswerEvent> = {}): AnswerEvent => ({ v: 1, seq: 2, askId: 'abcd-1234', text: 'Hi', done: true, error: false, ...o });
 const run = (s: MirrorState, ...ev: MirrorEvent[]) => ev.reduce(mirrorReduce, s);
 
@@ -68,12 +68,31 @@ describe('mirrorReduce (the pet window)', () => {
   });
 });
 
+describe('mirror: experiment context and clearing', () => {
+  it('a snapshot sets the folder name and the section list', () => {
+    const s = run(EMPTY_MIRROR, { type: 'state', event: st({ seq: 2, folder: '001_A', sections: ['Methods'], unitTarget: '001_wf.md' }) });
+    expect(s).toMatchObject({ folder: '001_A', sections: ['Methods'], unitTarget: '001_wf.md' });
+  });
+  it('cleared empties the answer, the reason and a pending question', () => {
+    const a = run(EMPTY_MIRROR, { type: 'asked', askId: 'abcd-1234' }, { type: 'answer', event: an({ done: false }) }, { type: 'cleared' });
+    expect(a).toMatchObject({ answer: null, pendingAsk: null, reason: null, answerSeq: -1 });
+  });
+});
+
 describe('buildStateEvent (the main window)', () => {
   const pet = { state: 'think' as const, skin: 'flasko', scale: 3 as const };
   it('maps the pet state, busy and the last assistant status line', () => {
     expect(buildStateEvent({ seq: 9, pet, items: [{ role: 'assistant', text: '', status: 'Reading the note' }], streaming: true, lang: 'en', quiet: false })).toEqual({
-      v: 1, seq: 9, state: 'think', skin: 'flasko', scale: 3, busy: true, lang: 'en', status: 'Reading the note', quiet: false,
+      v: 1, seq: 9, state: 'think', skin: 'flasko', scale: 3, busy: true, lang: 'en', status: 'Reading the note', quiet: false, folder: '', sections: [], unitTarget: '',
     });
+  });
+  it('carries only the experiment folder name, the section labels and the target note name', () => {
+    const e = buildStateEvent({
+      seq: 1, pet, items: [], streaming: false, lang: 'en', quiet: false,
+      folder: 'labnote/001_Cloning', sections: ['Methods', 'Results'], unitTarget: 'labnote/001_Cloning/001_wf.md',
+    });
+    expect(e).toMatchObject({ folder: '001_Cloning', sections: ['Methods', 'Results'], unitTarget: '001_wf.md' });
+    expect(buildStateEvent({ seq: 1, pet, items: [], streaming: false, lang: 'en', quiet: false, folder: null }).folder).toBe('');
   });
   it('bounds a huge status and copes with an empty session', () => {
     expect(buildStateEvent({ seq: 1, pet, items: [], streaming: false, lang: 'ko', quiet: true }).status).toBe('');

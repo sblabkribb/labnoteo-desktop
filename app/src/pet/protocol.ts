@@ -7,15 +7,24 @@ export const EVT = {
   reject: 'pet:reject',
   ready: 'pet:ready',
   ask: 'pet:ask',
+  clear: 'pet:clear',
   closed: 'pet:closed',
 } as const;
 
 export const STATUS_MAX = 120;
 export const ANSWER_MAX = 1200;
 export const ASK_MAX = 500;
+export const FOLDER_MAX = 80;
+export const SECTIONS_MAX = 40;
+export const LABEL_MAX = 100;
+export const TITLE_MAX = 200;
+
+/** The five panel modes (the same ids as the in-window chips). An enum on the wire, never free text. */
+export const MODES = ['howTo', 'section', 'unitOp', 'workflow', 'chat'] as const;
+export type AskMode = (typeof MODES)[number];
 
 const STATES: readonly SkinState[] = ['idle', 'talk', 'think', 'done'];
-const REASONS = ['no-vault', 'not-configured', 'busy', 'invalid'] as const;
+const REASONS = ['no-vault', 'not-configured', 'busy', 'invalid', 'no-note', 'no-workflow'] as const;
 export type RejectReason = (typeof REASONS)[number];
 const ASK_ID = /^[A-Za-z0-9-]{8,40}$/;
 const SKIN_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -30,6 +39,12 @@ export interface StateEvent {
   lang: 'ko' | 'en';
   status: string;
   quiet: boolean;
+  /** Name of the open experiment folder ('' when no experiment note is open). */
+  folder: string;
+  /** Labels of the sections the section mode can pick from the open note (bounded). */
+  sections: string[];
+  /** File name of the workflow note the unit operation mode would write to ('' when there is none). */
+  unitTarget: string;
 }
 export interface AnswerEvent {
   v: 1;
@@ -44,10 +59,17 @@ export interface RejectEvent {
   askId: string;
   reason: RejectReason;
 }
+/** The section the person chose: one of the listed labels (index and label must both still match) or a new title. */
+export type SectionPick = { kind: 'pick'; index: number; label: string } | { kind: 'new'; title: string };
 export interface AskEvent {
   v: 1;
   askId: string;
+  mode: AskMode;
   text: string;
+  section?: SectionPick;
+}
+export interface ClearEvent {
+  v: 1;
 }
 export interface ReadyEvent {
   v: 1;
@@ -85,6 +107,14 @@ export function parseState(raw: unknown): StateEvent | null {
     lang: raw.lang,
     status: clampText(raw.status, STATUS_MAX),
     quiet: raw.quiet === true,
+    folder: clampText(raw.folder, FOLDER_MAX).replace(/\n/g, ' '),
+    sections: Array.isArray(raw.sections)
+      ? raw.sections
+          .filter((x): x is string => typeof x === 'string')
+          .slice(0, SECTIONS_MAX)
+          .map((x) => clampText(x, LABEL_MAX).replace(/\n/g, ' '))
+      : [],
+    unitTarget: clampText(raw.unitTarget, LABEL_MAX).replace(/\n/g, ' '),
   };
 }
 
@@ -102,14 +132,40 @@ export function parseReject(raw: unknown): RejectEvent | null {
 
 export const parseReady = (raw: unknown): ReadyEvent | null => (isObj(raw) && raw.v === 1 ? { v: 1 } : null);
 
-export function parseAsk(raw: unknown): AskEvent | null {
-  if (!isObj(raw) || raw.v !== 1 || typeof raw.askId !== 'string' || !ASK_ID.test(raw.askId)) return null;
-  const text = clampText(raw.text, ASK_MAX);
-  return text ? { v: 1, askId: raw.askId, text } : null;
+const oneLine = (raw: unknown, max: number): string => clampText(raw, max).replace(/\s*\n\s*/g, ' ').trim();
+
+function parseSection(raw: unknown): SectionPick | null {
+  if (!isObj(raw)) return null;
+  if (raw.kind === 'pick') {
+    const label = oneLine(raw.label, LABEL_MAX);
+    const index = raw.index;
+    return typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < SECTIONS_MAX && label ? { kind: 'pick', index, label } : null;
+  }
+  if (raw.kind === 'new') {
+    const title = oneLine(raw.title, TITLE_MAX);
+    return title ? { kind: 'new', title } : null;
+  }
+  return null;
 }
 
-/** Pet side: the event to send for what the person typed, or null when there is nothing to send. */
-export function buildAsk(text: string, newId: () => string): AskEvent | null {
+export function parseAsk(raw: unknown): AskEvent | null {
+  if (!isObj(raw) || raw.v !== 1 || typeof raw.askId !== 'string' || !ASK_ID.test(raw.askId)) return null;
+  const mode = raw.mode === undefined ? 'chat' : (MODES as readonly unknown[]).includes(raw.mode) ? (raw.mode as AskMode) : null;
+  if (!mode) return null;
+  const text = clampText(raw.text, ASK_MAX);
+  if (mode === 'section') {
+    const section = parseSection(raw.section);
+    return section ? { v: 1, askId: raw.askId, mode, text, section } : null;
+  }
+  return text ? { v: 1, askId: raw.askId, mode, text } : null;
+}
+
+export const parseClear = (raw: unknown): ClearEvent | null => (isObj(raw) && raw.v === 1 ? { v: 1 } : null);
+
+/** Pet side: the event to send for what the person typed, or null when there is nothing to send (how-to sends nothing). */
+export function buildAsk(text: string, newId: () => string, mode: AskMode = 'chat', section?: SectionPick): AskEvent | null {
+  if (mode === 'howTo') return null;
   const clean = clampText(text, ASK_MAX);
-  return clean ? { v: 1, askId: newId(), text: clean } : null;
+  if (mode === 'section') return section ? { v: 1, askId: newId(), mode, text: clean, section } : null;
+  return clean ? { v: 1, askId: newId(), mode, text: clean } : null;
 }

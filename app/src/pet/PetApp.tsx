@@ -19,6 +19,8 @@ const REASON_KEY = {
   'not-configured': 'pet.desktop.reason.not-configured',
   busy: 'pet.desktop.reason.busy',
   invalid: 'pet.desktop.reason.invalid',
+  'no-note': 'pet.desktop.reason.no-note',
+  'no-workflow': 'pet.desktop.reason.no-workflow',
   offline: 'pet.desktop.reason.offline',
 } as const;
 const OFFLINE_MS = 5000;
