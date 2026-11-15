@@ -218,6 +218,7 @@ const PART_LABEL: Record<ImportPart, () => string> = {
   mcpServer: () => t('mcpClient.import.part'),
   github: () => t('github.import.part'),
   search: () => t('integrations.import.part.search'),
+  gallery: () => t('integrations.import.part.gallery'),
 };
 
 const REFUSAL_TEXT: Record<ImportRefusal, () => string> = {
@@ -300,9 +301,11 @@ function summaryLines(out: ImportOutcome): ImportLine[] {
     text:
       i.part === 'search'
         ? t('integrations.import.searchImported')
-        : i.keySaved && i.part === 'github'
-          ? t('github.import.importedToken', PART_LABEL[i.part]())
-          : t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
+        : i.part === 'gallery'
+          ? t('integrations.import.galleryImported')
+          : i.keySaved && i.part === 'github'
+            ? t('github.import.importedToken', PART_LABEL[i.part]())
+            : t(i.keySaved ? 'integrations.import.importedKey' : 'integrations.import.imported', PART_LABEL[i.part]()),
     warn: false,
   }));
   const mcp = out.mcp ?? [];

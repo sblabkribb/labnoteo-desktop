@@ -285,6 +285,17 @@ describe('Integration settings: Import from file…', () => {
     expect(t('integrations.import.searchImported')).toContain('웹 검색');
   });
 
+  it('a gallery address alone is named as the gallery, not as the web search address', async () => {
+    setLang('en');
+    const f = importDeps({ outcome: { status: 'done', imported: [{ part: 'gallery', keySaved: false }], invalid: [], settings: {} } });
+    show(f.deps);
+    await userEvent.click(await importButton());
+    expect(await screen.findByText(t('integrations.import.galleryImported'))).toBeTruthy();
+    expect(screen.queryByText(t('integrations.import.searchImported'))).toBeNull();
+    setLang('ko');
+    expect(t('integrations.import.galleryImported')).toContain('갤러리');
+  });
+
   it('nothing imported: says so and offers no delete', async () => {
     const f = importDeps({
       outcome: { status: 'done', imported: [], invalid: [{ part: 'llm', field: 'apiKey', reason: 'badKey' }], settings: {} },

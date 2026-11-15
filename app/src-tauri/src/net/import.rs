@@ -82,7 +82,7 @@ use super::error::{NetError, NetErrorKind};
 use super::github::GithubState;
 use super::web_search::parse_searxng_url;
 use crate::assistant::config::{
-    parse_gallery_url, read_at as read_assistant, write_at as write_assistant, AssistantConfigIn,
+    parse_gallery_url, write_named_at as write_assistant_named,
 };
 use super::mcp_client::placeholder::{is_placeholder, strip_bearer};
 use super::secrets::{
@@ -127,6 +127,8 @@ pub enum Part {
     Github,
     /// The web search (SearXNG) address and the optional gallery address: app-wide, in `assistant.json`.
     Search,
+    /// The gallery index address, imported with the search part.
+    Gallery,
 }
 
 /// Why a field was refused.
@@ -693,15 +695,21 @@ fn plan_search(f: &SearchFields, cfg: &ServiceConfig, bad: &mut Vec<Invalid>) ->
 /// vault's allowed clear-text origins.
 pub fn finish_search_import(settings_file: &Path, allow_http: &[String], outcome: &mut ImportOutcome) {
     let ImportOutcome::Done { imported, invalid, search: Some(part), .. } = outcome else { return };
-    let stored = read_assistant(settings_file);
-    let cfg = AssistantConfigIn {
-        searxng_url: part.searxng_url.clone().or(stored.searxng_url),
-        gallery_url: part.gallery_url.clone().or(stored.gallery_url),
-    };
-    if write_assistant(settings_file, cfg, allow_http).is_err() {
+    // Only the addresses the file named are written; the other field of
+    // assistant.json stays as it is on disk (never re-checked, never dropped).
+    if write_assistant_named(settings_file, part.searxng_url.as_deref(), part.gallery_url.as_deref(), allow_http).is_err() {
         imported.retain(|i| i.part != Part::Search);
         let field = if part.searxng_url.is_some() { "url" } else { "galleryUrl" };
         invalid.push(Invalid { part: Part::Search, field, reason: Problem::AppData, name: None });
+        return;
+    }
+    // Say which address was imported: a gallery address alone is not a "web search address".
+    imported.retain(|i| i.part != Part::Search);
+    if part.searxng_url.is_some() {
+        imported.push(Imported { part: Part::Search, key_saved: false });
+    }
+    if part.gallery_url.is_some() {
+        imported.push(Imported { part: Part::Gallery, key_saved: false });
     }
 }
 
@@ -764,7 +772,7 @@ fn apply_import_as(store: &dyn SecretStore, text: &str, format: Format, cfg: &Se
             Part::Bfworkflow => plan_bfw(&parsed.bfw, cfg, &mut invalid),
             // MCP entries are imported one by one below.
             Part::McpServer => None,
-            Part::Github | Part::Search => unreachable!("handled above"),
+            Part::Github | Part::Search | Part::Gallery => unreachable!("handled above"),
         };
         let Some(plan) = plan else { continue };
         // The key first: if Credential Manager refuses it, the part's settings are not saved either.
@@ -2125,6 +2133,63 @@ GITHUB_TOKEN={GH_FAKE}
         let stored = stored_search(&dir);
         assert_eq!(stored.gallery_url.as_deref(), Some("https://g2.lab.example/i.json"));
         assert_eq!(stored.searxng_url.as_deref(), Some("https://s.lab.example"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_gallery_address_alone_is_reported_as_the_gallery_not_as_web_search() {
+        let dir = scratch_dir("import-search-gallery-line");
+        let out = import_search(&dir, "g.json", r#"{"search": {"galleryUrl": "https://g.lab.example/i.json"}}"#, &cfg("{}"));
+        assert_eq!(done(&out).0, &vec![Imported { part: Part::Gallery, key_saved: false }]);
+        let out = import_search(&dir, "b.env", "SEARXNG_URL=https://s.lab.example\nGALLERY_URL=https://g.lab.example/i.json\n", &cfg("{}"));
+        assert_eq!(
+            done(&out).0,
+            &vec![Imported { part: Part::Search, key_saved: false }, Imported { part: Part::Gallery, key_saved: false }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stored_address_that_no_longer_passes_does_not_block_importing_the_other_one() {
+        let dir = scratch_dir("import-search-stale-http");
+        let settings = dir.join("config").join("settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        // Saved while its origin was allowed; the origin is not allowed now.
+        let old = r#"{"searxngUrl": "http://192.168.0.5:8080", "galleryUrl": "https://old.example/i.json"}"#;
+        std::fs::write(crate::assistant::config::config_path(&settings), old).unwrap();
+        let out = import_search(&dir, "g.json", r#"{"search": {"galleryUrl": "https://g.lab.example/i.json"}}"#, &cfg("{}"));
+        assert!(done(&out).1.is_empty(), "{out:?}");
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(crate::assistant::config::config_path(&settings)).unwrap()).unwrap();
+        assert_eq!(raw["galleryUrl"], "https://g.lab.example/i.json");
+        assert_eq!(raw["searxngUrl"], "http://192.168.0.5:8080", "the stored address is kept as it was");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_damaged_assistant_file_is_copied_before_the_import_replaces_it() {
+        let dir = scratch_dir("import-search-damaged");
+        let settings = dir.join("config").join("settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let file = crate::assistant::config::config_path(&settings);
+        std::fs::write(&file, "{not json, galleryUrl https://old.example/i.json").unwrap();
+        let out = import_search(&dir, "s.json", r#"{"search": {"url": "https://s.lab.example"}}"#, &cfg("{}"));
+        assert!(done(&out).1.is_empty());
+        assert_eq!(stored_search(&dir).searxng_url.as_deref(), Some("https://s.lab.example"));
+        let bak = std::fs::read_to_string(file.with_file_name("assistant.json.bak")).unwrap();
+        assert!(bak.contains("https://old.example/i.json"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_entry_that_no_longer_parses_is_not_dropped_by_importing_the_other_address() {
+        let dir = scratch_dir("import-search-keeps-raw");
+        let settings = dir.join("config").join("settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let file = crate::assistant::config::config_path(&settings);
+        std::fs::write(&file, r#"{"galleryUrl": "ftp://newer-app-format.example/x"}"#).unwrap();
+        import_search(&dir, "s.json", r#"{"search": {"url": "https://s.lab.example"}}"#, &cfg("{}"));
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(raw["galleryUrl"], "ftp://newer-app-format.example/x");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

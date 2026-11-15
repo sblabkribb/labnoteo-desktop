@@ -116,6 +116,55 @@ pub fn write_at(settings_file: &Path, cfg: AssistantConfigIn, allow_http: &[Stri
     Ok(stored)
 }
 
+/// Stores only the addresses named (checked like `write_at`), keeping the
+/// other fields of `assistant.json` exactly as they are on disk, even a value
+/// that no longer passes its check. A file that exists but cannot be read as a
+/// JSON object is copied first (`assistant.json.bak`) and then replaced.
+pub fn write_named_at(
+    settings_file: &Path,
+    searxng: Option<&str>,
+    gallery: Option<&str>,
+    allow_http: &[String],
+) -> Result<(), AssistantError> {
+    let searxng = searxng
+        .map(|raw| {
+            parse_searxng_url(raw.trim(), allow_http)
+                .map(|u| stored_form(&u))
+                .ok_or_else(|| AssistantError::new(K::BadUrl, "the web search address is not valid"))
+        })
+        .transpose()?;
+    let gallery = gallery
+        .map(|raw| {
+            parse_gallery_url(raw.trim())
+                .map(|u| stored_form(&u))
+                .ok_or_else(|| AssistantError::new(K::BadUrl, "the gallery address is not valid"))
+        })
+        .transpose()?;
+    let path = config_path(settings_file);
+    let mut doc = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Object(m)) => m,
+            _ => {
+                crate::vault::connections::keep_copy(&path);
+                serde_json::Map::new()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(_) => {
+            crate::vault::connections::keep_copy(&path);
+            serde_json::Map::new()
+        }
+    };
+    if let Some(u) = searxng {
+        doc.insert("searxngUrl".into(), Value::String(u));
+    }
+    if let Some(u) = gallery {
+        doc.insert("galleryUrl".into(), Value::String(u));
+    }
+    let body = serde_json::to_string_pretty(&Value::Object(doc)).map_err(|e| AssistantError::new(K::Io, e.to_string()))?;
+    crate::vault::fs::write_atomic(&path, &body).map_err(|e| AssistantError::new(K::Io, format!("cannot save assistant.json: {e}")))
+}
+
 /// The open vault's `allowHttpOrigins` (empty with no vault open).
 pub fn allow_http_of(settings_file: &Path, vault: &VaultState) -> Vec<String> {
     crate::net::config::ServiceConfig::load(settings_file, vault.root().ok().as_deref())

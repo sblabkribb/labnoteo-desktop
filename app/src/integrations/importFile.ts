@@ -13,7 +13,7 @@ import type { RawInvoke } from '../fs/vaultImage';
 /** `mcpServer`: Claude-Desktop 모양 JSON 의 `mcpServers`(또는 VS Code 의 `servers`) 항목 하나. */
 /** `github`: 토큰은 자격 증명 관리자의 GitHub 칸에, Client ID 는 앱 전체 GitHub 설정에(Rust). 볼트 설정에는 아무것도 오지 않는다. */
 /** `search`: 웹 검색(SearXNG) 주소와 갤러리 주소. Rust 가 이 PC 의 assistant.json 에 쓴다. 볼트 설정에는 아무것도 오지 않는다. */
-export type ImportPart = 'llm' | 'partbank' | 'bfworkflow' | 'mcpServer' | 'github' | 'search';
+export type ImportPart = 'llm' | 'partbank' | 'bfworkflow' | 'mcpServer' | 'github' | 'search' | 'gallery';
 
 export type ImportRefusal = 'insideVault' | 'tooLarge' | 'unreadable' | 'notText' | 'unrecognized' | 'wrongType';
 
