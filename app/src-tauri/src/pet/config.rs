@@ -50,9 +50,13 @@ pub fn read(config_dir: &Path) -> PetConfig {
 /// Atomic: a temp file in the same folder, then rename.
 pub fn write(config_dir: &Path, c: &PetConfig) -> std::io::Result<()> {
     std::fs::create_dir_all(config_dir)?;
-    let tmp = config_dir.join(format!("{FILE}.tmp"));
+    // A name of its own: two writers (or two app instances) never share one temp file.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = config_dir.join(format!("{FILE}.{}-{}.tmp", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     std::fs::write(&tmp, to_text(c))?;
-    std::fs::rename(&tmp, path(config_dir))
+    std::fs::rename(&tmp, path(config_dir)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 #[cfg(test)]
@@ -75,7 +79,22 @@ mod tests {
         let d = dir("roundtrip");
         write(&d, &PetConfig { pos: Some((-120, 340)), quiet: true }).unwrap();
         assert_eq!(read(&d), PetConfig { pos: Some((-120, 340)), quiet: true });
-        assert!(!d.join("pet-window.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn writers_at_the_same_moment_never_share_a_temp_file() {
+        let d = dir("race");
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let d = d.clone();
+                std::thread::spawn(move || (0..25).all(|j| write(&d, &PetConfig { pos: Some((i, j)), quiet: false }).is_ok()))
+            })
+            .collect();
+        for h in handles {
+            assert!(h.join().unwrap(), "a write failed");
+        }
+        assert!(read(&d).pos.is_some());
         let _ = std::fs::remove_dir_all(&d);
     }
 

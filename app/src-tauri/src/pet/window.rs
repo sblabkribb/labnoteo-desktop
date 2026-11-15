@@ -52,6 +52,8 @@ pub fn config_of(rt: &PetRuntime) -> PetConfig {
 
 /// Reads, changes and writes `pet-window.json`. With no config dir known nothing is written.
 pub fn update_config(rt: &PetRuntime, f: impl FnOnce(&mut PetConfig)) {
+    // One writer at a time: a position save and a quiet toggle must not undo each other.
+    let _guard = lock(&rt.cfg_lock);
     let dir = lock(&rt.config_dir).clone();
     if let Some(dir) = dir {
         let mut c = config::read(&dir);
@@ -96,11 +98,11 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, rt: &PetRuntime, w: u32, h: u32) ->
     if w == 0 || h == 0 || w > MAX_SPRITE || h > MAX_SPRITE {
         return fail("size");
     }
-    if app.get_webview_window(LABEL).is_some() {
-        return StartResult { ok: true, reason: None };
-    }
     if rt.hidden.load(Ordering::SeqCst) {
         return fail("hidden");
+    }
+    if app.get_webview_window(LABEL).is_some() {
+        return StartResult { ok: true, reason: None };
     }
     match build(app, rt, w, h) {
         Some(()) => {
@@ -256,29 +258,56 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     match event {
         WindowEvent::Moved(pos) => {
             let (ox, oy) = *lock(&rt.offset);
-            let at = {
-                let mut s = lock(&rt.sprite);
-                if let Some(r) = s.as_mut() {
-                    r.x = pos.x + ox;
-                    r.y = pos.y + oy;
-                }
-                *s
-            };
-            let n = rt.moves.fetch_add(1, Ordering::SeqCst) + 1;
-            let app = window.app_handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(SAVE_AFTER_MOVE);
-                let rt = app.state::<PetRuntime>();
-                if rt.moves.load(Ordering::SeqCst) == n {
-                    if let Some(r) = at {
-                        update_config(&rt, |c| c.pos = Some((r.x, r.y)));
+            if let Some(r) = lock(&rt.sprite).as_mut() {
+                r.x = pos.x + ox;
+                r.y = pos.y + oy;
+            }
+            rt.moves.fetch_add(1, Ordering::SeqCst);
+            // One saver thread per drag, not one per Moved event: it waits until the window has been still.
+            if !rt.saver.swap(true, Ordering::SeqCst) {
+                let app = window.app_handle().clone();
+                std::thread::spawn(move || {
+                    let rt = app.state::<PetRuntime>();
+                    loop {
+                        let seen = rt.moves.load(Ordering::SeqCst);
+                        std::thread::sleep(SAVE_AFTER_MOVE);
+                        if rt.moves.load(Ordering::SeqCst) == seen {
+                            break;
+                        }
                     }
-                }
-            });
+                    rt.saver.store(false, Ordering::SeqCst);
+                    settle(&app, &rt);
+                });
+            }
         }
         WindowEvent::ScaleFactorChanged { .. } => reapply(window, &rt),
         WindowEvent::Destroyed => announce_closed(window.app_handle()),
         _ => {}
+    }
+}
+
+/// After a drag: pull the whole window back into a work area when it was dropped off screen, then save where the
+/// sprite is. (`startDragging` has no limits of its own.)
+fn settle<R: Runtime>(app: &AppHandle<R>, rt: &PetRuntime) {
+    let Some(w) = app.get_webview_window(LABEL) else { return };
+    let window = w.as_ref().window();
+    if let Some(r) = window_rect(&window) {
+        let c = clamp_to_areas(r, &work_areas(app), MIN_VISIBLE);
+        if c != r {
+            let _ = window.set_position(PhysicalPosition::new(c.x, c.y));
+        }
+        let (ox, oy) = *lock(&rt.offset);
+        let spot = {
+            let mut s = lock(&rt.sprite);
+            if let Some(sp) = s.as_mut() {
+                sp.x = c.x + ox;
+                sp.y = c.y + oy;
+            }
+            *s
+        };
+        if let Some(sp) = spot {
+            update_config(rt, |cfg| cfg.pos = Some((sp.x, sp.y)));
+        }
     }
 }
 
@@ -324,6 +353,25 @@ mod tests {
         update_config(&rt, |c| c.quiet = true);
         update_config(&rt, |c| c.pos = Some((5, -6)));
         assert_eq!(config_of(&rt), PetConfig { pos: Some((5, -6)), quiet: true });
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_position_save_and_a_quiet_toggle_at_once_keep_both() {
+        let d = dir("both");
+        let rt = std::sync::Arc::new(PetRuntime::default());
+        *rt.config_dir.lock().unwrap() = Some(d.clone());
+        let hs: Vec<_> = (0..40)
+            .map(|i| {
+                let rt = rt.clone();
+                std::thread::spawn(move || if i % 2 == 0 { update_config(&rt, |c| c.quiet = true) } else { update_config(&rt, |c| c.pos = Some((i, i))) })
+            })
+            .collect();
+        for h in hs {
+            h.join().unwrap();
+        }
+        let c = config_of(&rt);
+        assert!(c.quiet && c.pos.is_some(), "{c:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
