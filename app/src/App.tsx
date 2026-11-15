@@ -100,7 +100,7 @@ import { bubbleActions, connectAssistant } from './assistant/wiring';
 import { petStore } from './assistant/petStore';
 import { assistantSession } from './assistant/useAssistantSession';
 import { createMainBridge } from './pet/mainBridge';
-import { tauriMainIpc } from './pet/petIpc';
+import { tauriMainIpc } from './pet/mainIpc';
 import { EmptyState } from './ui/EmptyState';
 import { Dock } from './ui/Dock';
 import { RightDock } from './ui/RightDock';

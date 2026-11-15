@@ -78,6 +78,7 @@
     "allow-partbank-read",
     "allow-partbank-request",
     "allow-pet-close",
+    "allow-pet-relay",
     "allow-pet-start",
     "allow-print-open-in-browser",
     "allow-scan-folder-choose",

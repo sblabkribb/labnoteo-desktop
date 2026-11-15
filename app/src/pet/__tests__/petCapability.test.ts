@@ -13,7 +13,7 @@ const lib = read('src-tauri/src/lib.rs');
 const block = lib.split('generate_handler![')[1].split(']')[0];
 const registered = [...block.matchAll(/\$crate::(?:[a-z0-9_]+::)*([a-z0-9_]+),/g)].map((m) => m[1]);
 const allow = (c: string) => `allow-${c.replace(/_/g, '-')}`;
-const PET_ONLY = ['pet_geometry', 'pet_set_layout', 'pet_hide', 'pet_open_main', 'pet_quiet_get', 'pet_quiet_set', 'pet_start_failed'];
+const PET_ONLY = ['pet_geometry', 'pet_set_layout', 'pet_hide', 'pet_open_main', 'pet_quiet_get', 'pet_quiet_set', 'pet_start_failed', 'pet_subscribe', 'pet_to_main'];
 
 describe('the pet window capability', () => {
   it('applies to the pet window only, and the main capability to the main window only', () => {
@@ -23,8 +23,16 @@ describe('the pet window capability', () => {
 
   it('lists exactly what the pet needs', () => {
     expect(ids(pet).sort()).toEqual(
-      ['core:event:allow-listen', 'core:event:allow-unlisten', 'core:event:allow-emit', 'core:window:allow-start-dragging', ...PET_ONLY.map(allow), 'allow-skin-read'].sort(),
+      ['core:window:allow-start-dragging', ...PET_ONLY.map(allow), 'allow-skin-read'].sort(),
     );
+  });
+
+  it('has no event permission at all: a listener on the global bus would receive every app-wide event (LLM frames, vault changes)', () => {
+    for (const id of ids(pet)) expect(id, id).not.toMatch(/^core:event:/);
+  });
+
+  it('the pet page never imports the Tauri event api', () => {
+    expect(read('src/pet/petIpc.ts')).not.toMatch(/api\/event/);
   });
 
   it('lists no vault, net, git, scan, settings, fs, dialog, opener, updater, process, mcp, index, secret or window-destroy permission', () => {

@@ -77,9 +77,12 @@ pet_hide
 pet_open_main
 pet_quiet_get
 pet_quiet_set
+pet_relay
 pet_set_layout
 pet_start
 pet_start_failed
+pet_subscribe
+pet_to_main
 print_open_in_browser
 scan_folder_choose
 scan_folder_clear

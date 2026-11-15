@@ -196,6 +196,9 @@ macro_rules! register_commands {
             $crate::pet::commands::pet_quiet_get,
             $crate::pet::commands::pet_quiet_set,
             $crate::pet::commands::pet_start_failed,
+            $crate::pet::commands::pet_subscribe,
+            $crate::pet::commands::pet_relay,
+            $crate::pet::commands::pet_to_main,
         ])
     };
 }

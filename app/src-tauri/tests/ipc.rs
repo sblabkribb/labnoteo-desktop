@@ -1279,9 +1279,26 @@ title: 실험
     assert!(call("pet_set_layout", json!({"args": {"mode": "sprite", "cmd": "x"}})).is_err());
     assert_eq!(call("pet_geometry", args("pet_geometry", vec![])).unwrap_err(), json!("notStarted"));
     // Not called here (a mock window would be hidden, destroyed or raised): their argument lists are still checked.
-    for cmd in ["pet_start", "pet_close", "pet_hide", "pet_open_main", "pet_start_failed"] {
+    for cmd in ["pet_start", "pet_close", "pet_hide", "pet_open_main", "pet_start_failed", "pet_subscribe"] {
         let n = fixture[cmd].as_array().unwrap().len();
         let _ = args(cmd, (0..n).map(|_| json!(0)).collect());
+    }
+    // The two relays carry only their fixed event names; anything else (the global bus names) is refused.
+    for ev in ["llm://frame", "vault://changed", "github://progress", "pet:ask", "pet:closed"] {
+        assert_eq!(ok("pet_relay", args("pet_relay", vec![json!(ev), json!({})])), json!(false), "{ev}");
+    }
+    assert_eq!(ok("pet_relay", args("pet_relay", vec![json!("pet:state"), json!({})])), json!(false), "no pet is listening");
+    for ev in ["llm://frame", "vault://changed", "pet:state", "pet:closed"] {
+        assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!(ev), json!({})])), json!(false), "{ev}");
+    }
+    assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!("pet:ask"), json!({})])), json!(true));
+    // Switching the pet off in the main window (pet_close) lifts a "Hide for now", so switching it on starts a new one.
+    {
+        use tauri::Manager;
+        let rt = app.state::<labnoteo_app_lib::pet::commands::PetRuntime>();
+        rt.hidden.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = call("pet_close", args("pet_close", vec![]));
+        assert!(!rt.hidden.load(std::sync::atomic::Ordering::SeqCst));
     }
     assert_eq!(call("pet_start", json!({"spriteW": 0, "spriteH": 96})).unwrap()["reason"], "size");
     assert_eq!(call("pet_start", json!({"spriteW": 9999, "spriteH": 96})).unwrap()["reason"], "size");

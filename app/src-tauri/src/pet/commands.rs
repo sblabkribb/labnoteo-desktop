@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow};
 
 use super::{geometry::Rect, window};
 
@@ -23,7 +24,17 @@ pub struct PetRuntime {
     pub moves: AtomicU64,
     /// The monitor watcher thread runs once per process.
     pub watcher: AtomicBool,
+    /// Serialises the read-modify-write of `pet-window.json`.
+    pub cfg_lock: Mutex<()>,
+    /// One delayed position save at a time.
+    pub saver: AtomicBool,
+    /// The pet page's inbox: the main window's events reach it only through here, never through the global event bus.
+    pub relay: Mutex<Option<Channel<serde_json::Value>>>,
 }
+
+/// What the main window may hand to the pet, and what the pet may hand to the main window. Nothing else is relayed.
+pub const TO_PET: [&str; 3] = ["pet:state", "pet:answer", "pet:reject"];
+pub const TO_MAIN: [&str; 2] = ["pet:ask", "pet:ready"];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,13 +59,17 @@ pub struct StartResult {
     pub reason: Option<&'static str>,
 }
 
-#[tauri::command]
+// `async` runs it off the main thread: building a window from a synchronous command deadlocks on Windows.
+#[tauri::command(async)]
 pub fn pet_start<R: Runtime>(app: AppHandle<R>, rt: State<'_, PetRuntime>, sprite_w: u32, sprite_h: u32) -> StartResult {
     window::start(&app, &rt, sprite_w, sprite_h)
 }
 
 #[tauri::command]
-pub fn pet_close<R: Runtime>(app: AppHandle<R>) {
+pub fn pet_close<R: Runtime>(app: AppHandle<R>, rt: State<'_, PetRuntime>) {
+    // The main window asks for this when the user switches the pet off: switching it on again starts a fresh one.
+    rt.hidden.store(false, std::sync::atomic::Ordering::SeqCst);
+    *rt.relay.lock().unwrap_or_else(|e| e.into_inner()) = None;
     if let Some(w) = app.get_webview_window("pet") {
         let _ = w.destroy();
     }
@@ -73,7 +88,37 @@ pub fn pet_set_layout<R: Runtime>(window: WebviewWindow<R>, rt: State<'_, PetRun
 #[tauri::command]
 pub fn pet_hide<R: Runtime>(window: WebviewWindow<R>, rt: State<'_, PetRuntime>) {
     rt.hidden.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _ = window.hide();
+    // The window is destroyed, not just hidden: the destroy event tells the main window, which then draws its own sprite.
+    let _ = window.destroy();
+}
+
+/// The pet page's one inbox for events from the main window (it has no event permission of its own).
+#[tauri::command]
+pub fn pet_subscribe(rt: State<'_, PetRuntime>, on_event: Channel<serde_json::Value>) {
+    *rt.relay.lock().unwrap_or_else(|e| e.into_inner()) = Some(on_event);
+}
+
+/// Main window to pet: only the three pet events, over the pet's channel. False when the pet is not listening.
+#[tauri::command]
+pub fn pet_relay(rt: State<'_, PetRuntime>, event: String, payload: serde_json::Value) -> bool {
+    if !TO_PET.contains(&event.as_str()) {
+        return false;
+    }
+    let mut slot = rt.relay.lock().unwrap_or_else(|e| e.into_inner());
+    match slot.as_ref().map(|c| c.send(serde_json::json!({ "event": event, "payload": payload }))) {
+        Some(Ok(())) => true,
+        Some(Err(_)) => {
+            *slot = None;
+            false
+        }
+        None => false,
+    }
+}
+
+/// Pet to main window: only `pet:ask` and `pet:ready`, delivered to the main window alone.
+#[tauri::command]
+pub fn pet_to_main<R: Runtime>(app: AppHandle<R>, event: String, payload: serde_json::Value) -> bool {
+    TO_MAIN.contains(&event.as_str()) && app.emit_to("main", &event, payload).is_ok()
 }
 
 /// The one place the main window is raised.
