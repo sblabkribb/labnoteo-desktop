@@ -18,6 +18,7 @@ import type { ChatMessage, ChatOptions, ChatResult, LlmProvider } from '../../la
 import type { Scope } from '../../labnote/context/scope';
 import { builtinRuntime } from '../builtinRuntime';
 import {
+  CATALOG_ONLY_RULE,
   CHIP_IDS,
   CHIP_TOOL_NAMES,
   CONTEXT_TOOL_NAMES,
@@ -217,6 +218,18 @@ describe('builtinRuntime in chip mode', () => {
     expect(prompt).toContain('only when');
     expect(prompt).toContain('one call');
     expect(prompt).toContain('do not plan the same steps again');
+  });
+
+  it('the unitOp and workflow prompts recommend only catalog codes; the section prompt keeps asking before an existing section is rewritten', () => {
+    // real-app check (2026-11-16): the unitOp chip recommended "UHW010 Restriction Digest" from memory; UHW010 is Liquid Handling.
+    for (const chip of ['unitOp', 'workflow'] as const) {
+      const prompt = chipSystemPrompt(chip);
+      expect(prompt).toContain(CATALOG_ONLY_RULE);
+      expect(prompt).toContain('by number or name');
+    }
+    expect(chipSystemPrompt('section')).not.toContain(CATALOG_ONLY_RULE);
+    expect(chipSystemPrompt('section')).not.toMatch(/Never ask in text/);
+    expect(chipSystemPrompt('section')).toContain('answers yes to a draft');
   });
 
   it('the unitOp prompt leaves filling sections to the Create section chip', async () => {

@@ -94,6 +94,24 @@ html[data-reduced-motion] .pet-desktop-sprite { animation: none; }
 .pet-desktop-text[data-error="true"] { color: var(--danger); }
 .pet-desktop-status { margin: 0 0 var(--space-3); color: var(--text-muted); font-size: 0.75rem; }
 
+/* The recent turns mirrored from the main window (the in-window chat look from assistant.css, compact for the panel). */
+.pet-recent { display: flex; flex-direction: column; gap: var(--space-2); }
+.pet-recent-item {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-element);
+  background: var(--bg-hover);
+}
+.pet-recent-item[data-role="user"] { background: var(--accent-soft); }
+.pet-recent-role { display: block; margin-bottom: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); }
+.pet-recent-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.pet-recent-text[data-error="true"] { color: var(--danger); }
+
 .pet-desktop-panel {
   position: relative;
   display: flex;

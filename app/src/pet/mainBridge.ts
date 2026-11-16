@@ -3,13 +3,13 @@ import { petSize } from '../assistant/petStore';
 import { BUILTIN_SKIN } from '../assistant/skins/builtin';
 import { loadSkin } from '../assistant/skins/useSkin';
 import type { SkinManifest } from '../assistant/skins/types';
-import type { AssistantSession } from '../assistant/useAssistantSession';
+import type { AssistantSession, ChatItem } from '../assistant/useAssistantSession';
 import { buildChipRun } from '../assistant/chipRun';
 import { isWorkflowNotePath, type ChipId } from '../assistant/chips';
 import { sectionLabel, sectionOptions, type SectionOption } from '../assistant/SectionPicker';
 import { getLang } from '../i18n/lang';
 import { buildStateEvent } from './mirror';
-import { ANSWER_MAX, clampText, EVT, LABEL_MAX, oneLine, parseAsk, parseClear, parseReady, type AnswerEvent, type AskEvent, type RejectEvent, type RejectReason } from './protocol';
+import { ANSWER_MAX, clampText, EVT, LABEL_MAX, oneLine, parseAsk, parseClear, parseReady, RECENT_MAX, type AnswerEvent, type AskEvent, type RecentItem, type RejectEvent, type RejectReason } from './protocol';
 
 /** The main window's whole window onto Tauri for the pet. Tests inject a fake; `tauriMainIpc` (mainIpc.ts) is the real one. */
 export interface BridgeIpc {
@@ -62,6 +62,16 @@ const nextSeq = (): number => ++seqCounter;
 let idCounter = 0;
 const defaultNewId = (): string => `run-${Date.now().toString(36)}-${(++idCounter).toString(36)}`;
 
+/**
+ * The recent turns for the pet's log: the visible text (a reply with no model text shows its end notice, as the saved history
+ * does; a failed turn shows its error line), turns without text skipped, the newest kept.
+ */
+const recentTurns = (messages: ChatItem[]): RecentItem[] =>
+  messages
+    .map((m) => ({ role: m.role, text: m.text || m.notice?.() || m.error || '', ...(m.error ? { error: true } : {}) }))
+    .filter((x) => x.text !== '')
+    .slice(-RECENT_MAX);
+
 async function defaultManifest(id: string): Promise<SkinManifest> {
   try {
     const skin = await loadSkin(id);
@@ -75,8 +85,8 @@ async function defaultManifest(id: string): Promise<SkinManifest> {
 
 /**
  * Mirrors the assistant that runs in this window to the desktop pet window and answers the pet's questions.
- * It sends only the sprite state, a status line while a run is going and the current answer text (all bounded);
- * it never raises or focuses this window and never calls `pet_open_main`.
+ * It sends only the sprite state, a status line while a run is going, a bounded slice of the recent conversation in the
+ * state and the current answer text; it never raises or focuses this window and never calls `pet_open_main`.
  */
 export function createMainBridge(deps: MainBridgeDeps): MainBridge {
   const { ipc, session, store } = deps;
@@ -158,8 +168,9 @@ export function createMainBridge(deps: MainBridgeDeps): MainBridge {
       buildStateEvent({
         seq: nextSeq(),
         pet: { state: pet.state, skin: pet.skin, scale: pet.scale },
-        // Only the status line of a run in progress; no message text leaves this window here.
+        // Only the status line of a run in progress rides the items; the recent conversation leaves through `recent` (bounded).
         items: snap.messages.map((m) => ({ role: m.role, text: '', status: snap.streaming ? m.status : undefined })),
+        recent: recentTurns(snap.messages),
         streaming: snap.streaming,
         lang: lang(),
         quiet,
