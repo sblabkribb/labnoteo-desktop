@@ -4,10 +4,10 @@ import { useLang } from '../i18n/useLang';
 import { Icon } from '../ui/Icon';
 import { buildChipRun } from './chipRun';
 import { ChipBar } from './ChipBar';
-import { chipGate, isWorkflowNotePath, type ChipId } from './chips';
+import { chipGate, isWorkflowNotePath, type ChipId } from './chipMeta';
 import { HowToCard } from './HowToCard';
 import { MessageView, type BubbleActions } from './MessageView';
-import { SectionPicker, sectionOptions, type SectionChoice, type SectionOption } from './SectionPicker';
+import { SectionPicker, type SectionChoice, type SectionOption } from './SectionPicker';
 import type { UseAssistantSession } from './useAssistantSession';
 
 /** IME 조합 중의 키(한글 입력의 Enter 는 글자를 확정할 뿐 보내지 않는다). */
@@ -127,26 +127,26 @@ export function Bubble(props: {
     setWebHint(false);
   };
 
-  // 섹션 칩: 열린 노트의 제목들
-  const noteReader = actions?.activeNote;
+  // 섹션 칩: 열린 노트의 제목들(앱 창이 노트를 읽어 고를 수 있는 섹션 목록을 준다)
+  const readChoices = actions?.sectionChoices;
   useEffect(() => {
     if (chip !== 'section' || chat.folder === null) return;
     let live = true;
     setSection(null);
     setOptions([]);
     setNotePath(undefined);
-    void (noteReader ? noteReader() : Promise.resolve(undefined)).then(
+    void (readChoices ? readChoices() : Promise.resolve(undefined)).then(
       (note) => {
         if (!live || !note) return;
         setNotePath(note.path);
-        setOptions(sectionOptions(note.text, note.cursorLine));
+        setOptions(note.options);
       },
       (err: unknown) => console.warn('[labnoteo] assistant could not read the open note:', err)
     );
     return () => {
       live = false;
     };
-  }, [chip, chat.folder, props.activePath, noteReader]);
+  }, [chip, chat.folder, props.activePath, readChoices]);
 
   // 단위 공정 칩: 열린 노트가 워크플로 노트가 아니면 이 실험의 워크플로 노트 중에서 고른다
   const listWorkflows = actions?.workflowNotes;

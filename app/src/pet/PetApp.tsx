@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Bubble } from '../assistant/Bubble';
 import { applySkinVars, BUBBLE_GAP, DRAG_THRESHOLD, snapScale } from '../assistant/petStore';
 import { BUILTIN_SKIN_ID } from '../assistant/skins/builtin';
 import { useSkin, type SkinDeps } from '../assistant/skins/useSkin';
 import { applyHtmlLang, setLang } from '../i18n/lang';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
-import { Icon } from '../ui/Icon';
 import { growWindow, type Rect } from './geometry';
 import { MENU_ITEMS, runMenuAction, type MenuAction, type MenuDeps } from './menuActions';
-import { EMPTY_MIRROR, mirrorReduce } from './mirror';
 import type { PetIpc } from './petIpc';
-import { ASK_MAX, buildAsk, EVT, MODES, parseAnswer, parseReject, parseState, type AskMode, type SectionPick } from './protocol';
+import { clampText, EVT, parseState, type StateEvent } from './protocol';
+import { createRemote } from './remote';
 
 /** Logical size of the toast bubble in px; Rust's `size()` in pet/window.rs uses the same numbers. The panel's size comes from Rust. */
 const TOAST = { w: 240, h: 72 } as const;
@@ -18,38 +18,9 @@ const TOAST = { w: 240, h: 72 } as const;
 const PANEL_FALLBACK: Panel = { w: 360, h: 440, minW: 300, minH: 340, maxW: 640, maxH: 900 };
 const RESIZE_STEP = 16;
 const RESIZE_STEP_BIG = 64;
-/** One sentence per reject code, written out so the catalog check sees every key. */
-const REASON_KEY = {
-  'no-vault': 'pet.desktop.reason.no-vault',
-  'not-configured': 'pet.desktop.reason.not-configured',
-  busy: 'pet.desktop.reason.busy',
-  invalid: 'pet.desktop.reason.invalid',
-  'no-note': 'pet.desktop.reason.no-note',
-  'no-workflow': 'pet.desktop.reason.no-workflow',
-  offline: 'pet.desktop.reason.offline',
-} as const;
-/** The panel's mode names (the same keys as the in-window chips) and the hint in the box, written out for the catalog check. */
-const MODE_KEY: Record<AskMode, string> = {
-  howTo: 'chip.howTo',
-  section: 'chip.section',
-  unitOp: 'chip.unitOp',
-  workflow: 'chip.workflow',
-  chat: 'chip.chat',
-};
-const MODE_PLACEHOLDER: Record<AskMode, string> = {
-  howTo: 'pet.placeholder',
-  section: 'chip.section.placeholder',
-  unitOp: 'chip.unitOp.placeholder',
-  workflow: 'chip.workflow.placeholder',
-  chat: 'pet.placeholder',
-};
-/** Three and two, like the in-window toolbar. */
-const MODE_ROWS: readonly (readonly AskMode[])[] = [MODES.slice(0, 3), MODES.slice(3)];
 const ARROW: Readonly<Record<string, readonly [number, number]>> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-const STEP: Readonly<Record<string, number>> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
-const OFFLINE_MS = 5000;
 const TOAST_MS = 6000;
-const NEW = 'new';
+const TOAST_TEXT_MAX = 300;
 
 interface Panel {
   w: number;
@@ -74,9 +45,6 @@ interface View {
   align: 'left' | 'right';
 }
 
-/** What the person picked in the section list: one of the labels of the list at the time, or "new title". */
-type Picked = { index: number; label: string } | typeof NEW | null;
-
 export interface PetAppProps {
   ipc: PetIpc;
   /** Skin loading hooks (blob URLs); `invoke` is always the page's own. */
@@ -84,6 +52,8 @@ export interface PetAppProps {
   /** Whether a sprite sheet can be drawn at all; false for the built-in skin closes the window. */
   canDraw?: (url: string) => Promise<boolean>;
   newId?: () => string;
+  /** How long a call to the main window waits (tests shorten it). */
+  callTimeoutMs?: number;
 }
 
 /** The skin loader's own invoke shape (kept here so the pet page imports nothing from the integrations code). */
@@ -92,7 +62,7 @@ type InvokeFn = NonNullable<SkinDeps['invoke']>;
 const defaultNewId = (): string =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
-    : `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    : `call-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 const defaultCanDraw = (url: string): Promise<boolean> =>
   new Promise((resolve) => {
@@ -116,99 +86,95 @@ const asGeo = (v: unknown): Geo | null => {
   return { sprite: g.sprite, areas: g.areas, scale: g.scale, panel: asPanel(g.panel) ?? PANEL_FALLBACK };
 };
 
-/** The desktop pet: the sprite, a drag handle, a three-item menu and a thin-client bubble. All state comes from validated events. */
-export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaultNewId }: PetAppProps) {
+/**
+ * The desktop assistant: the sprite, a drag handle, a three-item menu, a short answer toast and the assistant panel itself
+ * (the same Bubble the app has always drawn). The conversation and every action run in the main window (remote.ts).
+ */
+export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaultNewId, callTimeoutMs }: PetAppProps) {
   useLang();
-  const [m, dispatch] = useReducer(mirrorReduce, EMPTY_MIRROR);
+  const [st, setSt] = useState<StateEvent | null>(null);
+  const [quiet, setQuietState] = useState(false);
+  const [openLocal, setOpenLocal] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [menu, setMenu] = useState(false);
-  const [mode, setMode] = useState<AskMode>('chat');
-  const [draft, setDraft] = useState('');
-  const [picked, setPicked] = useState<Picked>(null);
-  const [newTitle, setNewTitle] = useState('');
-  const [confirmClear, setConfirmClear] = useState(false);
+  const [confirm, setConfirm] = useState<((ok: boolean) => void) | null>(null);
   const [panel, setPanel] = useState<Panel>(PANEL_FALLBACK);
-  const [focusMode, setFocusMode] = useState<AskMode>('chat');
-  const heading = useId();
+  const bubbleId = useId();
   const gripHint = useId();
   const sprite = useRef<HTMLSpanElement>(null);
   const bubble = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const modeButtons = useRef(new Map<AskMode, HTMLButtonElement>());
   const press = useRef<{ x: number; y: number; dragged: boolean } | null>(null);
   const resize = useRef<{ id: number; x: number; y: number; w: number; h: number } | null>(null);
   const sizing = useRef<{ busy: boolean; next: { w: number; h: number; commit: boolean } | null }>({ busy: false, next: null });
-  const askTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastMode = useRef<Mode | null>(null);
   const failed = useRef(false);
-  // The pet owns quiet mode (pet-window.json); a snapshot from the main window never flips it.
-  const quiet = useRef(false);
-  quiet.current = m.quiet;
+  const seq = useRef(-1);
+
+  const remote = useMemo(
+    () =>
+      createRemote({
+        ipc,
+        newId,
+        timeoutMs: callTimeoutMs,
+        confirmClear: () => new Promise<boolean>((resolve) => setConfirm(() => resolve)),
+      }),
+    [ipc, newId, callTimeoutMs],
+  );
+  useEffect(() => () => remote.dispose(), [remote]);
+  const chat = useSyncExternalStore(remote.subscribe, remote.get);
 
   const invoke = useCallback<InvokeFn>((cmd, args) => ipc.invoke(cmd, args) as Promise<never>, [ipc]);
   const deps = useMemo(() => ({ invoke, urls: skinDeps?.urls }), [invoke, skinDeps?.urls]);
-  const skin = useSkin(m.skin, deps);
+  const skin = useSkin(st?.skin ?? BUILTIN_SKIN_ID, deps);
+  const open = openLocal;
 
   // Events in: validated, dropped on anything wrong. The snapshot is asked for only once the listeners exist.
   useEffect(() => {
     let live = true;
     const offs: Array<() => void> = [];
-    const clearAsk = () => {
-      if (askTimer.current !== undefined) clearTimeout(askTimer.current);
-      askTimer.current = undefined;
-    };
-    const on = (name: string, fn: (payload: unknown) => void) =>
-      ipc.listen(name, fn).then((off) => (live ? void offs.push(off) : off()));
+    const on = (name: string, fn: (payload: unknown) => void) => ipc.listen(name, fn).then((off) => (live ? void offs.push(off) : off()));
     void Promise.all([
       on(EVT.state, (p) => {
-        const event = parseState(p);
-        if (!event) return;
-        clearAsk();
-        dispatch({ type: 'state', event: { ...event, quiet: quiet.current } });
+        const ev = parseState(p);
+        if (!ev || ev.seq <= seq.current) return;
+        seq.current = ev.seq;
+        setSt(ev);
+        setOpenLocal(ev.open);
       }),
-      on(EVT.answer, (p) => {
-        const event = parseAnswer(p);
-        if (!event) return;
-        clearAsk();
-        dispatch({ type: 'answer', event });
-      }),
-      on(EVT.reject, (p) => {
-        const event = parseReject(p);
-        if (!event) return;
-        clearAsk();
-        dispatch({ type: 'reject', event });
-      }),
+      on(EVT.chat, (p) => remote.onChat(p)),
+      on(EVT.result, (p) => remote.onResult(p)),
     ]).then(() => {
       if (live) void ipc.emit(EVT.ready, { v: 1 });
     });
     void Promise.resolve(ipc.invoke('pet_quiet_get')).then(
-      (q) => live && dispatch({ type: 'setQuiet', quiet: q === true }),
+      (q) => live && setQuietState(q === true),
       () => undefined,
     );
     return () => {
       live = false;
-      clearAsk();
       for (const off of offs) off();
     };
-  }, [ipc]);
+  }, [ipc, remote]);
 
   // The main window decides the language (localStorage is shared, but it only changes on a restart otherwise).
+  const lang = st?.lang;
   useEffect(() => {
-    if (!m.online) return;
-    setLang(m.lang);
-    applyHtmlLang(m.lang);
-  }, [m.online, m.lang]);
+    if (!lang) return;
+    setLang(lang);
+    applyHtmlLang(lang);
+  }, [lang]);
 
-  // Sprite art. The scale snaps to whole device pixels like the in-window sprite.
+  // Sprite art. The scale snaps to whole device pixels like the in-window sprite did.
   useLayoutEffect(() => {
     const el = sprite.current;
     if (!el) return;
-    applySkinVars(el, skin.manifest, m.state, skin.sheetUrl);
-    el.style.setProperty('--pet-scale', String(snapScale(m.scale, window.devicePixelRatio || 1)));
-  }, [skin, m.state, m.scale]);
+    applySkinVars(el, skin.manifest, st?.state ?? 'idle', skin.sheetUrl);
+    el.style.setProperty('--pet-scale', String(snapScale(st?.scale ?? 2, window.devicePixelRatio || 1)));
+  }, [skin, st?.state, st?.scale]);
 
-  // Not even the built-in skin can be drawn: close this window and let the main window show its own sprite.
+  // Not even the built-in skin can be drawn: close this window (the main window says so and turns the assistant off).
   useEffect(() => {
     if (skin.id !== BUILTIN_SKIN_ID || failed.current) return;
     let live = true;
@@ -223,8 +189,34 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
     };
   }, [skin, canDraw, ipc]);
 
+  // A finished answer pops a short toast by itself while the panel is closed, unless quiet.
+  const streaming = chat.streaming;
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    const ended = wasStreaming.current && !streaming;
+    wasStreaming.current = streaming;
+    if (!ended || open || quiet) return;
+    const last = [...chat.messages].reverse().find((m) => m.role === 'assistant');
+    const text = last ? last.text || last.error || last.notice?.() || '' : '';
+    if (text.trim()) setToast(clampText(text.replace(/\s+/g, ' ').trim(), TOAST_TEXT_MAX));
+  }, [streaming, open, quiet, chat.messages]);
+  useEffect(() => {
+    if (!toast || menu) return;
+    const id = setTimeout(() => setToast(null), TOAST_MS);
+    return () => clearTimeout(id);
+  }, [toast, menu]);
+
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOpenLocal(next);
+      if (next) setToast(null);
+      void remote.call('setOpen', [next]).catch(() => undefined);
+    },
+    [remote],
+  );
+
   // The window grows to hold the bubble (the menu uses the panel's room) and shrinks back to the sprite.
-  const wanted: Mode | null = menu || m.bubble === 'panel' ? 'panel' : m.bubble;
+  const wanted: Mode | null = menu || open ? 'panel' : toast ? 'toast' : null;
   useEffect(() => {
     let live = true;
     if (!wanted) {
@@ -240,12 +232,7 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
       // The panel's size is the one the window remembered (clamped to this monitor); a toast has a fixed size.
       const b = wanted === 'panel' ? { w: geo.panel.w, h: geo.panel.h } : TOAST;
       if (wanted === 'panel') setPanel(geo.panel);
-      const grown = growWindow(
-        geo.sprite,
-        { w: Math.round(b.w * geo.scale), h: Math.round(b.h * geo.scale) },
-        Math.round(BUBBLE_GAP * geo.scale),
-        geo.areas,
-      );
+      const grown = growWindow(geo.sprite, { w: Math.round(b.w * geo.scale), h: Math.round(b.h * geo.scale) }, Math.round(BUBBLE_GAP * geo.scale), geo.areas);
       await ipc.invoke('pet_set_layout', { args: { mode: wanted, rect: grown.rect } });
       if (live) setView({ mode: wanted, side: grown.side, align: grown.align });
     })().catch(() => undefined);
@@ -262,48 +249,40 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
     el.style.setProperty('--pet-bubble-h', `${panel.h}px`);
   }, [view, panel.w, panel.h]);
 
-  // A toast dismisses itself.
+  // Escape closes the clear question, then the menu (the panel closes itself on Escape); a click outside the menu closes it.
   useEffect(() => {
-    if (m.bubble !== 'toast' || menu) return;
-    const id = setTimeout(() => dispatch({ type: 'dismissToast' }), TOAST_MS);
-    return () => clearTimeout(id);
-  }, [m.bubble, m.answerSeq, menu]);
-
-  // The panel takes the keyboard: focus the question box once it is on screen.
-  useEffect(() => {
-    if (view?.mode === 'panel' && !menu) input.current?.focus();
-  }, [view?.mode, menu, mode]);
-
-  // Escape closes the clear question, then the menu, then the panel; a click outside the menu closes it.
-  useEffect(() => {
-    if (!menu && m.bubble !== 'panel') return;
+    if (!menu && !confirm) return;
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (confirmClear) setConfirmClear(false);
-      else if (menu) setMenu(false);
-      else dispatch({ type: 'toggle' });
+      e.preventDefault();
+      if (confirm) {
+        confirm(false);
+        setConfirm(null);
+      } else setMenu(false);
     };
     const away = (e: PointerEvent) => {
       if (menu && !menuRef.current?.contains(e.target as Node)) setMenu(false);
     };
-    document.addEventListener('keydown', key);
+    document.addEventListener('keydown', key, true);
     document.addEventListener('pointerdown', away);
     return () => {
-      document.removeEventListener('keydown', key);
+      document.removeEventListener('keydown', key, true);
       document.removeEventListener('pointerdown', away);
     };
-  }, [menu, m.bubble, confirmClear]);
+  }, [menu, confirm]);
 
   useEffect(() => {
     if (menu) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [menu]);
 
+  const hide = useCallback(() => void remote.call('hide').catch(() => undefined), [remote]);
   const menuDeps: MenuDeps = {
-    quiet: m.quiet,
-    hide: async () => void (await ipc.invoke('pet_hide')),
-    setQuiet: async (quiet) => {
-      await ipc.invoke('pet_quiet_set', { quiet });
-      dispatch({ type: 'setQuiet', quiet });
+    quiet,
+    hide: async () => hide(),
+    setQuiet: async (q) => {
+      await ipc.invoke('pet_quiet_set', { quiet: q });
+      setQuietState(q);
+      if (q) setToast(null);
     },
     openMain: async () => void (await ipc.invoke('pet_open_main')),
   };
@@ -330,13 +309,13 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
     press.current = null;
     if (e.button !== 0 || !p || p.dragged) return;
     setMenu(false);
-    dispatch({ type: 'toggle' });
+    setOpen(!open);
   };
   const onClick = (e: React.MouseEvent) => {
     // A pointer click was handled on release; a click without a pointer (Enter, Space) comes here.
     if (e.detail === 0) {
       setMenu(false);
-      dispatch({ type: 'toggle' });
+      setOpen(!open);
     }
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -344,51 +323,6 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
       e.preventDefault();
       setMenu(true);
     }
-  };
-
-  const sectionPick = (): SectionPick | null => {
-    if (picked === NEW) {
-      const title = newTitle.replace(/\s+/g, ' ').trim();
-      return title ? { kind: 'new', title } : null;
-    }
-    // A pick counts only while the list still has that label at that place.
-    return picked && m.sections[picked.index] === picked.label ? { kind: 'pick', index: picked.index, label: picked.label } : null;
-  };
-  const working = m.pendingAsk !== null || m.busy;
-  const needsExperiment = mode !== 'chat' && mode !== 'howTo' && m.folder === '';
-  const event = () => buildAsk(draft, newId, mode, mode === 'section' ? (sectionPick() ?? undefined) : undefined);
-  const canSend = !working && !needsExperiment && event() !== null;
-
-  const ask = () => {
-    if (!canSend) return;
-    const ev = event();
-    if (!ev) return;
-    void ipc.emit(EVT.ask, ev);
-    dispatch({ type: 'asked', askId: ev.askId });
-    setDraft('');
-    input.current?.focus();
-    if (askTimer.current !== undefined) clearTimeout(askTimer.current);
-    askTimer.current = setTimeout(() => dispatch({ type: 'offline' }), OFFLINE_MS);
-  };
-
-  const clearChat = () => {
-    setConfirmClear(false);
-    void ipc.emit(EVT.clear, { v: 1 });
-    dispatch({ type: 'cleared' });
-  };
-
-  const selectMode = (next: AskMode) => {
-    setMode(next);
-    setFocusMode(next);
-  };
-  const onModesKey = (e: React.KeyboardEvent) => {
-    const i = MODES.indexOf(focusMode);
-    const n = MODES.length;
-    const next = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : Object.hasOwn(STEP, e.key) ? (i + STEP[e.key] + n) % n : undefined;
-    if (next === undefined) return;
-    e.preventDefault();
-    setFocusMode(MODES[next]);
-    modeButtons.current.get(MODES[next])?.focus();
   };
 
   // Resizing: the window answers with the size it allows (bounds and this monitor), and that is the size drawn. One request at
@@ -408,12 +342,7 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
             const info = asPanel(await ipc.invoke('pet_panel_size', { ...job }));
             const geo = info ? asGeo(await ipc.invoke('pet_geometry')) : null;
             if (info && geo) {
-              const grown = growWindow(
-                geo.sprite,
-                { w: Math.round(info.w * geo.scale), h: Math.round(info.h * geo.scale) },
-                Math.round(BUBBLE_GAP * geo.scale),
-                geo.areas,
-              );
+              const grown = growWindow(geo.sprite, { w: Math.round(info.w * geo.scale), h: Math.round(info.h * geo.scale) }, Math.round(BUBBLE_GAP * geo.scale), geo.areas);
               await ipc.invoke('pet_set_layout', { args: { mode: 'panel', rect: grown.rect } });
               setPanel(info);
               setView((v) => (v ? { ...v, side: grown.side, align: grown.align } : v));
@@ -469,56 +398,30 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
     const next = sized(panel, dir[0] * step, dir[1] * step);
     resizeTo(next.w, next.h, true);
   };
-
-  const reason = m.reason ? t(REASON_KEY[m.reason]) : '';
-  const composerFields =
-    mode === 'section' ? (
-      <div className="pet-field">
-        <label className="pet-field-label" htmlFor={`${heading}-section`}>
-          {t('section.pick')}
-        </label>
-        <select
-          id={`${heading}-section`}
-          className="pet-select"
-          value={picked === NEW ? NEW : picked && m.sections[picked.index] === picked.label ? String(picked.index) : ''}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === NEW) setPicked(NEW);
-            else {
-              const index = Number(v);
-              setPicked(v === '' || m.sections[index] === undefined ? null : { index, label: m.sections[index] });
-            }
-          }}
-        >
-          <option value="" disabled>
-            {t('section.choose')}
-          </option>
-          {m.sections.map((label, i) => (
-            <option key={`${i}:${label}`} value={String(i)}>
-              {label}
-            </option>
-          ))}
-          <option value={NEW}>{t('section.new')}</option>
-        </select>
-        {picked === NEW ? (
-          <>
-            <label className="pet-field-label" htmlFor={`${heading}-title`}>
-              {t('section.newTitle')}
-            </label>
-            <input
-              id={`${heading}-title`}
-              className="pet-input"
-              type="text"
-              value={newTitle}
-              maxLength={200}
-              onChange={(e) => setNewTitle(e.target.value)}
-            />
-          </>
-        ) : null}
-      </div>
-    ) : mode === 'unitOp' ? (
-      <p className="pet-chip-target">{m.unitTarget ? t('chip.target', m.unitTarget) : t('chip.noWorkflow')}</p>
-    ) : null;
+  const grip = (
+    <>
+      <button
+        type="button"
+        className="pet-bubble-grip"
+        aria-label={t('pet.resize')}
+        aria-describedby={gripHint}
+        title={t('pet.resizeHint')}
+        onPointerDown={onGripDown}
+        onPointerMove={onGripMove}
+        onPointerUp={onGripUp}
+        onPointerCancel={onGripUp}
+        onDoubleClick={() => resizeTo(PANEL_FALLBACK.w, PANEL_FALLBACK.h, true)}
+        onKeyDown={onGripKey}
+      />
+      <span id={gripHint} className="pet-sr">
+        {t('pet.resizeHint')}
+      </span>
+    </>
+  );
+  const answerConfirm = (ok: boolean) => {
+    confirm?.(ok);
+    setConfirm(null);
+  };
 
   return (
     <div
@@ -539,7 +442,7 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
                   key={item.action}
                   type="button"
                   role="menuitem"
-                  aria-checked={item.action === 'quiet' ? m.quiet : undefined}
+                  aria-checked={item.action === 'quiet' ? quiet : undefined}
                   className="pet-desktop-menuitem"
                   onClick={() => choose(item.action)}
                 >
@@ -548,172 +451,36 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
               ))}
             </div>
           ) : view.mode === 'toast' ? (
-            <p className="pet-desktop-text" role="status" data-error={m.answer?.error === true}>
-              {m.answer?.text ?? ''}
+            <p className="pet-desktop-text" role="status">
+              {toast ?? ''}
             </p>
           ) : (
-            <div className="pet-desktop-panel" role="dialog" aria-modal="false" aria-labelledby={heading}>
-              <div className="pet-bubble-head">
-                <div className="pet-bubble-heading">
-                  <h2 id={heading} className="pet-bubble-title">
-                    {t('pet.title')}
-                  </h2>
-                  {m.folder !== '' ? (
-                    <span className="pet-bubble-folder" title={m.folder}>
-                      {t('pet.folder', m.folder)}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="pet-bubble-tools">
-                  {m.folder !== '' ? (
-                    <button
-                      type="button"
-                      className="ibtn pet-bubble-clear"
-                      aria-label={t('history.clear')}
-                      title={t('history.clear')}
-                      onClick={() => setConfirmClear(true)}
-                    >
-                      <Icon name="eraser" size={16} />
-                    </button>
-                  ) : null}
-                  <button type="button" className="ibtn pet-bubble-close" aria-label={t('pet.close')} title={t('pet.close')} onClick={() => dispatch({ type: 'toggle' })}>
-                    <Icon name="x" size={16} />
-                  </button>
-                </div>
-              </div>
-              {confirmClear ? (
-                <div className="pet-desktop-confirm" role="group" aria-label={t('history.clear')}>
+            <>
+              <Bubble
+                id={bubbleId}
+                onClose={() => setOpen(false)}
+                onHide={hide}
+                chat={chat}
+                activePath={st?.activePath || undefined}
+                actions={remote.actions}
+                grip={grip}
+                sized={panel.w !== PANEL_FALLBACK.w || panel.h !== PANEL_FALLBACK.h}
+                onResetSize={() => resizeTo(PANEL_FALLBACK.w, PANEL_FALLBACK.h, true)}
+              />
+              {confirm ? (
+                <div className="pet-desktop-confirm" role="alertdialog" aria-label={t('history.clear')}>
                   <p>{t('history.clearConfirm')}</p>
                   <div className="pet-composer-actions">
-                    <button type="button" className="btn" onClick={() => setConfirmClear(false)}>
+                    <button type="button" className="btn" onClick={() => answerConfirm(false)}>
                       {t('dialog.cancel')}
                     </button>
-                    <button type="button" className="btn primary" onClick={clearChat}>
+                    <button type="button" className="btn primary" onClick={() => answerConfirm(true)}>
                       {t('history.clearAction')}
                     </button>
                   </div>
                 </div>
               ) : null}
-              <div className="pet-chips" role="toolbar" aria-label={t('pet.chips')} onKeyDown={onModesKey}>
-                {MODE_ROWS.map((row) => (
-                  <div key={row.join()} className="pet-chips-row">
-                    {row.map((id) => (
-                      <button
-                        key={id}
-                        ref={(el) => {
-                          if (el) modeButtons.current.set(id, el);
-                          else modeButtons.current.delete(id);
-                        }}
-                        type="button"
-                        className="pet-chip"
-                        data-chip={id}
-                        aria-pressed={id === mode}
-                        tabIndex={id === focusMode ? 0 : -1}
-                        onFocus={() => setFocusMode(id)}
-                        onClick={() => selectMode(id)}
-                      >
-                        {t(MODE_KEY[id])}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              {m.folder === '' ? <p className="pet-bubble-note">{t('pet.ephemeral')}</p> : null}
-              <div className="pet-desktop-scroll" role="log" aria-live="polite" aria-relevant="additions" aria-label={t('pet.log')}>
-                {reason ? (
-                  <p className="pet-desktop-text" data-error="true">
-                    {reason}
-                  </p>
-                ) : null}
-                {working ? <p className="pet-desktop-status">{m.status || t('pet.desktop.working')}</p> : null}
-                {m.recent.length > 0 ? (
-                  <div className="pet-recent">
-                    {m.recent.map((item, i) => (
-                      <div key={i} className="pet-recent-item" data-role={item.role}>
-                        <span className="pet-recent-role">{item.role === 'assistant' ? t('pet.title') : t('pet.you')}</span>
-                        <p className="pet-recent-text" data-error={item.error ? 'true' : undefined}>
-                          {item.text}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {!reason && !working && !m.answer && m.recent.length === 0 ? <p className="pet-bubble-greeting">{t('pet.greeting')}</p> : null}
-              </div>
-              <div className="pet-chip-panel" data-chip={mode}>
-                {mode === 'howTo' ? (
-                  <section className="pet-howto" aria-label={t('chip.howTo')}>
-                    <p>{t('howto.what')}</p>
-                    <p>{t('howto.chips')}</p>
-                    <p>{t('howto.history')}</p>
-                    <p>{t('howto.hide')}</p>
-                    <div className="pet-howto-actions">
-                      <button type="button" className="btn primary" onClick={() => selectMode('chat')}>
-                        {t('howto.startChat')}
-                      </button>
-                    </div>
-                  </section>
-                ) : needsExperiment ? (
-                  <div className="pet-gate">
-                    <p>{t('pet.needExperiment')}</p>
-                  </div>
-                ) : (
-                  <form
-                    className="pet-composer"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      ask();
-                    }}
-                  >
-                    {composerFields}
-                    <textarea
-                      ref={input}
-                      className="pet-composer-input"
-                      rows={2}
-                      maxLength={ASK_MAX}
-                      value={draft}
-                      aria-label={t('pet.composer')}
-                      placeholder={t(MODE_PLACEHOLDER[mode])}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
-                          e.preventDefault();
-                          ask();
-                        }
-                      }}
-                    />
-                    <div className="pet-composer-actions">
-                      <button type="submit" className="btn primary pet-send" disabled={!canSend}>
-                        <Icon name="send" size={14} />
-                        <span>{t('pet.send')}</span>
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-              <div className="pet-bubble-foot">
-                <button type="button" className="btn pet-bubble-hide" onClick={() => choose('hide')}>
-                  <Icon name="eye-off" size={14} />
-                  <span>{t('pet.hide')}</span>
-                </button>
-              </div>
-              <button
-                type="button"
-                className="pet-bubble-grip"
-                aria-label={t('pet.resize')}
-                aria-describedby={gripHint}
-                title={t('pet.resizeHint')}
-                onPointerDown={onGripDown}
-                onPointerMove={onGripMove}
-                onPointerUp={onGripUp}
-                onPointerCancel={onGripUp}
-                onDoubleClick={() => resizeTo(PANEL_FALLBACK.w, PANEL_FALLBACK.h, true)}
-                onKeyDown={onGripKey}
-              />
-              <span id={gripHint} className="pet-sr">
-                {t('pet.resizeHint')}
-              </span>
-            </div>
+            </>
           )}
         </div>
       )}
@@ -722,7 +489,8 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
         className="pet-desktop-sprite-button"
         aria-label={t('pet.desktop.pet')}
         aria-haspopup="dialog"
-        aria-expanded={m.bubble === 'panel'}
+        aria-expanded={open}
+        aria-controls={open ? bubbleId : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -730,7 +498,7 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
         onClick={onClick}
         onKeyDown={onKeyDown}
       >
-        <span ref={sprite} className="pet-desktop-sprite" data-state={m.state} aria-hidden="true" />
+        <span ref={sprite} className="pet-desktop-sprite" data-state={st?.state ?? 'idle'} aria-hidden="true" />
       </button>
     </div>
   );

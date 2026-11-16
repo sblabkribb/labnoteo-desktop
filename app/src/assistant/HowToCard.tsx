@@ -2,7 +2,7 @@ import { useId } from 'react';
 import { t } from '../i18n/t';
 import { useLang } from '../i18n/useLang';
 import { Icon } from '../ui/Icon';
-import { chipLabel } from './chips';
+import { chipLabel } from './chipMeta';
 
 /**
  * 사용법 칩(assistant spec §4.4): 모델을 부르지 않는 짧은 도움말. 무엇을 하는지, 칩이 어떻게 움직이는지(쓰기 전에 늘

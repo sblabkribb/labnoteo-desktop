@@ -35,8 +35,10 @@ pub struct PetRuntime {
 }
 
 /// What the main window may hand to the pet, and what the pet may hand to the main window. Nothing else is relayed.
-pub const TO_PET: [&str; 3] = ["pet:state", "pet:answer", "pet:reject"];
-pub const TO_MAIN: [&str; 3] = ["pet:ask", "pet:clear", "pet:ready"];
+/// The pet window draws the assistant panel: it gets the sprite state, the conversation and the answers to its calls, and it
+/// sends calls (checked one by one in the main window, src/pet/protocol.ts parseCall) and "ready".
+pub const TO_PET: [&str; 3] = ["pet:state", "pet:chat", "pet:result"];
+pub const TO_MAIN: [&str; 2] = ["pet:call", "pet:ready"];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,7 +121,7 @@ pub fn pet_subscribe(rt: State<'_, PetRuntime>, on_event: Channel<serde_json::Va
     *rt.relay.lock().unwrap_or_else(|e| e.into_inner()) = Some(on_event);
 }
 
-/// Main window to pet: only the three pet events, over the pet's channel. False when the pet is not listening.
+/// Main window to pet: only the TO_PET events, over the pet's channel. False when the pet is not listening.
 #[tauri::command]
 pub fn pet_relay(rt: State<'_, PetRuntime>, event: String, payload: serde_json::Value) -> bool {
     if !TO_PET.contains(&event.as_str()) {
@@ -136,7 +138,7 @@ pub fn pet_relay(rt: State<'_, PetRuntime>, event: String, payload: serde_json::
     }
 }
 
-/// Pet to main window: only `pet:ask`, `pet:clear` and `pet:ready`, delivered to the main window alone.
+/// Pet to main window: only `pet:call` and `pet:ready`, delivered to the main window alone.
 #[tauri::command]
 pub fn pet_to_main<R: Runtime>(app: AppHandle<R>, event: String, payload: serde_json::Value) -> bool {
     TO_MAIN.contains(&event.as_str()) && app.emit_to("main", &event, payload).is_ok()

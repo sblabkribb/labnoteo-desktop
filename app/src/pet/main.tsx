@@ -4,6 +4,7 @@ import { applyHtmlLang, getLang } from '../i18n/lang';
 import { PetApp } from './PetApp';
 import { tauriPetIpc } from './petIpc';
 import '../styles/tokens.css';
+import '../styles/assistant.css';
 import '../styles/pet.css';
 
 // localStorage is shared with the main window (one origin): the language and theme it stored apply here too.

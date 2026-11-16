@@ -12,7 +12,9 @@ import { DialogLayer } from '../../labnote/host/DialogLayer';
 import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createLayoutStore, type UiPrefs } from '../../ui/layoutStore';
 import { emptyHistory } from '../history';
-import { PetLayer, type BubbleActions } from '../PetLayer';
+import { sectionOptions } from '../sectionOptions';
+import type { BubbleActions } from '../MessageView';
+import { PanelHarness as PetLayer } from './panelHarness';
 import { createPetStore, type PetStore } from '../petStore';
 import type { AssistantRuntime, AssistantTurn } from '../runtime';
 import { createAssistantSession, type AssistantSession, type HistoryIo } from '../useAssistantSession';
@@ -75,7 +77,7 @@ function setup(opts: { provider?: boolean; activePath?: string; actions?: Partia
     openSource: vi.fn(),
     insert: vi.fn(),
     runCommand: vi.fn(),
-    activeNote: vi.fn(async () => ({ path: opts.activePath ?? WF_A, text: MD, cursorLine: 6 })),
+    sectionChoices: vi.fn(async () => ({ path: opts.activePath ?? WF_A, options: sectionOptions(MD, 6) })),
     workflowNotes: vi.fn(async () => [WF_A, WF_A2]),
     ...opts.actions,
   };

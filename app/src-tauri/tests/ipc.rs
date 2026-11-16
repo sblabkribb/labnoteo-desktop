@@ -1289,14 +1289,16 @@ title: 실험
         let _ = args(cmd, (0..n).map(|_| json!(0)).collect());
     }
     // The two relays carry only their fixed event names; anything else (the global bus names) is refused.
-    for ev in ["llm://frame", "vault://changed", "github://progress", "pet:ask", "pet:closed"] {
+    for ev in ["llm://frame", "vault://changed", "github://progress", "pet:call", "pet:ready", "pet:closed", "pet:ask", "pet:answer"] {
         assert_eq!(ok("pet_relay", args("pet_relay", vec![json!(ev), json!({})])), json!(false), "{ev}");
     }
-    assert_eq!(ok("pet_relay", args("pet_relay", vec![json!("pet:state"), json!({})])), json!(false), "no pet is listening");
-    for ev in ["llm://frame", "vault://changed", "pet:state", "pet:closed", "pet:answer", "pet:reject"] {
+    for ev in ["pet:state", "pet:chat", "pet:result"] {
+        assert_eq!(ok("pet_relay", args("pet_relay", vec![json!(ev), json!({})])), json!(false), "no pet is listening: {ev}");
+    }
+    for ev in ["llm://frame", "vault://changed", "pet:state", "pet:chat", "pet:result", "pet:closed", "pet:ask", "pet:clear"] {
         assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!(ev), json!({})])), json!(false), "{ev}");
     }
-    for ev in ["pet:ask", "pet:clear", "pet:ready"] {
+    for ev in ["pet:call", "pet:ready"] {
         assert_eq!(ok("pet_to_main", args("pet_to_main", vec![json!(ev), json!({})])), json!(true), "{ev}");
     }
     // Switching the pet off in the main window (pet_close) lifts a "Hide for now", so switching it on starts a new one.

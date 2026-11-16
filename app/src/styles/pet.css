@@ -1,7 +1,8 @@
-/* The desktop pet window (pet.html): a transparent page holding the sprite and, when open, a bubble beside it.
-   Standalone: pet/main.tsx imports tokens.css and this file; the main page never loads it. Colours come from tokens
-   only; the sprite values (--pet-sheet, --pet-w, --pet-h, --pet-frames, --pet-dur, --pet-scale) are set by script
-   through CSSOM (CSP style-src 'self'). No backdrop-filter: a transparent window composites it badly. */
+/* The desktop assistant window (pet.html): a transparent page holding the sprite and, when open, a bubble beside it.
+   pet/main.tsx imports tokens.css, assistant.css (the assistant panel, the same rules the app window used) and then this
+   file, which only adds the window around it. Colours come from tokens only; the sprite values (--pet-sheet, --pet-w,
+   --pet-h, --pet-frames, --pet-dur, --pet-scale) are set by script through CSSOM (CSP style-src 'self'). No
+   backdrop-filter: a transparent window composites it badly. */
 
 html,
 body,
@@ -69,12 +70,13 @@ body {
 html[data-reduced-motion] .pet-desktop-sprite { animation: none; }
 
 /* The bubble fills the room Rust gave the window: 240 x 72 for a toast; the panel and the menu are as big as the person dragged
-   them (pet.tsx sets --pet-bubble-w and --pet-bubble-h through CSSOM; Rust keeps them between its bounds and the monitor). */
+   them (PetApp sets --pet-bubble-w and --pet-bubble-h through CSSOM; Rust keeps them between its bounds and the monitor). */
 .pet-desktop-bubble {
+  position: relative;
   box-sizing: border-box;
   flex: none;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-elevated);
   color: var(--text);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-m);
@@ -82,6 +84,19 @@ html[data-reduced-motion] .pet-desktop-sprite { animation: none; }
 }
 .pet-desktop-bubble[data-mode="toast"] { width: 240px; height: 72px; padding: var(--space-4); }
 .pet-desktop-bubble[data-mode="panel"] { width: var(--pet-bubble-w, 360px); height: var(--pet-bubble-h, 440px); }
+
+/* The assistant panel (assistant.css .pet-bubble) fills the window's bubble instead of floating over the editor. */
+.pet-desktop-bubble .pet-bubble {
+  position: static;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
 
 .pet-desktop-text {
   margin: 0;
@@ -91,58 +106,27 @@ html[data-reduced-motion] .pet-desktop-sprite { animation: none; }
   line-height: 1.4;
 }
 .pet-desktop-bubble[data-mode="toast"] .pet-desktop-text { max-height: 100%; overflow: hidden; }
-.pet-desktop-text[data-error="true"] { color: var(--danger); }
-.pet-desktop-status { margin: 0 0 var(--space-3); color: var(--text-muted); font-size: 0.75rem; }
 
-/* The recent turns mirrored from the main window (the in-window chat look from assistant.css, compact for the panel). */
-.pet-recent { display: flex; flex-direction: column; gap: var(--space-2); }
-.pet-recent-item {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-element);
-  background: var(--bg-hover);
-}
-.pet-recent-item[data-role="user"] { background: var(--accent-soft); }
-.pet-recent-role { display: block; margin-bottom: var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); }
-.pet-recent-text {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-}
-.pet-recent-text[data-error="true"] { color: var(--danger); }
-
-.pet-desktop-panel {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  height: 100%;
-  box-sizing: border-box;
-  padding: var(--space-5) var(--space-6);
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-.pet-desktop-panel > * { min-width: 0; flex: none; }
-.pet-desktop-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
+/* "Clear this conversation?" asked inside the window (the main window may be minimised). */
 .pet-desktop-confirm {
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border);
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-element);
   background: var(--bg-side);
+  box-shadow: var(--shadow-menu);
   font-size: var(--font-size-sm);
 }
 .pet-desktop-confirm p { margin: 0; }
 
-/* The same look as the in-window assistant (assistant.css): header, mode chips, box, buttons. This page does not load that file. */
-.pet-desktop-panel button {
+/* Controls: this page does not load the app's shell styles, so buttons, fields and focus rings get the same look here. */
+.pet-desktop-bubble button {
   min-height: 28px;
   padding: 0 var(--space-5);
   background: var(--btn-bg);
@@ -153,12 +137,12 @@ html[data-reduced-motion] .pet-desktop-sprite { animation: none; }
   line-height: 1.3;
   cursor: pointer;
 }
-.pet-desktop-panel button:hover:not(:disabled) { background: var(--btn-bg-hover); }
-.pet-desktop-panel button:disabled { opacity: 0.45; cursor: default; }
-.pet-desktop-panel .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-3); }
-.pet-desktop-panel .btn.primary { background: var(--accent-fill); color: var(--accent-text); font-weight: 600; }
-.pet-desktop-panel .btn.primary:hover:not(:disabled) { background: var(--accent-fill-hover); }
-.pet-desktop-panel .ibtn {
+.pet-desktop-bubble button:hover:not(:disabled) { background: var(--btn-bg-hover); }
+.pet-desktop-bubble button:disabled { opacity: 0.45; cursor: default; }
+.pet-desktop-bubble .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-3); }
+.pet-desktop-bubble .btn.primary { background: var(--accent-fill); color: var(--accent-text); font-weight: 600; }
+.pet-desktop-bubble .btn.primary:hover:not(:disabled) { background: var(--accent-fill-hover); }
+.pet-desktop-bubble .ibtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -167,117 +151,20 @@ html[data-reduced-motion] .pet-desktop-sprite { animation: none; }
   background: transparent;
   color: var(--text-muted);
 }
-.pet-desktop-panel .ibtn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-.pet-desktop-panel button:focus-visible,
-.pet-desktop-panel select:focus-visible,
-.pet-desktop-panel input:focus-visible,
-.pet-desktop-panel textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.pet-bubble-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-.pet-bubble-title { margin: 0; font-size: 1em; font-weight: 600; }
-.pet-bubble-heading { display: flex; flex-direction: column; min-width: 0; }
-.pet-bubble-folder {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pet-bubble-tools { display: flex; flex: none; gap: var(--space-2); }
-.pet-bubble-note { margin: 0; color: var(--text-muted); font-size: var(--font-size-sm); }
-.pet-bubble-greeting { margin: var(--space-2) 0; font-size: 0.8125rem; }
-.pet-bubble-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
-.pet-chips { display: flex; flex-direction: column; gap: var(--space-2); }
-.pet-chips-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.pet-desktop-panel .pet-chip {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-element);
-  background: var(--bg);
-  font-size: var(--font-size-sm);
-}
-.pet-desktop-panel .pet-chip[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.pet-chip-panel { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--font-size-sm); }
-.pet-howto,
-.pet-gate { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--font-size-sm); }
-.pet-howto p,
-.pet-gate p { margin: 0; }
-.pet-howto-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.pet-field { display: flex; flex-direction: column; gap: var(--space-1); }
-.pet-field-label { color: var(--text-muted); font-size: var(--font-size-sm); }
-.pet-select,
-.pet-input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-element);
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-}
-.pet-select { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pet-chip-target { margin: 0; color: var(--text-muted); font-size: var(--font-size-sm); }
-.pet-composer { display: flex; flex-direction: column; gap: var(--space-2); }
-.pet-composer-input {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 3.2em;
-  max-height: 8em;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-element);
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.8125rem;
-  resize: vertical;
-}
-.pet-composer-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
-.pet-sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
+.pet-desktop-bubble .ibtn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.pet-desktop-bubble .pet-chip { min-height: 0; padding: var(--space-1) var(--space-3); }
+.pet-desktop-bubble .pet-cite,
+.pet-desktop-bubble .pet-source-link { min-height: 0; padding: 0; background: transparent; }
+.pet-desktop-bubble button:focus-visible,
+.pet-desktop-bubble select:focus-visible,
+.pet-desktop-bubble input:focus-visible,
+.pet-desktop-bubble textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pet-desktop-bubble select,
+.pet-desktop-bubble input,
+.pet-desktop-bubble textarea { font: inherit; color: var(--text); }
 
-/* Resize handle at the bubble's corner away from the sprite, with two lines pointing at the corner (as in the in-window bubble). */
-.pet-desktop-panel .pet-bubble-grip {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 24px;
-  min-width: 0;
-  height: 24px;
-  min-height: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: nwse-resize;
-  touch-action: none;
-  user-select: none;
-}
-.pet-desktop-panel .pet-bubble-grip:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-.pet-bubble-grip::before {
-  content: "";
-  position: absolute;
-  inset: 7px;
-  border-top: 2px solid currentColor;
-  border-left: 2px solid currentColor;
-  border-top-left-radius: 2px;
-}
+/* The resize handle sits at the bubble's corner away from the sprite (assistant.css draws it top-left). */
+.pet-desktop .pet-bubble-grip { min-height: 0; padding: 0; background: transparent; }
 .pet-desktop[data-align="left"] .pet-bubble-grip { left: auto; right: 0; cursor: nesw-resize; }
 .pet-desktop[data-align="left"] .pet-bubble-grip::before { border-left: 0; border-right: 2px solid currentColor; border-radius: 0 2px 0 0; }
 .pet-desktop[data-side="below"] .pet-bubble-grip { top: auto; bottom: 0; cursor: nesw-resize; }

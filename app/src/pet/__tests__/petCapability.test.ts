@@ -91,14 +91,50 @@ describe('static pet guards', () => {
     for (const f of petFiles) for (const s of specifiers(readFileSync(f, 'utf-8'))) expect(s, `${f} imports ${s}`).not.toMatch(FORBIDDEN);
   });
 
-  it('PetApp imports only react, src/pet, the skins, the pet store helpers, i18n and the icon wrapper', () => {
+  it('PetApp imports only react, src/pet, the assistant panel, the skins, the pet store helpers and i18n', () => {
     const src = readFileSync('src/pet/PetApp.tsx', 'utf-8');
-    const ok = /^(?:react|\.\/[A-Za-z]+|\.\.\/assistant\/skins\/[A-Za-z]+|\.\.\/assistant\/petStore|\.\.\/i18n\/[A-Za-z]+|\.\.\/ui\/Icon)$/;
+    const ok = /^(?:react|\.\/[A-Za-z]+|\.\.\/assistant\/Bubble|\.\.\/assistant\/skins\/[A-Za-z]+|\.\.\/assistant\/petStore|\.\.\/i18n\/[A-Za-z]+|\.\.\/ui\/Icon)$/;
     for (const s of specifiers(src)) expect(s, s).toMatch(ok);
     // from petStore: the sprite and layout helpers only, never the store itself
     const names = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*\x27\.\.\/assistant\/petStore\x27/g)].flatMap((m) => m[1].split(',').map((n) => n.trim().replace(/^type\s+/, '')));
     expect(names.length).toBeGreaterThan(0);
     for (const n of names) expect(['applySkinVars', 'BUBBLE_GAP', 'DRAG_THRESHOLD', 'snapScale'], n).toContain(n);
+  });
+
+  it('nothing the pet page loads at run time (followed through every import) is vault, fs, network, git or AI code', () => {
+    // Type-only imports vanish at build time; every other import is followed from the page entry.
+    const runtimeSpecifiers = (src: string): string[] =>
+      [...src.matchAll(/(?:^|\n)\s*(import|export)\s+(?!type\b)[^;\x27\x22]*?\bfrom\s*[\x27\x22]([^\x27\x22]+)[\x27\x22]|(?:^|\n)\s*import\s*[\x27\x22]([^\x27\x22]+)[\x27\x22]/g)].map(
+        (m) => m[2] ?? m[3],
+      );
+    const resolve = (from: string, spec: string): string | null => {
+      if (!spec.startsWith('.')) return null; // a package
+      const base = join(from, '..', spec);
+      for (const p of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+        try {
+          if (statSync(p).isFile()) return p;
+        } catch {
+          /* try the next */
+        }
+      }
+      return null;
+    };
+    const seen = new Set<string>();
+    const todo = ['src/pet/main.tsx'];
+    while (todo.length) {
+      const f = todo.pop()!;
+      if (seen.has(f) || !/\.(?:ts|tsx)$/.test(f)) continue;
+      seen.add(f);
+      for (const s of runtimeSpecifiers(readFileSync(f, 'utf-8'))) {
+        const r = resolve(f, s);
+        if (r) todo.push(r);
+      }
+    }
+    const reached = [...seen].map((p) => p.replace(/\\/g, '/'));
+    expect(reached).toContain('src/assistant/Bubble.tsx');
+    const bad = /^src\/(?:fs|vault|integrations|github|labnote|partbank|bfworkflow|ai|labservices|links|search|editor)\//;
+    for (const p of reached) expect(p, p).not.toMatch(bad);
+    for (const p of reached) expect(p, p).not.toMatch(/^src\/assistant\/(?:chips|builtinRuntime|wiring|useAssistantSession|sectionOptions|tools|compact|history)\.tsx?$/);
   });
 
   it('the pet Rust sources never mention the vault, net, git sync, scan, directory reads, secrets, process spawning or the opener', () => {

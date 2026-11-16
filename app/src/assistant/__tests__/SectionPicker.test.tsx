@@ -7,7 +7,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { setLang } from '../../i18n/lang';
 import { PLANNING_SECTIONS_HW } from '../../labnote/context/chain';
-import { SectionPicker, sectionOptions, type SectionChoice } from '../SectionPicker';
+import { SectionPicker, type SectionChoice } from '../SectionPicker';
+import { sectionOptions } from '../sectionOptions';
 
 const MD = [
   '---',

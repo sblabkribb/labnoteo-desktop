@@ -14,7 +14,8 @@ import { cleanupDialogs } from '../../labnote/host/__tests__/harness';
 import { createLayoutStore, type UiPrefs } from '../../ui/layoutStore';
 import { AssistantHistoryError, emptyHistory, type HistoryDoc } from '../history';
 import { resetWebHint } from '../Bubble';
-import { PetLayer, type BubbleActions } from '../PetLayer';
+import type { BubbleActions } from '../MessageView';
+import { PanelHarness as PetLayer } from './panelHarness';
 import { createPetStore, type PetStore } from '../petStore';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn } from '../runtime';
 import { createAssistantSession, type AssistantSession, type HistoryIo } from '../useAssistantSession';
@@ -331,13 +332,13 @@ describe('assistant bubble chat', () => {
     expect(turns).toHaveLength(2);
   });
 
-  it('Escape closes the bubble and returns focus to the pet', async () => {
+  it('Escape closes the bubble', async () => {
     const { store } = setup();
     await open(store);
     fireEvent.keyDown(composer(), { key: 'Escape' });
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '어시스턴트 열기' }));
+    expect(store.get().open).toBe(false);
   });
 
   it('clear asks first and empties the log only when confirmed', async () => {

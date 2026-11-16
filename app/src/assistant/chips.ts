@@ -7,16 +7,16 @@
  * 칩 실행은 폴더 기록에 짧은 줄("[섹션 만들기] 결과 섹션")과 답으로 남는다(`chipUserLine`).
  */
 import { createLabnoteTools, type ToolDef } from '@labnoteo/core';
-import { t } from '../i18n/t';
 import { appTools } from '../labnote/context/appTools';
 import { contextTools } from '../labnote/context/contextTools';
 import type { Scope } from '../labnote/context/scope';
+import { chipLabel } from './chipMeta';
 import type { ChipId, ChipParams } from './runtime';
 import { assistantTools } from './tools';
 
 export type { ChipId, ChipParams } from './runtime';
-
-export const CHIP_IDS: readonly ChipId[] = ['howTo', 'section', 'unitOp', 'workflow', 'chat'];
+// The light half (ids, labels, gate, workflow note names) lives in chipMeta so the desktop window can draw the panel.
+export { CHIP_IDS, chipGate, chipLabel, chipNeedsScope, isWorkflowNotePath, type ChipGate } from './chipMeta';
 
 /** 실험 맥락을 읽는 도구(읽기만). 세 만들기 칩이 모두 쓴다. */
 export const CONTEXT_TOOL_NAMES = [
@@ -42,37 +42,6 @@ export const CHIP_TOOL_NAMES: Readonly<Record<'section' | 'unitOp' | 'workflow',
   unitOp: [...CONTEXT_TOOL_NAMES, 'search_catalog', 'get_unit_operation', 'insert_unit_operation'],
   workflow: [...CONTEXT_TOOL_NAMES, 'search_catalog', 'create_workflow'],
 };
-
-/** 칩 이름(지금 언어). 번역 키는 글자 그대로 둔다(카탈로그 검사가 키를 찾는다). */
-export function chipLabel(chip: ChipId): string {
-  switch (chip) {
-    case 'howTo':
-      return t('chip.howTo');
-    case 'section':
-      return t('chip.section');
-    case 'unitOp':
-      return t('chip.unitOp');
-    case 'workflow':
-      return t('chip.workflow');
-    case 'chat':
-      return t('chip.chat');
-  }
-}
-
-/** 칩이 실험 범위(열린 실험 노트)를 꼭 써야 하는지. 대화는 실험 밖에서도 된다(저장되지 않는다, R3). */
-export function chipNeedsScope(chip: ChipId): chip is 'section' | 'unitOp' | 'workflow' {
-  return chip === 'section' || chip === 'unitOp' || chip === 'workflow';
-}
-
-export type ChipGate = 'ok' | 'noProvider' | 'noScope';
-
-/** 칩을 지금 쓸 수 있는지: 사용법은 늘, 나머지는 AI 제공자가 먼저, 만들기 칩은 실험 노트도. */
-export function chipGate(chip: ChipId, s: { provider: boolean; folder: string | null }): ChipGate {
-  if (chip === 'howTo') return 'ok';
-  if (!s.provider) return 'noProvider';
-  if (chipNeedsScope(chip) && s.folder === null) return 'noScope';
-  return 'ok';
-}
 
 /**
  * 칩 하나의 도구. 범위가 있으면 `appTools({scope, allowedFolders})` 의 감싼 도구(범위 검사)에서 고르고, 도우미만 쓰는
@@ -152,15 +121,6 @@ export function guardNewSection(tools: readonly ToolDef[], chip: ChipId, params:
 export function chipUserLine(chip: ChipId, summary: string): string {
   const s = summary.replace(/\s+/g, ' ').trim();
   return s ? `[${chipLabel(chip)}] ${s}` : `[${chipLabel(chip)}]`;
-}
-
-const WORKFLOW_NOTE_RE = /^\d{3}_.*\.md$/i;
-const README_RE = /^readme(?:\.labnote)?\.md$/i;
-
-/** 워크플로 노트(`###_….md`, README 는 아니다). 실험 폴더 바로 아래의 파일 이름으로 본다. */
-export function isWorkflowNotePath(path: string): boolean {
-  const name = path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? '';
-  return WORKFLOW_NOTE_RE.test(name) && !README_RE.test(name);
 }
 
 const quoted = (s: string): string => JSON.stringify(s);
