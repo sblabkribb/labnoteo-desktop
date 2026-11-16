@@ -14,6 +14,8 @@ import { createRemote } from './remote';
 
 /** Logical size of the toast bubble in px; Rust's `size()` in pet/window.rs uses the same numbers. The panel's size comes from Rust. */
 const TOAST = { w: 240, h: 72 } as const;
+/** Logical size of the right-click menu (three entries); Rust's MENU in pet/window.rs is the same. */
+const MENU = { w: 180, h: 112 } as const;
 /** What the panel opens at before the window has said (it answers with the saved, clamped size). Same as PANEL_DEFAULT in window.rs. */
 const PANEL_FALLBACK: Panel = { w: 360, h: 440, minW: 300, minH: 340, maxW: 640, maxH: 900 };
 const RESIZE_STEP = 16;
@@ -38,7 +40,7 @@ interface Geo {
   panel: Panel;
 }
 
-type Mode = 'toast' | 'panel';
+type Mode = 'toast' | 'panel' | 'menu';
 interface View {
   mode: Mode;
   side: 'above' | 'below';
@@ -215,8 +217,8 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
     [remote],
   );
 
-  // The window grows to hold the bubble (the menu uses the panel's room) and shrinks back to the sprite.
-  const wanted: Mode | null = menu || open ? 'panel' : toast ? 'toast' : null;
+  // The window grows to hold the bubble (the menu has its own small size) and shrinks back to the sprite.
+  const wanted: Mode | null = menu ? 'menu' : open ? 'panel' : toast ? 'toast' : null;
   useEffect(() => {
     let live = true;
     if (!wanted) {
@@ -229,8 +231,8 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
     void (async () => {
       const geo = asGeo(await ipc.invoke('pet_geometry'));
       if (!geo || !live) return;
-      // The panel's size is the one the window remembered (clamped to this monitor); a toast has a fixed size.
-      const b = wanted === 'panel' ? { w: geo.panel.w, h: geo.panel.h } : TOAST;
+      // The panel's size is the one the window remembered (clamped to this monitor); a toast and the menu have fixed sizes.
+      const b = wanted === 'panel' ? { w: geo.panel.w, h: geo.panel.h } : wanted === 'menu' ? MENU : TOAST;
       if (wanted === 'panel') setPanel(geo.panel);
       const grown = growWindow(geo.sprite, { w: Math.round(b.w * geo.scale), h: Math.round(b.h * geo.scale) }, Math.round(BUBBLE_GAP * geo.scale), geo.areas);
       await ipc.invoke('pet_set_layout', { args: { mode: wanted, rect: grown.rect } });

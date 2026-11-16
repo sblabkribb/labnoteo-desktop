@@ -22,7 +22,13 @@ use super::secrets::{key_for, validate_secret, SecretStore, Secrets, Slot};
 use super::NetState;
 use crate::vault::{SettingsFile, VaultState};
 
-pub const LLM_TIMEOUT: Duration = Duration::from_secs(300);
+/// One AI answer (a non-streamed request, or the whole of a stream) ends within this time. Generous: a thinking model on a
+/// busy local server can take many minutes on a long agent turn, and the person can always press Stop. A model stuck
+/// repeating itself is stopped much sooner by the loop checks in ai/streamAssembler.ts.
+pub const LLM_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+/// A stream that sends nothing at all (no reasoning, no text, no keepalive) for this long has stalled. Also the wait for the
+/// first byte, which includes the server's queue and prompt processing.
+pub const LLM_IDLE: Duration = Duration::from_secs(5 * 60);
 pub const LLM_MAX_REQUEST: usize = 4 * 1024 * 1024;
 /// A connection test answers within this time or fails.
 pub const LLM_PROBE_TIMEOUT: Duration = Duration::from_secs(15);

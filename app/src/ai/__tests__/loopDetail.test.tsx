@@ -7,10 +7,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setLang } from '../../i18n/lang';
 import { t } from '../../i18n/t';
-import { ReasoningLoopError } from '../../labnote/port/llmError';
+import { AnswerLoopError, ReasoningLoopError } from '../../labnote/port/llmError';
 import { fromStored } from '../../labnote/settings';
 import { MessageView } from '../../assistant/MessageView';
-import { LOOP_BEFORE, LOOP_TAIL, OpenAiAssembler } from '../streamAssembler';
+import { LOOP_BEFORE, LOOP_TAIL, OllamaAssembler, OpenAiAssembler } from '../streamAssembler';
 import { loopDetail, redactLoopText } from '../loopDetail';
 
 const settings = { ...fromStored({}), llmProvider: 'openai' as const, llmEndpointOpenai: 'https://gpu7.lab.example:8443/v1', llmModel: 'm' };
@@ -36,6 +36,36 @@ describe('the loop error carries the repeated passage', () => {
     expect(loop.repeat(4)).toContain(err.repeated);
     expect(err.before.length).toBeLessThanOrEqual(LOOP_BEFORE);
     expect(err.before.length).toBeGreaterThan(0);
+  });
+
+  it('an answer that keeps repeating stops the stream too, as an AnswerLoopError (2026-11-17)', () => {
+    const loop = '1. UHW040 Desktop Liquid Handling - the same line again and again in the answer text. ';
+    const text = 'Here is what I suggest. '.repeat(10) + loop.repeat(60);
+    const a = new OpenAiAssembler();
+    let thrown: unknown;
+    let shown = '';
+    try {
+      for (const piece of text.match(/[\s\S]{1,9}/g)!) shown += a.push(JSON.stringify({ choices: [{ index: 0, delta: { content: piece } }] }));
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(AnswerLoopError);
+    expect(thrown).toBeInstanceOf(ReasoningLoopError); // "show what repeated" works the same way
+    expect(loop.repeat(4)).toContain((thrown as AnswerLoopError).repeated);
+    // It stops well before the whole text (the check runs every 400 characters).
+    expect(shown.length).toBeLessThan(text.length / 2);
+  });
+
+  it('an ordinary long answer, and the Ollama stream, are not taken for a loop', () => {
+    const a = new OpenAiAssembler();
+    const varied = Array.from({ length: 200 }, (_, i) => `Step ${i}: pipette ${i * 3} µL into well ${String.fromCharCode(65 + (i % 8))}${i % 12}. `).join('');
+    for (const piece of varied.match(/[\s\S]{1,11}/g)!) a.push(JSON.stringify({ choices: [{ index: 0, delta: { content: piece } }] }));
+    expect(a.result().content).toBe(varied);
+    const o = new OllamaAssembler();
+    const loop = 'The same Ollama sentence that never changes at all, over and over. ';
+    expect(() => {
+      for (const piece of loop.repeat(60).match(/[\s\S]{1,9}/g)!) o.push(JSON.stringify({ message: { content: piece } }));
+    }).toThrow(AnswerLoopError);
   });
 });
 
