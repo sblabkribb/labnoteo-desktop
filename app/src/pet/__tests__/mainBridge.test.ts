@@ -200,6 +200,20 @@ describe('mirror out', () => {
     expect(t.emitted.every((e) => e.target === 'pet')).toBe(true);
   });
 
+  it('a reply with no model text shows its end notice in the recent slice, as the in-window chat and the saved history do', async () => {
+    const t = setup();
+    await t.bridge.start();
+    await flushMicro();
+    t.s.set({
+      messages: [t.s.item('u1', 'user', 'add PCR'), t.s.item('a1', 'assistant', '', { notice: () => 'Changed 1 note.' })],
+      streaming: false,
+    });
+    vi.advanceTimersByTime(120);
+    await flushMicro();
+    const st = parseState(t.of('pet:state').at(-1))!;
+    expect(st.recent).toEqual([{ role: 'user', text: 'add PCR' }, { role: 'assistant', text: 'Changed 1 note.' }]);
+  });
+
   it('the recent slice is bounded: at most the newest six turns, each text clamped, empty turns skipped', async () => {
     const t = setup();
     await t.bridge.start();

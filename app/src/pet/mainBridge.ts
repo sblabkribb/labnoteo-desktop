@@ -62,10 +62,13 @@ const nextSeq = (): number => ++seqCounter;
 let idCounter = 0;
 const defaultNewId = (): string => `run-${Date.now().toString(36)}-${(++idCounter).toString(36)}`;
 
-/** The recent turns for the pet's log: the visible text (a failed turn shows its error line), turns without text skipped, the newest kept. */
+/**
+ * The recent turns for the pet's log: the visible text (a reply with no model text shows its end notice, as the saved history
+ * does; a failed turn shows its error line), turns without text skipped, the newest kept.
+ */
 const recentTurns = (messages: ChatItem[]): RecentItem[] =>
   messages
-    .map((m) => ({ role: m.role, text: m.text || m.error || '', ...(m.error ? { error: true } : {}) }))
+    .map((m) => ({ role: m.role, text: m.text || m.notice?.() || m.error || '', ...(m.error ? { error: true } : {}) }))
     .filter((x) => x.text !== '')
     .slice(-RECENT_MAX);
 
