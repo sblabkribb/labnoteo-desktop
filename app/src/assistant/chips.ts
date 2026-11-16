@@ -27,6 +27,15 @@ export const CONTEXT_TOOL_NAMES = [
   'get_unit_operation_context',
 ] as const;
 
+/**
+ * Unit Operation·Workflow 칩의 카탈로그 규칙: 대화의 `CATALOG_RULES` 와 같은 "코드를 지어내지 않는다"를 칩에도 준다
+ * (real-app check, 2026-11-16: UO 칩이 search_catalog 없이 추천해 "UHW010 Restriction Digest"를 지어냈고, 카탈로그의
+ * UHW010 은 Liquid Handling 이었다).
+ */
+export const CATALOG_ONLY_RULE =
+  'To recommend or list candidates, call search_catalog first, even when you will not insert anything yet, and name only ' +
+  'the codes and names it returned, exactly as returned. Never invent or guess a code or a name from memory.';
+
 /** 만들기 칩마다 모델에게 주는 도구(이 밖의 것은 주지 않는다). */
 export const CHIP_TOOL_NAMES: Readonly<Record<'section' | 'unitOp' | 'workflow', readonly string[]>> = {
   section: [...CONTEXT_TOOL_NAMES, 'read_section', 'update_section', 'add_section'],
@@ -191,7 +200,7 @@ export function chipSystemPrompt(chip: ChipId): string {
         'Read only what the section needs: read_section for an existing section, and get_experiment_context, get_unit_operation_context or read_note only when the section needs that background. Read each at most once.',
         'Then write in one call: update_section for an existing section, add_section for a new one; the researcher confirms every write after a preview.',
         'A new section does not exist yet: never call read_section for it and never ask the researcher what to write; propose the section directly with add_section (the preview is where the researcher decides).',
-        'Never ask in text whether to write (for example "shall I update it?"): call update_section or add_section directly; the preview is where the researcher confirms. If the researcher answers yes to an earlier draft, write that draft now.',
+        'If the researcher answers yes to a draft you showed in an earlier turn, write that draft now.',
         'Decide and call the tool; do not plan the same steps again.',
         "Keep any text the researcher already wrote: extend it, don't replace it.",
         'Never write Results & Discussions, QC Metrics, Discussion or Meta: the researcher writes those. Do not invent measured values.',
@@ -202,6 +211,8 @@ export function chipSystemPrompt(chip: ChipId): string {
         'You are running the "Create unit operation" chip: add exactly one unit operation from the catalog to the given workflow note.',
         'Find its id with search_catalog (kind "unitOp"), check it with get_unit_operation, then call insert_unit_operation once; the researcher confirms it after a preview.',
         'Do not fill the sections of the new block here: update_section is not available in this chip. Tell the researcher to use the Create section chip for that.',
+        CATALOG_ONLY_RULE,
+        'When the researcher picks one you listed in an earlier turn (by number or name), use that item\'s code from the list.',
         'If nothing in the catalog fits, say so and write nothing.',
         only,
       ].join(' ');
@@ -209,6 +220,8 @@ export function chipSystemPrompt(chip: ChipId): string {
       return [
         'You are running the "Create workflow" chip: create exactly one workflow from the catalog in the current experiment.',
         'Find its id with search_catalog (kind "workflow"), then call create_workflow once with the given documentPath; the researcher confirms it after a preview.',
+        CATALOG_ONLY_RULE,
+        'When the researcher picks one you listed in an earlier turn (by number or name), use that item\'s code from the list.',
         'If nothing in the catalog fits, say so and write nothing.',
         only,
       ].join(' ');
