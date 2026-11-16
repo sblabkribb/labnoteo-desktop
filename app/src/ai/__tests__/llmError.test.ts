@@ -13,7 +13,7 @@ import { coreT } from '../../labnote/i18n';
 import { describeLlmError, LlmHttpError } from '../../labnote/port/llmError';
 import { fromStored, type AppSettings } from '../../labnote/settings';
 import { registerLlmProbe } from '../llmProbe';
-import { ReasoningLoopError } from '../streamAssembler';
+import { AnswerLoopError, ReasoningLoopError } from '../streamAssembler';
 
 /** 코어 키를 그대로 돌려주는 번역기(vendor 테스트와 같다): 기대 문장을 영어 원문으로 적을 수 있다. */
 const id = (key: string, ...args: Array<string | number | boolean>) =>
@@ -48,6 +48,17 @@ describe('describeLlmError', () => {
 
   it('a reasoning loop the stream stopped gets its own sentence', () => {
     expect(describeLlmError(new ReasoningLoopError(), openai, id)).toBe(t('ai.reasoningLoop'));
+  });
+
+  it('an answer that kept repeating gets its own sentence, not the thinking one', () => {
+    expect(describeLlmError(new AnswerLoopError(), openai, id)).toBe(t('ai.answerLoop'));
+  });
+
+  it('the timeout sentence names the new limits (5 minutes with nothing sent, 20 minutes per answer)', () => {
+    setLang('ko');
+    expect(t('ai.timeout')).toContain('5분');
+    expect(t('ai.timeout')).toContain('20분');
+    setLang('en');
   });
 
   it('says to enter an address when the endpoint is empty', () => {

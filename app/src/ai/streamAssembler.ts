@@ -9,7 +9,9 @@
  *   `message.thinking` 만 있고 답이 없으면 `thinkingOnly`.
  * - 생각 글이 같은 대목을 되풀이하면(생각 고리) {@link ReasoningLoopError} 를 던진다(되풀이된 끝 대목과 처음 되풀이 앞의
  *   `LOOP_BEFORE` 자를 싣는다): `llmChatStream` 이 요청을 멈추고
- *   그 오류로 거절한다. 고리에 빠진 모델은 LLM_TIMEOUT(300초) 내내 생각만 흘리다 "연결할 수 없다"로 끝났다(real-app check).
+ *   그 오류로 거절한다. 고리에 빠진 모델은 LLM_TIMEOUT(그때 300초) 내내 생각만 흘리다 "연결할 수 없다"로 끝났다(real-app check).
+ * - 답 글이 같은 대목을 되풀이해도 같은 규칙으로 {@link AnswerLoopError} 를 던진다(2026-11-17): 시간 한도를 넉넉히 늘린 대신
+ *   같은 말만 되풀이하는 답은 이것이 일찍 멈춘다.
  * - `reasoningOnly()` 는 생각 글만 왔는지 알려 준다: 그때의 시간 초과는 llmProvider 가 생각을 끄고 한 번 더 보낸다.
  * - `finish_reason`(OpenAI) 이나 `done_reason`(Ollama) 이 'length' 면 결과에 `truncated` 를 단다(출력 한도에서 멈춘 답).
  * - `[DONE]` 과 JSON 이 아닌 프레임은 건너뛴다. `error` 가 든 프레임은 `NetError('remote')`(글은 500자까지).
@@ -17,10 +19,10 @@
  * labnote/port/ 밖에 둔다: provenance 가드는 그 폴더의 모든 파일에 `// Ported from` 머리를 요구한다.
  */
 import { NetError } from '../integrations/netIpc';
-import { ReasoningLoopError } from '../labnote/port/llmError';
+import { AnswerLoopError, ReasoningLoopError } from '../labnote/port/llmError';
 import { parseToolArguments, type ChatResult, type ToolCall } from '../labnote/port/llmProvider';
 
-export { ReasoningLoopError };
+export { AnswerLoopError, ReasoningLoopError };
 
 /** 서버가 보낸 오류 글을 보여 줄 수 있는 길이로 자른다(Rust bfw 와 같은 500자). */
 const REMOTE_MESSAGE_MAX = 500;
@@ -67,12 +69,15 @@ const LOOP_WINDOW = 24_000;
 const LOOP_STEP = 400;
 
 /**
- * 생각 글을 모으고 고리를 살핀다: 끝의 `LOOP_TAIL` 자가 최근 `LOOP_WINDOW` 자 안에 `LOOP_REPEATS` 번 이상 그대로 나오면
- * 던진다. 긴 생각이라도 같은 240자를 네 번 그대로 쓰지는 않는다. `LOOP_STEP` 자마다 한 번만 살핀다.
+ * 글을 모으고 고리를 살핀다: 끝의 `LOOP_TAIL` 자가 최근 `LOOP_WINDOW` 자 안에 `LOOP_REPEATS` 번 이상 그대로 나오면
+ * 던진다. 긴 글이라도 같은 240자를 네 번 그대로 쓰지는 않는다. `LOOP_STEP` 자마다 한 번만 살핀다. 생각 글은
+ * ReasoningLoopError, 답 글은 AnswerLoopError 다.
  */
-class Thinking {
+class LoopWatch {
   text = '';
   private checkedAt = 0;
+
+  constructor(private readonly fail: (repeated: string, before: string) => Error = (r, b) => new ReasoningLoopError(r, b)) {}
 
   add(piece: string): void {
     this.text += piece;
@@ -83,7 +88,7 @@ class Thinking {
     let count = 0;
     const first = recent.indexOf(tail);
     for (let at = first; at !== -1; at = recent.indexOf(tail, at + LOOP_TAIL)) {
-      if (++count >= LOOP_REPEATS) throw new ReasoningLoopError(tail, recent.slice(Math.max(0, first - LOOP_BEFORE), first));
+      if (++count >= LOOP_REPEATS) throw this.fail(tail, recent.slice(Math.max(0, first - LOOP_BEFORE), first));
     }
   }
 }
@@ -103,7 +108,8 @@ interface PartialCall {
 
 export class OpenAiAssembler implements StreamAssembler {
   private content = '';
-  private readonly thinking = new Thinking();
+  private readonly thinking = new LoopWatch();
+  private readonly answer = new LoopWatch((r, b) => new AnswerLoopError(r, b));
   private readonly calls = new Map<number, PartialCall>();
   private truncated = false;
 
@@ -133,6 +139,7 @@ export class OpenAiAssembler implements StreamAssembler {
     }
     const piece = typeof delta.content === 'string' ? delta.content : '';
     this.content += piece;
+    if (piece) this.answer.add(piece);
     return piece;
   }
 
@@ -155,7 +162,8 @@ export class OpenAiAssembler implements StreamAssembler {
 
 export class OllamaAssembler implements StreamAssembler {
   private content = '';
-  private readonly thinking = new Thinking();
+  private readonly thinking = new LoopWatch();
+  private readonly answer = new LoopWatch((r, b) => new AnswerLoopError(r, b));
   private readonly calls: ToolCall[] = [];
   private truncated = false;
 
@@ -181,6 +189,7 @@ export class OllamaAssembler implements StreamAssembler {
     }
     const piece = typeof message.content === 'string' ? message.content : '';
     this.content += piece;
+    if (piece) this.answer.add(piece);
     return piece;
   }
 

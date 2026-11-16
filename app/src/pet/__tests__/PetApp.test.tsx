@@ -417,6 +417,16 @@ describe('PetApp: the right-click menu', () => {
     expect(ipc.names().filter((n) => n === 'pet_open_main')).toHaveLength(1);
   });
 
+  it('the menu gets its own small window, never the panel\'s size (2026-11-17)', async () => {
+    const ipc = fakeIpc({ panel: { w: 640, h: 900 } });
+    const { container } = await mount(ipc);
+    fireEvent.contextMenu(spriteButton());
+    await flush();
+    expect(layouts(ipc).at(-1)).toMatchObject({ mode: 'menu', rect: { w: 180, h: 64 + 8 + 112 } });
+    expect((container.querySelector('.pet-desktop-bubble') as HTMLElement).dataset.mode).toBe('menu');
+    expect(ipc.names()).not.toContain('pet_panel_size');
+  });
+
   it('closes on Escape and on an outside click, and opens from the keyboard', async () => {
     const ipc = fakeIpc();
     await mount(ipc);

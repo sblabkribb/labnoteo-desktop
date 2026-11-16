@@ -24,6 +24,8 @@ pub const PANEL_MIN: (u32, u32) = (300, 340);
 pub const PANEL_MAX: (u32, u32) = (640, 900);
 /// Room kept between the window and the edge of the work area.
 const SCREEN_MARGIN: u32 = 16;
+/// The right-click menu's bubble in logical px (three entries); the pet page draws it at this size (pet.css, PetApp MENU).
+pub const MENU: (u32, u32) = (180, 112);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,6 +34,7 @@ pub enum Mode {
     Sprite,
     Toast,
     Panel,
+    Menu,
 }
 
 /// The window size of a mode in logical px: the sprite alone, or the sprite stacked with a bubble (`panel` is the
@@ -42,6 +45,7 @@ pub fn size(mode: Mode, sprite: (u32, u32), panel: (u32, u32)) -> (u32, u32) {
         Mode::Sprite => (w, h),
         Mode::Toast => (w.max(240), h + BUBBLE_GAP + 72),
         Mode::Panel => (w.max(panel.0), h + BUBBLE_GAP + panel.1),
+        Mode::Menu => (w.max(MENU.0), h + BUBBLE_GAP + MENU.1),
     }
 }
 
@@ -315,7 +319,7 @@ pub fn set_layout<R: Runtime>(window: &WebviewWindow<R>, rt: &PetRuntime, args: 
         let _ = window.set_size(dim);
         let _ = window.set_position(pos);
     }
-    if args.mode == Mode::Panel {
+    if args.mode == Mode::Panel || args.mode == Mode::Menu {
         let _ = window.set_focusable(true);
         let _ = window.set_focus();
     } else {
@@ -408,6 +412,9 @@ mod tests {
         assert_eq!(size(Mode::Panel, (96, 96), (320, 260)), (320, 364));
         assert_eq!(size(Mode::Panel, (96, 96), PANEL_DEFAULT), (360, 544));
         assert_eq!(size(Mode::Toast, (300, 100), (320, 260)), (300, 180));
+        // the menu is its own small bubble, never the panel's size
+        assert_eq!(size(Mode::Menu, (96, 96), (640, 900)), (180, 96 + 8 + 112));
+        assert_eq!(serde_json::from_str::<Mode>("\"menu\"").unwrap(), Mode::Menu);
         // a sprite wider than the bubble keeps its own width
         assert_eq!(size(Mode::Panel, (400, 100), (320, 260)), (400, 368));
     }

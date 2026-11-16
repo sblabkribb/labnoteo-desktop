@@ -51,7 +51,7 @@ import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llm
 import { describeLlmError, outputCutMessage } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
 import { answeredTurns, CHIP_RECENT_TOKENS, chipRecentTurns, historyBudget, toPromptMessages, type PromptMessages } from './compact';
-import { chipNeedsScope, chipSystemPrompt, chipTools, guardNewSection } from './chips';
+import { chipNeedsScope, chipSystemPrompt, chipTools, guardNewSection, isWorkflowNotePath } from './chips';
 import { addSectionText, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
 import { cleanLabel, SourceLedger, type Source } from './sources';
@@ -482,6 +482,21 @@ function instrument(
   };
 }
 
+/**
+ * Where a Unit Operation goes when the open note is not a workflow note (real-app check, 2026-11-17): with the README open the
+ * model passed the README as documentPath to insert_unit_operation, got "README is the experiment overview", and only then
+ * found the workflow note; the failed call and the retry are the extra turns a thinking model can start to loop in.
+ */
+export function unitOpPlaceRule(workflowNotes: readonly string[]): string {
+  if (workflowNotes.length === 0) {
+    return 'The open note is not a workflow note, and this experiment has no workflow note yet. Unit Operations go only into a ' +
+      'workflow note: create one with create_workflow first, or say that there is none.';
+  }
+  return 'The open note is not a workflow note. Unit Operations go only into a workflow note of this experiment, never into a ' +
+    `README or any other note. For insert_unit_operation pass one of these as documentPath: ${workflowNotes.map((p) => JSON.stringify(p)).join(', ')}. ` +
+    'Use the workflow the request names; if it names none and there are several, ask which one.';
+}
+
 function systemPrompt(o: {
   tools: readonly ToolDef[];
   scope?: Scope;
@@ -499,11 +514,14 @@ function systemPrompt(o: {
   chip?: string;
   /** partbank 연동 상태(partbank 를 찾는 도구가 없을 때의 문단을 고른다). */
   partbank?: PartbankSetup;
+  /** 열린 노트가 Workflow 노트가 아닐 때(README 등) 이 실험의 Workflow 노트들: Unit Operation 은 여기에만 넣는다. */
+  workflowNotes?: readonly string[];
 }): string {
   const parts = [
     "You are labnoteO's lab notebook assistant, chatting with a researcher in a small chat bubble. " +
       'Use the provided tools to inspect and edit the notebook.',
     o.activePath ? `The open note is "${o.activePath}"; pass it as documentPath when the request is about it.` : '',
+    o.workflowNotes ? unitOpPlaceRule(o.workflowNotes) : '',
     'Prefer reading before writing, and answer briefly in plain text. ' +
       'Your answer is shown in the chat and is not written to a note; to change a note, use the tools.',
     'Some tool results carry a "cite" number. When your answer uses such a result, cite it as [n] with that number. ' +
@@ -757,6 +775,19 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
             { budgetTokens: historyBudget(env.settings().llmContextWindow) }
           );
     const activePath = env.ctx.host.editTarget()?.path;
+    // A note that is not a workflow note (the README, a plain note): name the workflow notes a Unit Operation can go into.
+    let workflowNotes: string[] | undefined;
+    if (scope && activePath && !isWorkflowNotePath(activePath) && tools.some((x) => x.name === 'insert_unit_operation')) {
+      try {
+        const dir = scope.folder.replace(/\\/g, '/').replace(/\/+$/, '');
+        workflowNotes = (await env.ctx.host.fs.list(dir))
+          .filter((n) => !n.includes('/') && isWorkflowNotePath(n))
+          .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+          .map((n) => `${dir}/${n}`);
+      } catch {
+        workflowNotes = undefined; // no list: the tool's own refusal still says where Unit Operations go
+      }
+    }
     const partbank = hasPartbankTool(tools) ? undefined : setup.partbank;
     const outsideTools = external.tools.length > 0 || lab.tools.length > 0 || !!web;
     const messages: ChatMessage[] = [
@@ -773,6 +804,7 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
           lang: env.lang(),
           ...(chip ? { chip: chipSystemPrompt(chip) } : {}),
           ...(partbank ? { partbank } : {}),
+          ...(workflowNotes ? { workflowNotes } : {}),
         }),
       },
       ...earlier.messages,

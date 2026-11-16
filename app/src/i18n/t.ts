@@ -158,7 +158,9 @@ const ko: Record<string, string> = {
   'ai.notFoundOpenai':
     'AI 서버에 그런 주소가 없습니다(404). {0} 을(를) 확인해 주세요: 서버 주소만 넣거나 /v1 까지 넣습니다(예: https://host 또는 https://host/v1).',
   'ai.timeout':
-    'AI 서버의 답이 제한 시간 안에 끝나지 않았습니다. 생각하는 모델이 오래 생각했을 수 있습니다. 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꾸거나, 더 짧게 부탁해 보세요. 되풀이되면 AI 서버가 돌고 있는지 확인해 주세요.',
+    'AI 서버가 5분 동안 아무것도 보내지 않았거나, 한 답에 20분이 넘게 걸려 멈췄습니다. AI 서버가 돌고 있는지, 다른 요청으로 바쁘지 않은지 확인해 주세요. 생각하는 모델이면 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꾸면 빨라집니다.',
+  'ai.answerLoop':
+    'AI 모델이 답에서 같은 말을 되풀이해서 멈췄습니다. 요청을 더 짧고 분명하게 바꿔 다시 보내 보세요.',
   'ai.reasoningLoop':
     'AI 모델이 같은 생각을 되풀이해서 멈췄습니다(생각을 끄고 한 번 더 해 봤지만 같았습니다). 연동 설정 → AI 제공자 → 고급에서 생각 모드를 끔으로 바꿔 보세요. 요청을 더 짧고 분명하게 바꿔도 됩니다.',
   'ai.retrying': '생각을 끄고 다시 시도하는 중…',
@@ -1826,7 +1828,9 @@ const en: Record<string, string> = {
   'ai.notFoundOpenai':
     'The AI server has no such address (404). Check {0}: enter the server address, with or without /v1 (for example https://host or https://host/v1).',
   'ai.timeout':
-    'The AI server did not finish its answer within the time limit. A thinking model may have thought for too long: set Thinking to Off in Integration settings → AI provider → Advanced, or ask for something shorter. If it keeps happening, check that the AI server is running.',
+    'The AI server sent nothing for 5 minutes, or one answer took more than 20 minutes, so it was stopped. Check that the AI server is running and not busy with other requests. For a thinking model, setting Thinking to Off in Integration settings → AI provider → Advanced makes it faster.',
+  'ai.answerLoop':
+    'The AI model kept repeating the same words in its answer, so it was stopped. Try again with a shorter, clearer request.',
   'ai.reasoningLoop':
     'The AI model kept repeating the same reasoning, so it was stopped (one more try with thinking off did the same). Set Thinking to Off in Integration settings → AI provider → Advanced, or make the request shorter and clearer.',
   'ai.retrying': 'Trying again with thinking off…',

@@ -35,6 +35,7 @@ import {
   STATUS_TITLE_MAX,
   statusLabel,
   toolLabel,
+  unitOpPlaceRule,
 } from '../builtinRuntime';
 import { fakeRuntime } from '../fakeRuntime';
 import {
@@ -1070,6 +1071,29 @@ describe('builtinRuntime', () => {
 });
 
 // Plan Task 14: the web tools join a chat only when this PC has a search address (assistant.json).
+describe('where a Unit Operation goes (real-app check, 2026-11-17)', () => {
+  it('with the README open, chat is told that Unit Operations go only into a workflow note, and which ones there are', async () => {
+    const p = new Script([answer('네')]);
+    const { th, rt } = await setup(p, { mount: false });
+    await th.mount(README);
+    await rt.run(turnOf('PCR 넣어줘'), recordSink().sink, go());
+    const system = String(p.seen[0][0].content);
+    expect(system).toContain(unitOpPlaceRule([NOTE]));
+    expect(system).toContain(`"${NOTE}"`);
+  });
+
+  it('with a workflow note open, no such rule (the open note is where it goes)', async () => {
+    const p = new Script([answer('네')]);
+    const { rt } = await setup(p);
+    await rt.run(turnOf('PCR 넣어줘'), recordSink().sink, go());
+    expect(String(p.seen[0][0].content)).not.toContain('Unit Operations go only into a workflow note');
+  });
+
+  it('an experiment without a workflow note says to create one first', () => {
+    expect(unitOpPlaceRule([])).toContain('create_workflow');
+  });
+});
+
 describe('builtinRuntime web tools', () => {
   const SEARX = { assistant_config_read: () => ({ searxngUrl: 'http://127.0.0.1:8888' }) };
   const hits = {

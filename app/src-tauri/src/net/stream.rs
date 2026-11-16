@@ -11,7 +11,7 @@
 //!   one frame and the line with `"done": true` ends the stream. A 2xx
 //!   `application/json` body that is one JSON value comes back whole as
 //!   `text`; one that is not (NDJSON mislabelled) is still framed by line.
-//! - Every chunk must arrive within `SSE_IDLE`, the whole stream within
+//! - Every chunk must arrive within `LLM_IDLE`, the whole stream within
 //!   `LLM_TIMEOUT` (`timeout`); a frame over `SSE_MAX_FRAME`, a line over
 //!   64 KiB or more than 8 MiB in all is `tooLarge`.
 //! - A non-2xx answer resolves `{status, text}` with the body's first
@@ -34,9 +34,9 @@ use super::http::{
     cancelled, client, header_map, net_error, read_capped, redirect_error, refuse_insecure, take_utf8, too_large, Registration,
     MAX_BODY,
 };
-use super::llm::{auth_headers, chat_target, ChatTarget, LLM_TIMEOUT};
+use super::llm::{auth_headers, chat_target, ChatTarget, LLM_IDLE, LLM_TIMEOUT};
 use super::secrets::{SecretStore, Secrets};
-use super::sse::{SseParser, SSE_IDLE, SSE_MAX_FRAME};
+use super::sse::{SseParser, SSE_MAX_FRAME};
 use super::NetState;
 use crate::vault::{SettingsFile, VaultState};
 
@@ -93,7 +93,7 @@ pub struct StreamLimits {
 
 impl Default for StreamLimits {
     fn default() -> Self {
-        StreamLimits { idle: SSE_IDLE, total: LLM_TIMEOUT, max_bytes: STREAM_MAX_TOTAL }
+        StreamLimits { idle: LLM_IDLE, total: LLM_TIMEOUT, max_bytes: STREAM_MAX_TOTAL }
     }
 }
 
