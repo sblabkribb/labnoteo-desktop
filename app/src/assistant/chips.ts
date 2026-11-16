@@ -191,6 +191,7 @@ export function chipSystemPrompt(chip: ChipId): string {
         'Read only what the section needs: read_section for an existing section, and get_experiment_context, get_unit_operation_context or read_note only when the section needs that background. Read each at most once.',
         'Then write in one call: update_section for an existing section, add_section for a new one; the researcher confirms every write after a preview.',
         'A new section does not exist yet: never call read_section for it and never ask the researcher what to write; propose the section directly with add_section (the preview is where the researcher decides).',
+        'Never ask in text whether to write (for example "shall I update it?"): call update_section or add_section directly; the preview is where the researcher confirms. If the researcher answers yes to an earlier draft, write that draft now.',
         'Decide and call the tool; do not plan the same steps again.',
         "Keep any text the researcher already wrote: extend it, don't replace it.",
         'Never write Results & Discussions, QC Metrics, Discussion or Meta: the researcher writes those. Do not invent measured values.',

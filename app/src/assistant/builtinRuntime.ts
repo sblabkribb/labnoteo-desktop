@@ -15,9 +15,11 @@
  * - 오염된 요약·사용자 글은 울타리에 싸서, 오염된 앞선 답은 울타리 없이(시스템 프롬프트의 `EARLIER_REPLIES_RULES`)
  *   보내고, 실행을 오염된 채로 시작한다(`initialTaint`, R11). 답에 베낀 울타리 태그는 지운다. 기록은 `compact.ts` 의
  *   `toPromptMessages` 로 만들고, 문맥 창의 0.4 에 들어가는 최근 것만 보낸다(압축이 실패했을 때의 대비).
- * - 만들기 칩(섹션·Unit Operation·Workflow)은 한 번에 끝나는 일이라 저장된 기록도 요약도 보내지 않는다(real-server check,
+ * - 만들기 칩(섹션·Unit Operation·Workflow)은 저장된 기록 전체도 요약도 보내지 않는다(real-server check,
  *   2026-11-11: 기록이 있는 실험에서 섹션 만들기가 4번 모두 생각 고리에 빠졌고, 기록이 없는 실험에서는 25초에 미리보기까지
- *   갔다). 대화는 기록을 보내되 답이 없던 차례는 뺀다(`answeredTurns`). 저장된 기록 파일은 그대로다.
+ *   갔다). 다만 30분 안의 마지막 2차례(`chipRecentTurns`)는 보낸다: 없으면 "그래", "10번으로 넣어줘"가 방금 추천한 것을
+ *   가리키는지 몰라 엉뚱한 항목을 넣거나 없다고 답했다(2026-11-16). 대화는 기록을 보내되 답이 없던 차례는 뺀다
+ *   (`answeredTurns`). 저장된 기록 파일은 그대로다.
  * - 생각을 끄고 다시 보내도 생각 고리로 끝나면 오류에 되풀이된 대목(`errorDetail`, ai/loopDetail)을 싣는다.
  * - 확인 글의 오염 까닭(real-server check, 2026-11-11): 오염이 저장된 기록에서만 왔으면(이번 차례에 MCP 도구도 바깥 결과도
  *   없었다) 확인 글은 "이전 대화에서 바깥 내용을 읽었어요"라고 말한다(`ConfirmNote.historyOnly`). 이번 차례가 바깥 내용을
@@ -48,7 +50,7 @@ import { experimentReadmes } from '../labnote/port/experiments';
 import { countToolOutcomes, runAgent, type AgentDeps } from '../labnote/port/llmAgent';
 import { describeLlmError, outputCutMessage } from '../labnote/port/llmError';
 import type { ChatMessage, LlmProvider } from '../labnote/port/llmProvider';
-import { answeredTurns, historyBudget, toPromptMessages, type PromptMessages } from './compact';
+import { answeredTurns, CHIP_RECENT_TOKENS, chipRecentTurns, historyBudget, toPromptMessages, type PromptMessages } from './compact';
 import { chipNeedsScope, chipSystemPrompt, chipTools, guardNewSection } from './chips';
 import { addSectionText, isAddSectionPreview } from './tools';
 import type { AssistantResult, AssistantRuntime, AssistantSink, AssistantTurn, PetState } from './runtime';
@@ -739,10 +741,14 @@ async function runBuiltin(env: AiEnv, turn: AssistantTurn, sink: AssistantSink, 
         : {}),
     };
     // Summary first (as a user message, never in the system prompt), then the most recent history that fits;
-    // tainted items go fenced and seed the run's taint (spec §6.3, R11). A making chip is one-shot: no history at all.
+    // tainted items go fenced and seed the run's taint (spec §6.3, R11). A making chip gets no summary and no saved history,
+    // only the last recent turns (chipRecentTurns), so "yes" or "insert number 10" refers to what was just said.
     const earlier: PromptMessages =
       chip && chip !== 'chat'
-        ? { messages: [], initialTaint: [], fenced: false, taintedReplies: false }
+        ? toPromptMessages(
+            { messages: chipRecentTurns(turn.history, Date.now()) },
+            { budgetTokens: Math.min(CHIP_RECENT_TOKENS, historyBudget(env.settings().llmContextWindow)) }
+          )
         : toPromptMessages(
             {
               ...(turn.summary !== undefined ? { summary: { text: turn.summary, tainted: !!turn.summaryTainted } } : {}),

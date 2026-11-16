@@ -237,6 +237,26 @@ export function answeredTurns(messages: readonly StoredMessage[]): StoredMessage
   return out;
 }
 
+/** 만들기 칩이 받는 최근 메시지 수(사용자·도우미 2차례). */
+export const CHIP_RECENT_MESSAGES = 4;
+/** 만들기 칩이 받는 최근 메시지의 나이 한도: 이보다 오래된 차례는 지난 일이라 보내지 않는다. */
+export const CHIP_RECENT_MS = 30 * 60_000;
+/** 만들기 칩이 받는 최근 기록의 토큰 한도(추정). */
+export const CHIP_RECENT_TOKENS = 1500;
+
+/**
+ * 만들기 칩(섹션·Unit Operation·Workflow)에 보낼 짧은 기록: 답이 있던 차례 중 `now` 에서 `CHIP_RECENT_MS` 안의 마지막
+ * `CHIP_RECENT_MESSAGES` 개. 사용자 글로 시작한다. 저장된 기록 전체와 요약은 보내지 않는다: 긴 기록에서 칩이 생각 고리에
+ * 빠졌다(2026-11-11). 이 몇 줄이 있어야 "그래", "10번으로 넣어줘" 같은 말이 방금 대화의 무엇을 가리키는지 안다.
+ */
+export function chipRecentTurns(messages: readonly StoredMessage[], now: number): StoredMessage[] {
+  const recent = answeredTurns(messages)
+    .filter((m) => typeof m.ts !== 'number' || now - m.ts <= CHIP_RECENT_MS)
+    .slice(-CHIP_RECENT_MESSAGES);
+  while (recent.length && recent[0]!.role !== 'user') recent.shift();
+  return recent;
+}
+
 export interface PromptMessages {
   /** 요약(있으면, 사용자 메시지) 다음에 기록. 시스템 메시지와 이번 사용자 글은 들어 있지 않다. */
   messages: ChatMessage[];
