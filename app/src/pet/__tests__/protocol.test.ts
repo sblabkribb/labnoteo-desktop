@@ -44,6 +44,21 @@ describe('parseState', () => {
   it('truncates an oversize status instead of trusting it', () => {
     expect([...(parseState({ ...state, status: 'x'.repeat(5000) })?.status ?? '')].length).toBeLessThanOrEqual(STATUS_MAX);
   });
+  it('bounds the recent conversation: known roles only, text clamped, the error flag kept, missing means none', () => {
+    const good = parseState({
+      ...state,
+      recent: [{ role: 'user', text: 'q' }, { role: 'assistant', text: 'x'.repeat(9999), error: true }, { role: 'robot', text: 'no' }, 7, { role: 'user' }],
+    });
+    expect(good?.recent).toHaveLength(2);
+    expect(good?.recent[0]).toEqual({ role: 'user', text: 'q' });
+    expect([...(good?.recent[1].text ?? '')].length).toBeLessThanOrEqual(1200);
+    expect(good?.recent[1]?.error).toBe(true);
+    const capped = parseState({ ...state, recent: Array.from({ length: 20 }, (_, i) => ({ role: 'user', text: `t${i}` })) });
+    expect(capped?.recent).toHaveLength(6);
+    expect(capped?.recent.map((x) => x.text)).toEqual(['t14', 't15', 't16', 't17', 't18', 't19']);
+    expect(parseState(state)?.recent).toEqual([]);
+    expect(parseState({ ...state, recent: 'nope' })?.recent).toEqual([]);
+  });
   it('keeps HTML-looking text as literal text (it is only ever rendered as a text node)', () => {
     expect(parseState({ ...state, status: '<img src=x onerror=alert(1)>' })?.status).toBe('<img src=x onerror=alert(1)>');
   });

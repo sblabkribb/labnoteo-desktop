@@ -174,7 +174,7 @@ describe('start and close', () => {
 });
 
 describe('mirror out', () => {
-  it('emits one pet:state per trailing 120 ms with an increasing seq, all valid, with no vault text in them', async () => {
+  it('emits one pet:state per trailing 120 ms with an increasing seq, all valid; the only conversation text in them is the recent slice', async () => {
     const t = setup();
     await t.bridge.start();
     await flushMicro();
@@ -193,8 +193,26 @@ describe('mirror out', () => {
     expect(states.every((s) => s !== null)).toBe(true);
     expect(states[1]!.seq).toBeGreaterThan(states[0]!.seq);
     expect(states[1]!.state).toBe('done');
-    expect(JSON.stringify(t.emitted)).not.toContain('SECRET');
+    // The recent conversation leaves as the only message text: the folder stays a name, the status stays empty.
+    expect(states[1]!.recent).toEqual([{ role: 'user', text: SECRET }, { role: 'assistant', text: SECRET }]);
+    expect(states[1]!.folder).toBe('001_A');
+    expect(states[1]!.status).toBe('');
     expect(t.emitted.every((e) => e.target === 'pet')).toBe(true);
+  });
+
+  it('the recent slice is bounded: at most the newest six turns, each text clamped, empty turns skipped', async () => {
+    const t = setup();
+    await t.bridge.start();
+    await flushMicro();
+    const messages = Array.from({ length: 20 }, (_, i) => t.s.item(`m${i}`, (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', 'y'.repeat(5000)));
+    t.s.set({ messages: [...messages, t.s.item('p1', 'assistant', '', { pending: true, status: 'Working' })], streaming: true });
+    vi.advanceTimersByTime(120);
+    await flushMicro();
+    const st = parseState(t.of('pet:state').at(-1))!;
+    expect(st.recent).toHaveLength(6);
+    expect(st.recent.every((x) => [...x.text].length <= 1200)).toBe(true);
+    expect(st.recent[0].text).toBe('y'.repeat(1199) + '\u2026'); // the oldest kept turn is m14, the pending empty turn is out
+    expect(st.status).toBe('Working');
   });
 
   it('streams pet:answer snapshots of the current assistant item, bounded, done at the end, error flagged', async () => {

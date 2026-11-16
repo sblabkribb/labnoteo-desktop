@@ -1,5 +1,5 @@
 import type { SkinState } from '../assistant/skins/types';
-import { clampText, FOLDER_MAX, LABEL_MAX, SECTIONS_MAX, STATUS_MAX, type AnswerEvent, type RejectEvent, type RejectReason, type StateEvent } from './protocol';
+import { clampText, FOLDER_MAX, LABEL_MAX, RECENT_MAX, RECENT_TEXT_MAX, SECTIONS_MAX, STATUS_MAX, type AnswerEvent, type RecentItem, type RejectEvent, type RejectReason, type StateEvent } from './protocol';
 
 export type BubbleMode = 'toast' | 'panel' | null;
 
@@ -16,6 +16,8 @@ export interface MirrorState {
   folder: string;
   sections: string[];
   unitTarget: string;
+  /** The recent turns mirrored from the main window (the in-window chat, a bounded slice). */
+  recent: RecentItem[];
   bubble: BubbleMode;
   answer: { askId: string; text: string; done: boolean; error: boolean } | null;
   answerSeq: number;
@@ -25,6 +27,7 @@ export interface MirrorState {
 
 export const EMPTY_MIRROR: MirrorState = {
   online: false, seq: -1, state: 'idle', skin: 'flasko', scale: 2, busy: false, lang: 'ko', status: '', quiet: false, folder: '', sections: [], unitTarget: '',
+  recent: [],
   bubble: null, answer: null, answerSeq: -1, pendingAsk: null, reason: null,
 };
 
@@ -47,8 +50,8 @@ export function mirrorReduce(s: MirrorState, e: MirrorEvent): MirrorState {
       return { ...EMPTY_MIRROR, quiet: s.quiet, skin: s.skin, scale: s.scale, lang: s.lang };
     case 'state': {
       if (e.event.seq <= s.seq) return s;
-      const { state, skin, scale, busy, lang, status, quiet, folder, sections, unitTarget } = e.event;
-      return { ...s, online: true, seq: e.event.seq, state, skin, scale, busy, lang, status, quiet, folder, sections, unitTarget, reason: s.reason === 'offline' ? null : s.reason };
+      const { state, skin, scale, busy, lang, status, quiet, folder, sections, unitTarget, recent } = e.event;
+      return { ...s, online: true, seq: e.event.seq, state, skin, scale, busy, lang, status, quiet, folder, sections, unitTarget, recent, reason: s.reason === 'offline' ? null : s.reason };
     }
     case 'answer': {
       const a = e.event;
@@ -65,7 +68,7 @@ export function mirrorReduce(s: MirrorState, e: MirrorEvent): MirrorState {
     case 'asked':
       return { ...s, pendingAsk: e.askId, reason: null, answer: null, answerSeq: -1 };
     case 'cleared':
-      return { ...s, answer: null, answerSeq: -1, pendingAsk: null, reason: null };
+      return { ...s, answer: null, answerSeq: -1, pendingAsk: null, reason: null, recent: [] };
     case 'toggle':
       return { ...s, bubble: s.bubble === 'panel' ? null : 'panel' };
     case 'dismissToast':
@@ -89,11 +92,17 @@ export interface MirrorSource {
   sections?: string[];
   /** Path of the workflow note the unit operation mode would use. Only its file name leaves. */
   unitTarget?: string;
+  /** The recent turns the pet's log shows (text already trimmed to visible lines; bounded again here). */
+  recent?: RecentItem[];
 }
 
 const basename = (p: string): string => p.split('/').filter(Boolean).pop() ?? p;
 
-/** The main window's snapshot for the pet: only the sprite state and the current status line, never vault data. */
+/**
+ * The main window's snapshot for the pet: the sprite state, the current status line, the experiment context and a bounded slice of
+ * the recent conversation — the only conversation text that leaves the main window (the full answer rides `pet:answer` while a run
+ * is going). Note text itself (beyond the section labels) never leaves.
+ */
 export function buildStateEvent(src: MirrorSource): StateEvent {
   const last = [...src.items].reverse().find((i) => i.role === 'assistant');
   return {
@@ -102,5 +111,9 @@ export function buildStateEvent(src: MirrorSource): StateEvent {
     folder: src.folder ? clampText(basename(src.folder), FOLDER_MAX) : '',
     sections: (src.sections ?? []).slice(0, SECTIONS_MAX).map((x) => clampText(x, LABEL_MAX)),
     unitTarget: src.unitTarget ? clampText(basename(src.unitTarget), LABEL_MAX) : '',
+    recent: (src.recent ?? [])
+      .map((x) => ({ role: x.role, text: clampText(x.text, RECENT_TEXT_MAX), ...(x.error ? { error: true } : {}) }))
+      .filter((x) => x.text !== '')
+      .slice(-RECENT_MAX),
   };
 }

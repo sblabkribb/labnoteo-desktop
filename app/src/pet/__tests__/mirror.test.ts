@@ -1,7 +1,7 @@
 import { EMPTY_MIRROR, buildStateEvent, mirrorReduce, type MirrorEvent, type MirrorState } from '../mirror';
 import type { AnswerEvent, StateEvent } from '../protocol';
 
-const st = (o: Partial<StateEvent> = {}): StateEvent => ({ v: 1, seq: 1, state: 'idle', skin: 'flasko', scale: 2, busy: false, lang: 'ko', status: '', quiet: false, folder: '', sections: [], unitTarget: '', ...o });
+const st = (o: Partial<StateEvent> = {}): StateEvent => ({ v: 1, seq: 1, state: 'idle', skin: 'flasko', scale: 2, busy: false, lang: 'ko', status: '', quiet: false, folder: '', sections: [], unitTarget: '', recent: [], ...o });
 const an = (o: Partial<AnswerEvent> = {}): AnswerEvent => ({ v: 1, seq: 2, askId: 'abcd-1234', text: 'Hi', done: true, error: false, ...o });
 const run = (s: MirrorState, ...ev: MirrorEvent[]) => ev.reduce(mirrorReduce, s);
 
@@ -77,14 +77,33 @@ describe('mirror: experiment context and clearing', () => {
     const a = run(EMPTY_MIRROR, { type: 'asked', askId: 'abcd-1234' }, { type: 'answer', event: an({ done: false }) }, { type: 'cleared' });
     expect(a).toMatchObject({ answer: null, pendingAsk: null, reason: null, answerSeq: -1 });
   });
+  it('a snapshot replaces the recent conversation; an older one does not; cleared empties it', () => {
+    const recent = [{ role: 'user' as const, text: 'q' }, { role: 'assistant' as const, text: 'a' }];
+    const s = run(EMPTY_MIRROR, { type: 'state', event: st({ seq: 2, recent }) }, { type: 'state', event: st({ seq: 1 }) });
+    expect(s.recent).toEqual(recent); // seq 1 is older: the conversation stays
+    expect(run(s, { type: 'state', event: st({ seq: 3, recent: [] }) }).recent).toEqual([]);
+    expect(run(s, { type: 'cleared' }).recent).toEqual([]);
+  });
 });
 
 describe('buildStateEvent (the main window)', () => {
   const pet = { state: 'think' as const, skin: 'flasko', scale: 3 as const };
   it('maps the pet state, busy and the last assistant status line', () => {
     expect(buildStateEvent({ seq: 9, pet, items: [{ role: 'assistant', text: '', status: 'Reading the note' }], streaming: true, lang: 'en', quiet: false })).toEqual({
-      v: 1, seq: 9, state: 'think', skin: 'flasko', scale: 3, busy: true, lang: 'en', status: 'Reading the note', quiet: false, folder: '', sections: [], unitTarget: '',
+      v: 1, seq: 9, state: 'think', skin: 'flasko', scale: 3, busy: true, lang: 'en', status: 'Reading the note', quiet: false, folder: '', sections: [], unitTarget: '', recent: [],
     });
+  });
+  it('bounds the recent conversation: the newest turns, each text clamped, empty turns dropped, the error flag kept', () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', text: `t${i}` }));
+    const e = buildStateEvent({ seq: 3, pet, items: [], streaming: false, lang: 'en', quiet: false, recent: [...many, { role: 'assistant' as const, text: '' }] });
+    expect(e.recent.map((x) => x.text)).toEqual(['t4', 't5', 't6', 't7', 't8', 't9']);
+    const long = buildStateEvent({
+      seq: 4, pet, items: [], streaming: false, lang: 'en', quiet: false,
+      recent: [{ role: 'user', text: 'x'.repeat(9999) }, { role: 'assistant', text: 'ok', error: true }],
+    });
+    expect([...long.recent[0].text].length).toBeLessThanOrEqual(1200);
+    expect(long.recent[1]).toEqual({ role: 'assistant', text: 'ok', error: true });
+    expect(buildStateEvent({ seq: 5, pet, items: [], streaming: false, lang: 'en', quiet: false, recent: [{ role: 'user', text: '  ' }] }).recent).toEqual([]);
   });
   it('carries only the experiment folder name, the section labels and the target note name', () => {
     const e = buildStateEvent({

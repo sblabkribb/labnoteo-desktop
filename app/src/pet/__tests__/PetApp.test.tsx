@@ -437,10 +437,21 @@ describe('PetApp', () => {
       expect(screen.getByRole('textbox')).toBeTruthy();
     });
 
+    it('shows the recent conversation the main window mirrors, with the role labels, a failed turn in the error colour, and no greeting', async () => {
+      const ipc = fakeIpc();
+      await open(ipc, { recent: [{ role: 'user', text: 'make it shorter' }, { role: 'assistant', text: 'Done.' }, { role: 'assistant', text: 'It failed', error: true }] });
+      const log = screen.getByRole('log');
+      expect(log.textContent).toContain('make it shorter');
+      expect(log.textContent).toContain('Done.');
+      expect(log.querySelector('.pet-recent-item[data-role="user"]')).toBeTruthy();
+      expect(log.querySelector('.pet-recent-item[data-role="assistant"] .pet-recent-text[data-error="true"]')).toBeTruthy();
+      expect(screen.queryByText(t('pet.greeting'))).toBeNull();
+    });
+
     it('clear asks first inside the bubble; Cancel changes nothing, Delete sends pet:clear and empties the answer', async () => {
       const ipc = fakeIpc();
       await open(ipc);
-      await ipc.fire(EVT.answer, answer({ text: 'An old answer' }));
+      await ipc.fire(EVT.state, state({ seq: 2, folder: '001_Cloning', recent: [{ role: 'assistant', text: 'An old answer' }] }));
       expect(screen.getByRole('log').textContent).toContain('An old answer');
       fireEvent.click(screen.getByRole('button', { name: t('history.clear') }));
       expect(screen.getByText(t('history.clearConfirm'))).toBeTruthy();

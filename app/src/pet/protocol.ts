@@ -18,10 +18,21 @@ export const FOLDER_MAX = 80;
 export const SECTIONS_MAX = 40;
 export const LABEL_MAX = 100;
 export const TITLE_MAX = 200;
+/** The recent turns the pet's log shows (the in-window chat, a bounded slice). */
+export const RECENT_MAX = 6;
+/** The bound on one recent turn's text. */
+export const RECENT_TEXT_MAX = 1200;
 
 /** The five panel modes (the same ids as the in-window chips). An enum on the wire, never free text. */
 export const MODES = ['howTo', 'section', 'unitOp', 'workflow', 'chat'] as const;
 export type AskMode = (typeof MODES)[number];
+
+/** One recent turn in the pet's log: the role and its bounded text (a failed turn carries its error line). */
+export interface RecentItem {
+  role: 'user' | 'assistant';
+  text: string;
+  error?: boolean;
+}
 
 const STATES: readonly SkinState[] = ['idle', 'talk', 'think', 'done'];
 const REASONS = ['no-vault', 'not-configured', 'busy', 'invalid', 'no-note', 'no-workflow'] as const;
@@ -45,6 +56,8 @@ export interface StateEvent {
   sections: string[];
   /** File name of the workflow note the unit operation mode would write to ('' when there is none). */
   unitTarget: string;
+  /** The recent turns (user and assistant text, each bounded) so the pet's log shows the in-window chat, not only the last answer. */
+  recent: RecentItem[];
 }
 export interface AnswerEvent {
   v: 1;
@@ -115,6 +128,13 @@ export function parseState(raw: unknown): StateEvent | null {
           .map((x) => clampText(x, LABEL_MAX).replace(/\n/g, ' '))
       : [],
     unitTarget: clampText(raw.unitTarget, LABEL_MAX).replace(/\n/g, ' '),
+    recent: Array.isArray(raw.recent)
+      ? raw.recent
+          .filter((x): x is Record<string, unknown> => isObj(x) && (x.role === 'user' || x.role === 'assistant') && typeof x.text === 'string')
+          .map((x) => ({ role: x.role as 'user' | 'assistant', text: clampText(x.text, RECENT_TEXT_MAX), ...(x.error === true ? { error: true } : {}) }))
+          .filter((x) => x.text !== '')
+          .slice(-RECENT_MAX)
+      : [],
   };
 }
 

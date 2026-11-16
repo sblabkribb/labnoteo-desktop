@@ -626,12 +626,19 @@ export function PetApp({ ipc, skinDeps, canDraw = defaultCanDraw, newId = defaul
                   </p>
                 ) : null}
                 {working ? <p className="pet-desktop-status">{m.status || t('pet.desktop.working')}</p> : null}
-                {m.answer ? (
-                  <p className="pet-desktop-text" data-error={m.answer.error}>
-                    {m.answer.text}
-                  </p>
+                {m.recent.length > 0 ? (
+                  <div className="pet-recent">
+                    {m.recent.map((item, i) => (
+                      <div key={i} className="pet-recent-item" data-role={item.role}>
+                        <span className="pet-recent-role">{item.role === 'assistant' ? t('pet.title') : t('pet.you')}</span>
+                        <p className="pet-recent-text" data-error={item.error ? 'true' : undefined}>
+                          {item.text}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
-                {!reason && !working && !m.answer ? <p className="pet-bubble-greeting">{t('pet.greeting')}</p> : null}
+                {!reason && !working && !m.answer && m.recent.length === 0 ? <p className="pet-bubble-greeting">{t('pet.greeting')}</p> : null}
               </div>
               <div className="pet-chip-panel" data-chip={mode}>
                 {mode === 'howTo' ? (
