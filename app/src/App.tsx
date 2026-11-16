@@ -46,7 +46,7 @@ import { samplesSync, setSampleSyncEnv } from './samples/sync';
 import { noteSyncEnv, startPartbank } from './partbank/partbankApp';
 import { TauriLabnoteFs } from './fs/tauriLabnoteFs';
 import { createAppHost } from './labnote/host/createAppHost';
-import { DialogLayer, PET_LAYER_ID } from './labnote/host/DialogLayer';
+import { DialogLayer } from './labnote/host/DialogLayer';
 import { Toaster } from './labnote/host/Toaster';
 import { closeAllDialogs } from './labnote/host/dialogStore';
 import { clearToasts, notify as notifyToast } from './labnote/host/toastStore';
@@ -94,7 +94,6 @@ import { startScan } from './labnote/scan/commands';
 import { NoteIdService } from './labnote/port/noteIdService';
 import { unsolicitedHost } from './labnote/host/whenNotComposing';
 import { Ribbon } from './ui/Ribbon';
-import { PetLayer } from './assistant/PetLayer';
 import { openAssistant, toggleAssistant } from './assistant/commands';
 import { bubbleActions, connectAssistant } from './assistant/wiring';
 import { petStore } from './assistant/petStore';
@@ -392,21 +391,25 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
   selectedRef.current = selected;
   assistantCtx.current = ctx;
   useEffect(() => connectAssistant(() => assistantCtx.current), []);
-  // 바탕화면 도우미 창(plan Task 7): 이 창의 도우미를 비추고 그 창의 질문을 받는다. 레이아웃 저장소가 읽힌 뒤에 시작한다.
+  // 도우미의 대화는 열린 노트의 실험 폴더를 따른다(폴더가 바뀌면 멈추고 그 폴더의 기록으로 바꾼다).
   useEffect(() => {
-    // The creating modes of the pet read the open note and the experiment's workflow notes the way the in-window panel does.
-    const note = bubbleActions(() => assistantCtx.current);
+    assistantSession.setActivePath(selected);
+  }, [selected]);
+  // 바탕화면 도우미 창(plan Task 7): 도우미는 그 창에만 그려진다. 이 창은 대화와 실행을 맡고, 그 창의 패널이 부르는
+  // 일(보내기, 칩 실행, 노트 읽기, 명령)을 한다. 레이아웃 저장소가 읽힌 뒤에 시작한다.
+  useEffect(() => {
     const bridge = createMainBridge({
       ipc: tauriMainIpc,
       session: assistantSession,
       store: petStore,
       ready: layoutStore.ready(),
-      context: { activePath: () => selectedRef.current, activeNote: note.activeNote, workflowNotes: note.workflowNotes },
+      actions: bubbleActions(() => assistantCtx.current),
+      activePath: () => selectedRef.current,
+      notify: (message) => notifyToast('warn', message),
     });
     void bridge.start().catch((e) => console.warn('[labnoteo] desktop pet bridge failed:', e));
     return () => bridge.stop();
   }, []);
-  const petActions = useMemo(() => bubbleActions(() => assistantCtx.current), []);
   // 쓰는 동안의 손질(Task 20): last_updated_date 찍기와 저장 때의 UO 목록 맞추기. 보관함마다 새로 만든다(손으로 정한 날짜도 보관함마다).
   const upkeepSettings = useRef(settings);
   upkeepSettings.current = settings;
@@ -962,10 +965,6 @@ function VaultView({ vault, version, onChangeVault, theme, setTheme }: ViewProps
       {/* .shell 밖: 대화상자가 열려 있는 동안 .shell 은 inert 다. 알림과 메뉴는 그 위에 뜬다 */}
       <DialogLayer blockRef={shell} />
       <Toaster />
-      {/* 떠 있는 도우미 층(assistant 명세 §4.1). 탭 순서의 맨 끝(상태 줄 뒤)이다. 대화상자가 열려 있는 동안 DialogLayer 가 inert 로 막는다 */}
-      <div id={PET_LAYER_ID}>
-        <PetLayer activePath={selected} actions={petActions} />
-      </div>
       <ContextMenu />
     </>
   );

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { t } from '../i18n/t';
 import { Icon } from '../ui/Icon';
+import type { SectionOption } from './SectionPicker';
 import { SourceLedger, textWithSources, type Source } from './sources';
 import type { ChatItem } from './useAssistantSession';
 
@@ -23,6 +24,8 @@ export interface BubbleActions {
   runCommand?(id: string): void;
   /** 열린 노트의 글과 커서 줄. */
   activeNote?(): Promise<ActiveNote | undefined>;
+  /** 섹션 칩이 고를 수 있는 열린 노트의 섹션(앱 창이 노트를 읽어 만든다). 노트가 없으면 undefined. */
+  sectionChoices?(): Promise<{ path: string; options: SectionOption[] } | undefined>;
   /** 실험 폴더의 워크플로 노트(보관함 상대 경로, 번호 차례). */
   workflowNotes?(folder: string): Promise<string[]>;
   /** 이 PC 에 웹 검색 주소가 있는지(`assistant.json`). 없으면 대화 칩이 한 번 안내한다. */

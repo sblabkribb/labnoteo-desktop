@@ -20,6 +20,7 @@ import { readAssistantConfig } from './config';
 import { prepareHistory } from './compact';
 import type { BubbleActions } from './MessageView';
 import { registerRuntime, type AssistantRuntime } from './runtime';
+import { sectionOptions } from './sectionOptions';
 import { catalogIdOf, noteFileOf, safeTarget, type Source } from './sources';
 import { revealCatalogEntry } from '../labnote/panel/catalogReveal';
 import { assistantSession, type AssistantSession } from './useAssistantSession';
@@ -52,6 +53,13 @@ export function lineAt(text: string, offset: number): number {
 }
 
 export function bubbleActions(getCtx: () => CommandContext | undefined): BubbleActions {
+  const activeNote = async () => {
+    const target = getCtx()?.host.editTarget();
+    if (!target) return undefined;
+    const text = await target.getText();
+    const offset = await target.getCursorOffset?.();
+    return { path: target.path, text, ...(offset !== undefined ? { cursorLine: lineAt(text, offset) } : {}) };
+  };
   return {
     runCommand(id) {
       const ctx = getCtx();
@@ -62,12 +70,10 @@ export function bubbleActions(getCtx: () => CommandContext | undefined): BubbleA
       }
       void runCommand(ctx, cmd);
     },
-    async activeNote() {
-      const target = getCtx()?.host.editTarget();
-      if (!target) return undefined;
-      const text = await target.getText();
-      const offset = await target.getCursorOffset?.();
-      return { path: target.path, text, ...(offset !== undefined ? { cursorLine: lineAt(text, offset) } : {}) };
+    activeNote,
+    async sectionChoices() {
+      const note = await activeNote();
+      return note ? { path: note.path, options: sectionOptions(note.text, note.cursorLine) } : undefined;
     },
     async workflowNotes(folder) {
       const ctx = getCtx();

@@ -181,14 +181,15 @@ as **Summarize Workflow results** put the answer into the note as a callout with
 
 #### 16. The assistant
 
-Flasko, the flask in the bottom-right corner, is the in-app assistant. Click it for quick chips
+Flasko, the flask on your desktop, is the assistant. It stays on top of other windows, so you can use it
+without bringing the app window forward. Click it (or press Ctrl+Shift+Y in the app) for quick chips
 (how-to, add a section, a Unit Operation or a Workflow) or a free chat. Questions about Workflows and
 Unit Operations are answered from the catalog first, and every answer carries source chips you can
 click. **Insert into note** adds the answer with its sources. Anything that would change a note is
-shown as a preview and runs only after you allow it. The chat window can be resized, and chat
-history is kept per experiment in this PC's app folder, never in the vault. The assistant also lives on
-your desktop as a small always-on-top pet: click it to ask a short question without opening the app
-window, or right-click it for Hide for now, Quiet mode and Open labnoteO window.
+shown as a preview in the app window and runs only after you allow it. Drag the flask to move it and
+the bubble's corner to resize it. Chat history is kept per experiment in this PC's app folder, never in
+the vault. Right-click the flask for Hide for now, Quiet mode and Open labnoteO window; the assistant
+button in the left ribbon shows it again.
 
 ![Ask Flasko about the WB150 Workflow, see the cited catalog sources, insert the answer and approve a new Unit Operation](docs/images/en/labnoteo-assistant.gif)
 
